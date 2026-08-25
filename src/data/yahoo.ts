@@ -82,14 +82,20 @@ export function subscribeYahooBar(
   interval: Interval,
   onBar: (bar: Bar) => void,
 ): () => void {
+  let closed = false;
   const id = window.setInterval(async () => {
+    if (closed) return;
     try {
       const bars = await fetchYahooHistory(symbol.ticker, interval);
+      if (closed) return;
       const last = bars.at(-1);
       if (last) onBar(last);
     } catch {
       /* keep previous */
     }
   }, 2500);
-  return () => window.clearInterval(id);
+  return () => {
+    closed = true;
+    window.clearInterval(id);
+  };
 }

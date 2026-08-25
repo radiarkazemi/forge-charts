@@ -128,6 +128,7 @@ export function subscribeBinanceKline(symbol: string, interval: Interval, onBar:
     if (closed) return;
     ws = new WebSocket(`${BINANCE_WS}/${stream}`);
     ws.onmessage = (ev) => {
+      if (closed) return;
       retry = 0;
       const k = JSON.parse(String(ev.data))?.k;
       if (!k) return;

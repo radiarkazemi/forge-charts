@@ -15,6 +15,7 @@ export default function App() {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<ChartEngine | null>(null);
   const unsubRef = useRef<() => void>(() => {});
+  const feedGen = useRef(0);
   const [engine, setEngine] = useState<ChartEngine | null>(null);
   const [live, setLive] = useState(false);
   const [status, setStatus] = useState("Loading BINANCE + FOREXCOM…");
@@ -34,13 +35,20 @@ export default function App() {
     const eng = engineRef.current;
     if (!eng) return;
     unsubRef.current();
+    const gen = ++feedGen.current;
     setStatus(`Loading ${symbol.exchange}:${symbol.ticker}…`);
     const { bars, live: isLive, source: feed } = await fetchHistory(symbol, interval);
+    if (gen !== feedGen.current || engineRef.current !== eng) return;
     if (mode === "symbol") eng.setSymbol(symbol, bars);
     else eng.setInterval(interval, bars);
     setLive(isLive);
     setStatus(isLive ? `${symbol.exchange} · live ${feed}` : `${symbol.exchange} · demo fallback`);
-    unsubRef.current = subscribeLive(symbol, interval, (bar) => eng.upsertBar(bar));
+    unsubRef.current = subscribeLive(symbol, interval, (bar) => {
+      if (gen !== feedGen.current) return;
+      const last = eng.getSnapshot().last;
+      if (last && (bar.close > last.close * 8 || bar.close < last.close / 8)) return;
+      eng.upsertBar(bar);
+    });
   };
 
   useEffect(() => {

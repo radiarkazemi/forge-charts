@@ -356,6 +356,7 @@ export function subscribeChartApi(
       }
     };
     ws.onmessage = (ev) => {
+      if (closed) return;
       try {
         const data = JSON.parse(String(ev.data));
         const bar = barFromWs(data);
