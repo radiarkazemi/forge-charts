@@ -1,20 +1,12 @@
 import { hashString, mulberry32 } from "../engine/math";
 import type { Bar, Interval, SymbolInfo } from "../engine/types";
-import { BINANCE_WATCH } from "./binance";
+import { BINANCE_UNIVERSE, BINANCE_WATCH } from "./binance";
 import { FOREXCOM_UNIVERSE, FOREXCOM_WATCH } from "./forexcom";
-
-const SEED_BINANCE: SymbolInfo[] = [
-  { ticker: "BTCUSDT", name: "Bitcoin / Tether", exchange: "BINANCE", type: "crypto", pricePrecision: 2 },
-  { ticker: "ETHUSDT", name: "Ethereum / Tether", exchange: "BINANCE", type: "crypto", pricePrecision: 2 },
-  { ticker: "SOLUSDT", name: "Solana / Tether", exchange: "BINANCE", type: "crypto", pricePrecision: 3 },
-  { ticker: "BNBUSDT", name: "BNB / Tether", exchange: "BINANCE", type: "crypto", pricePrecision: 2 },
-  { ticker: "XRPUSDT", name: "XRP / Tether", exchange: "BINANCE", type: "crypto", pricePrecision: 4 },
-];
 
 export const EXCHANGES = ["BINANCE", "FOREXCOM"] as const;
 export type ExchangeId = (typeof EXCHANGES)[number];
 
-export let UNIVERSE: SymbolInfo[] = [...SEED_BINANCE, ...FOREXCOM_UNIVERSE];
+export let UNIVERSE: SymbolInfo[] = [...BINANCE_UNIVERSE, ...FOREXCOM_UNIVERSE];
 
 export const INTERVAL_SEC: Record<Interval, number> = {
   "1": 60,
@@ -71,11 +63,10 @@ export function findSymbol(ticker: string, exchange?: string): SymbolInfo {
 export function watchlistSymbols(universe: SymbolInfo[] = UNIVERSE): SymbolInfo[] {
   const wanted = new Set([...BINANCE_WATCH, ...FOREXCOM_WATCH]);
   const picked = universe.filter((s) => wanted.has(s.ticker));
-  const rest = universe.filter((s) => !wanted.has(s.ticker));
-  return [...picked, ...rest];
+  return picked.length ? picked : universe.slice(0, 40);
 }
 
-export function generateBars(symbol: SymbolInfo, interval: Interval, count = 1600): Bar[] {
+export function generateBars(symbol: SymbolInfo, interval: Interval, count = 400): Bar[] {
   const step = INTERVAL_SEC[interval];
   const now = Math.floor(Date.now() / 1000);
   const aligned = now - (now % Math.min(step, 86400));

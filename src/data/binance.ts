@@ -16,6 +16,7 @@ export const BINANCE_IV: Record<Interval, string> = {
   "1M": "1M",
 };
 
+/** Curated list — never download the full exchange catalog on startup. */
 export const BINANCE_WATCH = [
   "BTCUSDT",
   "ETHUSDT",
@@ -33,7 +34,66 @@ export const BINANCE_WATCH = [
   "NEARUSDT",
   "SUIUSDT",
   "TONUSDT",
+  "TRXUSDT",
+  "MATICUSDT",
+  "UNIUSDT",
+  "APTUSDT",
+  "ARBUSDT",
+  "OPUSDT",
+  "INJUSDT",
+  "FILUSDT",
+  "AAVEUSDT",
+  "PEPEUSDT",
+  "SHIBUSDT",
+  "WIFUSDT",
+  "BONKUSDT",
+  "RENDERUSDT",
 ];
+
+const NAMES: Record<string, string> = {
+  BTCUSDT: "Bitcoin / Tether",
+  ETHUSDT: "Ethereum / Tether",
+  BNBUSDT: "BNB / Tether",
+  SOLUSDT: "Solana / Tether",
+  XRPUSDT: "XRP / Tether",
+  DOGEUSDT: "Dogecoin / Tether",
+  ADAUSDT: "Cardano / Tether",
+  AVAXUSDT: "Avalanche / Tether",
+  LINKUSDT: "Chainlink / Tether",
+  DOTUSDT: "Polkadot / Tether",
+  LTCUSDT: "Litecoin / Tether",
+  BCHUSDT: "Bitcoin Cash / Tether",
+  ATOMUSDT: "Cosmos / Tether",
+  NEARUSDT: "NEAR / Tether",
+  SUIUSDT: "Sui / Tether",
+  TONUSDT: "Toncoin / Tether",
+  TRXUSDT: "TRON / Tether",
+  MATICUSDT: "Polygon / Tether",
+  UNIUSDT: "Uniswap / Tether",
+  APTUSDT: "Aptos / Tether",
+  ARBUSDT: "Arbitrum / Tether",
+  OPUSDT: "Optimism / Tether",
+  INJUSDT: "Injective / Tether",
+  FILUSDT: "Filecoin / Tether",
+  AAVEUSDT: "Aave / Tether",
+  PEPEUSDT: "Pepe / Tether",
+  SHIBUSDT: "Shiba Inu / Tether",
+  WIFUSDT: "dogwifhat / Tether",
+  BONKUSDT: "Bonk / Tether",
+  RENDERUSDT: "Render / Tether",
+};
+
+export const BINANCE_UNIVERSE: SymbolInfo[] = BINANCE_WATCH.map((ticker) => {
+  const quote = ticker.endsWith("USDC") ? "USDC" : "USDT";
+  const base = ticker.slice(0, -quote.length);
+  return {
+    ticker,
+    name: NAMES[ticker] ?? `${base} / ${quote}`,
+    exchange: "BINANCE",
+    type: "crypto",
+    pricePrecision: ticker.includes("PEPE") || ticker.includes("SHIB") || ticker.includes("BONK") ? 8 : 4,
+  };
+});
 
 type Kline = [number, string, string, string, string, string];
 
@@ -50,68 +110,45 @@ function toBars(raw: Kline[]): Bar[] {
     .filter((b) => Number.isFinite(b.open) && Number.isFinite(b.close));
 }
 
-function precisionFromPrice(price: string): number {
-  const i = price.indexOf(".");
-  if (i < 0) return 2;
-  const frac = price.slice(i + 1).replace(/0+$/, "");
-  return frac.length || 2;
+export function binanceSymbol(ticker: string): SymbolInfo {
+  const upper = ticker.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const known = BINANCE_UNIVERSE.find((s) => s.ticker === upper);
+  if (known) return known;
+  const quote = upper.endsWith("USDC") ? "USDC" : "USDT";
+  const base = upper.endsWith(quote) ? upper.slice(0, -quote.length) : upper;
+  return {
+    ticker: upper.endsWith(quote) ? upper : `${upper}USDT`,
+    name: `${base} / ${quote}`,
+    exchange: "BINANCE",
+    type: "crypto",
+    pricePrecision: 4,
+  };
 }
 
 export async function fetchBinanceSymbols(): Promise<SymbolInfo[]> {
-  const res = await fetch(`${BINANCE_REST}/api/v3/ticker/24hr`);
-  if (!res.ok) throw new Error(`binance ticker ${res.status}`);
-  const rows = (await res.json()) as Array<{ symbol: string; lastPrice: string; quoteVolume?: string }>;
-  return rows
-    .filter((s) => s.symbol.endsWith("USDT") || s.symbol.endsWith("USDC"))
-    .sort((a, b) => Number(b.quoteVolume ?? 0) - Number(a.quoteVolume ?? 0))
-    .map((s) => {
-      const quote = s.symbol.endsWith("USDC") ? "USDC" : "USDT";
-      const base = s.symbol.slice(0, -quote.length);
-      return {
-        ticker: s.symbol,
-        name: `${base} / ${quote}`,
-        exchange: "BINANCE",
-        type: "crypto" as const,
-        pricePrecision: precisionFromPrice(s.lastPrice),
-      };
-    });
+  // Instant catalog — avoid the multi‑MB /ticker/24hr dump on every page load.
+  return BINANCE_UNIVERSE;
 }
 
-export async function fetchBinanceHistory(symbol: string, interval: Interval, pages = 2): Promise<Bar[]> {
-  const iv = BINANCE_IV[interval];
-  const all: Bar[] = [];
-  let endTime: number | undefined;
-  for (let i = 0; i < pages; i++) {
-    const qs = new URLSearchParams({ symbol, interval: iv, limit: "1000" });
-    if (endTime) qs.set("endTime", String(endTime));
-    const res = await fetch(`${BINANCE_REST}/api/v3/klines?${qs}`);
-    if (!res.ok) throw new Error(`binance klines ${res.status}`);
-    const raw = (await res.json()) as Kline[];
-    const bars = toBars(raw);
-    if (!bars.length) break;
-    all.unshift(...bars);
-    endTime = raw[0][0] - 1;
-    if (raw.length < 1000) break;
-  }
-  const seen = new Set<number>();
-  return all.filter((b) => {
-    if (seen.has(b.time)) return false;
-    seen.add(b.time);
-    return true;
+export async function fetchBinanceHistory(symbol: string, interval: Interval, limit = 500): Promise<Bar[]> {
+  const qs = new URLSearchParams({
+    symbol,
+    interval: BINANCE_IV[interval],
+    limit: String(Math.min(1000, Math.max(50, limit))),
   });
+  const res = await fetch(`${BINANCE_REST}/api/v3/klines?${qs}`);
+  if (!res.ok) throw new Error(`binance klines ${res.status}`);
+  return toBars((await res.json()) as Kline[]);
 }
 
-export async function fetchBinanceQuotes(tickers?: string[]): Promise<Record<string, { price: number; change: number }>> {
-  const url = tickers?.length
-    ? `${BINANCE_REST}/api/v3/ticker/24hr?symbols=${encodeURIComponent(JSON.stringify(tickers))}`
-    : `${BINANCE_REST}/api/v3/ticker/24hr`;
+export async function fetchBinanceQuotes(tickers: string[] = BINANCE_WATCH): Promise<Record<string, { price: number; change: number }>> {
+  const symbols = tickers.length ? tickers : BINANCE_WATCH;
+  const url = `${BINANCE_REST}/api/v3/ticker/24hr?symbols=${encodeURIComponent(JSON.stringify(symbols))}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`binance ticker ${res.status}`);
   const rows = (await res.json()) as Array<{ symbol: string; lastPrice: string; priceChangePercent: string }>;
   const out: Record<string, { price: number; change: number }> = {};
   for (const row of rows) {
-    if (tickers && !tickers.includes(row.symbol)) continue;
-    if (!tickers && !row.symbol.endsWith("USDT") && !row.symbol.endsWith("USDC")) continue;
     out[row.symbol] = { price: +row.lastPrice, change: +row.priceChangePercent };
   }
   return out;

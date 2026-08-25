@@ -73,9 +73,13 @@ export default function App() {
     const tick = () => {
       void fetchQuotes(universe).then(setQuotes);
     };
-    tick();
-    const id = window.setInterval(tick, 6000);
-    return () => window.clearInterval(id);
+    // Defer quotes so candles paint first.
+    const start = window.setTimeout(tick, 50);
+    const id = window.setInterval(tick, 10000);
+    return () => {
+      window.clearTimeout(start);
+      window.clearInterval(id);
+    };
   }, [universe]);
 
   useEffect(() => {

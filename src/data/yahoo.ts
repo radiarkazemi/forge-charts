@@ -2,15 +2,15 @@ import type { Bar, Interval, SymbolInfo } from "../engine/types";
 import { FOREXCOM_YAHOO } from "./forexcom";
 
 export const YAHOO_IV: Record<Interval, { interval: string; range: string }> = {
-  "1": { interval: "1m", range: "5d" },
-  "5": { interval: "5m", range: "1mo" },
-  "15": { interval: "15m", range: "1mo" },
+  "1": { interval: "1m", range: "1d" },
+  "5": { interval: "5m", range: "5d" },
+  "15": { interval: "15m", range: "5d" },
   "30": { interval: "30m", range: "1mo" },
-  "60": { interval: "60m", range: "3mo" },
-  "120": { interval: "60m", range: "3mo" },
-  "240": { interval: "60m", range: "6mo" },
-  "1D": { interval: "1d", range: "2y" },
-  "1W": { interval: "1wk", range: "10y" },
+  "60": { interval: "60m", range: "1mo" },
+  "120": { interval: "60m", range: "1mo" },
+  "240": { interval: "60m", range: "3mo" },
+  "1D": { interval: "1d", range: "1y" },
+  "1W": { interval: "1wk", range: "5y" },
   "1M": { interval: "1mo", range: "max" },
 };
 
@@ -83,17 +83,39 @@ export function subscribeYahooBar(
   onBar: (bar: Bar) => void,
 ): () => void {
   let closed = false;
-  const id = window.setInterval(async () => {
+  const poll = async () => {
     if (closed) return;
     try {
-      const bars = await fetchYahooHistory(symbol.ticker, interval);
-      if (closed) return;
-      const last = bars.at(-1);
-      if (last) onBar(last);
+      // Short range for live updates — full history is only needed once at attach.
+      const y = yahooSymbol(symbol.ticker);
+      if (!y) return;
+      const { interval: iv } = YAHOO_IV[interval];
+      const res = await fetch(
+        `/yahoo/v8/finance/chart/${encodeURIComponent(y)}?interval=${iv}&range=5d`,
+      );
+      if (!res.ok || closed) return;
+      const json = await res.json();
+      const result = json?.chart?.result?.[0];
+      const ts: number[] = result?.timestamp ?? [];
+      const q = result?.indicators?.quote?.[0] ?? {};
+      const i = ts.length - 1;
+      if (i < 0) return;
+      const open = q.open?.[i];
+      const close = q.close?.[i];
+      if (!Number.isFinite(open) || !Number.isFinite(close) || closed) return;
+      onBar({
+        time: ts[i],
+        open,
+        high: q.high?.[i] ?? Math.max(open, close),
+        low: q.low?.[i] ?? Math.min(open, close),
+        close,
+        volume: q.volume?.[i] || 0,
+      });
     } catch {
       /* keep previous */
     }
-  }, 2500);
+  };
+  const id = window.setInterval(poll, 5000);
   return () => {
     closed = true;
     window.clearInterval(id);
