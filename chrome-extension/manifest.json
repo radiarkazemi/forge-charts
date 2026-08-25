@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "TRH Hunt Alerts",
+  "version": "1.0.0",
+  "description": "Free XAUUSD TRH setup alerts — zero config",
+  "permissions": ["notifications", "alarms", "storage"],
+  "host_permissions": [
+    "https://query1.finance.yahoo.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "TRH Alerts Active",
+    "default_popup": "popup.html"
+  },
+  "icons": {
+    "128": "icon128.png"
+  }
+}

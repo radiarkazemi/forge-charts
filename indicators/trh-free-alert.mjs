@@ -17,7 +17,7 @@
  *   export TRH_PRICE_OFFSET="56"
  */
 
-import { readFileSync, writeFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, appendFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 
@@ -25,12 +25,14 @@ const __dir = dirname(fileURLToPath(import.meta.url));
 const STATE_FILE = join(__dir, ".trh-alert-state.json");
 
 const POLL_SEC = Number(process.env.TRH_POLL_SEC || 60);
-const NTFY_TOPIC = process.env.NTFY_TOPIC || "";
+const NTFY_TOPIC = process.env.NTFY_TOPIC || "trh-forge-radiarkazemi-bc13";
 const NTFY_SERVER = process.env.NTFY_SERVER || "https://ntfy.sh";
+const ALERT_EMAIL = process.env.TRH_ALERT_EMAIL || "radiarkazemi@gmail.com";
 const TELEGRAM_BOT = process.env.TELEGRAM_BOT_TOKEN || "";
 const TELEGRAM_CHAT = process.env.TELEGRAM_CHAT_ID || "";
-const PRICE_OFFSET = Number(process.env.TRH_PRICE_OFFSET || 0);
+const PRICE_OFFSET = Number(process.env.TRH_PRICE_OFFSET || 56);
 const SYMBOL_LABEL = process.env.TRH_SYMBOL || "XAUUSD";
+const RUN_ONCE = process.argv.includes("--once");
 
 // ── minimal TRH engine (inline for .mjs — keep in sync with trh-engine.ts) ──
 
@@ -262,7 +264,7 @@ async function notifyNtfy(title, message) {
     method: "POST",
     headers: {
       Title: title,
-      Priority: "high",
+      Priority: "urgent",
       Tags: "chart_with_upwards_trend,moneybag",
     },
     body: message,
@@ -313,22 +315,23 @@ async function tick() {
     sent = (await notifyTelegram(msg)) || sent;
     console.log("[trh] telegram →", sent ? "ok" : "fail");
   }
-  if (!NTFY_TOPIC && !TELEGRAM_BOT) {
-    console.log("[trh] set NTFY_TOPIC or TELEGRAM_* to receive mobile push");
-    return;
-  }
 
   state.lastAlertTime = latest.barTime;
   saveState(state);
+
+  if (process.env.GITHUB_OUTPUT) {
+    appendFileSync(process.env.GITHUB_OUTPUT, `alert=true\nalert_body=${encodeURIComponent(msg)}\n`);
+  }
+
+  if (!sent && !process.env.GITHUB_OUTPUT) {
+    console.log("[trh] alert recorded locally");
+  }
 }
 
 async function main() {
-  console.log(`[trh] free alert monitor — poll every ${POLL_SEC}s`);
-  if (!NTFY_TOPIC && !TELEGRAM_BOT) {
-    console.log("[trh] ⚠ no notifier configured. See indicators/FREE-ALERTS.md");
-  }
+  console.log(`[trh] alert monitor — ${RUN_ONCE ? "once" : `poll ${POLL_SEC}s`} → ${ALERT_EMAIL}`);
   await tick();
-  setInterval(tick, POLL_SEC * 1000);
+  if (!RUN_ONCE) setInterval(tick, POLL_SEC * 1000);
 }
 
 main().catch((e) => {

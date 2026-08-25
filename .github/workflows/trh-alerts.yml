@@ -1,0 +1,47 @@
+name: TRH Gold Alerts
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore alert state
+        uses: actions/cache@v4
+        with:
+          path: indicators/.trh-alert-state.json
+          key: trh-alert-state-v1
+
+      - name: Scan XAUUSD TRH
+        id: scan
+        env:
+          TRH_PRICE_OFFSET: "56"
+          NTFY_TOPIC: trh-forge-radiarkazemi-bc13
+        run: node indicators/trh-free-alert.mjs --once
+
+      - name: Notify via GitHub (email to your inbox)
+        if: steps.scan.outputs.alert == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ALERT_BODY: ${{ steps.scan.outputs.alert_body }}
+        run: |
+          python3 -c "import os,urllib.parse; print(urllib.parse.unquote(os.environ.get('ALERT_BODY','')))" > /tmp/trh-body.txt
+          gh issue create \
+            --title "🔔 TRH Gold Setup — $(date -u '+%Y-%m-%d %H:%M UTC')" \
+            --body-file /tmp/trh-body.txt
+
+      - name: Push ntfy (backup)
+        if: steps.scan.outputs.alert == 'true'
+        run: |
+          curl -sS -H "Title: TRH Setup" -H "Priority: urgent" \
+            -d "${ALERT_BODY:-TRH setup}" \
+            "https://ntfy.sh/trh-forge-radiarkazemi-bc13" || true
