@@ -1,0 +1,16 @@
+{
+  "install": "npm install",
+  "terminals": [
+    {
+      "name": "Forge Charts",
+      "command": "npm run dev",
+      "description": "Vite chart server. Cursor forwards it to http://localhost:5173"
+    }
+  ],
+  "ports": [
+    {
+      "name": "Forge Charts",
+      "port": 5173
+    }
+  ]
+}

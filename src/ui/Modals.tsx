@@ -1,31 +1,48 @@
 import { useMemo, useState } from "react";
 import { INDICATORS } from "../catalog";
-import { UNIVERSE } from "../data/feed";
-import type { IndicatorKind, SymbolInfo } from "../engine/types";
+import { EXCHANGES, UNIVERSE } from "../data/feed";
+import { chartApiBase, readStoredChartApiUrl, storeChartApiUrl } from "../data/config";
+import type { IndicatorKind, SymbolInfo, Theme } from "../engine/types";
 
 export function SymbolModal({
   open,
   onClose,
   onPick,
+  universe = UNIVERSE,
 }: {
   open: boolean;
   onClose: () => void;
   onPick: (s: SymbolInfo) => void;
+  universe?: SymbolInfo[];
 }) {
   const [q, setQ] = useState("");
-  const list = useMemo(
-    () => UNIVERSE.filter((s) => `${s.ticker} ${s.name} ${s.exchange}`.toLowerCase().includes(q.toLowerCase())),
-    [q],
-  );
+  const [exchange, setExchange] = useState<"ALL" | "BINANCE" | "FOREXCOM">("ALL");
+  const list = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    return universe
+      .filter((s) => exchange === "ALL" || s.exchange === exchange)
+      .filter((s) => !query || `${s.ticker} ${s.name} ${s.exchange} ${s.type}`.toLowerCase().includes(query))
+      .slice(0, 400);
+  }, [q, exchange, universe]);
   if (!open) return null;
   return (
     <div className="modal-bg" onClick={onClose}>
       <div className="modal tall" onClick={(e) => e.stopPropagation()}>
         <h2>Symbol Search</h2>
-        <input autoFocus placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="seg modal-seg">
+          <button className={exchange === "ALL" ? "on" : ""} onClick={() => setExchange("ALL")}>
+            All
+          </button>
+          {EXCHANGES.map((id) => (
+            <button key={id} className={exchange === id ? "on" : ""} onClick={() => setExchange(id)}>
+              {id}
+            </button>
+          ))}
+        </div>
+        <input autoFocus placeholder="Search BINANCE or FOREXCOM" value={q} onChange={(e) => setQ(e.target.value)} />
         <ul>
           {list.map((s) => (
-            <li key={s.ticker} onClick={() => onPick(s)}>
+            <li key={`${s.exchange}:${s.ticker}`} onClick={() => onPick(s)}>
               <strong>{s.ticker}</strong>
               <span>
                 {s.name} · {s.exchange} · {s.type}
@@ -80,12 +97,15 @@ export function SettingsModal({
   onClose,
   theme,
   onTheme,
+  onApiChange,
 }: {
   open: boolean;
   onClose: () => void;
-  theme: "dark" | "light";
-  onTheme: (t: "dark" | "light") => void;
+  theme: Theme;
+  onTheme: (t: Theme) => void;
+  onApiChange?: () => void;
 }) {
+  const [apiUrl, setApiUrl] = useState(() => readStoredChartApiUrl());
   if (!open) return null;
   return (
     <div className="modal-bg" onClick={onClose}>
@@ -93,15 +113,44 @@ export function SettingsModal({
         <h2>Chart settings</h2>
         <label className="row">
           Theme
-          <select value={theme} onChange={(e) => onTheme(e.target.value as "dark" | "light")}>
+          <select value={theme} onChange={(e) => onTheme(e.target.value as Theme)}>
             <option value="dark">Dark</option>
             <option value="light">Light</option>
           </select>
         </label>
-        <p className="hint">Scale, magnet, and grid are also on the chart overlays and drawing toolbar.</p>
-        <button className="primary" onClick={onClose}>
-          Done
-        </button>
+        <label className="stack">
+          Chart API server
+          <input
+            placeholder="https://your-cp-fetcher-host or leave blank for /cp"
+            value={apiUrl}
+            onChange={(e) => setApiUrl(e.target.value)}
+          />
+        </label>
+        <p className="hint">
+          Prefer the VPS cp_fetcher API (Mongo history + WebSocket live). Leave blank for{" "}
+          <code>/crypto-api</code> on this host. Active: <code>{apiUrl.trim() || chartApiBase()}</code>
+        </p>
+        <div className="row">
+          <button
+            className="primary"
+            onClick={() => {
+              storeChartApiUrl(apiUrl);
+              onApiChange?.();
+              onClose();
+            }}
+          >
+            Save & reconnect
+          </button>
+          <button
+            onClick={() => {
+              setApiUrl("");
+              storeChartApiUrl("");
+              onApiChange?.();
+            }}
+          >
+            Clear
+          </button>
+        </div>
       </div>
     </div>
   );

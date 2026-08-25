@@ -161,11 +161,17 @@ export class ChartEngine {
     this.selectedId = null;
     this.compareBars = null;
     this.compareTicker = null;
+    this.priceSpan = null;
+    this.priceMid = null;
+    this.fitMode = true;
     this.setBars(bars);
   }
 
   setInterval(interval: Interval, bars: Bar[]): void {
     this.interval = interval;
+    this.priceSpan = null;
+    this.priceMid = null;
+    this.fitMode = true;
     this.setBars(bars);
   }
 

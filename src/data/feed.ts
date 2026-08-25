@@ -1,22 +1,12 @@
 import { hashString, mulberry32 } from "../engine/math";
 import type { Bar, Interval, SymbolInfo } from "../engine/types";
+import { BINANCE_UNIVERSE, BINANCE_WATCH } from "./binance";
+import { FOREXCOM_UNIVERSE, FOREXCOM_WATCH } from "./forexcom";
 
-export const UNIVERSE: SymbolInfo[] = [
-  { ticker: "BTCUSD", name: "Bitcoin / U.S. Dollar", exchange: "CRYPTO", type: "crypto", pricePrecision: 2 },
-  { ticker: "ETHUSD", name: "Ethereum / U.S. Dollar", exchange: "CRYPTO", type: "crypto", pricePrecision: 2 },
-  { ticker: "SOLUSD", name: "Solana / U.S. Dollar", exchange: "CRYPTO", type: "crypto", pricePrecision: 3 },
-  { ticker: "BNBUSDT", name: "BNB / Tether", exchange: "CRYPTO", type: "crypto", pricePrecision: 2 },
-  { ticker: "EURUSD", name: "Euro / U.S. Dollar", exchange: "FX", type: "fx", pricePrecision: 5 },
-  { ticker: "GBPUSD", name: "British Pound / U.S. Dollar", exchange: "FX", type: "fx", pricePrecision: 5 },
-  { ticker: "USDJPY", name: "U.S. Dollar / Japanese Yen", exchange: "FX", type: "fx", pricePrecision: 3 },
-  { ticker: "XAUUSD", name: "Gold Spot / U.S. Dollar", exchange: "OANDA", type: "metal", pricePrecision: 2 },
-  { ticker: "USOIL", name: "WTI Crude Oil", exchange: "TVC", type: "metal", pricePrecision: 2 },
-  { ticker: "SPX", name: "S&P 500", exchange: "SP", type: "index", pricePrecision: 2 },
-  { ticker: "NDX", name: "US 100", exchange: "NASDAQ", type: "index", pricePrecision: 2 },
-  { ticker: "AAPL", name: "Apple Inc.", exchange: "NASDAQ", type: "stock", pricePrecision: 2 },
-  { ticker: "NVDA", name: "NVIDIA Corporation", exchange: "NASDAQ", type: "stock", pricePrecision: 2 },
-  { ticker: "TSLA", name: "Tesla, Inc.", exchange: "NASDAQ", type: "stock", pricePrecision: 2 },
-];
+export const EXCHANGES = ["BINANCE", "FOREXCOM"] as const;
+export type ExchangeId = (typeof EXCHANGES)[number];
+
+export let UNIVERSE: SymbolInfo[] = [...BINANCE_UNIVERSE, ...FOREXCOM_UNIVERSE];
 
 export const INTERVAL_SEC: Record<Interval, number> = {
   "1": 60,
@@ -32,36 +22,56 @@ export const INTERVAL_SEC: Record<Interval, number> = {
 };
 
 const BASE: Record<string, number> = {
-  BTCUSD: 97250,
-  ETHUSD: 3420,
-  SOLUSD: 178.4,
+  BTCUSDT: 79800,
+  ETHUSDT: 2480,
+  SOLUSDT: 178.4,
   BNBUSDT: 612,
-  EURUSD: 1.0864,
-  GBPUSD: 1.2731,
-  USDJPY: 148.22,
-  XAUUSD: 2645,
+  XRPUSDT: 2.4,
+  EURUSD: 1.167,
+  GBPUSD: 1.364,
+  USDJPY: 159.3,
+  XAUUSD: 4687,
   USOIL: 78.4,
-  SPX: 5620,
-  NDX: 20140,
-  AAPL: 227.4,
-  NVDA: 131.8,
-  TSLA: 248.6,
+  SPX500: 5620,
+  NAS100: 20140,
 };
 
 export function intervalSeconds(interval: Interval): number {
   return INTERVAL_SEC[interval];
 }
 
-export function findSymbol(ticker: string): SymbolInfo {
-  return UNIVERSE.find((s) => s.ticker === ticker) ?? UNIVERSE[0];
+export function setUniverse(next: SymbolInfo[]): void {
+  const seen = new Set<string>();
+  UNIVERSE = next.filter((s) => {
+    const key = `${s.exchange}:${s.ticker}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
-export function generateBars(symbol: SymbolInfo, interval: Interval, count = 1600): Bar[] {
+export function findSymbol(ticker: string, exchange?: string): SymbolInfo {
+  const upper = ticker.toUpperCase();
+  const wantEx = exchange?.toUpperCase();
+  return (
+    UNIVERSE.find((s) => s.ticker === upper && (!wantEx || s.exchange === wantEx)) ??
+    UNIVERSE.find((s) => s.ticker === upper) ??
+    UNIVERSE[0]
+  );
+}
+
+export function watchlistSymbols(universe: SymbolInfo[] = UNIVERSE): SymbolInfo[] {
+  const wanted = new Set([...BINANCE_WATCH, ...FOREXCOM_WATCH]);
+  const picked = universe.filter((s) => wanted.has(s.ticker));
+  return picked.length ? picked : universe.slice(0, 40);
+}
+
+export function generateBars(symbol: SymbolInfo, interval: Interval, count = 400): Bar[] {
   const step = INTERVAL_SEC[interval];
   const now = Math.floor(Date.now() / 1000);
   const aligned = now - (now % Math.min(step, 86400));
-  const rand = mulberry32(hashString(`${symbol.ticker}:${interval}`));
-  let price = BASE[symbol.ticker] ?? 100;
+  const rand = mulberry32(hashString(`${symbol.exchange}:${symbol.ticker}:${interval}`));
+  let price = BASE[symbol.ticker] ?? (symbol.type === "fx" ? 1.1 : 100);
   const vol = price * (symbol.type === "fx" ? 0.00035 : 0.011);
   const bars: Bar[] = [];
 
@@ -84,17 +94,4 @@ export function generateBars(symbol: SymbolInfo, interval: Interval, count = 160
     price = close;
   }
   return bars;
-}
-
-export function tickBar(bar: Bar, symbol: SymbolInfo): Bar {
-  const vol = bar.close * (symbol.type === "fx" ? 0.00012 : 0.0016);
-  const delta = (Math.random() - 0.48) * vol;
-  const close = Math.max(0.0001, bar.close + delta);
-  return {
-    ...bar,
-    close,
-    high: Math.max(bar.high, close),
-    low: Math.min(bar.low, close),
-    volume: bar.volume + Math.round(Math.random() * 48),
-  };
 }
