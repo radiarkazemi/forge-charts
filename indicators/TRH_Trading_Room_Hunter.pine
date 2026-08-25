@@ -1,0 +1,495 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// TRH | Trading Room Hunter — built from real XAUUSD sample (25 Aug 2026 04:19 UTC-4)
+// Sample geometry: SL≈4620.23 (sweep low) · ENTRY≈4627.84 (mid-room) · TP≈4645.99 (~2.4R)
+
+//@version=5
+indicator("TRH | Trading Room Hunter", shorttitle="TRH", overlay=true, max_boxes_count=40, max_lines_count=80, max_labels_count=80, max_bars_back=5000)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+grp = "TRH Detection (real-data model)"
+pivotPeriod    = input.int(5, "Pivot Period", minval=2, maxval=30, group=grp,
+     tooltip="Major green/red liquidity pivots.")
+minContextAtr  = input.float(1.2, "Min Selloff/Rally Into Sweep (ATR×)", minval=0.5, maxval=8.0, step=0.1, group=grp,
+     tooltip="Require a real run into the hunted pivot (sample had a multi-ATR selloff).")
+minSweepAtr    = input.float(0.05, "Min Sweep Beyond Pivot (ATR×)", minval=0.0, maxval=1.0, step=0.05, group=grp)
+baseConfirmBars= input.int(8, "Min Base Bars After Sweep", minval=2, maxval=40, group=grp,
+     tooltip="Sample: sweep 04:09 → confirm ~04:21–04:22 (~12 bars).")
+maxBaseBars    = input.int(40, "Max Bars To Confirm Room", minval=5, maxval=100, group=grp)
+minRoomAtr     = input.float(0.8, "Min Room Width (ATR×)", minval=0.3, maxval=5.0, step=0.1, group=grp)
+maxRoomAtr     = input.float(3.5, "Max Room Width (ATR×)", minval=1.0, maxval=10.0, step=0.1, group=grp)
+cooldownBars   = input.int(50, "Cooldown Between Setups", minval=10, maxval=300, group=grp)
+
+grpPos = "Entry / SL / TP (sample-matched)"
+slPadAtr       = input.float(0.02, "SL Pad (ATR×)", minval=0.0, maxval=1.0, step=0.01, group=grpPos,
+     tooltip="Sample SL sat ~0.03 under the sweep low.")
+riskReward     = input.float(2.4, "Risk-Reward Ratio", minval=1.0, maxval=6.0, step=0.1, group=grpPos,
+     tooltip="Sample was ~2.39R to 4645.99.")
+useLiquidityTP = input.bool(true, "Prefer Opposing Pivot As TP", group=grpPos,
+     tooltip="If a red/green liquidity pivot sits beyond min R:R, use it as TP.")
+
+grpDisp = "Display"
+onlyLast       = input.bool(true, "Only Last Setup", group=grpDisp)
+setupWidth     = input.int(80, "Box Width (bars)", minval=20, maxval=400, group=grpDisp)
+showFillMark   = input.bool(false, "Show ENTRY/TP/SL Markers", group=grpDisp)
+
+grpCol = "Colors"
+bullZoneCol = input.color(color.new(#26A69A, 82), "Long Room", group=grpCol)
+bearZoneCol = input.color(color.new(#EF5350, 82), "Short Room", group=grpCol)
+entryCol    = input.color(#787B86, "Entry", group=grpCol)
+slCol       = input.color(#EF5350, "SL", group=grpCol)
+tpCol       = input.color(#26A69A, "TP", group=grpCol)
+
+grpAlert = "Alerts (system + mobile)"
+alertSetup = input.bool(true, "🔔 Alert: NEW setup found (hunt)", group=grpAlert,
+     tooltip="Fires when TRH room is confirmed with ENTRY / SL / TP. Use this for mobile alarms.")
+alertBuilding = input.bool(false, "Alert: sweep building (early)", group=grpAlert,
+     tooltip="Optional early ping when a sweep starts, before the room is confirmed.")
+alertEntry = input.bool(true, "Alert: entry filled", group=grpAlert)
+alertExit  = input.bool(true, "Alert: TP / SL hit", group=grpAlert)
+
+// Rich alert text (shown in popup + mobile push)
+f_setupMsg(side, entry, sl, tp) =>
+    syminfo.ticker + " " + timeframe.period + " | TRH " + side + " SETUP\n" +
+     "ENTRY " + str.tostring(entry, format.mintick) + "\n" +
+     "SL " + str.tostring(sl, format.mintick) + "\n" +
+     "TP " + str.tostring(tp, format.mintick)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ATR + PIVOTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+atr = ta.atr(14)
+ph = ta.pivothigh(high, pivotPeriod, pivotPeriod)
+pl = ta.pivotlow(low, pivotPeriod, pivotPeriod)
+
+var float[] pivHi = array.new<float>()
+var int[]   pivHiBar = array.new<int>()
+var float[] pivLo = array.new<float>()
+var int[]   pivLoBar = array.new<int>()
+
+if not na(ph)
+    array.push(pivHi, ph)
+    array.push(pivHiBar, bar_index - pivotPeriod)
+    while array.size(pivHi) > 30
+        array.shift(pivHi)
+        array.shift(pivHiBar)
+
+if not na(pl)
+    array.push(pivLo, pl)
+    array.push(pivLoBar, bar_index - pivotPeriod)
+    while array.size(pivLo) > 30
+        array.shift(pivLo)
+        array.shift(pivLoBar)
+
+f_lastPivotLow(maxAge) =>
+    float best = na
+    int bestB = na
+    if array.size(pivLo) > 0
+        for i = array.size(pivLo) - 1 to 0
+            int b = array.get(pivLoBar, i)
+            float px = array.get(pivLo, i)
+            int age = bar_index - b
+            if age >= pivotPeriod and age <= maxAge
+                if na(best) or px <= best
+                    best := px
+                    bestB := b
+    [best, bestB]
+
+f_lastPivotHigh(maxAge) =>
+    float best = na
+    int bestB = na
+    if array.size(pivHi) > 0
+        for i = array.size(pivHi) - 1 to 0
+            int b = array.get(pivHiBar, i)
+            float px = array.get(pivHi, i)
+            int age = bar_index - b
+            if age >= pivotPeriod and age <= maxAge
+                if na(best) or px >= best
+                    best := px
+                    bestB := b
+    [best, bestB]
+
+f_nextLiquidityHigh(fromPrice, minDist) =>
+    float best = na
+    if array.size(pivHi) > 0
+        for i = 0 to array.size(pivHi) - 1
+            px = array.get(pivHi, i)
+            if px >= fromPrice + minDist
+                if na(best) or px < best
+                    best := px
+    best
+
+f_nextLiquidityLow(fromPrice, minDist) =>
+    float best = na
+    if array.size(pivLo) > 0
+        for i = 0 to array.size(pivLo) - 1
+            px = array.get(pivLo, i)
+            if px <= fromPrice - minDist
+                if na(best) or px > best
+                    best := px
+    best
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PENDING SWEEP → BUILD ROOM (sample path)
+// Long: selloff → sweep pivot low → base → mid-room ENTRY
+// Short: mirror
+// ═══════════════════════════════════════════════════════════════════════════
+
+[huntLo, huntLoBar] = f_lastPivotLow(80)
+[huntHi, huntHiBar] = f_lastPivotHigh(80)
+
+priorHigh = ta.highest(high[1], 40)
+priorLow  = ta.lowest(low[1], 40)
+selloffInto = priorHigh - low
+rallyInto   = high - priorLow
+
+bullSweepNow = not na(huntLo) and low < huntLo - atr * minSweepAtr and close > huntLo and close > open and selloffInto >= atr * minContextAtr
+bearSweepNow = not na(huntHi) and high > huntHi + atr * minSweepAtr and close < huntHi and close < open and rallyInto >= atr * minContextAtr
+
+var int   pendDir = 0          // 1 long, -1 short, 0 none
+var float pendDistal = na      // sweep extreme
+var float pendHunt = na        // hunted pivot
+var int   pendBar = na
+var float pendBaseHigh = na
+var float pendBaseLow = na
+
+var int lastSetupBar = na
+
+if barstate.isconfirmed
+    // Start new pending sweep (only if flat / cooled down)
+    canStart = pendDir == 0 and (na(lastSetupBar) or bar_index - lastSetupBar >= cooldownBars)
+    if canStart and bullSweepNow
+        pendDir := 1
+        pendDistal := low
+        pendHunt := huntLo
+        pendBar := bar_index
+        pendBaseHigh := high
+        pendBaseLow := low
+        if alertBuilding
+            alert(syminfo.ticker + " " + timeframe.period + " | TRH building LONG sweep room…", alert.freq_once_per_bar_close)
+    else if canStart and bearSweepNow
+        pendDir := -1
+        pendDistal := high
+        pendHunt := huntHi
+        pendBar := bar_index
+        pendBaseHigh := high
+        pendBaseLow := low
+        if alertBuilding
+            alert(syminfo.ticker + " " + timeframe.period + " | TRH building SHORT sweep room…", alert.freq_once_per_bar_close)
+
+    // Update pending base
+    if pendDir != 0
+        pendBaseHigh := math.max(nz(pendBaseHigh), high)
+        pendBaseLow := math.min(nz(pendBaseLow), low)
+        // If a deeper sweep happens same direction, deepen distal
+        if pendDir == 1 and low < pendDistal
+            pendDistal := low
+        if pendDir == -1 and high > pendDistal
+            pendDistal := high
+
+        int agePend = bar_index - pendBar
+        // Cancel if base takes too long without confirmation
+        if agePend > maxBaseBars
+            pendDir := 0
+            pendDistal := na
+            pendHunt := na
+            pendBar := na
+            pendBaseHigh := na
+            pendBaseLow := na
+
+// Confirm room: enough base bars + room width in ATR band + bullish/bearish break of micro structure
+int newDir = 0
+float newDistal = na
+float newProximal = na
+float newEntry = na
+float newSl = na
+float newTp = na
+
+if barstate.isconfirmed and pendDir != 0 and not na(pendBar)
+    int age = bar_index - pendBar
+    if age >= baseConfirmBars
+        if pendDir == 1
+            // Room: distal=sweep low, proximal=base high since sweep (sample ~4634 → mid ~4627.2)
+            float distal = pendDistal
+            float proximal = pendBaseHigh
+            float width = proximal - distal
+            float prevBaseHigh = nz(pendBaseHigh[1], proximal)
+            // Confirm when base is wide enough and price presses the top (impulse starting)
+            bool microBreak = close > open and (high >= prevBaseHigh or close >= distal + width * 0.7)
+            if width >= atr * minRoomAtr and width <= atr * maxRoomAtr and microBreak
+                float entry = (distal + proximal) * 0.5
+                float sl = distal - atr * slPadAtr
+                float risk = entry - sl
+                float tpRR = entry + risk * riskReward
+                float liq = f_nextLiquidityHigh(entry, risk * 1.5)
+                float tp = useLiquidityTP and not na(liq) ? math.max(tpRR, liq) : tpRR
+                newDir := 1
+                newDistal := distal
+                newProximal := proximal
+                newEntry := entry
+                newSl := sl
+                newTp := tp
+        else if pendDir == -1
+            float distal = pendDistal
+            float proximal = pendBaseLow
+            float width = distal - proximal
+            float prevBaseLow = nz(pendBaseLow[1], proximal)
+            bool microBreak = close < open and (low <= prevBaseLow or close <= distal - width * 0.7)
+            if width >= atr * minRoomAtr and width <= atr * maxRoomAtr and microBreak
+                float entry = (distal + proximal) * 0.5
+                float sl = distal + atr * slPadAtr
+                float risk = sl - entry
+                float tpRR = entry - risk * riskReward
+                float liq = f_nextLiquidityLow(entry, risk * 1.5)
+                float tp = useLiquidityTP and not na(liq) ? math.min(tpRR, liq) : tpRR
+                newDir := -1
+                newDistal := distal
+                newProximal := proximal
+                newEntry := entry
+                newSl := sl
+                newTp := tp
+
+    // Clear pending once we fire
+    if newDir != 0
+        pendDir := 0
+        pendDistal := na
+        pendHunt := na
+        pendBar := na
+        pendBaseHigh := na
+        pendBaseLow := na
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DRAWINGS + TRADE STATE
+// 0 armed/wait fill · 1 in trade · 2 TP · 3 SL · 4 expired
+// ═══════════════════════════════════════════════════════════════════════════
+
+var box[]   bZone = array.new<box>()
+var box[]   bTp = array.new<box>()
+var box[]   bSl = array.new<box>()
+var line[]  lEntry = array.new<line>()
+var label[] labE = array.new<label>()
+var label[] labS = array.new<label>()
+var label[] labT = array.new<label>()
+var label[] labTag = array.new<label>()
+
+var int[]   sDir = array.new<int>()
+var float[] sEntry = array.new<float>()
+var float[] sSl = array.new<float>()
+var float[] sTp = array.new<float>()
+var float[] sProx = array.new<float>()
+var float[] sDist = array.new<float>()
+var int[]   sBar = array.new<int>()
+var int[]   sStat = array.new<int>()
+var bool[]  sFilled = array.new<bool>()
+
+var float activeE = na
+var float activeS = na
+var float activeT = na
+var int signalDir = 0
+var bool alertSetupLong = false
+var bool alertSetupShort = false
+var bool alertEntryLong = false
+var bool alertEntryShort = false
+var bool alertTpHit = false
+var bool alertSlHit = false
+signalDir := 0
+alertSetupLong := false
+alertSetupShort := false
+alertEntryLong := false
+alertEntryShort := false
+alertTpHit := false
+alertSlHit := false
+
+if newDir != 0
+    if onlyLast and array.size(sDir) > 0
+        for i = 0 to array.size(bZone) - 1
+            box.delete(array.get(bZone, i))
+            box.delete(array.get(bTp, i))
+            box.delete(array.get(bSl, i))
+            line.delete(array.get(lEntry, i))
+            label.delete(array.get(labE, i))
+            label.delete(array.get(labS, i))
+            label.delete(array.get(labT, i))
+            label.delete(array.get(labTag, i))
+        array.clear(bZone)
+        array.clear(bTp)
+        array.clear(bSl)
+        array.clear(lEntry)
+        array.clear(labE)
+        array.clear(labS)
+        array.clear(labT)
+        array.clear(labTag)
+        array.clear(sDir)
+        array.clear(sEntry)
+        array.clear(sSl)
+        array.clear(sTp)
+        array.clear(sProx)
+        array.clear(sDist)
+        array.clear(sBar)
+        array.clear(sStat)
+        array.clear(sFilled)
+
+    zTop = math.max(newProximal, newDistal)
+    zBot = math.min(newProximal, newDistal)
+    right = bar_index + setupWidth
+    zcol = newDir == 1 ? bullZoneCol : bearZoneCol
+
+    // Room box
+    array.push(bZone, box.new(bar_index, zTop, right, zBot, bgcolor=zcol, border_color=color.new(zcol, 40), border_width=1))
+    // TP / SL shade like TradingView long/short tool
+    if newDir == 1
+        array.push(bTp, box.new(bar_index, newTp, right, newEntry, bgcolor=color.new(#26A69A, 85), border_color=color.new(#26A69A, 60), border_width=1))
+        array.push(bSl, box.new(bar_index, newEntry, right, newSl, bgcolor=color.new(#EF5350, 85), border_color=color.new(#EF5350, 60), border_width=1))
+    else
+        array.push(bTp, box.new(bar_index, newEntry, right, newTp, bgcolor=color.new(#26A69A, 85), border_color=color.new(#26A69A, 60), border_width=1))
+        array.push(bSl, box.new(bar_index, newSl, right, newEntry, bgcolor=color.new(#EF5350, 85), border_color=color.new(#EF5350, 60), border_width=1))
+
+    array.push(lEntry, line.new(bar_index, newEntry, right, newEntry, color=entryCol, width=2))
+    array.push(labE, label.new(right, newEntry, "ENTRY " + str.tostring(newEntry, format.mintick), style=label.style_label_left, color=entryCol, textcolor=color.white, size=size.small))
+    array.push(labS, label.new(right, newSl, "SL " + str.tostring(newSl, format.mintick), style=label.style_label_left, color=slCol, textcolor=color.white, size=size.small))
+    array.push(labT, label.new(right, newTp, "TP " + str.tostring(newTp, format.mintick), style=label.style_label_left, color=tpCol, textcolor=color.white, size=size.small))
+    array.push(labTag, label.new(bar_index, newDir == 1 ? zTop : zBot, "TRH " + (newDir == 1 ? "LONG" : "SHORT") + " · SWEEP\nR:R " + str.tostring(riskReward, "#.#"), style=newDir == 1 ? label.style_label_down : label.style_label_up, color=newDir == 1 ? #00897B : #C62828, textcolor=color.white, size=size.small))
+
+    array.push(sDir, newDir)
+    array.push(sEntry, newEntry)
+    array.push(sSl, newSl)
+    array.push(sTp, newTp)
+    array.push(sProx, newProximal)
+    array.push(sDist, newDistal)
+    array.push(sBar, bar_index)
+    array.push(sStat, 0)
+    array.push(sFilled, false)
+    lastSetupBar := bar_index
+
+    sideTxt = newDir == 1 ? "LONG" : "SHORT"
+    if alertSetup
+        alert(f_setupMsg(sideTxt, newEntry, newSl, newTp), alert.freq_once_per_bar_close)
+    if newDir == 1
+        alertSetupLong := true
+    else
+        alertSetupShort := true
+
+    // Visual ping on chart when setup found
+    label.new(bar_index, newDir == 1 ? zTop : zBot, "🔔 HUNT", style=newDir == 1 ? label.style_label_down : label.style_label_up, color=color.new(#FFC107, 0), textcolor=#212121, size=size.tiny)
+
+    // If price already traded through entry during the base, count as filled (Set & Forget)
+    alreadyFilled = newDir == 1 ? low <= newEntry : high >= newEntry
+    // On confirm bar, price is often already above entry (sample 04:22) — mark in-trade
+    if alreadyFilled or (newDir == 1 and close >= newEntry) or (newDir == -1 and close <= newEntry)
+        array.set(sStat, array.size(sStat) - 1, 1)
+        array.set(sFilled, array.size(sFilled) - 1, true)
+        signalDir := newDir
+        activeE := newEntry
+        activeS := newSl
+        activeT := newTp
+        if showFillMark
+            label.new(bar_index, newEntry, "▶ ENTRY", style=label.style_label_center, color=newDir == 1 ? #00897B : #C62828, textcolor=color.white, size=size.normal)
+        if alertEntry
+            alert(syminfo.ticker + " | TRH ENTRY " + (newDir == 1 ? "LONG" : "SHORT") + " @ " + str.tostring(newEntry, format.mintick), alert.freq_once_per_bar_close)
+        if newDir == 1
+            alertEntryLong := true
+        else
+            alertEntryShort := true
+
+// Manage live setups
+n = array.size(sDir)
+if n > 0
+    for i = 0 to n - 1
+        st = array.get(sStat, i)
+        if st <= 1
+            dir = array.get(sDir, i)
+            e = array.get(sEntry, i)
+            s = array.get(sSl, i)
+            t = array.get(sTp, i)
+            startB = array.get(sBar, i)
+            right = math.max(bar_index, startB + setupWidth)
+            box.set_right(array.get(bZone, i), right)
+            box.set_right(array.get(bTp, i), right)
+            box.set_right(array.get(bSl, i), right)
+            line.set_x2(array.get(lEntry, i), right)
+            label.set_x(array.get(labE, i), right)
+            label.set_x(array.get(labS, i), right)
+            label.set_x(array.get(labT, i), right)
+
+            if st == 0 and bar_index - startB > setupWidth
+                array.set(sStat, i, 4)
+            else if st == 0
+                hitE = dir == 1 ? low <= e : high >= e
+                if hitE
+                    array.set(sStat, i, 1)
+                    array.set(sFilled, i, true)
+                    signalDir := dir
+                    activeE := e
+                    activeS := s
+                    activeT := t
+                    if showFillMark
+                        label.new(bar_index, e, "▶ ENTRY", style=label.style_label_center, color=dir == 1 ? #00897B : #C62828, textcolor=color.white, size=size.normal)
+                    if alertEntry
+                        alert(syminfo.ticker + " | TRH ENTRY " + (dir == 1 ? "LONG" : "SHORT") + " @ " + str.tostring(e, format.mintick), alert.freq_once_per_bar_close)
+                    if dir == 1
+                        alertEntryLong := true
+                    else
+                        alertEntryShort := true
+
+            if array.get(sStat, i) == 1
+                // Prefer TP if both wick in one bar
+                hitT = dir == 1 ? high >= t : low <= t
+                hitS = dir == 1 ? low <= s : high >= s
+                if hitT
+                    array.set(sStat, i, 2)
+                    if showFillMark
+                        label.new(bar_index, t, "✓ TP EXIT", style=label.style_label_center, color=#26A69A, textcolor=color.white, size=size.normal)
+                    if alertExit
+                        alert(syminfo.ticker + " | TRH ✓ TP @ " + str.tostring(t, format.mintick), alert.freq_once_per_bar_close)
+                    alertTpHit := true
+                else if hitS
+                    array.set(sStat, i, 3)
+                    if showFillMark
+                        label.new(bar_index, s, "✗ SL EXIT", style=label.style_label_center, color=#EF5350, textcolor=color.white, size=size.normal)
+                    if alertExit
+                        alert(syminfo.ticker + " | TRH ✗ SL @ " + str.tostring(s, format.mintick), alert.freq_once_per_bar_close)
+                    alertSlHit := true
+
+plot(activeE, "ENTRY", color=entryCol, display=display.data_window)
+plot(activeS, "SL", color=slCol, display=display.data_window)
+plot(activeT, "TP", color=tpCol, display=display.data_window)
+
+var table info = table.new(position.top_right, 2, 7, bgcolor=color.new(#111111, 5), border_width=1, border_color=color.new(color.white, 70))
+if barstate.islast
+    if array.size(sDir) > 0
+        idx = array.size(sDir) - 1
+        dir = array.get(sDir, idx)
+        st = array.get(sStat, idx)
+        stTxt = st == 0 ? "WAIT FILL" : st == 1 ? "IN TRADE" : st == 2 ? "TP HIT" : st == 3 ? "SL HIT" : "EXPIRED"
+        e = array.get(sEntry, idx)
+        s = array.get(sSl, idx)
+        t = array.get(sTp, idx)
+        table.cell(info, 0, 0, "TRH", text_color=color.white, text_size=size.small)
+        table.cell(info, 1, 0, (dir == 1 ? "LONG" : "SHORT") + " · " + stTxt, text_color=dir == 1 ? #69F0AE : #FF8A80, text_size=size.small)
+        table.cell(info, 0, 1, "Type", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 1, "SWEEP (real model)", text_color=color.white, text_size=size.small)
+        table.cell(info, 0, 2, "ENTRY", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 2, str.tostring(e, format.mintick), text_color=color.white, text_size=size.small)
+        table.cell(info, 0, 3, "SL", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 3, str.tostring(s, format.mintick), text_color=#FF8A80, text_size=size.small)
+        table.cell(info, 0, 4, "TP", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 4, str.tostring(t, format.mintick), text_color=#69F0AE, text_size=size.small)
+        table.cell(info, 0, 5, "Risk", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 5, str.tostring(math.abs(e - s), format.mintick), text_color=color.white, text_size=size.small)
+        table.cell(info, 0, 6, "Reward", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 6, str.tostring(math.abs(t - e), format.mintick) + " (" + str.tostring(riskReward, "#.#") + "R)", text_color=color.white, text_size=size.small)
+    else
+        table.cell(info, 0, 0, "TRH", text_color=color.white, text_size=size.small)
+        table.cell(info, 1, 0, pendDir != 0 ? "building sweep room…" : "scanning…", text_color=color.gray, text_size=size.small)
+
+// ── Alert conditions (pick in TradingView alarm dialog) ─────────────────────
+alertcondition(alertSetupLong, title="🔔 TRH New LONG Setup", message="TRH LONG setup — check chart for ENTRY / SL / TP")
+alertcondition(alertSetupShort, title="🔔 TRH New SHORT Setup", message="TRH SHORT setup — check chart for ENTRY / SL / TP")
+alertcondition(alertSetupLong or alertSetupShort, title="🔔 TRH New Setup (Any)", message="TRH setup found — hunt now")
+alertcondition(alertEntryLong, title="TRH LONG Entry Fill", message="TRH LONG entry filled")
+alertcondition(alertEntryShort, title="TRH SHORT Entry Fill", message="TRH SHORT entry filled")
+alertcondition(alertTpHit, title="TRH Take Profit Hit", message="TRH take profit hit")
+alertcondition(alertSlHit, title="TRH Stop Loss Hit", message="TRH stop loss hit")

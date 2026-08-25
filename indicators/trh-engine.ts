@@ -1,0 +1,252 @@
+/** TRH sweep-room detector (mirrors Pine logic — free alert monitor) */
+
+export type Bar = { time: number; open: number; high: number; low: number; close: number };
+
+export type TrhConfig = {
+  pivotPeriod: number;
+  minContextAtr: number;
+  minSweepAtr: number;
+  baseConfirmBars: number;
+  maxBaseBars: number;
+  minRoomAtr: number;
+  maxRoomAtr: number;
+  cooldownBars: number;
+  slPadAtr: number;
+  riskReward: number;
+};
+
+export const DEFAULT_TRH_CONFIG: TrhConfig = {
+  pivotPeriod: 5,
+  minContextAtr: 1.2,
+  minSweepAtr: 0.05,
+  baseConfirmBars: 8,
+  maxBaseBars: 40,
+  minRoomAtr: 0.8,
+  maxRoomAtr: 3.5,
+  cooldownBars: 50,
+  slPadAtr: 0.02,
+  riskReward: 2.4,
+};
+
+export type TrhSetup = {
+  dir: 1 | -1;
+  entry: number;
+  sl: number;
+  tp: number;
+  distal: number;
+  proximal: number;
+  barIndex: number;
+  barTime: number;
+};
+
+type Pending = {
+  dir: 1 | -1;
+  distal: number;
+  hunt: number;
+  bar: number;
+  baseHigh: number;
+  baseLow: number;
+};
+
+function atr(bars: Bar[], i: number, len = 14): number {
+  if (i < 1) return bars[i].high - bars[i].low;
+  let sum = 0;
+  const start = Math.max(1, i - len + 1);
+  for (let j = start; j <= i; j++) {
+    const tr = Math.max(
+      bars[j].high - bars[j].low,
+      Math.abs(bars[j].high - bars[j - 1].close),
+      Math.abs(bars[j].low - bars[j - 1].close),
+    );
+    sum += tr;
+  }
+  return sum / (i - start + 1);
+}
+
+function pivotLow(bars: Bar[], i: number, p: number): number | null {
+  if (i < p || i >= bars.length - p) return null;
+  const v = bars[i].low;
+  for (let j = i - p; j <= i + p; j++) {
+    if (j !== i && bars[j].low <= v) return null;
+  }
+  return v;
+}
+
+function pivotHigh(bars: Bar[], i: number, p: number): number | null {
+  if (i < p || i >= bars.length - p) return null;
+  const v = bars[i].high;
+  for (let j = i - p; j <= i + p; j++) {
+    if (j !== i && bars[j].high >= v) return null;
+  }
+  return v;
+}
+
+function lastPivotLow(bars: Bar[], pivots: { price: number; bar: number }[], i: number, maxAge: number, p: number) {
+  let best: number | null = null;
+  let bestBar = -1;
+  for (const pv of pivots) {
+    const age = i - pv.bar;
+    if (age >= p && age <= maxAge) {
+      if (best === null || pv.price <= best) {
+        best = pv.price;
+        bestBar = pv.bar;
+      }
+    }
+  }
+  return { price: best, bar: bestBar };
+}
+
+function lastPivotHigh(bars: Bar[], pivots: { price: number; bar: number }[], i: number, maxAge: number, p: number) {
+  let best: number | null = null;
+  let bestBar = -1;
+  for (const pv of pivots) {
+    const age = i - pv.bar;
+    if (age >= p && age <= maxAge) {
+      if (best === null || pv.price >= best) {
+        best = pv.price;
+        bestBar = pv.bar;
+      }
+    }
+  }
+  return { price: best, bar: bestBar };
+}
+
+function levels(dir: 1 | -1, proximal: number, distal: number, a: number, cfg: TrhConfig) {
+  const entry = (proximal + distal) / 2;
+  const pad = a * cfg.slPadAtr;
+  const sl = dir === 1 ? distal - pad : distal + pad;
+  const risk = Math.abs(entry - sl);
+  const tp = dir === 1 ? entry + risk * cfg.riskReward : entry - risk * cfg.riskReward;
+  return { entry, sl, tp, risk };
+}
+
+function validRoom(dir: 1 | -1, proximal: number, distal: number, a: number, cfg: TrhConfig) {
+  const w = Math.abs(proximal - distal);
+  if (w <= 0) return false;
+  if (dir === 1 && distal >= proximal) return false;
+  if (dir === -1 && distal <= proximal) return false;
+  if (w < a * cfg.minRoomAtr || w > a * cfg.maxRoomAtr) return false;
+  const { risk } = levels(dir, proximal, distal, a, cfg);
+  return risk >= a * 0.8;
+}
+
+/** Scan bars; returns setups found (newest last). */
+export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG): TrhSetup[] {
+  const setups: TrhSetup[] = [];
+  const p = cfg.pivotPeriod;
+  const pivLo: { price: number; bar: number }[] = [];
+  const pivHi: { price: number; bar: number }[] = [];
+
+  let pending: Pending | null = null;
+  let lastSetupBar = -9999;
+
+  for (let i = 0; i < bars.length; i++) {
+    const b = bars[i];
+    const a = atr(bars, i);
+
+    const pl = pivotLow(bars, i - p, p);
+    const ph = pivotHigh(bars, i - p, p);
+    if (pl !== null) {
+      pivLo.push({ price: pl, bar: i - p });
+      if (pivLo.length > 30) pivLo.shift();
+    }
+    if (ph !== null) {
+      pivHi.push({ price: ph, bar: i - p });
+      if (pivHi.length > 30) pivHi.shift();
+    }
+
+    const { price: huntLo } = lastPivotLow(bars, pivLo, i, 80, p);
+    const { price: huntHi } = lastPivotHigh(bars, pivHi, i, 80, p);
+
+    const priorHigh = Math.max(...bars.slice(Math.max(0, i - 40), i).map((x) => x.high));
+    const priorLow = Math.min(...bars.slice(Math.max(0, i - 40), i).map((x) => x.low));
+    const selloff = priorHigh - b.low;
+    const rally = b.high - priorLow;
+
+    const bullSweep =
+      huntLo !== null &&
+      b.low < huntLo - a * cfg.minSweepAtr &&
+      b.close > huntLo &&
+      b.close > b.open &&
+      selloff >= a * cfg.minContextAtr;
+
+    const bearSweep =
+      huntHi !== null &&
+      b.high > huntHi + a * cfg.minSweepAtr &&
+      b.close < huntHi &&
+      b.close < b.open &&
+      rally >= a * cfg.minContextAtr;
+
+    const canStart = !pending && i - lastSetupBar >= cfg.cooldownBars;
+
+    if (canStart && bullSweep && huntLo !== null) {
+      pending = { dir: 1, distal: b.low, hunt: huntLo, bar: i, baseHigh: b.high, baseLow: b.low };
+    } else if (canStart && bearSweep && huntHi !== null) {
+      pending = { dir: -1, distal: b.high, hunt: huntHi, bar: i, baseHigh: b.high, baseLow: b.low };
+    }
+
+    if (pending) {
+      pending.baseHigh = Math.max(pending.baseHigh, b.high);
+      pending.baseLow = Math.min(pending.baseLow, b.low);
+      if (pending.dir === 1 && b.low < pending.distal) pending.distal = b.low;
+      if (pending.dir === -1 && b.high > pending.distal) pending.distal = b.high;
+
+      const age = i - pending.bar;
+      if (age > cfg.maxBaseBars) {
+        pending = null;
+        continue;
+      }
+
+      if (age >= cfg.baseConfirmBars) {
+        let fired = false;
+        if (pending.dir === 1) {
+          const distal = pending.distal;
+          const proximal = pending.baseHigh;
+          const width = proximal - distal;
+          const prevBaseHigh = i > pending.bar ? bars[i - 1].high : proximal;
+          const microBreak = b.close > b.open && (b.high >= prevBaseHigh || b.close >= distal + width * 0.7);
+          if (validRoom(1, proximal, distal, a, cfg) && microBreak) {
+            const lv = levels(1, proximal, distal, a, cfg);
+            setups.push({
+              dir: 1,
+              entry: lv.entry,
+              sl: lv.sl,
+              tp: lv.tp,
+              distal,
+              proximal,
+              barIndex: i,
+              barTime: b.time,
+            });
+            fired = true;
+          }
+        } else {
+          const distal = pending.distal;
+          const proximal = pending.baseLow;
+          const width = distal - proximal;
+          const prevBaseLow = i > pending.bar ? bars[i - 1].low : proximal;
+          const microBreak = b.close < b.open && (b.low <= prevBaseLow || b.close <= distal - width * 0.7);
+          if (validRoom(-1, proximal, distal, a, cfg) && microBreak) {
+            const lv = levels(-1, proximal, distal, a, cfg);
+            setups.push({
+              dir: -1,
+              entry: lv.entry,
+              sl: lv.sl,
+              tp: lv.tp,
+              distal,
+              proximal,
+              barIndex: i,
+              barTime: b.time,
+            });
+            fired = true;
+          }
+        }
+        if (fired) {
+          lastSetupBar = i;
+          pending = null;
+        }
+      }
+    }
+  }
+
+  return setups;
+}
