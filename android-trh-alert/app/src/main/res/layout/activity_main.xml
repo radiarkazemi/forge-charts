@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#111111"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="TRH Alert"
+        android:textColor="#FFD700"
+        android:textSize="28sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Encrypted VPS tunnel — zero config"
+        android:textColor="#888888"
+        android:textSize="14sp" />
+
+    <TextView
+        android:id="@+id/statusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="32dp"
+        android:background="#1a1a1a"
+        android:padding="16dp"
+        android:text="@string/status_connecting"
+        android:textColor="#EEEEEE"
+        android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/lastAlertText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:background="#1a1a1a"
+        android:padding="16dp"
+        android:text="No alerts yet"
+        android:textColor="#AAAAAA"
+        android:textSize="14sp" />
+</LinearLayout>

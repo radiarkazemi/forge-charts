@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TRH Alert</string>
+    <string name="service_channel">TRH secure feed</string>
+    <string name="alert_channel">TRH trade alerts</string>
+    <string name="service_running">Listening for encrypted TRH setups…</string>
+    <string name="status_connected">Connected — waiting for hunts</string>
+    <string name="status_connecting">Connecting to secure tunnel…</string>
+    <string name="status_disconnected">Disconnected — retrying…</string>
+</resources>
