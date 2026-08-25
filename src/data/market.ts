@@ -7,6 +7,7 @@ import {
   fetchChartApiSymbols,
   subscribeChartApi,
 } from "./chartApi";
+import { readStoredChartApiUrl } from "./config";
 import { FOREXCOM_UNIVERSE, FOREXCOM_WATCH } from "./forexcom";
 import { generateBars, setUniverse, UNIVERSE } from "./feed";
 import { fetchYahooHistory, fetchYahooQuotes, subscribeYahooBar } from "./yahoo";
@@ -19,7 +20,17 @@ export type FeedMeta = {
 
 let chartApiReady: boolean | null = null;
 
+function hasExplicitChartApi(): boolean {
+  const stored = typeof window !== "undefined" ? readStoredChartApiUrl() : "";
+  const env = (import.meta.env.VITE_CHART_API_URL ?? "").trim();
+  return Boolean(stored || env);
+}
+
 export async function detectChartApi(): Promise<boolean> {
+  if (!hasExplicitChartApi()) {
+    chartApiReady = false;
+    return false;
+  }
   chartApiReady = await chartApiHealth();
   return chartApiReady;
 }

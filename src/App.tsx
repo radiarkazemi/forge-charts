@@ -58,12 +58,8 @@ export default function App() {
     const eng = new ChartEngine(host, symbol);
     engineRef.current = eng;
     setEngine(eng);
-    void (async () => {
-      const catalog = await loadCatalog();
-      setUniverse(catalog);
-      const next = catalog.find((s) => s.ticker === "BTCUSDT" && s.exchange === "BINANCE") ?? catalog[0] ?? symbol;
-      await attachFeed(next, "15", "symbol");
-    })();
+    void attachFeed(symbol, "15", "symbol");
+    void loadCatalog().then(setUniverse);
     return () => {
       unsubRef.current();
       eng.destroy();
