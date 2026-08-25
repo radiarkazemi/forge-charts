@@ -32,4 +32,32 @@ The fake “IMPULSE · SL HIT” at 4622 is removed — that was wrong post-spik
 - Room width `0.8–3.5 ATR` · R:R **`2.4`** · SL pad `0.02 ATR`  
 - Only last setup ON  
 
+## Alerts (desktop + mobile)
+
+### Best — full ENTRY / SL / TP in the push
+
+1. XAUUSD chart with TRH → click **Alarm clock**
+2. **Condition:** `TRH | Trading Room Hunter` → **Any alert() function call**
+3. **Notifications:** enable **Notify on app**, **Show popup**, **Play sound**
+4. **Expiration:** Open-ended → **Create**
+
+Example push:
+
+```
+XAUUSD 1 | TRH LONG SETUP
+ENTRY 4627.84
+SL 4620.23
+TP 4645.99
+```
+
+### Or pick a condition
+
+- **🔔 TRH New Setup (Any)** — new hunt (long or short)
+- **🔔 TRH New LONG Setup** / **🔔 TRH New SHORT Setup**
+- Entry fill · TP hit · SL hit
+
+### Mobile
+
+Install TradingView app, same login as desktop, allow notifications in phone settings. Alerts sync automatically.
+
 Educational tool — not financial advice.
