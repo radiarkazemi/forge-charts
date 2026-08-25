@@ -2,6 +2,8 @@ const STORAGE_KEY = "forge.chartApiUrl";
 
 /** Same-origin cp_fetcher REST (nginx injects X-API-Key). */
 export const CHART_API_PROXY = "/crypto-api";
+/** Same-origin compact Mongo history (chart sidecar, no API key). */
+export const CHART_FAST_PROXY = "/crypto-chart";
 /** Same-origin cp_fetcher realtime WebSocket. */
 export const CHART_WS_PROXY = "/crypto-ws";
 
@@ -41,4 +43,16 @@ export function chartApiWsUrl(): string {
   }
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${window.location.host}${CHART_WS_PROXY}`;
+}
+
+export function chartFastBase(): string {
+  const base = chartApiBase();
+  if (base.startsWith("http://") || base.startsWith("https://")) {
+    const u = new URL(base);
+    u.pathname = "/crypto-chart";
+    u.search = "";
+    u.hash = "";
+    return u.toString().replace(/\/$/, "");
+  }
+  return CHART_FAST_PROXY;
 }

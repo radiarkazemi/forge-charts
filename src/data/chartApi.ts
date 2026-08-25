@@ -1,9 +1,9 @@
 import type { Bar, Interval, SymbolInfo } from "../engine/types";
-import { chartApiBase, chartApiWsUrl } from "./config";
+import { chartApiBase, chartApiWsUrl, chartFastBase } from "./config";
 
 export type Quote = { price: number; change: number };
 
-/** Chart interval -> cp_fetcher Mongo timeframe used for history. */
+/** Chart interval -> cp_fetcher Mongo timeframe + aggregation group. */
 const HISTORY_TF: Record<Interval, { tf: "1m" | "1h" | "1d"; group: number }> = {
   "1": { tf: "1m", group: 1 },
   "5": { tf: "1m", group: 5 },
@@ -30,22 +30,32 @@ const LIVE_TF: Record<Interval, "1m" | "1h" | "1d"> = {
   "1M": "1d",
 };
 
+/** Target candles on screen — server aggregates, so payload stays tiny. */
+const DISPLAY_BARS = 350;
+
+const historyCache = new Map<string, { at: number; bars: Bar[] }>();
+const HISTORY_CACHE_MS = 15_000;
+
 function num(v: unknown): number {
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : NaN;
 }
 
-async function getJson(path: string, timeoutMs = 8000): Promise<unknown> {
+async function getJson(url: string, timeoutMs = 8000): Promise<unknown> {
   const ctrl = new AbortController();
   const t = window.setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const base = chartApiBase().replace(/\/+$/, "");
-    const res = await fetch(`${base}${path}`, { signal: ctrl.signal });
-    if (!res.ok) throw new Error(`${path} ${res.status}`);
+    const res = await fetch(url, { signal: ctrl.signal });
+    if (!res.ok) throw new Error(`${url} ${res.status}`);
     return await res.json();
   } finally {
     window.clearTimeout(t);
   }
+}
+
+async function getApiJson(path: string, timeoutMs = 8000): Promise<unknown> {
+  const base = chartApiBase().replace(/\/+$/, "");
+  return getJson(`${base}${path}`, timeoutMs);
 }
 
 function parseCandleTime(raw: unknown): number {
@@ -76,6 +86,29 @@ function historyToBars(results: unknown[]): Bar[] {
     });
   }
   return bars.sort((a, b) => a.time - b.time);
+}
+
+function compactToBars(rows: unknown[]): Bar[] {
+  const bars: Bar[] = [];
+  for (const row of rows) {
+    if (!Array.isArray(row) || row.length < 5) continue;
+    const time = num(row[0]);
+    const open = num(row[1]);
+    const high = num(row[2]);
+    const low = num(row[3]);
+    const close = num(row[4]);
+    const volume = num(row[5]) || 0;
+    if (!Number.isFinite(time) || !Number.isFinite(open) || !Number.isFinite(close)) continue;
+    bars.push({
+      time: time > 1e12 ? Math.floor(time / 1000) : time,
+      open,
+      high: Number.isFinite(high) ? high : Math.max(open, close),
+      low: Number.isFinite(low) ? low : Math.min(open, close),
+      close,
+      volume,
+    });
+  }
+  return bars;
 }
 
 function aggregateBars(bars: Bar[], group: number, stepSec: number): Bar[] {
@@ -117,7 +150,13 @@ function symbolType(ticker: string, exchange: string): SymbolInfo["type"] {
 
 export async function chartApiHealth(): Promise<boolean> {
   try {
-    const json = (await getJson("/health/", 2500)) as { status?: string; mongo?: boolean };
+    const fast = (await getJson(`${chartFastBase()}/health`, 1500)) as { status?: string; mongo?: boolean };
+    if (fast?.status === "ok" || fast?.mongo === true) return true;
+  } catch {
+    /* fall through to django health */
+  }
+  try {
+    const json = (await getApiJson("/health/", 2500)) as { status?: string; mongo?: boolean };
     return json?.status === "ok" || json?.mongo === true;
   } catch {
     return false;
@@ -129,9 +168,9 @@ export async function fetchChartApiSymbols(exchanges: string[]): Promise<SymbolI
   for (const exchange of exchanges) {
     const ex = exchange.toLowerCase();
     try {
-      const json = (await getJson(
-        `/prices/?timeframe=1m&exchange=${encodeURIComponent(ex)}&page_size=200`,
-        8000,
+      const json = (await getApiJson(
+        `/prices/?timeframe=1m&exchange=${encodeURIComponent(ex)}&page_size=80`,
+        5000,
       )) as { results?: Array<Record<string, unknown>> };
       for (const row of json.results ?? []) {
         const ticker = String(row.symbol ?? "").toUpperCase();
@@ -152,16 +191,46 @@ export async function fetchChartApiSymbols(exchanges: string[]): Promise<SymbolI
   return out;
 }
 
-export async function fetchChartApiHistory(symbol: SymbolInfo, interval: Interval): Promise<Bar[]> {
+async function fetchCompactHistory(symbol: SymbolInfo, interval: Interval): Promise<Bar[] | null> {
   const { tf, group } = HISTORY_TF[interval];
-  const limit = group > 1 ? Math.min(2000, 500 * group) : 500;
-  const json = (await getJson(
+  const limit = DISPLAY_BARS;
+  const url =
+    `${chartFastBase()}/history?symbol=${encodeURIComponent(symbol.ticker.toLowerCase())}` +
+    `&timeframe=${tf}&limit=${limit}&group=${group}`;
+  const json = (await getJson(url, 6000)) as { bars?: unknown[] };
+  const bars = compactToBars(json.bars ?? []);
+  return bars.length ? bars : null;
+}
+
+async function fetchVerboseHistory(symbol: SymbolInfo, interval: Interval): Promise<Bar[]> {
+  const { tf, group } = HISTORY_TF[interval];
+  // Keep verbose fallback small — never pull 2000 raw bars over the wire.
+  const limit = Math.min(500, DISPLAY_BARS * Math.min(group, 4));
+  const json = (await getApiJson(
     `/prices/${encodeURIComponent(symbol.ticker.toLowerCase())}/history/?timeframe=${tf}&limit=${limit}`,
-    12000,
+    8000,
   )) as { results?: unknown[] };
   const raw = historyToBars(json.results ?? []);
   const step = tf === "1m" ? 60 : tf === "1h" ? 3600 : 86400;
   return aggregateBars(raw, group, step);
+}
+
+export async function fetchChartApiHistory(symbol: SymbolInfo, interval: Interval): Promise<Bar[]> {
+  const cacheKey = `${symbol.exchange}:${symbol.ticker}:${interval}`;
+  const cached = historyCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < HISTORY_CACHE_MS) return cached.bars;
+
+  let bars: Bar[] = [];
+  try {
+    bars = (await fetchCompactHistory(symbol, interval)) ?? [];
+  } catch {
+    bars = [];
+  }
+  if (!bars.length) {
+    bars = await fetchVerboseHistory(symbol, interval);
+  }
+  if (bars.length) historyCache.set(cacheKey, { at: Date.now(), bars });
+  return bars;
 }
 
 export async function fetchChartApiQuotes(symbols: SymbolInfo[]): Promise<Record<string, Quote>> {
@@ -176,9 +245,9 @@ export async function fetchChartApiQuotes(symbols: SymbolInfo[]): Promise<Record
   await Promise.all(
     [...byEx.entries()].map(async ([ex, rows]) => {
       try {
-        const json = (await getJson(
-          `/prices/?timeframe=1m&exchange=${encodeURIComponent(ex)}&page_size=200`,
-          8000,
+        const json = (await getApiJson(
+          `/prices/?timeframe=1m&exchange=${encodeURIComponent(ex)}&page_size=80`,
+          5000,
         )) as { results?: Array<Record<string, unknown>> };
         const wanted = new Set(rows.map((r) => r.ticker.toLowerCase()));
         for (const row of json.results ?? []) {
@@ -235,7 +304,7 @@ export function subscribeChartApi(
     poll = window.setInterval(async () => {
       if (closed) return;
       try {
-        const json = (await getJson(
+        const json = (await getApiJson(
           `/prices/${encodeURIComponent(symbol.ticker.toLowerCase())}/?timeframe=${tf}`,
           4000,
         )) as Record<string, unknown>;

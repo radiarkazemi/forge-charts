@@ -3,8 +3,28 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig(({ mode }) => ({
   plugins: [react()],
-  // Production on VPS is served under /charts/
+  // App URL is /charts/; hashed JS/CSS are emitted under /assets/forge/
+  // because this VPS path reliably serves large static files (same as goldanil).
   base: mode === "production" ? "/charts/" : "/",
+  build: {
+    assetsDir: "assets",
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules/react-dom")) return "react-dom";
+          if (id.includes("node_modules/react")) return "react";
+        },
+      },
+    },
+  },
+  experimental: {
+    renderBuiltUrl(filename) {
+      if (mode === "production" && filename.startsWith("assets/")) {
+        return `/assets/forge/${filename.slice("assets/".length)}`;
+      }
+      return { relative: true as const };
+    },
+  },
   server: {
     port: 5173,
     strictPort: true,
@@ -17,6 +37,10 @@ export default defineConfig(({ mode }) => ({
     },
     proxy: {
       "/crypto-api": {
+        target: "http://185.222.163.116",
+        changeOrigin: true,
+      },
+      "/crypto-chart": {
         target: "http://185.222.163.116",
         changeOrigin: true,
       },
