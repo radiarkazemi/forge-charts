@@ -54,7 +54,10 @@ export default function App() {
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const symbol = findSymbol("BTCUSDT", "BINANCE");
+    const params = new URLSearchParams(window.location.search);
+    const qTicker = (params.get("symbol") || params.get("ticker") || "BTCUSDT").toUpperCase();
+    const qExchange = (params.get("exchange") || "BINANCE").toUpperCase();
+    const symbol = findSymbol(qTicker, qExchange) ?? findSymbol("BTCUSDT", "BINANCE");
     const eng = new ChartEngine(host, symbol);
     engineRef.current = eng;
     setEngine(eng);
