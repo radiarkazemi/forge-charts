@@ -157,7 +157,6 @@ var float pendBaseHigh = na
 var float pendBaseLow = na
 
 var int lastSetupBar = na
-var bool alertBuildingFired = false
 
 if barstate.isconfirmed
     // Start new pending sweep (only if flat / cooled down)
@@ -169,7 +168,6 @@ if barstate.isconfirmed
         pendBar := bar_index
         pendBaseHigh := high
         pendBaseLow := low
-        alertBuildingFired := false
         if alertBuilding
             alert(syminfo.ticker + " " + timeframe.period + " | TRH building LONG sweep room…", alert.freq_once_per_bar_close)
     else if canStart and bearSweepNow
@@ -179,7 +177,6 @@ if barstate.isconfirmed
         pendBar := bar_index
         pendBaseHigh := high
         pendBaseLow := low
-        alertBuildingFired := false
         if alertBuilding
             alert(syminfo.ticker + " " + timeframe.period + " | TRH building SHORT sweep room…", alert.freq_once_per_bar_close)
 

@@ -34,30 +34,22 @@ The fake “IMPULSE · SL HIT” at 4622 is removed — that was wrong post-spik
 
 ## Alerts (desktop + mobile)
 
-### Best — full ENTRY / SL / TP in the push
+> **TradingView free account:** chart alerts require a **paid plan**.  
+> Use the **free monitor** instead → [`FREE-ALERTS.md`](./FREE-ALERTS.md)
 
-1. XAUUSD chart with TRH → click **Alarm clock**
-2. **Condition:** `TRH | Trading Room Hunter` → **Any alert() function call**
-3. **Notifications:** enable **Notify on app**, **Show popup**, **Play sound**
-4. **Expiration:** Open-ended → **Create**
+### Free mobile push (ntfy or Telegram)
 
-Example push:
-
-```
-XAUUSD 1 | TRH LONG SETUP
-ENTRY 4627.84
-SL 4620.23
-TP 4645.99
+```bash
+export NTFY_TOPIC="your-secret-topic"
+export TRH_PRICE_OFFSET="56"   # FxPro gold offset
+npm run trh:alert
 ```
 
-### Or pick a condition
+Install the **ntfy** app, subscribe to your topic — done. No payment.
 
-- **🔔 TRH New Setup (Any)** — new hunt (long or short)
-- **🔔 TRH New LONG Setup** / **🔔 TRH New SHORT Setup**
-- Entry fill · TP hit · SL hit
+### TradingView paid users
 
-### Mobile
-
-Install TradingView app, same login as desktop, allow notifications in phone settings. Alerts sync automatically.
+1. Alarm clock → **Any alert() function call**
+2. Enable **Notify on app**
 
 Educational tool — not financial advice.

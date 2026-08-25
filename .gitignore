@@ -7,3 +7,4 @@ dist/
 *.tsbuildinfo
 .env
 .env.*
+indicators/.trh-alert-state.json
