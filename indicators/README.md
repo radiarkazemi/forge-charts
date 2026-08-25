@@ -1,52 +1,35 @@
-# TRH | Trading Room Hunter — TradingView Indicator
+# TRH | Trading Room Hunter
 
-Pine Script v5 indicator for **quality TRH rooms only** — exact **ENTRY / SL / TP**, less noise.
+Pine Script built from the **real XAUUSD sample**: Tue 25 Aug 2026 **04:19 UTC-4**.
 
-File: [`TRH_Trading_Room_Hunter.pine`](./TRH_Trading_Room_Hunter.pine)
+## Real sample geometry (FxPro)
+
+| Level | Price | Meaning |
+|---|---|---|
+| SL | **4620.23** | Just under sweep low (04:09 ≈ 4620.26) |
+| ENTRY | **4627.84** | Mid of room (sweep low → base high ≈ 4634) |
+| TP | **4645.99** | ~2.39R / liquidity high (04:24 ≈ 4645.96) |
+
+## Model (not the old noisy impulse)
+
+1. Large selloff/rally into a **major pivot**
+2. **Sweep** that pivot + reclaim close
+3. Build base for ≥ N bars → room = sweep extreme ↔ base extreme
+4. **ENTRY = mid-room**, **SL = distal ± pad**, **TP = R:R (default 2.4)** or next opposing pivot
+5. Set & Forget: if price already traded the mid during the base, count as filled
+
+The fake “IMPULSE · SL HIT” at 4622 is removed — that was wrong post-spike logic.
 
 ## Install
 
-1. TradingView → XAUUSD chart (start with **1m** or **5m**)
-2. Pine Editor → paste full `.pine` file → **Save** → **Add to chart**
-3. If you still have the old version, remove it from the chart first
+1. Remove old TRH from the chart  
+2. Paste `TRH_Trading_Room_Hunter.pine` → Add to chart  
+3. XAUUSD **1m**, replay **04:00–04:30 UTC-4** on 25 Aug 2026  
 
-## What changed (noise fix)
+## Defaults
 
-| Before | After |
-|---|---|
-| Almost every micro swing fired | Cooldown + min impulse / min risk filters |
-| Tiny 2–3 pt rooms | **Min Risk ≥ 0.8 ATR** (rejects noise) |
-| Same-bar spam labels | Markers hidden by default; levels on lines + table |
-| Orange pivots everywhere | Off by default |
-| Missed sample-style longs | **Sweep Hunt**: raid a major pivot after a real selloff/rally |
+- Pivot `5` · Context `1.2 ATR` · Base bars `8`  
+- Room width `0.8–3.5 ATR` · R:R **`2.4`** · SL pad `0.02 ATR`  
+- Only last setup ON  
 
-## Logic
-
-1. **Sweep Hunt (04:19 style)** — after a large opposing move, price sweeps a stored major pivot, reclaim closes back inside → TRH room between sweep extreme (distal) and pivot (proximal).
-2. **Impulse TRH** — a strong ATR-sized break creates a room; price must leave, then return for entry.
-3. **ENTRY** = Mid Zone (default) or Proximal edge  
-   **SL** = beyond distal + ATR pad  
-   **TP** = ENTRY ± risk × R:R
-
-## Suggested XAUUSD 1m defaults (already set)
-
-- Pivot Period: `8`
-- Min Impulse: `2.0` ATR
-- Cooldown: `40` bars
-- Min Prior Opposing Move: `1.5` ATR
-- Min Risk: `0.8` ATR
-- Max Zone Width: `2.5` ATR
-- R:R: `2.0`
-- Only Last Position: **ON**
-- Hide entry/TP/SL text spam: **ON**
-
-If still too quiet on 5m/15m, lower `Min Impulse` to `1.5` and `Cooldown` to `25`.
-
-## Alerts
-
-- TRH Long / Short Zone created  
-- TRH Long / Short Entry fill  
-
-## Disclaimer
-
-Educational recreation of the TRH / Khosro zone model. Not financial advice.
+Educational tool — not financial advice.
