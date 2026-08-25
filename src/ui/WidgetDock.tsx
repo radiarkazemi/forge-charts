@@ -1,4 +1,5 @@
-import { UNIVERSE } from "../data/feed";
+import { useMemo, useState } from "react";
+import { EXCHANGES, watchlistSymbols } from "../data/feed";
 import type { ChartEngine } from "../engine/ChartEngine";
 import { formatPrice, formatVolume } from "../engine/math";
 import type { SymbolInfo } from "../engine/types";
@@ -20,13 +21,29 @@ type Props = {
   active: WidgetId | null;
   onActive: (id: WidgetId | null) => void;
   quotes: Record<string, { price: number; change: number }>;
+  universe: SymbolInfo[];
   onPick: (s: SymbolInfo) => void;
   alerts: string[];
 };
 
-export function WidgetDock({ engine, active, onActive, quotes, onPick, alerts }: Props) {
+export function WidgetDock({ engine, active, onActive, quotes, universe, onPick, alerts }: Props) {
   const snap = useEngine(engine);
   const bar = snap?.hover ?? snap?.last;
+  const [exchange, setExchange] = useState<"ALL" | "BINANCE" | "FOREXCOM">("ALL");
+  const [q, setQ] = useState("");
+  const rows = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    const base = watchlistSymbols(universe).filter((s) => exchange === "ALL" || s.exchange === exchange);
+    const filtered = query
+      ? universe.filter(
+          (s) =>
+            (exchange === "ALL" || s.exchange === exchange) &&
+            `${s.ticker} ${s.name} ${s.exchange}`.toLowerCase().includes(query),
+        )
+      : base;
+    return filtered.slice(0, query ? 200 : 40);
+  }, [universe, exchange, q]);
+
   return (
     <div className="widget-dock">
       {active ? (
@@ -36,26 +53,45 @@ export function WidgetDock({ engine, active, onActive, quotes, onPick, alerts }:
             <button onClick={() => onActive(null)}>×</button>
           </header>
           {active === "watchlist" ? (
-            <ul className="watch">
-              {UNIVERSE.map((s) => {
-                const q = quotes[s.ticker];
-                return (
-                  <li key={s.ticker} className={snap?.symbol.ticker === s.ticker ? "on" : ""} onClick={() => onPick(s)}>
-                    <div>
-                      <strong>{s.ticker}</strong>
-                      <span>{s.exchange}</span>
-                    </div>
-                    <div className={(q?.change ?? 0) >= 0 ? "up" : "down"}>
-                      {q ? formatPrice(q.price, s.pricePrecision) : "—"}
-                      <small>
-                        {(q?.change ?? 0) >= 0 ? "+" : ""}
-                        {(q?.change ?? 0).toFixed(2)}%
-                      </small>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+            <>
+              <div className="seg modal-seg">
+                <button className={exchange === "ALL" ? "on" : ""} onClick={() => setExchange("ALL")}>
+                  All
+                </button>
+                {EXCHANGES.map((id) => (
+                  <button key={id} className={exchange === id ? "on" : ""} onClick={() => setExchange(id)}>
+                    {id}
+                  </button>
+                ))}
+              </div>
+              <input
+                className="watch-search"
+                placeholder="Filter symbols"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+              />
+              <ul className="watch">
+                {rows.map((s) => {
+                  const qrow = quotes[s.ticker];
+                  const on = snap?.symbol.ticker === s.ticker && snap?.symbol.exchange === s.exchange;
+                  return (
+                    <li key={`${s.exchange}:${s.ticker}`} className={on ? "on" : ""} onClick={() => onPick(s)}>
+                      <div>
+                        <strong>{s.ticker}</strong>
+                        <span>{s.exchange}</span>
+                      </div>
+                      <div className={(qrow?.change ?? 0) >= 0 ? "up" : "down"}>
+                        {qrow ? formatPrice(qrow.price, s.pricePrecision) : "—"}
+                        <small>
+                          {(qrow?.change ?? 0) >= 0 ? "+" : ""}
+                          {(qrow?.change ?? 0).toFixed(2)}%
+                        </small>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
           ) : null}
           {active === "object" ? (
             <ul className="objects">

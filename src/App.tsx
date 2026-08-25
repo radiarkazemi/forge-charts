@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { findSymbol } from "./data/feed";
-import { fetchHistory, fetchQuotes, subscribeLive } from "./data/market";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { findSymbol, UNIVERSE } from "./data/feed";
+import { fetchHistory, fetchQuotes, loadCatalog, subscribeLive } from "./data/market";
 import { ChartEngine } from "./engine/ChartEngine";
 import type { Interval, SymbolInfo } from "./engine/types";
 import { BottomDock } from "./ui/BottomDock";
@@ -17,6 +17,8 @@ export default function App() {
   const unsubRef = useRef<() => void>(() => {});
   const [engine, setEngine] = useState<ChartEngine | null>(null);
   const [live, setLive] = useState(false);
+  const [status, setStatus] = useState("Loading BINANCE + FOREXCOM…");
+  const [universe, setUniverse] = useState<SymbolInfo[]>(UNIVERSE);
   const [symbolOpen, setSymbolOpen] = useState(false);
   const [compareOpen, setCompareOpen] = useState(false);
   const [indOpen, setIndOpen] = useState(false);
@@ -32,21 +34,28 @@ export default function App() {
     const eng = engineRef.current;
     if (!eng) return;
     unsubRef.current();
-    const { bars, live: isLive } = await fetchHistory(symbol, interval);
+    setStatus(`Loading ${symbol.exchange}:${symbol.ticker}…`);
+    const { bars, live: isLive, source: feed } = await fetchHistory(symbol, interval);
     if (mode === "symbol") eng.setSymbol(symbol, bars);
     else eng.setInterval(interval, bars);
     setLive(isLive);
+    setStatus(isLive ? `${symbol.exchange} · live ${feed}` : `${symbol.exchange} · demo fallback`);
     unsubRef.current = subscribeLive(symbol, interval, (bar) => eng.upsertBar(bar));
   };
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const symbol = findSymbol("XAUUSD");
+    const symbol = findSymbol("BTCUSDT", "BINANCE");
     const eng = new ChartEngine(host, symbol);
     engineRef.current = eng;
     setEngine(eng);
-    void attachFeed(symbol, "15", "interval");
+    void (async () => {
+      const catalog = await loadCatalog();
+      setUniverse(catalog);
+      const next = catalog.find((s) => s.ticker === "BTCUSDT" && s.exchange === "BINANCE") ?? catalog[0] ?? symbol;
+      await attachFeed(next, "15", "symbol");
+    })();
     return () => {
       unsubRef.current();
       eng.destroy();
@@ -58,12 +67,12 @@ export default function App() {
 
   useEffect(() => {
     const tick = () => {
-      void fetchQuotes().then(setQuotes);
+      void fetchQuotes(universe).then(setQuotes);
     };
     tick();
-    const id = window.setInterval(tick, 5000);
+    const id = window.setInterval(tick, 6000);
     return () => window.clearInterval(id);
-  }, []);
+  }, [universe]);
 
   useEffect(() => {
     if (!snap?.replayPlaying) return;
@@ -85,17 +94,20 @@ export default function App() {
     void attachFeed(eng.getSnapshot().symbol, interval, "interval");
   };
 
+  const counts = useMemo(() => {
+    const binance = universe.filter((s) => s.exchange === "BINANCE").length;
+    const forex = universe.filter((s) => s.exchange === "FOREXCOM").length;
+    return { binance, forex };
+  }, [universe]);
+
   return (
     <div className="shell" data-theme={snap?.theme ?? "dark"}>
       <header className="product-header">
         <div className="logo">F</div>
         <b>Forge</b>
         <nav>
-          <span>Products</span>
-          <span>Community</span>
-          <span>Markets</span>
-          <span>Brokers</span>
-          <span>More</span>
+          <span>BINANCE {counts.binance}</span>
+          <span>FOREXCOM {counts.forex}</span>
         </nav>
         <span className="spacer" />
         <button onClick={() => setSearchOpen(true)}>Search</button>
@@ -116,7 +128,7 @@ export default function App() {
           const s = engine?.getSnapshot();
           if (s?.last) {
             const last = s.last;
-            setAlerts((a) => [`${s.symbol.ticker} @ ${last.close.toFixed(s.symbol.pricePrecision)}`, ...a]);
+            setAlerts((a) => [`${s.symbol.exchange}:${s.symbol.ticker} @ ${last.close.toFixed(s.symbol.pricePrecision)}`, ...a]);
           }
           setWidget("alerts");
         }}
@@ -125,6 +137,7 @@ export default function App() {
         <DrawingToolbar engine={engine} />
         <div className="chart-stage">
           <div className="chart-host" ref={hostRef} />
+          <div className={`chart-status ${live ? "on" : ""}`}>{status}</div>
           <ChartOverlays engine={engine} />
         </div>
         <WidgetDock
@@ -132,14 +145,24 @@ export default function App() {
           active={widget}
           onActive={setWidget}
           quotes={quotes}
+          universe={universe}
           onPick={loadSymbol}
           alerts={alerts}
         />
       </div>
       <BottomDock engine={engine} open={bottomOpen} onToggle={() => setBottomOpen((v) => !v)} />
-      <SymbolModal open={symbolOpen || searchOpen} onClose={() => { setSymbolOpen(false); setSearchOpen(false); }} onPick={loadSymbol} />
+      <SymbolModal
+        open={symbolOpen || searchOpen}
+        universe={universe}
+        onClose={() => {
+          setSymbolOpen(false);
+          setSearchOpen(false);
+        }}
+        onPick={loadSymbol}
+      />
       <SymbolModal
         open={compareOpen}
+        universe={universe}
         onClose={() => setCompareOpen(false)}
         onPick={(s) => {
           const eng = engineRef.current;
@@ -161,6 +184,15 @@ export default function App() {
         onClose={() => setSettingsOpen(false)}
         theme={snap?.theme ?? "dark"}
         onTheme={(t) => engine?.setTheme(t)}
+        onApiChange={() => {
+          const eng = engineRef.current;
+          if (!eng) return;
+          void loadCatalog().then((catalog) => {
+            setUniverse(catalog);
+            const cur = eng.getSnapshot();
+            return attachFeed(cur.symbol, cur.interval, "interval");
+          });
+        }}
       />
     </div>
   );

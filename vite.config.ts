@@ -5,10 +5,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
-    host: "127.0.0.1",
+    host: true,
+    allowedHosts: true,
     proxy: {
       "/binance": {
-        target: "https://api.binance.com",
+        target: "https://data-api.binance.vision",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/binance/, ""),
       },
@@ -17,6 +18,12 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/yahoo/, ""),
         headers: { "User-Agent": "Mozilla/5.0 ForgeCharts" },
+      },
+      "/cp": {
+        target: "http://127.0.0.1:8787",
+        changeOrigin: true,
+        ws: true,
+        rewrite: (path) => path.replace(/^\/cp/, ""),
       },
     },
   },
