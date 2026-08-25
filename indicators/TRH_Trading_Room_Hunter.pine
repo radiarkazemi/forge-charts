@@ -143,34 +143,34 @@ var int lastBullZoneBar = na
 var int lastBearZoneBar = na
 
 // Candidate pack: dir, proximal, distal, fire
-newDir = 0
-newProx = float(na)
-newDist = float(na)
+int newDir = 0
+float newProx = na
+float newDist = na
 
 if barstate.isconfirmed
     // Priority 1: classic BoS TRH
     if bullBos and (na(lastBullZoneBar) or bar_index - lastBullZoneBar > minSpikeBars)
-        d = nz(lastMajorLow, ta.lowest(low, minSpikeBars + pivotPeriod))
+        float d = nz(lastMajorLow, ta.lowest(low, minSpikeBars + pivotPeriod))
         if not na(lastInternalLow)
             d := math.min(d, lastInternalLow)
-        p = low
+        float p = low
         if d < p and f_zoneOk(p, d)
             newDir := 1
             newProx := p
             newDist := d
     else if bearBos and (na(lastBearZoneBar) or bar_index - lastBearZoneBar > minSpikeBars)
-        d = nz(lastMajorHigh, ta.highest(high, minSpikeBars + pivotPeriod))
+        float d = nz(lastMajorHigh, ta.highest(high, minSpikeBars + pivotPeriod))
         if not na(lastInternalHigh)
             d := math.max(d, lastInternalHigh)
-        p = high
+        float p = high
         if d > p and f_zoneOk(p, d)
             newDir := -1
             newProx := p
             newDist := d
     // Priority 2: liquidity sweep hunt
     else if bullSweep and (na(lastBullZoneBar) or bar_index - lastBullZoneBar > pivotPeriod)
-        d = low
-        p = math.max(close, open)
+        float d = low
+        float p = math.max(close, open)
         p := math.min(p, priorSwingLow + atr * 0.8)
         p := math.max(p, d + syminfo.mintick * 5)
         if d < p and f_zoneOk(p, d)
@@ -178,8 +178,8 @@ if barstate.isconfirmed
             newProx := p
             newDist := d
     else if bearSweep and (na(lastBearZoneBar) or bar_index - lastBearZoneBar > pivotPeriod)
-        d = high
-        p = math.min(close, open)
+        float d = high
+        float p = math.min(close, open)
         p := math.max(p, priorSwingHigh - atr * 0.8)
         p := math.min(p, d - syminfo.mintick * 5)
         if d > p and f_zoneOk(p, d)
@@ -191,24 +191,24 @@ if barstate.isconfirmed
 // STATE + DRAWINGS (all mutation in global scope)
 // ═══════════════════════════════════════════════════════════════════════════
 
-var box[] zoneBoxes = array.new_box()
-var line[] entryLines = array.new_line()
-var line[] slLines = array.new_line()
-var line[] tpLines = array.new_line()
-var label[] entryLabels = array.new_label()
-var label[] slLabels = array.new_label()
-var label[] tpLabels = array.new_label()
-var label[] tagLabels = array.new_label()
+var box[] zoneBoxes = array.new<box>()
+var line[] entryLines = array.new<line>()
+var line[] slLines = array.new<line>()
+var line[] tpLines = array.new<line>()
+var label[] entryLabels = array.new<label>()
+var label[] slLabels = array.new<label>()
+var label[] tpLabels = array.new<label>()
+var label[] tagLabels = array.new<label>()
 
-var int[] sDir = array.new_int()
-var float[] sEntry = array.new_float()
-var float[] sSl = array.new_float()
-var float[] sTp = array.new_float()
-var float[] sProx = array.new_float()
-var float[] sDist = array.new_float()
-var int[] sStartBar = array.new_int()
-var int[] sStatus = array.new_int() // 0 wait, 1 in trade, 2 tp, 3 sl, 4 expired
-var bool[] sAlertedIn = array.new_bool()
+var int[] sDir = array.new<int>()
+var float[] sEntry = array.new<float>()
+var float[] sSl = array.new<float>()
+var float[] sTp = array.new<float>()
+var float[] sProx = array.new<float>()
+var float[] sDist = array.new<float>()
+var int[] sStartBar = array.new<int>()
+var int[] sStatus = array.new<int>() // 0 wait, 1 in trade, 2 tp, 3 sl, 4 expired
+var bool[] sAlertedIn = array.new<bool>()
 
 var float activeEntry = na
 var float activeSl = na
