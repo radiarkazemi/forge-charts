@@ -202,50 +202,50 @@ float newSl = na
 float newTp = na
 
 if barstate.isconfirmed and pendDir != 0 and not na(pendBar)
-        age = bar_index - pendBar
-        if age >= baseConfirmBars
-            if pendDir == 1
-                // Room: distal=sweep low, proximal=base high since sweep (sample ~4634 → mid ~4627.2)
-                distal = pendDistal
-                proximal = pendBaseHigh
-                width = proximal - distal
-                prevBaseHigh = nz(pendBaseHigh[1], proximal)
-                // Confirm when base is wide enough and price presses the top (impulse starting)
-                microBreak = close > open and (high >= prevBaseHigh or close >= distal + width * 0.7)
-                if width >= atr * minRoomAtr and width <= atr * maxRoomAtr and microBreak
-                    entry = (distal + proximal) * 0.5
-                    sl = distal - atr * slPadAtr
-                    risk = entry - sl
-                    tpRR = entry + risk * riskReward
-                    liq = f_nextLiquidityHigh(entry, risk * 1.5)
-                    tp = useLiquidityTP and not na(liq) ? math.max(tpRR, liq) : tpRR
-                    newDir := 1
-                    newDistal := distal
-                    newProximal := proximal
-                    newEntry := entry
-                    newSl := sl
-                    newTp := tp
-            else if pendDir == -1
-                distal = pendDistal
-                proximal = pendBaseLow
-                width = distal - proximal
-                prevBaseLow = nz(pendBaseLow[1], proximal)
-                microBreak = close < open and (low <= prevBaseLow or close <= distal - width * 0.7)
-                if width >= atr * minRoomAtr and width <= atr * maxRoomAtr and microBreak
-                    entry = (distal + proximal) * 0.5
-                    sl = distal + atr * slPadAtr
-                    risk = sl - entry
-                    tpRR = entry - risk * riskReward
-                    liq = f_nextLiquidityLow(entry, risk * 1.5)
-                    tp = useLiquidityTP and not na(liq) ? math.min(tpRR, liq) : tpRR
-                    newDir := -1
-                    newDistal := distal
-                    newProximal := proximal
-                    newEntry := entry
-                    newSl := sl
-                    newTp := tp
+    int age = bar_index - pendBar
+    if age >= baseConfirmBars
+        if pendDir == 1
+            // Room: distal=sweep low, proximal=base high since sweep (sample ~4634 → mid ~4627.2)
+            float distal = pendDistal
+            float proximal = pendBaseHigh
+            float width = proximal - distal
+            float prevBaseHigh = nz(pendBaseHigh[1], proximal)
+            // Confirm when base is wide enough and price presses the top (impulse starting)
+            bool microBreak = close > open and (high >= prevBaseHigh or close >= distal + width * 0.7)
+            if width >= atr * minRoomAtr and width <= atr * maxRoomAtr and microBreak
+                float entry = (distal + proximal) * 0.5
+                float sl = distal - atr * slPadAtr
+                float risk = entry - sl
+                float tpRR = entry + risk * riskReward
+                float liq = f_nextLiquidityHigh(entry, risk * 1.5)
+                float tp = useLiquidityTP and not na(liq) ? math.max(tpRR, liq) : tpRR
+                newDir := 1
+                newDistal := distal
+                newProximal := proximal
+                newEntry := entry
+                newSl := sl
+                newTp := tp
+        else if pendDir == -1
+            float distal = pendDistal
+            float proximal = pendBaseLow
+            float width = distal - proximal
+            float prevBaseLow = nz(pendBaseLow[1], proximal)
+            bool microBreak = close < open and (low <= prevBaseLow or close <= distal - width * 0.7)
+            if width >= atr * minRoomAtr and width <= atr * maxRoomAtr and microBreak
+                float entry = (distal + proximal) * 0.5
+                float sl = distal + atr * slPadAtr
+                float risk = sl - entry
+                float tpRR = entry - risk * riskReward
+                float liq = f_nextLiquidityLow(entry, risk * 1.5)
+                float tp = useLiquidityTP and not na(liq) ? math.min(tpRR, liq) : tpRR
+                newDir := -1
+                newDistal := distal
+                newProximal := proximal
+                newEntry := entry
+                newSl := sl
+                newTp := tp
 
-    // Clear pending once we fire (or if price already ran far beyond room without us — handled by maxBaseBars)
+    // Clear pending once we fire
     if newDir != 0
         pendDir := 0
         pendDistal := na
