@@ -33,7 +33,6 @@ useLiquidityTP = input.bool(true, "Prefer Opposing Pivot As TP", group=grpPos,
 grpDisp = "Display"
 onlyLast       = input.bool(true, "Only Last Setup", group=grpDisp)
 setupWidth     = input.int(80, "Box Width (bars)", minval=20, maxval=400, group=grpDisp)
-showPivots     = input.bool(true, "Show Pivot Circles", group=grpDisp)
 showFillMark   = input.bool(false, "Show ENTRY/TP/SL Markers", group=grpDisp)
 
 grpCol = "Colors"
@@ -42,13 +41,21 @@ bearZoneCol = input.color(color.new(#EF5350, 82), "Short Room", group=grpCol)
 entryCol    = input.color(#787B86, "Entry", group=grpCol)
 slCol       = input.color(#EF5350, "SL", group=grpCol)
 tpCol       = input.color(#26A69A, "TP", group=grpCol)
-pivLoCol    = input.color(#26A69A, "Pivot Low", group=grpCol)
-pivHiCol    = input.color(#EF5350, "Pivot High", group=grpCol)
 
-grpAlert = "Alerts"
-alertZone  = input.bool(true, "Alert: room confirmed", group=grpAlert)
-alertEntry = input.bool(true, "Alert: entry fill", group=grpAlert)
-alertExit  = input.bool(true, "Alert: SL/TP", group=grpAlert)
+grpAlert = "Alerts (system + mobile)"
+alertSetup = input.bool(true, "🔔 Alert: NEW setup found (hunt)", group=grpAlert,
+     tooltip="Fires when TRH room is confirmed with ENTRY / SL / TP. Use this for mobile alarms.")
+alertBuilding = input.bool(false, "Alert: sweep building (early)", group=grpAlert,
+     tooltip="Optional early ping when a sweep starts, before the room is confirmed.")
+alertEntry = input.bool(true, "Alert: entry filled", group=grpAlert)
+alertExit  = input.bool(true, "Alert: TP / SL hit", group=grpAlert)
+
+// Rich alert text (shown in popup + mobile push)
+f_setupMsg(side, entry, sl, tp) =>
+    syminfo.ticker + " " + timeframe.period + " | TRH " + side + " SETUP\n" +
+     "ENTRY " + str.tostring(entry, format.mintick) + "\n" +
+     "SL " + str.tostring(sl, format.mintick) + "\n" +
+     "TP " + str.tostring(tp, format.mintick)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ATR + PIVOTS
@@ -76,9 +83,6 @@ if not na(pl)
     while array.size(pivLo) > 30
         array.shift(pivLo)
         array.shift(pivLoBar)
-
-plotshape(showPivots and not na(pl) ? pl : na, title="Pivot Low", style=shape.circle, location=location.absolute, color=pivLoCol, size=size.small, offset=-pivotPeriod)
-plotshape(showPivots and not na(ph) ? ph : na, title="Pivot High", style=shape.circle, location=location.absolute, color=pivHiCol, size=size.small, offset=-pivotPeriod)
 
 f_lastPivotLow(maxAge) =>
     float best = na
@@ -153,6 +157,7 @@ var float pendBaseHigh = na
 var float pendBaseLow = na
 
 var int lastSetupBar = na
+var bool alertBuildingFired = false
 
 if barstate.isconfirmed
     // Start new pending sweep (only if flat / cooled down)
@@ -164,6 +169,9 @@ if barstate.isconfirmed
         pendBar := bar_index
         pendBaseHigh := high
         pendBaseLow := low
+        alertBuildingFired := false
+        if alertBuilding
+            alert(syminfo.ticker + " " + timeframe.period + " | TRH building LONG sweep room…", alert.freq_once_per_bar_close)
     else if canStart and bearSweepNow
         pendDir := -1
         pendDistal := high
@@ -171,6 +179,9 @@ if barstate.isconfirmed
         pendBar := bar_index
         pendBaseHigh := high
         pendBaseLow := low
+        alertBuildingFired := false
+        if alertBuilding
+            alert(syminfo.ticker + " " + timeframe.period + " | TRH building SHORT sweep room…", alert.freq_once_per_bar_close)
 
     // Update pending base
     if pendDir != 0
@@ -281,7 +292,19 @@ var float activeE = na
 var float activeS = na
 var float activeT = na
 var int signalDir = 0
+var bool alertSetupLong = false
+var bool alertSetupShort = false
+var bool alertEntryLong = false
+var bool alertEntryShort = false
+var bool alertTpHit = false
+var bool alertSlHit = false
 signalDir := 0
+alertSetupLong := false
+alertSetupShort := false
+alertEntryLong := false
+alertEntryShort := false
+alertTpHit := false
+alertSlHit := false
 
 if newDir != 0
     if onlyLast and array.size(sDir) > 0
@@ -344,6 +367,17 @@ if newDir != 0
     array.push(sFilled, false)
     lastSetupBar := bar_index
 
+    sideTxt = newDir == 1 ? "LONG" : "SHORT"
+    if alertSetup
+        alert(f_setupMsg(sideTxt, newEntry, newSl, newTp), alert.freq_once_per_bar_close)
+    if newDir == 1
+        alertSetupLong := true
+    else
+        alertSetupShort := true
+
+    // Visual ping on chart when setup found
+    label.new(bar_index, newDir == 1 ? zTop : zBot, "🔔 HUNT", style=newDir == 1 ? label.style_label_down : label.style_label_up, color=color.new(#FFC107, 0), textcolor=#212121, size=size.tiny)
+
     // If price already traded through entry during the base, count as filled (Set & Forget)
     alreadyFilled = newDir == 1 ? low <= newEntry : high >= newEntry
     // On confirm bar, price is often already above entry (sample 04:22) — mark in-trade
@@ -357,10 +391,11 @@ if newDir != 0
         if showFillMark
             label.new(bar_index, newEntry, "▶ ENTRY", style=label.style_label_center, color=newDir == 1 ? #00897B : #C62828, textcolor=color.white, size=size.normal)
         if alertEntry
-            alert("TRH ENTRY " + (newDir == 1 ? "LONG" : "SHORT") + " @ " + str.tostring(newEntry, format.mintick) + " | SL " + str.tostring(newSl, format.mintick) + " | TP " + str.tostring(newTp, format.mintick), alert.freq_once_per_bar_close)
-
-    if alertZone
-        alert("TRH room | ENTRY " + str.tostring(newEntry, format.mintick) + " | SL " + str.tostring(newSl, format.mintick) + " | TP " + str.tostring(newTp, format.mintick), alert.freq_once_per_bar_close)
+            alert(syminfo.ticker + " | TRH ENTRY " + (newDir == 1 ? "LONG" : "SHORT") + " @ " + str.tostring(newEntry, format.mintick), alert.freq_once_per_bar_close)
+        if newDir == 1
+            alertEntryLong := true
+        else
+            alertEntryShort := true
 
 // Manage live setups
 n = array.size(sDir)
@@ -396,7 +431,11 @@ if n > 0
                     if showFillMark
                         label.new(bar_index, e, "▶ ENTRY", style=label.style_label_center, color=dir == 1 ? #00897B : #C62828, textcolor=color.white, size=size.normal)
                     if alertEntry
-                        alert("TRH ENTRY @ " + str.tostring(e, format.mintick), alert.freq_once_per_bar_close)
+                        alert(syminfo.ticker + " | TRH ENTRY " + (dir == 1 ? "LONG" : "SHORT") + " @ " + str.tostring(e, format.mintick), alert.freq_once_per_bar_close)
+                    if dir == 1
+                        alertEntryLong := true
+                    else
+                        alertEntryShort := true
 
             if array.get(sStat, i) == 1
                 // Prefer TP if both wick in one bar
@@ -407,13 +446,15 @@ if n > 0
                     if showFillMark
                         label.new(bar_index, t, "✓ TP EXIT", style=label.style_label_center, color=#26A69A, textcolor=color.white, size=size.normal)
                     if alertExit
-                        alert("TRH TP EXIT @ " + str.tostring(t, format.mintick), alert.freq_once_per_bar_close)
+                        alert(syminfo.ticker + " | TRH ✓ TP @ " + str.tostring(t, format.mintick), alert.freq_once_per_bar_close)
+                    alertTpHit := true
                 else if hitS
                     array.set(sStat, i, 3)
                     if showFillMark
                         label.new(bar_index, s, "✗ SL EXIT", style=label.style_label_center, color=#EF5350, textcolor=color.white, size=size.normal)
                     if alertExit
-                        alert("TRH SL EXIT @ " + str.tostring(s, format.mintick), alert.freq_once_per_bar_close)
+                        alert(syminfo.ticker + " | TRH ✗ SL @ " + str.tostring(s, format.mintick), alert.freq_once_per_bar_close)
+                    alertSlHit := true
 
 plot(activeE, "ENTRY", color=entryCol, display=display.data_window)
 plot(activeS, "SL", color=slCol, display=display.data_window)
@@ -447,7 +488,11 @@ if barstate.islast
         table.cell(info, 0, 0, "TRH", text_color=color.white, text_size=size.small)
         table.cell(info, 1, 0, pendDir != 0 ? "building sweep room…" : "scanning…", text_color=color.gray, text_size=size.small)
 
-alertcondition(newDir == 1, title="TRH Long Room", message="TRH LONG sweep room confirmed")
-alertcondition(newDir == -1, title="TRH Short Room", message="TRH SHORT sweep room confirmed")
-alertcondition(signalDir == 1, title="TRH Long Entry", message="TRH LONG entry")
-alertcondition(signalDir == -1, title="TRH Short Entry", message="TRH SHORT entry")
+// ── Alert conditions (pick in TradingView alarm dialog) ─────────────────────
+alertcondition(alertSetupLong, title="🔔 TRH New LONG Setup", message="TRH LONG setup — check chart for ENTRY / SL / TP")
+alertcondition(alertSetupShort, title="🔔 TRH New SHORT Setup", message="TRH SHORT setup — check chart for ENTRY / SL / TP")
+alertcondition(alertSetupLong or alertSetupShort, title="🔔 TRH New Setup (Any)", message="TRH setup found — hunt now")
+alertcondition(alertEntryLong, title="TRH LONG Entry Fill", message="TRH LONG entry filled")
+alertcondition(alertEntryShort, title="TRH SHORT Entry Fill", message="TRH SHORT entry filled")
+alertcondition(alertTpHit, title="TRH Take Profit Hit", message="TRH take profit hit")
+alertcondition(alertSlHit, title="TRH Stop Loss Hit", message="TRH stop loss hit")
