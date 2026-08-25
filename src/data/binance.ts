@@ -37,12 +37,6 @@ export const BINANCE_WATCH = [
 
 type Kline = [number, string, string, string, string, string];
 
-function tickPrecision(tick: string): number {
-  const i = tick.indexOf(".");
-  if (i < 0) return 0;
-  return tick.replace(/0+$/, "").length - i - 1;
-}
-
 function toBars(raw: Kline[]): Bar[] {
   return raw
     .map((k) => ({
@@ -56,28 +50,29 @@ function toBars(raw: Kline[]): Bar[] {
     .filter((b) => Number.isFinite(b.open) && Number.isFinite(b.close));
 }
 
+function precisionFromPrice(price: string): number {
+  const i = price.indexOf(".");
+  if (i < 0) return 2;
+  const frac = price.slice(i + 1).replace(/0+$/, "");
+  return frac.length || 2;
+}
+
 export async function fetchBinanceSymbols(): Promise<SymbolInfo[]> {
-  const res = await fetch(`${BINANCE_REST}/api/v3/exchangeInfo`);
-  if (!res.ok) throw new Error(`binance exchangeInfo ${res.status}`);
-  const json = (await res.json()) as {
-    symbols: Array<{
-      symbol: string;
-      status: string;
-      baseAsset: string;
-      quoteAsset: string;
-      filters: Array<{ filterType: string; tickSize?: string }>;
-    }>;
-  };
-  return json.symbols
-    .filter((s) => s.status === "TRADING" && (s.quoteAsset === "USDT" || s.quoteAsset === "USDC"))
+  const res = await fetch(`${BINANCE_REST}/api/v3/ticker/24hr`);
+  if (!res.ok) throw new Error(`binance ticker ${res.status}`);
+  const rows = (await res.json()) as Array<{ symbol: string; lastPrice: string; quoteVolume?: string }>;
+  return rows
+    .filter((s) => s.symbol.endsWith("USDT") || s.symbol.endsWith("USDC"))
+    .sort((a, b) => Number(b.quoteVolume ?? 0) - Number(a.quoteVolume ?? 0))
     .map((s) => {
-      const tick = s.filters.find((f) => f.filterType === "PRICE_FILTER")?.tickSize ?? "0.01";
+      const quote = s.symbol.endsWith("USDC") ? "USDC" : "USDT";
+      const base = s.symbol.slice(0, -quote.length);
       return {
         ticker: s.symbol,
-        name: `${s.baseAsset} / ${s.quoteAsset}`,
+        name: `${base} / ${quote}`,
         exchange: "BINANCE",
         type: "crypto" as const,
-        pricePrecision: Math.max(0, tickPrecision(tick)),
+        pricePrecision: precisionFromPrice(s.lastPrice),
       };
     });
 }
