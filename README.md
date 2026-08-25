@@ -15,9 +15,12 @@ Open **http://localhost:5173**
 
 `npm start` binds `127.0.0.1:5173` for a local browser. Cloud Agents use `npm run dev` (all interfaces) and Cursor forwards that same port to your machine as `http://localhost:5173`.
 
-## Market data
+## Production (VPS)
 
-The chart loads **BINANCE** (spot USDT/USDC) and **FOREXCOM** (FX, metals, indices) historical candles plus live prices.
+Deployed next to `cp_fetcher` on the VPS:
 
-1. If your `cp_fetcher` Chart API is reachable, it is used first (`VITE_CHART_API_URL`, Settings → Chart API server, or the Vite `/cp` proxy via `CHART_API_URL`).
-2. Otherwise BINANCE uses `data-api.binance.vision` + `data-stream.binance.vision`, and FOREXCOM uses Yahoo Finance mapped to FOREX.com symbols.
+- Chart UI: `http://<vps>/charts/`
+- REST (Mongo history/quotes): `http://<vps>/crypto-api/`
+- WebSocket live bars: `ws://<vps>/crypto-ws`
+
+Nginx injects the API key server-side so the browser never needs credentials. The chart reads cached historical candles from MongoDB and streams the current bar over WebSocket.

@@ -3,38 +3,44 @@ import { chartApiBase, chartApiWsUrl } from "./config";
 
 export type Quote = { price: number; change: number };
 
-type UdfHistory = {
-  s?: string;
-  t?: number[];
-  o?: number[];
-  h?: number[];
-  l?: number[];
-  c?: number[];
-  v?: number[];
+/** Chart interval -> cp_fetcher Mongo timeframe used for history. */
+const HISTORY_TF: Record<Interval, { tf: "1m" | "1h" | "1d"; group: number }> = {
+  "1": { tf: "1m", group: 1 },
+  "5": { tf: "1m", group: 5 },
+  "15": { tf: "1m", group: 15 },
+  "30": { tf: "1m", group: 30 },
+  "60": { tf: "1h", group: 1 },
+  "120": { tf: "1h", group: 2 },
+  "240": { tf: "1h", group: 4 },
+  "1D": { tf: "1d", group: 1 },
+  "1W": { tf: "1d", group: 7 },
+  "1M": { tf: "1d", group: 30 },
 };
 
-const IV: Record<Interval, { rest: string; udf: string }> = {
-  "1": { rest: "1m", udf: "1" },
-  "5": { rest: "5m", udf: "5" },
-  "15": { rest: "15m", udf: "15" },
-  "30": { rest: "30m", udf: "30" },
-  "60": { rest: "1h", udf: "60" },
-  "120": { rest: "2h", udf: "120" },
-  "240": { rest: "4h", udf: "240" },
-  "1D": { rest: "1d", udf: "1D" },
-  "1W": { rest: "1w", udf: "1W" },
-  "1M": { rest: "1M", udf: "1M" },
+const LIVE_TF: Record<Interval, "1m" | "1h" | "1d"> = {
+  "1": "1m",
+  "5": "1m",
+  "15": "1m",
+  "30": "1m",
+  "60": "1h",
+  "120": "1h",
+  "240": "1h",
+  "1D": "1d",
+  "1W": "1d",
+  "1M": "1d",
 };
 
-function tvSymbol(symbol: SymbolInfo): string {
-  return `${symbol.exchange}:${symbol.ticker}`;
+function num(v: unknown): number {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : NaN;
 }
 
-async function getJson(path: string, timeoutMs = 4000): Promise<unknown> {
+async function getJson(path: string, timeoutMs = 8000): Promise<unknown> {
   const ctrl = new AbortController();
   const t = window.setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(`${chartApiBase()}${path}`, { signal: ctrl.signal });
+    const base = chartApiBase().replace(/\/+$/, "");
+    const res = await fetch(`${base}${path}`, { signal: ctrl.signal });
     if (!res.ok) throw new Error(`${path} ${res.status}`);
     return await res.json();
   } finally {
@@ -42,281 +48,174 @@ async function getJson(path: string, timeoutMs = 4000): Promise<unknown> {
   }
 }
 
-function num(v: unknown): number {
-  const n = typeof v === "number" ? v : Number(v);
-  return Number.isFinite(n) ? n : NaN;
-}
-
-function asBars(payload: unknown): Bar[] {
-  if (!payload || typeof payload !== "object") return [];
-  const p = payload as Record<string, unknown>;
-
-  const udf = p as UdfHistory;
-  if (Array.isArray(udf.t) && (udf.s === "ok" || udf.o || udf.c)) {
-    return udf.t
-      .map((t, i) => ({
-        time: t > 1e12 ? Math.floor(t / 1000) : t,
-        open: num(udf.o?.[i]),
-        high: num(udf.h?.[i]),
-        low: num(udf.l?.[i]),
-        close: num(udf.c?.[i]),
-        volume: num(udf.v?.[i]) || 0,
-      }))
-      .filter((b) => Number.isFinite(b.open) && Number.isFinite(b.close));
+function parseCandleTime(raw: unknown): number {
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw > 1e12 ? Math.floor(raw / 1000) : raw;
+  if (typeof raw === "string" && raw) {
+    const ms = Date.parse(raw.endsWith("Z") || raw.includes("+") ? raw : `${raw}Z`);
+    if (Number.isFinite(ms)) return Math.floor(ms / 1000);
   }
-
-  const rows =
-    (Array.isArray(p.bars) && p.bars) ||
-    (Array.isArray(p.data) && p.data) ||
-    (Array.isArray(p.candles) && p.candles) ||
-    (Array.isArray(p.result) && p.result) ||
-    (Array.isArray(payload) ? payload : null);
-
-  if (!Array.isArray(rows) || !rows.length) return [];
-
-  return rows
-    .map((row) => {
-      if (Array.isArray(row)) {
-        const t = num(row[0]);
-        return {
-          time: t > 1e12 ? Math.floor(t / 1000) : t,
-          open: num(row[1]),
-          high: num(row[2]),
-          low: num(row[3]),
-          close: num(row[4]),
-          volume: num(row[5]) || 0,
-        };
-      }
-      const r = row as Record<string, unknown>;
-      const t = num(r.time ?? r.t ?? r.timestamp ?? r.openTime);
-      return {
-        time: t > 1e12 ? Math.floor(t / 1000) : t,
-        open: num(r.open ?? r.o),
-        high: num(r.high ?? r.h),
-        low: num(r.low ?? r.l),
-        close: num(r.close ?? r.c),
-        volume: num(r.volume ?? r.v) || 0,
-      };
-    })
-    .filter((b) => Number.isFinite(b.time) && Number.isFinite(b.open) && Number.isFinite(b.close));
+  return NaN;
 }
 
-function asSymbols(payload: unknown, fallbackExchange: string): SymbolInfo[] {
-  const rows =
-    (payload && typeof payload === "object" && "symbols" in payload && Array.isArray((payload as { symbols: unknown }).symbols)
-      ? (payload as { symbols: unknown[] }).symbols
-      : null) ||
-    (payload && typeof payload === "object" && "data" in payload && Array.isArray((payload as { data: unknown }).data)
-      ? (payload as { data: unknown[] }).data
-      : null) ||
-    (Array.isArray(payload) ? payload : []);
-
-  const out: SymbolInfo[] = [];
-  for (const row of rows) {
-    if (typeof row === "string") {
-      const [ex, ticker] = row.includes(":") ? row.split(":") : [fallbackExchange, row];
-      out.push({
-        ticker,
-        name: ticker,
-        exchange: ex || fallbackExchange,
-        type: (ex || fallbackExchange) === "BINANCE" ? "crypto" : "fx",
-        pricePrecision: (ex || fallbackExchange) === "BINANCE" ? 2 : 5,
-      });
-      continue;
-    }
+function historyToBars(results: unknown[]): Bar[] {
+  const bars: Bar[] = [];
+  for (const row of results) {
     if (!row || typeof row !== "object") continue;
     const r = row as Record<string, unknown>;
-    const full = String(r.full_name ?? r.fullName ?? r.tv ?? "");
-    const [exFromFull, tickerFromFull] = full.includes(":") ? full.split(":") : ["", ""];
-    const ticker = String(r.ticker ?? r.symbol ?? r.name ?? tickerFromFull ?? "").replace(/^.*:/, "");
-    if (!ticker) continue;
-    const exchange = String(r.exchange ?? r.provider ?? exFromFull ?? fallbackExchange);
-    const typeRaw = String(r.type ?? r.assetType ?? "").toLowerCase();
-    const type: SymbolInfo["type"] =
-      typeRaw.includes("crypto") || exchange === "BINANCE"
-        ? "crypto"
-        : typeRaw.includes("metal") || ticker.startsWith("XAU") || ticker.startsWith("XAG")
-          ? "metal"
-          : typeRaw.includes("index")
-            ? "index"
-            : typeRaw.includes("stock")
-              ? "stock"
-              : "fx";
-    const scale = num(r.pricescale ?? r.priceScale);
-    const precision = Number.isFinite(num(r.pricePrecision ?? r.precision))
-      ? Math.max(0, Math.round(num(r.pricePrecision ?? r.precision)))
-      : Number.isFinite(scale) && scale > 0
-        ? Math.round(Math.log10(scale))
-        : type === "fx"
-          ? 5
-          : 2;
-    out.push({
-      ticker,
-      name: String(r.description ?? r.name ?? r.full_name ?? ticker),
-      exchange,
-      type,
-      pricePrecision: precision,
+    const time = parseCandleTime(r.time ?? r.id);
+    const open = num(r.open);
+    const close = num(r.close);
+    if (!Number.isFinite(time) || !Number.isFinite(open) || !Number.isFinite(close)) continue;
+    bars.push({
+      time,
+      open,
+      high: num(r.high) || Math.max(open, close),
+      low: num(r.low) || Math.min(open, close),
+      close,
+      volume: num(r.volume) || 0,
     });
   }
+  return bars.sort((a, b) => a.time - b.time);
+}
+
+function aggregateBars(bars: Bar[], group: number, stepSec: number): Bar[] {
+  if (group <= 1 || bars.length === 0) return bars;
+  const bucket = stepSec * group;
+  const out: Bar[] = [];
+  let cur: Bar | null = null;
+  let bucketStart = -1;
+  for (const b of bars) {
+    const start = Math.floor(b.time / bucket) * bucket;
+    if (!cur || start !== bucketStart) {
+      if (cur) out.push(cur);
+      bucketStart = start;
+      cur = { time: start, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume };
+    } else {
+      cur.high = Math.max(cur.high, b.high);
+      cur.low = Math.min(cur.low, b.low);
+      cur.close = b.close;
+      cur.volume += b.volume;
+    }
+  }
+  if (cur) out.push(cur);
   return out;
 }
 
-function asQuotes(payload: unknown): Record<string, Quote> {
-  const out: Record<string, Quote> = {};
-  if (!payload || typeof payload !== "object") return out;
-  const p = payload as Record<string, unknown>;
-
-  const udf = p.d;
-  if (Array.isArray(udf)) {
-    for (const row of udf) {
-      if (!row || typeof row !== "object") continue;
-      const r = row as { n?: string; v?: { lp?: number; chp?: number } };
-      const ticker = String(r.n ?? "").replace(/^.*:/, "");
-      if (ticker && r.v && Number.isFinite(r.v.lp)) out[ticker] = { price: r.v.lp as number, change: num(r.v.chp) || 0 };
-    }
-  }
-
-  const rows =
-    (Array.isArray(p.quotes) && p.quotes) ||
-    (Array.isArray(p.data) && p.data) ||
-    (Array.isArray(p.result) && p.result) ||
-    (Array.isArray(payload) ? payload : null);
-
-  if (Array.isArray(rows)) {
-    for (const row of rows) {
-      if (!row || typeof row !== "object") continue;
-      const r = row as Record<string, unknown>;
-      const ticker = String(r.ticker ?? r.symbol ?? r.n ?? "").replace(/^.*:/, "");
-      const price = num(r.price ?? r.last ?? r.lp ?? r.close);
-      if (!ticker || !Number.isFinite(price)) continue;
-      out[ticker] = { price, change: num(r.change ?? r.chp ?? r.changePercent ?? r.priceChangePercent) || 0 };
-    }
-  }
-
-  for (const [key, val] of Object.entries(p)) {
-    if (!val || typeof val !== "object" || Array.isArray(val)) continue;
-    const v = val as Record<string, unknown>;
-    const price = num(v.price ?? v.last ?? v.lp ?? v.close);
-    if (!Number.isFinite(price)) continue;
-    out[key.replace(/^.*:/, "")] = { price, change: num(v.change ?? v.chp) || 0 };
-  }
-  return out;
+function precisionFromPrice(price: number, exchange: string): number {
+  if (!Number.isFinite(price) || price === 0) return exchange === "FOREXCOM" ? 5 : 4;
+  if (price >= 1000) return 2;
+  if (price >= 1) return exchange === "FOREXCOM" ? 5 : 4;
+  if (price >= 0.01) return 6;
+  return 8;
 }
 
-function barFromWs(msg: unknown): Bar | null {
-  if (!msg || typeof msg !== "object") return null;
-  const m = msg as Record<string, unknown>;
-  const k = (m.k ?? m.bar ?? m.candle ?? m.data ?? m) as Record<string, unknown>;
-  if (!k || typeof k !== "object") return null;
-  const time = num(k.t ?? k.time ?? k.timestamp ?? k.openTime);
-  const open = num(k.o ?? k.open);
-  const close = num(k.c ?? k.close);
-  if (!Number.isFinite(time) || !Number.isFinite(open) || !Number.isFinite(close)) return null;
-  return {
-    time: time > 1e12 ? Math.floor(time / 1000) : time,
-    open,
-    high: num(k.h ?? k.high) || Math.max(open, close),
-    low: num(k.l ?? k.low) || Math.min(open, close),
-    close,
-    volume: num(k.v ?? k.volume) || 0,
-  };
+function symbolType(ticker: string, exchange: string): SymbolInfo["type"] {
+  if (exchange === "BINANCE") return "crypto";
+  if (ticker.startsWith("XAU") || ticker.startsWith("XAG")) return "metal";
+  return "fx";
 }
 
 export async function chartApiHealth(): Promise<boolean> {
-  for (const path of ["/health", "/config", "/api/health", "/openapi.json"]) {
-    try {
-      const ctrl = new AbortController();
-      const t = window.setTimeout(() => ctrl.abort(), 2500);
-      const res = await fetch(`${chartApiBase()}${path}`, { signal: ctrl.signal });
-      window.clearTimeout(t);
-      if (!res.ok) continue;
-      const type = res.headers.get("content-type") ?? "";
-      if (type.includes("json") || type.includes("text/plain") || path.endsWith("health")) return true;
-    } catch {
-      /* try next */
-    }
+  try {
+    const json = (await getJson("/health/", 2500)) as { status?: string; mongo?: boolean };
+    return json?.status === "ok" || json?.mongo === true;
+  } catch {
+    return false;
   }
-  return false;
 }
 
 export async function fetchChartApiSymbols(exchanges: string[]): Promise<SymbolInfo[]> {
   const out: SymbolInfo[] = [];
   for (const exchange of exchanges) {
-    const paths = [
-      `/symbols?exchange=${encodeURIComponent(exchange)}`,
-      `/api/symbols?exchange=${encodeURIComponent(exchange)}`,
-      `/search?query=&exchange=${encodeURIComponent(exchange)}&limit=5000`,
-      `/symbol_info?group=${encodeURIComponent(exchange)}`,
-    ];
-    for (const path of paths) {
-      try {
-        const json = await getJson(path, 5000);
-        const rows = asSymbols(json, exchange).filter((s) => !s.exchange || s.exchange.toUpperCase() === exchange);
-        if (rows.length) {
-          out.push(...rows.map((s) => ({ ...s, exchange })));
-          break;
-        }
-      } catch {
-        /* next path */
+    const ex = exchange.toLowerCase();
+    try {
+      const json = (await getJson(
+        `/prices/?timeframe=1m&exchange=${encodeURIComponent(ex)}&page_size=200`,
+        8000,
+      )) as { results?: Array<Record<string, unknown>> };
+      for (const row of json.results ?? []) {
+        const ticker = String(row.symbol ?? "").toUpperCase();
+        if (!ticker) continue;
+        const price = num(row.price);
+        out.push({
+          ticker,
+          name: ticker,
+          exchange: exchange.toUpperCase() === "FOREXCOM" ? "FOREXCOM" : "BINANCE",
+          type: symbolType(ticker, exchange.toUpperCase()),
+          pricePrecision: precisionFromPrice(price, exchange.toUpperCase()),
+        });
       }
+    } catch {
+      /* next exchange */
     }
   }
   return out;
 }
 
 export async function fetchChartApiHistory(symbol: SymbolInfo, interval: Interval): Promise<Bar[]> {
-  const now = Math.floor(Date.now() / 1000);
-  const span: Record<Interval, number> = {
-    "1": 60 * 4000,
-    "5": 300 * 4000,
-    "15": 900 * 4000,
-    "30": 1800 * 4000,
-    "60": 3600 * 4000,
-    "120": 7200 * 3000,
-    "240": 14400 * 2500,
-    "1D": 86400 * 2500,
-    "1W": 604800 * 800,
-    "1M": 2592000 * 400,
-  };
-  const from = now - span[interval];
-  const tv = tvSymbol(symbol);
-  const { rest, udf } = IV[interval];
-  const paths = [
-    `/history?exchange=${symbol.exchange}&symbol=${symbol.ticker}&interval=${rest}&limit=4000`,
-    `/api/history?exchange=${symbol.exchange}&symbol=${symbol.ticker}&interval=${rest}&limit=4000`,
-    `/api/candles?exchange=${symbol.exchange}&symbol=${symbol.ticker}&interval=${rest}&limit=4000`,
-    `/history?symbol=${encodeURIComponent(tv)}&resolution=${udf}&from=${from}&to=${now}`,
-    `/udf/history?symbol=${encodeURIComponent(tv)}&resolution=${udf}&from=${from}&to=${now}`,
-  ];
-  for (const path of paths) {
-    try {
-      const bars = asBars(await getJson(path, 12000));
-      if (bars.length) return bars.sort((a, b) => a.time - b.time);
-    } catch {
-      /* next */
-    }
-  }
-  throw new Error("chart api history unavailable");
+  const { tf, group } = HISTORY_TF[interval];
+  const limit = group > 1 ? Math.min(2000, 500 * group) : 500;
+  const json = (await getJson(
+    `/prices/${encodeURIComponent(symbol.ticker.toLowerCase())}/history/?timeframe=${tf}&limit=${limit}`,
+    12000,
+  )) as { results?: unknown[] };
+  const raw = historyToBars(json.results ?? []);
+  const step = tf === "1m" ? 60 : tf === "1h" ? 3600 : 86400;
+  return aggregateBars(raw, group, step);
 }
 
 export async function fetchChartApiQuotes(symbols: SymbolInfo[]): Promise<Record<string, Quote>> {
-  if (!symbols.length) return {};
-  const listed = symbols.map(tvSymbol).join(",");
-  const paths = [
-    `/quotes?symbols=${encodeURIComponent(listed)}`,
-    `/api/quotes?symbols=${encodeURIComponent(listed)}`,
-    `/quotes?exchange=BINANCE`,
-    `/quotes?exchange=FOREXCOM`,
-  ];
   const out: Record<string, Quote> = {};
-  for (const path of paths) {
-    try {
-      Object.assign(out, asQuotes(await getJson(path, 6000)));
-    } catch {
-      /* next */
-    }
+  const byEx = new Map<string, SymbolInfo[]>();
+  for (const s of symbols) {
+    const ex = s.exchange.toLowerCase();
+    const list = byEx.get(ex) ?? [];
+    list.push(s);
+    byEx.set(ex, list);
   }
+  await Promise.all(
+    [...byEx.entries()].map(async ([ex, rows]) => {
+      try {
+        const json = (await getJson(
+          `/prices/?timeframe=1m&exchange=${encodeURIComponent(ex)}&page_size=200`,
+          8000,
+        )) as { results?: Array<Record<string, unknown>> };
+        const wanted = new Set(rows.map((r) => r.ticker.toLowerCase()));
+        for (const row of json.results ?? []) {
+          const ticker = String(row.symbol ?? "").toLowerCase();
+          if (!wanted.has(ticker)) continue;
+          const price = num(row.price);
+          if (!Number.isFinite(price)) continue;
+          out[ticker.toUpperCase()] = { price, change: num(row.price_change) || 0 };
+        }
+      } catch {
+        /* ignore */
+      }
+    }),
+  );
   return out;
+}
+
+function barFromWs(msg: unknown): Bar | null {
+  if (!msg || typeof msg !== "object") return null;
+  const m = msg as Record<string, unknown>;
+  const src = (m.bar && typeof m.bar === "object" ? m.bar : m) as Record<string, unknown>;
+  if (String(src.type ?? m.type ?? "") === "bar" || src.t != null || src.c != null) {
+    const time = num(src.t ?? src.time);
+    const open = num(src.o ?? src.open);
+    const close = num(src.c ?? src.close ?? src.price);
+    if (!Number.isFinite(time) || !Number.isFinite(close)) return null;
+    const o = Number.isFinite(open) ? open : close;
+    return {
+      time: time > 1e12 ? Math.floor(time / 1000) : time,
+      open: o,
+      high: num(src.h ?? src.high) || Math.max(o, close),
+      low: num(src.l ?? src.low) || Math.min(o, close),
+      close,
+      volume: num(src.v ?? src.volume) || 0,
+    };
+  }
+  return null;
 }
 
 export function subscribeChartApi(
@@ -324,36 +223,58 @@ export function subscribeChartApi(
   interval: Interval,
   onBar: (bar: Bar) => void,
 ): () => void {
-  const { rest, udf } = IV[interval];
-  const payloads = [
-    { op: "subscribe", exchange: symbol.exchange, symbol: symbol.ticker, interval: rest },
-    { action: "subscribe", exchange: symbol.exchange, symbol: symbol.ticker, interval: rest },
-    { type: "subscribe", symbol: tvSymbol(symbol), resolution: udf },
-  ];
-  const paths = ["/ws", "/ws/stream", "/stream"];
+  const tf = LIVE_TF[interval];
   let ws: WebSocket | null = null;
   let closed = false;
-  let pathIndex = 0;
+  let retry = 0;
   let timer = 0;
+  let poll = 0;
+
+  const startPoll = () => {
+    window.clearInterval(poll);
+    poll = window.setInterval(async () => {
+      if (closed) return;
+      try {
+        const json = (await getJson(
+          `/prices/${encodeURIComponent(symbol.ticker.toLowerCase())}/?timeframe=${tf}`,
+          4000,
+        )) as Record<string, unknown>;
+        const time = num(json.bar_close_time);
+        const close = num(json.price);
+        if (!Number.isFinite(time) || !Number.isFinite(close)) return;
+        const open = num(json.open);
+        onBar({
+          time,
+          open: Number.isFinite(open) ? open : close,
+          high: num(json.high) || Math.max(open || close, close),
+          low: num(json.low) || Math.min(open || close, close),
+          close,
+          volume: num(json.volume) || 0,
+        });
+      } catch {
+        /* ignore */
+      }
+    }, 2000);
+  };
 
   const connect = () => {
     if (closed) return;
-    const url = chartApiWsUrl(paths[pathIndex % paths.length]);
     try {
-      ws = new WebSocket(url);
+      ws = new WebSocket(chartApiWsUrl());
     } catch {
-      pathIndex += 1;
-      timer = window.setTimeout(connect, 1200);
+      startPoll();
       return;
     }
     ws.onopen = () => {
-      for (const body of payloads) {
-        try {
-          ws?.send(JSON.stringify(body));
-        } catch {
-          /* ignore */
-        }
-      }
+      retry = 0;
+      ws?.send(
+        JSON.stringify({
+          op: "subscribe",
+          exchange: symbol.exchange,
+          symbol: symbol.ticker,
+          interval: tf,
+        }),
+      );
     };
     ws.onmessage = (ev) => {
       if (closed) return;
@@ -362,13 +283,14 @@ export function subscribeChartApi(
         const bar = barFromWs(data);
         if (bar) onBar(bar);
       } catch {
-        /* ignore non-json */
+        /* ignore */
       }
     };
     ws.onclose = () => {
       if (closed) return;
-      pathIndex += 1;
-      timer = window.setTimeout(connect, 1500);
+      const wait = Math.min(10000, 500 * 2 ** retry++);
+      timer = window.setTimeout(connect, wait);
+      if (retry >= 2) startPoll();
     };
     ws.onerror = () => ws?.close();
   };
@@ -377,6 +299,12 @@ export function subscribeChartApi(
   return () => {
     closed = true;
     window.clearTimeout(timer);
+    window.clearInterval(poll);
+    try {
+      ws?.send(JSON.stringify({ op: "unsubscribe" }));
+    } catch {
+      /* ignore */
+    }
     ws?.close();
   };
 }

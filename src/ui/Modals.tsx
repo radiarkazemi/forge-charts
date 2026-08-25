@@ -127,8 +127,8 @@ export function SettingsModal({
           />
         </label>
         <p className="hint">
-          Connects to your cp_fetcher Chart API for BINANCE and FOREXCOM history, quotes, and realtime.
-          Active origin: <code>{apiUrl.trim() || chartApiBase()}</code>
+          Prefer the VPS cp_fetcher API (Mongo history + WebSocket live). Leave blank for{" "}
+          <code>/crypto-api</code> on this host. Active: <code>{apiUrl.trim() || chartApiBase()}</code>
         </p>
         <div className="row">
           <button

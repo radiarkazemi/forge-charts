@@ -1,8 +1,10 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
+  // Production on VPS is served under /charts/
+  base: mode === "production" ? "/charts/" : "/",
   server: {
     port: 5173,
     strictPort: true,
@@ -14,6 +16,15 @@ export default defineConfig({
       clientPort: 5173,
     },
     proxy: {
+      "/crypto-api": {
+        target: "http://185.222.163.116",
+        changeOrigin: true,
+      },
+      "/crypto-ws": {
+        target: "ws://185.222.163.116",
+        ws: true,
+        changeOrigin: true,
+      },
       "/binance": {
         target: "https://data-api.binance.vision",
         changeOrigin: true,
@@ -25,12 +36,6 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/yahoo/, ""),
         headers: { "User-Agent": "Mozilla/5.0 ForgeCharts" },
       },
-      "/cp": {
-        target: "http://127.0.0.1:8787",
-        changeOrigin: true,
-        ws: true,
-        rewrite: (path) => path.replace(/^\/cp/, ""),
-      },
     },
   },
-});
+}));
