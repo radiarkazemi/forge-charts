@@ -85,10 +85,9 @@ f_lastPivotLow(maxAge) =>
     int bestB = na
     if array.size(pivLo) > 0
         for i = array.size(pivLo) - 1 to 0
-            b = array.get(pivLoBar, i)
-            px = array.get(pivLo, i)
-            age = bar_index - b
-            // must be confirmed and not ancient
+            int b = array.get(pivLoBar, i)
+            float px = array.get(pivLo, i)
+            int age = bar_index - b
             if age >= pivotPeriod and age <= maxAge
                 if na(best) or px <= best
                     best := px
@@ -100,9 +99,9 @@ f_lastPivotHigh(maxAge) =>
     int bestB = na
     if array.size(pivHi) > 0
         for i = array.size(pivHi) - 1 to 0
-            b = array.get(pivHiBar, i)
-            px = array.get(pivHi, i)
-            age = bar_index - b
+            int b = array.get(pivHiBar, i)
+            float px = array.get(pivHi, i)
+            int age = bar_index - b
             if age >= pivotPeriod and age <= maxAge
                 if na(best) or px >= best
                     best := px
@@ -183,9 +182,9 @@ if barstate.isconfirmed
         if pendDir == -1 and high > pendDistal
             pendDistal := high
 
-        age = bar_index - pendBar
+        int agePend = bar_index - pendBar
         // Cancel if base takes too long without confirmation
-        if age > maxBaseBars
+        if agePend > maxBaseBars
             pendDir := 0
             pendDistal := na
             pendHunt := na
