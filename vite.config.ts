@@ -5,8 +5,14 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    strictPort: true,
     host: true,
     allowedHosts: true,
+    hmr: {
+      protocol: "ws",
+      host: "localhost",
+      clientPort: 5173,
+    },
     proxy: {
       "/binance": {
         target: "https://data-api.binance.vision",

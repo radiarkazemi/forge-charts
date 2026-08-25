@@ -8,10 +8,12 @@ The UI follows Super Chart layout: product header, dense chart toolbar, drawing 
 
 ```bash
 npm install
-npm run dev
+npm start
 ```
 
-Open http://127.0.0.1:5173
+Open **http://localhost:5173**
+
+`npm start` binds `127.0.0.1:5173` for a local browser. Cloud Agents use `npm run dev` (all interfaces) and Cursor forwards that same port to your machine as `http://localhost:5173`.
 
 ## Market data
 
