@@ -10,6 +10,7 @@ import { ChartOverlays } from "./ui/ChartOverlays";
 import { ChartToolbar } from "./ui/ChartToolbar";
 import { DrawingToolbar } from "./ui/DrawingToolbar";
 import { IndicatorModal, SettingsModal, SymbolModal } from "./ui/Modals";
+import { ProductHeader } from "./ui/ProductHeader";
 import { useEngine } from "./ui/useEngine";
 import { WidgetDock, type WidgetId } from "./ui/WidgetDock";
 
@@ -175,22 +176,16 @@ export default function App() {
 
   return (
     <div className="shell" data-theme={snap?.theme ?? "dark"}>
-      <header className="product-header">
-        <div className="logo">F</div>
-        <b>Forge</b>
-        <nav>
-          <span>Products</span>
-          <span>Community</span>
-          <span>Markets</span>
-          <span>Brokers</span>
-          <span>More</span>
-        </nav>
-        <span className="spacer" />
-        <button onClick={() => setSearchOpen(true)}>Search</button>
-        <button onClick={() => engine?.setTheme(snap?.theme === "dark" ? "light" : "dark")}>
-          {snap?.theme === "dark" ? "Light" : "Dark"}
-        </button>
-      </header>
+      <ProductHeader
+        theme={snap?.theme ?? "dark"}
+        alertCount={alerts.length}
+        symbolLabel={snap?.symbol.ticker}
+        onOpenSearch={() => setSearchOpen(true)}
+        onOpenAlerts={() => setWidget("alerts")}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onToggleTheme={() => engine?.setTheme(snap?.theme === "dark" ? "light" : "dark")}
+        onOpenMarkets={() => setWidget("watchlist")}
+      />
       <ChartToolbar
         engine={engine}
         live={live}
