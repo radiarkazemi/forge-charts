@@ -174,6 +174,10 @@ export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG):
 
     if (!pending) continue;
 
+    // Pine: pendBaseHigh[1] after update — capture base before this bar extends it
+    const prevBaseHigh = pending.baseHigh;
+    const prevBaseLow = pending.baseLow;
+
     pending.baseHigh = Math.max(pending.baseHigh, b.high);
     pending.baseLow = Math.min(pending.baseLow, b.low);
     if (pending.dir === 1 && b.low < pending.distal) pending.distal = b.low;
@@ -190,7 +194,6 @@ export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG):
       const distal = pending.distal;
       const proximal = pending.baseHigh;
       const width = proximal - distal;
-      const prevBaseHigh = i > pending.bar ? bars[i - 1].high : proximal;
       const microBreak =
         b.close > b.open && (b.high >= prevBaseHigh || b.close >= distal + width * 0.7);
       if (width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak) {
@@ -215,7 +218,6 @@ export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG):
       const distal = pending.distal;
       const proximal = pending.baseLow;
       const width = distal - proximal;
-      const prevBaseLow = i > pending.bar ? bars[i - 1].low : proximal;
       const microBreak =
         b.close < b.open && (b.low <= prevBaseLow || b.close <= distal - width * 0.7);
       if (width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak) {

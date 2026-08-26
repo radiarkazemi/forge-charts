@@ -101,6 +101,8 @@ function scanTrhSetups(bars, cfg = DEFAULT_TRH_CONFIG) {
       pending = { dir: -1, distal: b.high, hunt: huntHi, bar: i, baseHigh: b.high, baseLow: b.low };
     }
     if (!pending) continue;
+    const prevBaseHigh = pending.baseHigh;
+    const prevBaseLow = pending.baseLow;
     pending.baseHigh = Math.max(pending.baseHigh, b.high);
     pending.baseLow = Math.min(pending.baseLow, b.low);
     if (pending.dir === 1 && b.low < pending.distal) pending.distal = b.low;
@@ -115,7 +117,6 @@ function scanTrhSetups(bars, cfg = DEFAULT_TRH_CONFIG) {
       const distal = pending.distal;
       const proximal = pending.baseHigh;
       const width = proximal - distal;
-      const prevBaseHigh = i > pending.bar ? bars[i - 1].high : proximal;
       const microBreak = b.close > b.open && (b.high >= prevBaseHigh || b.close >= distal + width * 0.7);
       if (width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak) {
         const lv = levels(1, proximal, distal, a, cfg);
@@ -139,7 +140,6 @@ function scanTrhSetups(bars, cfg = DEFAULT_TRH_CONFIG) {
       const distal = pending.distal;
       const proximal = pending.baseLow;
       const width = distal - proximal;
-      const prevBaseLow = i > pending.bar ? bars[i - 1].low : proximal;
       const microBreak = b.close < b.open && (b.low <= prevBaseLow || b.close <= distal - width * 0.7);
       if (width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak) {
         const lv = levels(-1, proximal, distal, a, cfg);
