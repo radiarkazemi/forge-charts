@@ -60,16 +60,26 @@ export function WidgetDock({ engine, active, onActive, quotes, onPick, alerts }:
           {active === "object" ? (
             <ul className="objects">
               {snap?.indicators.map((ind) => (
-                <li key={ind.id}>
-                  <button className="link" onClick={() => engine?.toggleIndicator(ind.id)}>
+                <li key={ind.id} className={snap.selectedIndicatorId === ind.id ? "on" : ""}>
+                  <button
+                    className="link"
+                    onClick={() => engine?.selectIndicator(ind.id)}
+                  >
                     {ind.visible ? "●" : "○"} {ind.kind.toUpperCase()} {ind.params.join(",")}
                   </button>
-                  <button onClick={() => engine?.removeIndicator(ind.id)}>×</button>
+                  <span>
+                    <button title="Hide/show" onClick={() => engine?.toggleIndicator(ind.id)}>
+                      👁
+                    </button>
+                    <button onClick={() => engine?.removeIndicator(ind.id)}>×</button>
+                  </span>
                 </li>
               ))}
               {snap?.drawings.map((d) => (
-                <li key={d.id}>
-                  <span>{d.kind}</span>
+                <li key={d.id} className={snap.selectedId === d.id ? "on" : ""}>
+                  <button className="link" onClick={() => engine?.selectDrawing(d.id)}>
+                    {d.kind}
+                  </button>
                   <button onClick={() => engine?.removeDrawing(d.id)}>×</button>
                 </li>
               ))}

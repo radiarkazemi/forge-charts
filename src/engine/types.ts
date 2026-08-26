@@ -1,14 +1,27 @@
-export type Interval = "1" | "5" | "15" | "30" | "60" | "120" | "240" | "1D" | "1W" | "1M";
+export type Interval = string;
 
 export type ChartType =
   | "candle"
   | "hollow"
   | "bar"
+  | "volcandle"
   | "line"
+  | "linemarkers"
   | "area"
+  | "hlcarea"
   | "baseline"
   | "heikin"
-  | "stepline";
+  | "stepline"
+  | "columns"
+  | "highlow"
+  | "renko"
+  | "linebreak"
+  | "kagi"
+  | "pnf"
+  | "rangechart"
+  | "volfoot"
+  | "tpo"
+  | "sessionvp";
 
 export type CursorTool = "cursor" | "crosshair" | "dot" | "eraser" | "zoom";
 
@@ -128,7 +141,7 @@ export type SymbolInfo = {
   ticker: string;
   name: string;
   exchange: string;
-  type: "crypto" | "fx" | "stock" | "metal" | "index";
+  type: "crypto" | "fx" | "stock" | "metal" | "index" | "fund" | "future" | "bond" | "economy" | "option";
   pricePrecision: number;
 };
 
@@ -139,6 +152,9 @@ export type IndicatorInstance = {
   params: number[];
   visible: boolean;
   color: string;
+  lineWidth?: number;
+  lineStyle?: LineStyle;
+  source?: ChartSource;
 };
 
 
@@ -147,6 +163,8 @@ export type ChartPoint = {
   price: number;
 };
 
+export type LineStyle = "solid" | "dashed" | "dotted";
+
 export type Drawing = {
   id: string;
   kind: DrawingKind;
@@ -154,9 +172,25 @@ export type Drawing = {
   color: string;
   text?: string;
   locked?: boolean;
+  lineWidth?: number;
+  lineStyle?: LineStyle;
 };
 
 export type Theme = "dark" | "light";
+
+export type ChartSource = "open" | "high" | "low" | "close" | "hl2" | "hlc3" | "ohlc4";
+
+export type ChartStyle = {
+  upColor: string;
+  downColor: string;
+  wickUpColor: string;
+  wickDownColor: string;
+  borderUpColor: string;
+  borderDownColor: string;
+  showWick: boolean;
+  showBorder: boolean;
+  source: ChartSource;
+};
 
 export type RangePreset = "1D" | "5D" | "1M" | "3M" | "6M" | "YTD" | "1Y" | "5Y" | "ALL";
 
@@ -181,6 +215,7 @@ export type EngineSnapshot = {
   indicators: IndicatorInstance[];
   drawings: Drawing[];
   selectedId: string | null;
+  selectedIndicatorId: string | null;
   replay: boolean;
   replayPlaying: boolean;
   replaySpeed: number;
@@ -195,4 +230,5 @@ export type EngineSnapshot = {
   compare: string | null;
   rangePreset: RangePreset;
   autoScale: boolean;
+  chartStyle: ChartStyle;
 };

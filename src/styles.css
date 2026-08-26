@@ -92,6 +92,40 @@ button { cursor: pointer; }
 .menu button { background: transparent; border: 0; text-align: left; padding: 6px 8px; border-radius: 4px; display: flex; justify-content: space-between; gap: 12px; }
 .menu button em { color: var(--muted); font-style: normal; font-size: 11px; }
 .menu button.on, .menu button:hover { background: var(--hover); }
+.caret { margin-left: 4px; color: var(--muted); font-size: 10px; }
+
+.iv-menu {
+  min-width: 280px;
+  max-height: min(72vh, 560px);
+  overflow: auto;
+  padding: 4px 0 8px;
+  display: block;
+}
+.iv-sec + .iv-sec { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 4px; }
+.iv-head {
+  font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em;
+  padding: 6px 12px 4px;
+}
+.iv-row { display: grid; grid-template-columns: 1fr 28px; align-items: center; padding: 0 4px; }
+.iv-row > button:first-child {
+  display: flex; justify-content: space-between; width: 100%; padding: 6px 8px;
+}
+.iv-row.on, .iv-row:hover { background: var(--hover); border-radius: 4px; }
+.iv-row .star {
+  width: 28px; height: 24px; padding: 0; justify-content: center;
+  color: transparent; background: transparent;
+}
+.iv-row:hover .star, .iv-row .star.on { color: var(--muted); }
+.iv-row .star.on { color: #f0b90b; }
+.iv-custom-toggle { width: calc(100% - 16px); margin: 4px 8px; }
+.iv-custom {
+  display: flex; gap: 6px; align-items: center; padding: 4px 10px 8px;
+}
+.iv-custom input, .iv-custom select {
+  height: 28px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);
+}
+.iv-custom input { width: 64px; padding: 0 8px; }
+.iv-custom select { flex: 1; }
 
 .workspace {
   display: grid;
@@ -141,6 +175,11 @@ button { cursor: pointer; }
   max-height: inherit;
   overflow: auto;
 }
+.fly-section.separated {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
 .tool {
   width: 36px; height: 32px; border: 0; background: transparent; color: var(--muted);
   border-radius: 4px; display: grid; place-items: center;
@@ -153,6 +192,81 @@ button { cursor: pointer; }
 .flyout button.on svg, .flyout button:hover svg { color: var(--text); }
 .tool-emoji { width: 18px; text-align: center; font-size: 14px; line-height: 1; }
 .flyout button.on, .flyout button:hover { background: var(--hover); }
+
+.legend {
+  position: absolute;
+  left: 10px;
+  top: 32px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  pointer-events: auto;
+}
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px 2px 4px;
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  background: transparent;
+  cursor: pointer;
+}
+.legend-row:hover, .legend-row.on { background: var(--panel); }
+.legend-swatch { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.legend-acts { display: none; margin-left: 6px; gap: 2px; }
+.legend-row:hover .legend-acts, .legend-row.on .legend-acts { display: flex; }
+.legend-acts button {
+  width: 20px; height: 18px; padding: 0; border: 0; background: transparent; color: var(--muted);
+}
+.legend-acts button:hover { color: var(--text); }
+
+.obj-bar {
+  position: absolute;
+  left: 50%;
+  top: 10px;
+  transform: translateX(-50%);
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+}
+.obj-bar button {
+  min-width: 26px; height: 24px; padding: 0 6px; border: 0; background: transparent;
+  color: var(--text); border-radius: 4px;
+}
+.obj-bar button.on, .obj-bar button:hover { background: var(--hover); }
+.obj-sep { width: 1px; height: 16px; background: var(--border); margin: 0 4px; }
+.swatch { width: 16px !important; min-width: 16px !important; height: 16px !important; border-radius: 50% !important; border: 1px solid transparent !important; }
+.swatch.on { outline: 2px solid #fff; }
+.swatch-row { display: flex; gap: 4px; }
+.width-mark { display: block; width: 14px; background: currentColor; border-radius: 1px; }
+
+.ind-card {
+  position: absolute;
+  left: 10px;
+  top: 120px;
+  z-index: 10;
+  width: 260px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+}
+.ind-card header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.ind-card header button { background: transparent; border: 0; color: var(--muted); }
+.ind-card .row input, .ind-card .row select { width: 88px; margin: 0; height: 28px; }
+.ind-actions { display: flex; justify-content: space-between; margin-top: 10px; }
+.ind-actions button { background: var(--hover); border: 0; border-radius: 4px; height: 28px; padding: 0 10px; }
+.danger { color: #f23645 !important; }
 
 .chart-stage { position: relative; z-index: 1; min-width: 0; min-height: 0; background: var(--bg); }
 .chart-host, .forge-canvas { width: 100%; height: 100%; display: block; outline: none; }
@@ -198,7 +312,7 @@ button { cursor: pointer; }
 
 .watch, .objects { list-style: none; margin: 0; padding: 0; }
 .watch li, .objects li { display: flex; justify-content: space-between; gap: 8px; padding: 8px; border-radius: 4px; cursor: pointer; }
-.watch li.on, .watch li:hover { background: var(--hover); }
+.watch li.on, .watch li:hover, .objects li.on, .objects li:hover { background: var(--hover); }
 .watch span, .watch small, .muted { color: var(--muted); font-size: 11px; }
 .up { color: var(--up); }
 .down { color: var(--down); }
@@ -222,6 +336,59 @@ button { cursor: pointer; }
 .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: grid; place-items: center; z-index: 50; }
 .modal { width: min(460px, 92vw); background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
 .modal.tall { height: min(560px, 86vh); overflow: auto; }
+.symbol-modal {
+  width: min(760px, 96vw);
+  height: min(680px, 90vh);
+  padding: 0;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  overflow: hidden;
+}
+.symbol-head { padding: 16px 16px 8px; }
+.symbol-head h2 { margin-bottom: 10px; }
+.symbol-head input { margin-bottom: 0; }
+.symbol-tabs {
+  display: flex;
+  gap: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  margin: 0;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+.symbol-tabs button {
+  height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.symbol-tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+.symbol-tabs button:hover { color: var(--text); background: transparent; }
+.symbol-table-wrap { overflow: auto; min-height: 0; }
+.symbol-table { width: 100%; border-collapse: collapse; }
+.symbol-table th, .symbol-table td {
+  text-align: left; padding: 8px 12px; font-weight: 400;
+}
+.symbol-table th {
+  position: sticky; top: 0; background: var(--panel); color: var(--muted);
+  font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+  border-bottom: 1px solid var(--border);
+}
+.symbol-table td:first-child, .symbol-table th:first-child { width: 28%; }
+.symbol-table td:last-child, .symbol-table th:last-child { width: 18%; color: var(--muted); }
+.symbol-table tbody tr { cursor: pointer; }
+.symbol-table tbody tr.on, .symbol-table tbody tr:hover { background: var(--hover); }
+.symbol-table mark { background: transparent; color: #ffd166; font-weight: 700; padding: 0; }
+.symbol-section td {
+  color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+  padding-top: 12px;
+}
+.empty-symbols { color: var(--muted); cursor: default !important; }
+.empty-symbols:hover { background: transparent !important; }
 .modal h2 { margin: 0 0 12px; font-size: 18px; }
 .modal h3 { margin: 14px 0 6px; color: var(--muted); font-size: 11px; text-transform: uppercase; }
 .modal input, .modal select {
@@ -231,6 +398,81 @@ button { cursor: pointer; }
 .modal li { padding: 9px 8px; border-radius: 4px; cursor: pointer; display: flex; flex-direction: column; }
 .modal li:hover { background: var(--hover); }
 .modal li span { color: var(--muted); font-size: 12px; }
+.settings-block {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.settings-block input[type="color"] {
+  width: 42px;
+  height: 28px;
+  padding: 2px;
+  margin: 0;
+  border-radius: 4px;
+}
+.settings-block input[type="checkbox"] {
+  width: auto;
+  height: auto;
+  margin: 0;
+}
 .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 12px 0; }
 .hint { color: var(--muted); font-size: 12px; }
 .spacer { flex: 1; }
+
+.indicator-modal .indicator-table td:first-child,
+.indicator-modal .indicator-table th:first-child { width: 38%; }
+.indicator-modal .indicator-table td:nth-child(2),
+.indicator-modal .indicator-table th:nth-child(2) { width: 28%; }
+.indicator-modal .indicator-table td:nth-child(3),
+.indicator-modal .indicator-table th:nth-child(3) { width: 24%; }
+.ind-fav-col { width: 44px; text-align: center !important; }
+.ind-star {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+.ind-star.on { color: #ffd166; }
+.ind-star:hover { color: #ffd166; }
+.ind-disabled { opacity: 0.72; cursor: default !important; }
+.ind-disabled:hover { background: transparent !important; }
+.ind-badge {
+  margin-left: 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--muted);
+}
+.ind-card-tabs { width: min(320px, 92vw); }
+.ind-tab-row {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  margin: 0 0 8px;
+}
+.ind-tab-row button {
+  flex: 1;
+  height: 32px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+}
+.ind-tab-row button.on { color: var(--text); border-bottom-color: var(--accent); }
+.ind-tab-panel { min-height: 120px; }
+.ind-tab-panel .row select,
+.ind-tab-panel .row input[type="number"] { width: 120px; margin: 0; }
+.check-row { justify-content: flex-start; gap: 8px; }
+.style-row { display: flex; gap: 6px; }
+.style-row button {
+  min-width: 34px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+}
+.style-row button.on { border-color: var(--accent); color: var(--accent); }

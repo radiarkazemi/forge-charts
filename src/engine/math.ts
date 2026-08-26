@@ -44,7 +44,11 @@ export function formatVolume(value: number): string {
 export function formatTime(unix: number, interval: string): string {
   const d = new Date(unix * 1000);
   const pad = (n: number) => String(n).padStart(2, "0");
-  if (interval === "1D" || interval === "1W") {
+  const upper = interval.toUpperCase();
+  if (/^\d+S$/.test(upper)) {
+    return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+  }
+  if (/^\d+[DWM]$/.test(upper)) {
     return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
   }
   return `${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;

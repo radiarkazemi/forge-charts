@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type SVGProps } from "react";
-import { TOOL_GROUPS, type ToolItem } from "../catalog";
+import { TOOL_GROUPS, type ToolGroup, type ToolItem } from "../catalog";
 import type { ChartEngine } from "../engine/ChartEngine";
 import { useEngine } from "./useEngine";
 import { ToolGlyph } from "./toolIcons";
@@ -15,6 +15,10 @@ function I(props: SVGProps<SVGSVGElement> & { children: ReactNode }) {
 
 function lastFor(groupId: string, saved: Record<string, string>, tools: ToolItem[]): ToolItem {
   return tools.find((t) => t.id === saved[groupId]) ?? tools[0];
+}
+
+function toolsOf(group: ToolGroup): ToolItem[] {
+  return group.sections.flatMap((section) => section.tools);
 }
 
 export function DrawingToolbar({ engine }: { engine: ChartEngine | null }) {
@@ -118,8 +122,9 @@ export function DrawingToolbar({ engine }: { engine: ChartEngine | null }) {
   return (
     <aside className="draw-rail" ref={railRef}>
       {TOOL_GROUPS.map((g) => {
-        const current = lastFor(g.id, saved, g.tools);
-        const groupActive = g.tools.some((t) => t.draw === snap.tool);
+        const groupTools = toolsOf(g);
+        const current = lastFor(g.id, saved, groupTools);
+        const groupActive = groupTools.some((t) => t.draw === snap.tool);
         return (
           <div
             key={g.id}
@@ -133,7 +138,7 @@ export function DrawingToolbar({ engine }: { engine: ChartEngine | null }) {
             <button
               className={groupActive ? "tool on" : "tool"}
               title={`${current.label} · ${g.title}`}
-              onClick={() => activateGroup(g.id, g.tools)}
+              onClick={() => activateGroup(g.id, groupTools)}
             >
               {current.glyph ? <span className="tool-emoji">{current.glyph}</span> : <ToolGlyph id={current.id} />}
             </button>
@@ -155,22 +160,26 @@ export function DrawingToolbar({ engine }: { engine: ChartEngine | null }) {
                 onPointerEnter={cancelTimers}
                 onPointerLeave={scheduleClose}
               >
-                <div className="fly-title">{g.title}</div>
                 <div className="flyout-list">
-                  {g.tools.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      className={current.id === t.id && groupActive ? "on" : ""}
-                      onPointerDown={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        pick(t, g.id);
-                      }}
-                    >
-                      {t.glyph ? <span className="tool-emoji">{t.glyph}</span> : <ToolGlyph id={t.id} />}
-                      {t.label}
-                    </button>
+                  {g.sections.map((section, index) => (
+                    <div key={section.id} className={index > 0 ? "fly-section separated" : "fly-section"}>
+                      {section.title ? <div className="fly-title">{section.title}</div> : null}
+                      {section.tools.map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          className={current.id === t.id && groupActive ? "on" : ""}
+                          onPointerDown={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            pick(t, g.id);
+                          }}
+                        >
+                          {t.glyph ? <span className="tool-emoji">{t.glyph}</span> : <ToolGlyph id={t.id} />}
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
                   ))}
                 </div>
               </div>

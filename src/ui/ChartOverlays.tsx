@@ -1,5 +1,6 @@
 import type { ChartEngine } from "../engine/ChartEngine";
 import type { RangePreset } from "../engine/types";
+import { ChartInspectors } from "./Inspectors";
 import { useEngine } from "./useEngine";
 
 const RANGES: RangePreset[] = ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y", "ALL"];
@@ -30,6 +31,7 @@ export function ChartOverlays({ engine }: { engine: ChartEngine | null }) {
         ))}
         <span className="tz">UTC</span>
       </div>
+      <ChartInspectors engine={engine} />
       {snap.replay ? (
         <div className="replay-bar">
           <button onClick={() => engine?.setReplayPlaying(!snap.replayPlaying)}>{snap.replayPlaying ? "Pause" : "Play"}</button>

@@ -115,7 +115,7 @@ const GANN_RATIOS = [1 / 8, 1 / 4, 1 / 3, 1 / 2, 1, 2, 3, 4, 8];
 const GANN_LABELS = ["1/8", "1/4", "1/3", "1/2", "1/1", "2/1", "3/1", "4/1", "8/1"];
 const FAN_RATIOS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
 const BOX_RATIOS = [0, 0.25, 0.382, 0.5, 0.618, 0.75, 1];
-const HIT = 6;
+const HIT = 9;
 
 export function paintDrawing(
   ctx: CanvasRenderingContext2D,
@@ -131,11 +131,14 @@ export function paintDrawing(
   ctx.beginPath();
   ctx.rect(rect.x, rect.y, rect.w, rect.h);
   ctx.clip();
-  ctx.lineWidth = selected ? 1.8 : 1.15;
+  ctx.lineWidth = d.lineWidth ?? 1.2;
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
-  ctx.strokeStyle = selected ? "#2962ff" : d.color;
-  ctx.fillStyle = selected ? "#2962ff" : d.color;
+  ctx.strokeStyle = d.color;
+  ctx.fillStyle = d.color;
+  if (d.lineStyle === "dashed") ctx.setLineDash([7, 5]);
+  else if (d.lineStyle === "dotted") ctx.setLineDash([2, 4]);
+  else ctx.setLineDash([]);
   const kind = d.kind;
   if (kind === "fib") paintFibRetrace(ctx, d, pts, rect, precision, selected);
   else if (kind === "fibext") paintFibExtension(ctx, d, pts, rect, precision, selected);
@@ -211,6 +214,13 @@ export function paintDrawing(
   else if (kind === "sineline" && pts.length >= 2) paintSine(ctx, pts, rect);
   if (selected) pts.forEach((p) => handle(ctx, p));
   ctx.restore();
+}
+
+export function hitHandle(pts: Pt[], x: number, y: number): number | null {
+  for (let i = 0; i < pts.length; i++) {
+    if (Math.hypot(x - pts[i].x, y - pts[i].y) <= 9) return i;
+  }
+  return null;
 }
 
 export function hitTestDrawing(d: Drawing, pts: Pt[], x: number, y: number, rect: ViewRect): boolean {
