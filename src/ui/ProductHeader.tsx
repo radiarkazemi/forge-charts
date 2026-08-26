@@ -57,10 +57,10 @@ export function ProductHeader({
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) {
-        setOpenMenu(null);
-        setProfileOpen(false);
-      }
+      const node = e.target as Node | null;
+      if (!node || rootRef.current?.contains(node)) return;
+      setOpenMenu(null);
+      setProfileOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -72,10 +72,10 @@ export function ProductHeader({
         onOpenSearch();
       }
     };
-    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("pointerdown", onDoc);
     window.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("pointerdown", onDoc);
       window.removeEventListener("keydown", onKey);
     };
   }, [onOpenSearch]);
@@ -128,7 +128,7 @@ export function ProductHeader({
 
   return (
     <header className="product-header" ref={rootRef}>
-      <a className="hdr-brand" href="#chart" title="Forge Supercharts">
+      <button type="button" className="hdr-brand" title="Forge Supercharts" onClick={onOpenMarkets}>
         <span className="logo" aria-hidden>
           F
         </span>
@@ -136,7 +136,7 @@ export function ProductHeader({
           <b>Forge</b>
           <em>Supercharts</em>
         </span>
-      </a>
+      </button>
 
       <nav className="hdr-nav" aria-label="Product">
         {nav.map((section) => (
