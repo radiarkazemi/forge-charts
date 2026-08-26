@@ -51,7 +51,7 @@ button { cursor: pointer; }
   border-bottom: 1px solid var(--border);
   background: var(--header);
   position: relative;
-  z-index: 40;
+  z-index: 1100;
 }
 .hdr-brand {
   display: flex;
