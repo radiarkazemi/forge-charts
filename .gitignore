@@ -18,3 +18,4 @@ android-trh-alert/build/
 android-trh-alert/local.properties
 android-trh-alert/.gradle/
 .android-sdk/
+*.apk

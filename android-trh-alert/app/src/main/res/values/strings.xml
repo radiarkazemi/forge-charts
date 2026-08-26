@@ -1,10 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">TRH Alert</string>
-    <string name="service_channel">TRH secure feed</string>
-    <string name="alert_channel">TRH trade alerts</string>
-    <string name="service_running">Listening for encrypted TRH setups…</string>
-    <string name="status_connected">Connected — waiting for hunts</string>
-    <string name="status_connecting">Connecting to secure alert feed…</string>
-    <string name="status_disconnected">Disconnected — retrying…</string>
+    <string name="service_channel">TRH live feed</string>
+    <string name="alert_channel">TRH hunt alarms</string>
+    <string name="service_running">Armed — listening for TRH hunts</string>
+    <string name="status_connected">Armed · encrypted feed live</string>
+    <string name="status_connecting">Connecting to alert feed…</string>
+    <string name="status_disconnected">Offline — reconnecting…</string>
+    <string name="test_sound">Test alarm sound</string>
+    <string name="last_hunt">Last hunt</string>
+    <string name="no_alerts">Waiting for the next TRH setup</string>
 </resources>
