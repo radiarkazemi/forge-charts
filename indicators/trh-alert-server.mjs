@@ -11,6 +11,7 @@ import { createCipheriv, randomBytes, timingSafeEqual } from "crypto";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { WebSocketServer } from "ws";
+import { scanTrhSetups } from "./trh-engine.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const STATE_FILE = join(__dir, ".trh-server-state.json");
@@ -59,163 +60,7 @@ function safeTokenMatch(got) {
   }
 }
 
-const CFG = {
-  pivotPeriod: 5,
-  minContextAtr: 1.2,
-  minSweepAtr: 0.05,
-  baseConfirmBars: 8,
-  maxBaseBars: 40,
-  minRoomAtr: 0.8,
-  maxRoomAtr: 3.5,
-  cooldownBars: 50,
-  slPadAtr: 0.02,
-  riskReward: 2.4,
-};
-
-// ── TRH engine (inline) ──
-function atr(bars, i, len = 14) {
-  let sum = 0;
-  const start = Math.max(1, i - len + 1);
-  for (let j = start; j <= i; j++) {
-    sum += Math.max(
-      bars[j].high - bars[j].low,
-      Math.abs(bars[j].high - bars[j - 1].close),
-      Math.abs(bars[j].low - bars[j - 1].close),
-    );
-  }
-  return sum / (i - start + 1);
-}
-
-function pivotLow(bars, i, p) {
-  if (i < p || i >= bars.length - p) return null;
-  const v = bars[i].low;
-  for (let j = i - p; j <= i + p; j++) if (j !== i && bars[j].low <= v) return null;
-  return v;
-}
-
-function pivotHigh(bars, i, p) {
-  if (i < p || i >= bars.length - p) return null;
-  const v = bars[i].high;
-  for (let j = i - p; j <= i + p; j++) if (j !== i && bars[j].high >= v) return null;
-  return v;
-}
-
-function lastPivot(pivots, i, maxAge, p, lowSide) {
-  let best = null;
-  for (const pv of pivots) {
-    const age = i - pv.bar;
-    if (age >= p && age <= maxAge) {
-      if (best === null || (lowSide ? pv.price <= best : pv.price >= best)) best = pv.price;
-    }
-  }
-  return best;
-}
-
-function levels(dir, proximal, distal, a) {
-  const entry = (proximal + distal) / 2;
-  const pad = a * CFG.slPadAtr;
-  const sl = dir === 1 ? distal - pad : distal + pad;
-  const risk = Math.abs(entry - sl);
-  const tp = dir === 1 ? entry + risk * CFG.riskReward : entry - risk * CFG.riskReward;
-  return { entry, sl, tp };
-}
-
-function validRoom(dir, proximal, distal, a) {
-  const w = Math.abs(proximal - distal);
-  if (w <= 0) return false;
-  if (dir === 1 && distal >= proximal) return false;
-  if (dir === -1 && distal <= proximal) return false;
-  return w >= a * CFG.minRoomAtr && w <= a * CFG.maxRoomAtr;
-}
-
-function scanTrhSetups(bars) {
-  const setups = [];
-  const p = CFG.pivotPeriod;
-  const pivLo = [];
-  const pivHi = [];
-  let pending = null;
-  let lastSetupBar = -9999;
-
-  for (let i = 0; i < bars.length; i++) {
-    const b = bars[i];
-    const a = atr(bars, i);
-    const pl = pivotLow(bars, i - p, p);
-    const ph = pivotHigh(bars, i - p, p);
-    if (pl !== null) {
-      pivLo.push({ price: pl, bar: i - p });
-      if (pivLo.length > 30) pivLo.shift();
-    }
-    if (ph !== null) {
-      pivHi.push({ price: ph, bar: i - p });
-      if (pivHi.length > 30) pivHi.shift();
-    }
-
-    const huntLo = lastPivot(pivLo, i, 80, p, true);
-    const huntHi = lastPivot(pivHi, i, 80, p, false);
-    const slice = bars.slice(Math.max(0, i - 40), i);
-    const priorHigh = slice.length ? Math.max(...slice.map((x) => x.high)) : b.high;
-    const priorLow = slice.length ? Math.min(...slice.map((x) => x.low)) : b.low;
-
-    const bullSweep =
-      huntLo !== null &&
-      b.low < huntLo - a * CFG.minSweepAtr &&
-      b.close > huntLo &&
-      b.close > b.open &&
-      priorHigh - b.low >= a * CFG.minContextAtr;
-    const bearSweep =
-      huntHi !== null &&
-      b.high > huntHi + a * CFG.minSweepAtr &&
-      b.close < huntHi &&
-      b.close < b.open &&
-      b.high - priorLow >= a * CFG.minContextAtr;
-
-    if (!pending && i - lastSetupBar >= CFG.cooldownBars) {
-      if (bullSweep) pending = { dir: 1, distal: b.low, bar: i, baseHigh: b.high, baseLow: b.low };
-      else if (bearSweep) pending = { dir: -1, distal: b.high, bar: i, baseHigh: b.high, baseLow: b.low };
-    }
-
-    if (pending) {
-      pending.baseHigh = Math.max(pending.baseHigh, b.high);
-      pending.baseLow = Math.min(pending.baseLow, b.low);
-      if (pending.dir === 1 && b.low < pending.distal) pending.distal = b.low;
-      if (pending.dir === -1 && b.high > pending.distal) pending.distal = b.high;
-      const age = i - pending.bar;
-      if (age > CFG.maxBaseBars) {
-        pending = null;
-        continue;
-      }
-      if (age >= CFG.baseConfirmBars) {
-        let ok = false;
-        if (pending.dir === 1) {
-          const distal = pending.distal;
-          const proximal = pending.baseHigh;
-          const width = proximal - distal;
-          const prevBaseHigh = i > pending.bar ? bars[i - 1].high : proximal;
-          const microBreak = b.close > b.open && (b.high >= prevBaseHigh || b.close >= distal + width * 0.7);
-          if (validRoom(1, proximal, distal, a) && microBreak) {
-            setups.push({ dir: 1, ...levels(1, proximal, distal, a), barTime: b.time, barIndex: i });
-            ok = true;
-          }
-        } else {
-          const distal = pending.distal;
-          const proximal = pending.baseLow;
-          const width = distal - proximal;
-          const prevBaseLow = i > pending.bar ? bars[i - 1].low : proximal;
-          const microBreak = b.close < b.open && (b.low <= prevBaseLow || b.close <= distal - width * 0.7);
-          if (validRoom(-1, proximal, distal, a) && microBreak) {
-            setups.push({ dir: -1, ...levels(-1, proximal, distal, a), barTime: b.time, barIndex: i });
-            ok = true;
-          }
-        }
-        if (ok) {
-          lastSetupBar = i;
-          pending = null;
-        }
-      }
-    }
-  }
-  return setups;
-}
+// TRH engine: indicators/trh-engine.mjs
 
 async function fetchGold1m() {
   const url = "https://query1.finance.yahoo.com/v8/finance/chart/GC%3DF?interval=1m&range=1d";
@@ -350,11 +195,26 @@ async function scanOnce() {
 
   const s = setups[setups.length - 1];
   const barsSince = bars.length - 1 - s.barIndex;
-  // Live VPS polls every ~60s — keep a short window, but log what we saw.
-  if (barsSince > 5) {
+  // Live VPS polls every ~60s — only alert fresh setups.
+  if (barsSince > 3) {
     console.log(
-      `[${new Date().toISOString()}] setup found but stale (${barsSince} bars ago) ${setupPayload(s).side} ENTRY ${fmt(s.entry)}`,
+      `[${new Date().toISOString()}] setup found but stale (${barsSince} bars ago) ${s.dir === 1 ? "LONG" : "SHORT"} ENTRY ${fmt(s.entry)}`,
     );
+    return;
+  }
+
+  const risk = Math.abs(s.entry - s.sl);
+  const minRisk = Number(process.env.TRH_MIN_RISK || 2.5);
+  if (risk < minRisk) {
+    console.log(`[${new Date().toISOString()}] risk ${risk.toFixed(2)} < ${minRisk} — skip`);
+    return;
+  }
+
+  // Match phone alerts to cleaner chart hunts: SWEEP only by default.
+  const modes = (process.env.TRH_ALERT_MODES || "sweep").split(",").map((x) => x.trim());
+  const mode = s.mode || "sweep";
+  if (!modes.includes(mode)) {
+    console.log(`[${new Date().toISOString()}] mode ${mode} skipped (alert modes: ${modes})`);
     return;
   }
 

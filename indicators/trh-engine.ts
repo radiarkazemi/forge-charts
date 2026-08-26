@@ -18,6 +18,7 @@ export type TrhConfig = {
   levelTouchTolAtr: number;
   enableLevelReject: boolean;
   blockCounterTrend: boolean;
+  enableSwingReject: boolean;
 };
 
 export const DEFAULT_TRH_CONFIG: TrhConfig = {
@@ -36,6 +37,7 @@ export const DEFAULT_TRH_CONFIG: TrhConfig = {
   levelTouchTolAtr: 0.25,
   enableLevelReject: true,
   blockCounterTrend: true,
+  enableSwingReject: false,
 };
 
 export type TrhSetup = {
@@ -198,15 +200,16 @@ export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG):
         b.close > huntLo &&
         b.close > b.open &&
         b.close - b.open >= a * 0.08) ||
-        (() => {
-          const swingLo = Math.min(...bars.slice(Math.max(0, i - 20), i).map((x) => x.low));
-          return (
-            b.low <= swingLo + a * 0.1 &&
-            b.close > b.open &&
-            b.close - b.low >= a * 0.45 &&
-            b.close > (b.high + b.low) * 0.5
-          );
-        })());
+        (cfg.enableSwingReject &&
+          (() => {
+            const swingLo = Math.min(...bars.slice(Math.max(0, i - 20), i).map((x) => x.low));
+            return (
+              b.low <= swingLo + a * 0.1 &&
+              b.close > b.open &&
+              b.close - b.low >= a * 0.45 &&
+              b.close > (b.high + b.low) * 0.5
+            );
+          })()));
     const bearLevelReject =
       cfg.enableLevelReject &&
       ((strongHi &&
@@ -216,15 +219,16 @@ export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG):
         b.close < huntHi &&
         b.close < b.open &&
         b.open - b.close >= a * 0.08) ||
-        (() => {
-          const swingHi = Math.max(...bars.slice(Math.max(0, i - 20), i).map((x) => x.high));
-          return (
-            b.high >= swingHi - a * 0.1 &&
-            b.close < b.open &&
-            b.high - b.close >= a * 0.45 &&
-            b.close < (b.high + b.low) * 0.5
-          );
-        })());
+        (cfg.enableSwingReject &&
+          (() => {
+            const swingHi = Math.max(...bars.slice(Math.max(0, i - 20), i).map((x) => x.high));
+            return (
+              b.high >= swingHi - a * 0.1 &&
+              b.close < b.open &&
+              b.high - b.close >= a * 0.45 &&
+              b.close < (b.high + b.low) * 0.5
+            );
+          })()));
 
     if (bearLevelReject) lastBearRejectBar = i;
     if (bullLevelReject) lastBullRejectBar = i;
