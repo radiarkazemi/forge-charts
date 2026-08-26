@@ -174,14 +174,29 @@ async function tick() {
   const latest = setups[setups.length - 1];
   const state = loadState();
 
-  // GitHub Actions cron is often delayed (minutes–tens of minutes), so allow a
-  // wider window for --once. Live pollers keep a tight 3-bar window.
-  const maxAgeBars = RUN_ONCE ? Number(process.env.TRH_MAX_AGE_BARS || 45) : 2;
+  // Live poll: only brand-new setups (≤3 bars).
+  // GitHub Actions --once: allow a short window (≤8 bars) because cron can lag,
+  // but NOT 45 bars — that alerted stale Yahoo setups that were not on the chart.
+  const maxAgeBars = RUN_ONCE ? Number(process.env.TRH_MAX_AGE_BARS || 8) : 3;
+  const minRisk = Number(process.env.TRH_MIN_RISK || 2.5);
   const barsSinceSetup = bars.length - 1 - latest.barIndex;
   if (barsSinceSetup > maxAgeBars) {
     console.log(
       `[trh] latest setup is ${barsSinceSetup} bars old (max ${maxAgeBars}) — skip`,
     );
+    return;
+  }
+  const risk = Math.abs(latest.entry - latest.sl);
+  if (risk < minRisk) {
+    console.log(`[trh] risk ${risk.toFixed(2)} < min ${minRisk} — skip noisy room`);
+    return;
+  }
+  // Phone alerts: classic SWEEP only by default (matches cleaner chart hunts).
+  // Set TRH_ALERT_MODES=sweep,level_reject to also alert level-rejects.
+  const modes = (process.env.TRH_ALERT_MODES || "sweep").split(",").map((x) => x.trim());
+  const mode = latest.mode || "sweep";
+  if (!modes.includes(mode)) {
+    console.log(`[trh] mode ${mode} not in alert modes [${modes}] — skip`);
     return;
   }
   if (state.lastAlertTime === latest.barTime) {

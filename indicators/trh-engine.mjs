@@ -13,7 +13,8 @@ const DEFAULT_TRH_CONFIG = {
   minLevelTouches: 2,
   levelTouchTolAtr: 0.25,
   enableLevelReject: true,
-  blockCounterTrend: true
+  blockCounterTrend: true,
+  enableSwingReject: false
 };
 function atr(bars, i, len = 14) {
   if (i < 1) return bars[i].high - bars[i].low;
@@ -112,11 +113,11 @@ function scanTrhSetups(bars, cfg = DEFAULT_TRH_CONFIG) {
     const priorLow = slice.length ? Math.min(...slice.map((x) => x.low)) : b.low;
     const bullSweep = huntLo !== null && b.low < huntLo - a * cfg.minSweepAtr && b.close > huntLo && b.close > b.open && priorHigh - b.low >= a * cfg.minContextAtr;
     const bearSweep = huntHi !== null && b.high > huntHi + a * cfg.minSweepAtr && b.close < huntHi && b.close < b.open && b.high - priorLow >= a * cfg.minContextAtr;
-    const bullLevelReject = cfg.enableLevelReject && (strongLo && huntLo !== null && b.low <= huntLo + tol && b.low < huntLo + a * 0.05 && b.close > huntLo && b.close > b.open && b.close - b.open >= a * 0.08 || (() => {
+    const bullLevelReject = cfg.enableLevelReject && (strongLo && huntLo !== null && b.low <= huntLo + tol && b.low < huntLo + a * 0.05 && b.close > huntLo && b.close > b.open && b.close - b.open >= a * 0.08 || cfg.enableSwingReject && (() => {
       const swingLo = Math.min(...bars.slice(Math.max(0, i - 20), i).map((x) => x.low));
       return b.low <= swingLo + a * 0.1 && b.close > b.open && b.close - b.low >= a * 0.45 && b.close > (b.high + b.low) * 0.5;
     })());
-    const bearLevelReject = cfg.enableLevelReject && (strongHi && huntHi !== null && b.high >= huntHi - tol && b.high > huntHi - a * 0.05 && b.close < huntHi && b.close < b.open && b.open - b.close >= a * 0.08 || (() => {
+    const bearLevelReject = cfg.enableLevelReject && (strongHi && huntHi !== null && b.high >= huntHi - tol && b.high > huntHi - a * 0.05 && b.close < huntHi && b.close < b.open && b.open - b.close >= a * 0.08 || cfg.enableSwingReject && (() => {
       const swingHi = Math.max(...bars.slice(Math.max(0, i - 20), i).map((x) => x.high));
       return b.high >= swingHi - a * 0.1 && b.close < b.open && b.high - b.close >= a * 0.45 && b.close < (b.high + b.low) * 0.5;
     })());

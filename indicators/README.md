@@ -53,7 +53,14 @@ v2 blocks counter-trend longs after a resistance reject and adds a **LEVEL REJEC
 - Room width `0.6–3.5 ATR` (reject rooms capped ~2.2 ATR) · R:R **`2.4`**  
 - HTF level touches `2` · Counter-trend block **ON** · Only last setup **ON**  
 
-## Alerts
+## What you see on the chart
 
-> TradingView chart alerts need a paid plan.  
-> Free phone push → [`FREE-ALERTS.md`](./FREE-ALERTS.md) + Android APK release.
+| Visual | Meaning |
+|---|---|
+| **SWEEP** room box | Classic TRH (Sample A) — selloff/rally → sweep pivot → mid-room entry |
+| **LEVEL REJECT** room box | Sample B path — reject at multi-touch HTF level (optional) |
+| Purple HTF lines | Optional — **OFF by default** (Settings → Display) |
+| Yellow HUNT tag | Marks when a new setup was confirmed |
+
+Phone alerts default to **SWEEP only** so they match the cleaner chart hunts (not every experimental level-reject).
+

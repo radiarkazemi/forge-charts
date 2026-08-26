@@ -195,11 +195,26 @@ async function scanOnce() {
 
   const s = setups[setups.length - 1];
   const barsSince = bars.length - 1 - s.barIndex;
-  // Live VPS polls every ~60s — keep a short window, but log what we saw.
-  if (barsSince > 5) {
+  // Live VPS polls every ~60s — only alert fresh setups.
+  if (barsSince > 3) {
     console.log(
-      `[${new Date().toISOString()}] setup found but stale (${barsSince} bars ago) ${setupPayload(s).side} ENTRY ${fmt(s.entry)}`,
+      `[${new Date().toISOString()}] setup found but stale (${barsSince} bars ago) ${s.dir === 1 ? "LONG" : "SHORT"} ENTRY ${fmt(s.entry)}`,
     );
+    return;
+  }
+
+  const risk = Math.abs(s.entry - s.sl);
+  const minRisk = Number(process.env.TRH_MIN_RISK || 2.5);
+  if (risk < minRisk) {
+    console.log(`[${new Date().toISOString()}] risk ${risk.toFixed(2)} < ${minRisk} — skip`);
+    return;
+  }
+
+  // Match phone alerts to cleaner chart hunts: SWEEP only by default.
+  const modes = (process.env.TRH_ALERT_MODES || "sweep").split(",").map((x) => x.trim());
+  const mode = s.mode || "sweep";
+  if (!modes.includes(mode)) {
+    console.log(`[${new Date().toISOString()}] mode ${mode} skipped (alert modes: ${modes})`);
     return;
   }
 

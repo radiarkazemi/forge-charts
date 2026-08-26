@@ -32,9 +32,11 @@ minLevelTouches= input.int(2, "HTF Level Min Touches", minval=1, maxval=8, group
      tooltip="Purple-line style multi-touch resistance/support (Aug 26).")
 levelTouchTolAtr = input.float(0.25, "Level Touch Tolerance (ATR×)", minval=0.05, maxval=1.0, step=0.05, group=grp)
 enableLevelReject = input.bool(true, "Enable Level-Reject Path (Aug 26)", group=grp,
-     tooltip="Catch early shorts/longs at multi-touch HTF levels without waiting for a deep classic sweep.")
+     tooltip="Multi-touch HTF level rejection only (no loose swing noise).")
 blockCounterTrend = input.bool(true, "Block Counter-Trend After Reject", group=grp,
-     tooltip="If resistance just rejected, do not fire a LONG into it (fixes Aug 26 false long).")
+     tooltip="If resistance just rejected, do not fire a LONG into it.")
+enableSwingReject = input.bool(false, "Also Use Loose Swing Reject (noisy)", group=grp,
+     tooltip="OFF by default — was creating extra false shorts that did not match the chart.")
 
 grpPos = "Entry / SL / TP (sample-matched)"
 slPadAtr       = input.float(0.02, "SL Pad (ATR×)", minval=0.0, maxval=1.0, step=0.01, group=grpPos)
@@ -46,7 +48,8 @@ grpDisp = "Display"
 onlyLast       = input.bool(true, "Only Last Setup", group=grpDisp)
 setupWidth     = input.int(80, "Box Width (bars)", minval=20, maxval=400, group=grpDisp)
 showFillMark   = input.bool(false, "Show ENTRY/TP/SL Markers", group=grpDisp)
-showHtfLevel   = input.bool(true, "Highlight Active HTF Level", group=grpDisp)
+showHtfLevel   = input.bool(false, "Highlight Active HTF Level (purple)", group=grpDisp,
+     tooltip="OFF by default — purple lines are optional context only.")
 
 grpCol = "Colors"
 bullZoneCol = input.color(color.new(#26A69A, 82), "Long Room", group=grpCol)
@@ -177,11 +180,11 @@ bullSweepNow = not na(huntLo) and low < huntLo - atr * minSweepAtr and close > h
 bearSweepNow = not na(huntHi) and high > huntHi + atr * minSweepAtr and close < huntHi and close < open and rallyInto >= atr * minContextAtr
 
 // Aug 26 path: tag multi-touch HTF level, wick through / touch, close back with rejection candle
-// Aug 26: also treat rejection at the rolling swing high as a short seed
+// Optional loose swing reject (OFF by default — caused false shorts vs chart)
 nearSwingHigh = high >= ta.highest(high[1], 20) - atr * 0.1
-bearSwingReject = nearSwingHigh and close < open and (high - close) >= atr * 0.45 and close < (high + low) * 0.5
+bearSwingReject = enableSwingReject and nearSwingHigh and close < open and (high - close) >= atr * 0.45 and close < (high + low) * 0.5
 nearSwingLow = low <= ta.lowest(low[1], 20) + atr * 0.1
-bullSwingReject = nearSwingLow and close > open and (close - low) >= atr * 0.45 and close > (high + low) * 0.5
+bullSwingReject = enableSwingReject and nearSwingLow and close > open and (close - low) >= atr * 0.45 and close > (high + low) * 0.5
 
 bullLevelReject = enableLevelReject and ((strongLo and not na(huntLo) and low <= huntLo + atr * levelTouchTolAtr and low < huntLo + atr * 0.05 and close > huntLo and close > open and (close - open) >= atr * 0.08) or bullSwingReject)
 bearLevelReject = enableLevelReject and ((strongHi and not na(huntHi) and high >= huntHi - atr * levelTouchTolAtr and high > huntHi - atr * 0.05 and close < huntHi and close < open and (open - close) >= atr * 0.08) or bearSwingReject)
