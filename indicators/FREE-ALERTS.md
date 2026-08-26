@@ -6,13 +6,31 @@ Everything is pre-configured for **radiarkazemi@gmail.com** / **forge-charts** r
 
 | Channel | How | You do |
 |---|---|---|
+| **Android phone push** | VPS → encrypted WebSocket → TRH Alert app | Install APK once |
 | **Phone + desktop email** | GitHub Actions every 5 min → creates issue → GitHub emails you | Nothing |
 | **Desktop Chrome popup** | Chrome extension scans gold locally every 1 min | Load extension once (see below) |
-| **VPS monitor** | Cloud agent runs `trh-alert-server` while active | Nothing |
+| **VPS monitor** | Cloud agent runs `trh-alert-server` + Cloudflare tunnel | Nothing |
 
 ---
 
-## Phone alerts (already live after push)
+## Android app (recommended — instant push)
+
+Install **TRH Alert** APK on your phone. The app connects to your VPS over an **encrypted private tunnel** (Cloudflare) and shows a notification when a TRH hunt appears.
+
+**Security:**
+- WebSocket auth token (HMAC-derived)
+- Alert payloads encrypted with **AES-256-GCM**
+- Secrets baked into APK at build time — nothing to type
+
+**Install:** download `trh-alert.apk` from the latest agent run artifacts, enable "Install unknown apps", open once, allow notifications. Done.
+
+The app runs as a foreground service and auto-starts on boot.
+
+See `android-trh-alert/README.md` for details.
+
+---
+
+## Phone alerts via email (already live after push)
 
 GitHub Actions workflow `.github/workflows/trh-alerts.yml` scans XAUUSD every **5 minutes**.
 
@@ -48,13 +66,14 @@ After that it runs forever in the background and pops Chrome notifications when 
 
 ---
 
-## VPS server (optional, runs on cloud agent)
+## VPS server + secure tunnel
 
 ```bash
-npm run trh:server
+bash scripts/start-trh-stack.sh   # starts server + Cloudflare tunnel + embeds Android config
 ```
 
-Local health: http://127.0.0.1:3921/health
+Local health: http://127.0.0.1:3921/health  
+Encrypted WebSocket: `/ws` (token auth + AES-256-GCM alerts)
 
 ---
 

@@ -1,0 +1,58 @@
+name: Build TRH Alert APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, cursor/trh-pinescript-indicator-992e]
+    paths:
+      - 'android-trh-alert/**'
+      - 'scripts/embed-android-config.mjs'
+      - '.github/workflows/android-trh-apk.yml'
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Generate Config.kt from secrets
+        env:
+          TRH_SECRET_KEY: ${{ secrets.TRH_SECRET_KEY }}
+          TRH_APP_TOKEN: ${{ secrets.TRH_APP_TOKEN }}
+          TRH_WS_URL: ${{ secrets.TRH_WS_URL }}
+        run: |
+          if [ -z "$TRH_SECRET_KEY" ] || [ -z "$TRH_APP_TOKEN" ] || [ -z "$TRH_WS_URL" ]; then
+            echo "GitHub secrets TRH_SECRET_KEY, TRH_APP_TOKEN, TRH_WS_URL required"
+            echo "Using placeholder Config.kt for CI smoke build"
+            exit 0
+          fi
+          mkdir -p indicators
+          echo "{\"secretKey\":\"$TRH_SECRET_KEY\",\"appToken\":\"$TRH_APP_TOKEN\"}" > indicators/.trh-secrets.json
+          echo "$TRH_WS_URL" > indicators/.trh-tunnel-url
+          node scripts/embed-android-config.mjs
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build debug APK
+        working-directory: android-trh-alert
+        run: |
+          chmod +x gradlew 2>/dev/null || true
+          if [ -f gradlew ]; then
+            ./gradlew assembleDebug --no-daemon
+          else
+            gradle assembleDebug --no-daemon
+          fi
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: trh-alert-apk
+          path: android-trh-alert/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: warn

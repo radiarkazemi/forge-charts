@@ -9,3 +9,14 @@ dist/
 .env.*
 !.env.example
 indicators/.trh-alert-state.json
+indicators/.trh-secrets.json
+indicators/.trh-tunnel-url
+indicators/.trh-server-state.json
+indicators/.trh-logs/
+android-trh-alert/.gradle/
+android-trh-alert/app/build/
+android-trh-alert/build/
+android-trh-alert/local.properties
+android-trh-alert/.gradle/
+.android-sdk/
+*.apk
