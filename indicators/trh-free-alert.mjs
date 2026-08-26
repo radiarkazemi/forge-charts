@@ -169,56 +169,83 @@ async function tick() {
     return;
   }
   const setups = scanTrhSetups(bars);
-  if (setups.length === 0) return;
+  if (setups.length === 0) {
+    console.log("[trh] no setups on Yahoo/GC=F feed");
+    return;
+  }
 
-  const latest = setups[setups.length - 1];
   const state = loadState();
-
-  // Live poll: only brand-new setups (≤3 bars).
-  // GitHub Actions --once: allow a short window (≤8 bars) because cron can lag,
-  // but NOT 45 bars — that alerted stale Yahoo setups that were not on the chart.
-  const maxAgeBars = RUN_ONCE ? Number(process.env.TRH_MAX_AGE_BARS || 8) : 3;
-  const minRisk = Number(process.env.TRH_MIN_RISK || 2.5);
-  const barsSinceSetup = bars.length - 1 - latest.barIndex;
-  if (barsSinceSetup > maxAgeBars) {
-    console.log(
-      `[trh] latest setup is ${barsSinceSetup} bars old (max ${maxAgeBars}) — skip`,
-    );
-    return;
-  }
-  const risk = Math.abs(latest.entry - latest.sl);
-  if (risk < minRisk) {
-    console.log(`[trh] risk ${risk.toFixed(2)} < min ${minRisk} — skip noisy room`);
-    return;
-  }
-  // Phone alerts: classic SWEEP only by default (matches cleaner chart hunts).
-  // Set TRH_ALERT_MODES=sweep,level_reject to also alert level-rejects.
+  // GitHub cron is often 30–60+ min late (not true */5). Live poll stays tight.
+  // Dedupe by barTime so a late cron still fires once for a new setup.
+  const maxAgeBars = RUN_ONCE
+    ? Number(process.env.TRH_MAX_AGE_BARS || 90)
+    : Number(process.env.TRH_MAX_AGE_BARS || 5);
+  const minRisk = Number(process.env.TRH_MIN_RISK || 2.0);
   const modes = (process.env.TRH_ALERT_MODES || "sweep").split(",").map((x) => x.trim());
-  const mode = latest.mode || "sweep";
-  if (!modes.includes(mode)) {
-    console.log(`[trh] mode ${mode} not in alert modes [${modes}] — skip`);
+
+  // Newest → oldest: first un-alerted setup that still qualifies
+  let chosen = null;
+  for (let i = setups.length - 1; i >= 0; i--) {
+    const s = setups[i];
+    const age = bars.length - 1 - s.barIndex;
+    const risk = Math.abs(s.entry - s.sl);
+    const mode = s.mode || "sweep";
+
+    if (state.lastAlertTime && s.barTime <= state.lastAlertTime) break;
+    if (age > maxAgeBars) {
+      console.log(
+        `[trh] skip ${mode} ${s.dir === 1 ? "LONG" : "SHORT"} age=${age}>${maxAgeBars} ENTRY ${fmt(s.entry)}`,
+      );
+      continue;
+    }
+    if (risk < minRisk) {
+      console.log(`[trh] skip risk ${risk.toFixed(2)} < ${minRisk}`);
+      continue;
+    }
+    if (!modes.includes(mode)) {
+      console.log(`[trh] skip mode ${mode}`);
+      continue;
+    }
+    chosen = s;
+    break;
+  }
+
+  if (!chosen) {
+    // Cold start / empty cache: seed so we don't spam an ancient setup next tick
+    const latest = setups[setups.length - 1];
+    if (!state.lastAlertTime) {
+      state.lastAlertTime = latest.barTime;
+      saveState(state);
+      console.log(
+        `[trh] seeded alert state @ ${latest.barTime} (no push — waiting for next new setup)`,
+      );
+    } else {
+      console.log("[trh] no new alertable setup");
+    }
     return;
   }
-  if (state.lastAlertTime === latest.barTime) {
+
+  if (state.lastAlertTime === chosen.barTime) {
     console.log("[trh] already alerted this setup");
     return;
   }
 
-  const msg = setupMessage(latest);
-  const title = `TRH ${latest.dir === 1 ? "LONG" : "SHORT"} Hunt`;
+  const msg = setupMessage(chosen);
+  const title = `TRH ${chosen.dir === 1 ? "LONG" : "SHORT"} SETUP`;
+  const age = bars.length - 1 - chosen.barIndex;
 
-  console.log("[trh] NEW SETUP\n" + msg);
+  console.log(`[trh] NEW SETUP (age ${age}m)\n` + msg);
 
   let sent = false;
   if (NTFY_TOPIC) {
     sent =
       (await notifyNtfy(title, msg, {
-        side: latest.dir === 1 ? "LONG" : "SHORT",
+        side: chosen.dir === 1 ? "LONG" : "SHORT",
         symbol: SYMBOL_LABEL,
-        entry: latest.entry,
-        sl: latest.sl,
-        tp: latest.tp,
-        barTime: latest.barTime,
+        entry: chosen.entry,
+        sl: chosen.sl,
+        tp: chosen.tp,
+        barTime: chosen.barTime,
       })) || sent;
     console.log("[trh] ntfy →", sent ? "ok" : "fail");
   }
@@ -227,11 +254,14 @@ async function tick() {
     console.log("[trh] telegram →", sent ? "ok" : "fail");
   }
 
-  state.lastAlertTime = latest.barTime;
+  state.lastAlertTime = chosen.barTime;
   saveState(state);
 
   if (process.env.GITHUB_OUTPUT) {
-    appendFileSync(process.env.GITHUB_OUTPUT, `alert=true\nalert_body=${encodeURIComponent(msg)}\n`);
+    appendFileSync(
+      process.env.GITHUB_OUTPUT,
+      `alert=true\nalert_body=${encodeURIComponent(msg)}\n`,
+    );
   }
 
   if (!sent && !process.env.GITHUB_OUTPUT) {

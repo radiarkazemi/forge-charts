@@ -196,7 +196,7 @@ async function scanOnce() {
   const s = setups[setups.length - 1];
   const barsSince = bars.length - 1 - s.barIndex;
   // Live VPS polls every ~60s — only alert fresh setups.
-  if (barsSince > 3) {
+  if (barsSince > 5) {
     console.log(
       `[${new Date().toISOString()}] setup found but stale (${barsSince} bars ago) ${s.dir === 1 ? "LONG" : "SHORT"} ENTRY ${fmt(s.entry)}`,
     );
@@ -204,7 +204,7 @@ async function scanOnce() {
   }
 
   const risk = Math.abs(s.entry - s.sl);
-  const minRisk = Number(process.env.TRH_MIN_RISK || 2.5);
+  const minRisk = Number(process.env.TRH_MIN_RISK || 2.0);
   if (risk < minRisk) {
     console.log(`[${new Date().toISOString()}] risk ${risk.toFixed(2)} < ${minRisk} — skip`);
     return;

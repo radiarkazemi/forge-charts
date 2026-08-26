@@ -25,6 +25,8 @@ jobs:
         id: scan
         env:
           TRH_PRICE_OFFSET: "56"
+          TRH_MAX_AGE_BARS: "90"
+          TRH_MIN_RISK: "2.0"
           NTFY_TOPIC: trh-forge-radiarkazemi-bc13
         run: node indicators/trh-free-alert.mjs --once
 
@@ -36,12 +38,16 @@ jobs:
         run: |
           python3 -c "import os,urllib.parse; print(urllib.parse.unquote(os.environ.get('ALERT_BODY','')))" > /tmp/trh-body.txt
           gh issue create \
-            --title "🔔 TRH Gold Setup — $(date -u '+%Y-%m-%d %H:%M UTC')" \
+            --title "TRH Gold Setup — $(date -u '+%Y-%m-%d %H:%M UTC')" \
             --body-file /tmp/trh-body.txt
 
       - name: Push ntfy (backup)
         if: steps.scan.outputs.alert == 'true'
+        env:
+          ALERT_BODY: ${{ steps.scan.outputs.alert_body }}
         run: |
-          curl -sS -H "Title: TRH Setup" -H "Priority: urgent" \
-            -d "${ALERT_BODY:-TRH setup}" \
+          BODY=$(python3 -c "import os,urllib.parse; print(urllib.parse.unquote(os.environ.get('ALERT_BODY','')))")
+          curl -sS -H "Title: TRH SETUP" -H "Priority: urgent" \
+            -H "Tags: chart_with_upwards_trend,moneybag" \
+            -d "$BODY" \
             "https://ntfy.sh/trh-forge-radiarkazemi-bc13" || true
