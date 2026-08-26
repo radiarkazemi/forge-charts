@@ -19,7 +19,7 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 
 | ID | Supercharts item | Forge | Notes |
 | --- | --- | --- | --- |
-| C-01 | App header (product, search, alerts, profile) | PARTIAL | Header exists; TV product nav / account / cloud not matched |
+| C-01 | App header (product, search, alerts, profile) | MATCH | Brand + Products/Community/Markets/Brokers/More menus, search (⌘K), alerts badge, local profile menu. Cloud account/sync remains OUT |
 | C-02 | Top chart toolbar | PARTIAL | See section 1 |
 | C-03 | Left drawing toolbar | PARTIAL | See section 2 |
 | C-04 | Chart canvas + legend + overlays | PARTIAL | See section 4 |
@@ -445,7 +445,7 @@ SMA, EMA, WMA, SMMA, VWMA, DEMA, TEMA, HMA, ALMA, LSMA, KAMA, McGinley Dynamic, 
 | K-10 | Ctrl/Cmd+Z undo, Shift redo | MATCH |
 | K-11 | Type ticker to search | MATCH |
 | K-12 | Comma interval menu | MATCH |
-| K-13 | Ctrl/Cmd+K quick search | MISSING |
+| K-13 | Ctrl/Cmd+K quick search | MATCH | Wired from product header |
 
 ---
 
