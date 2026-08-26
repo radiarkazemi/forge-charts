@@ -110,8 +110,9 @@ function fmt(n) {
 
 function setupMessage(s) {
   const side = s.dir === 1 ? "LONG" : "SHORT";
+  const kind = s.mode === "hunt" ? "HUNT — PLACE LIMIT" : "SETUP";
   return (
-    `${SYMBOL_LABEL} 1m | TRH ${side} SETUP\n` +
+    `${SYMBOL_LABEL} 1m | TRH ${side} ${kind}\n` +
     `ENTRY ${fmt(s.entry)}\n` +
     `SL ${fmt(s.sl)}\n` +
     `TP ${fmt(s.tp)}`
@@ -214,7 +215,7 @@ async function tick() {
     saveState(state);
     return;
   }
-  const modes = (process.env.TRH_ALERT_MODES || "sweep").split(",").map((x) => x.trim());
+  const modes = (process.env.TRH_ALERT_MODES || "hunt,sweep").split(",").map((x) => x.trim());
   const mode = latest.mode || "sweep";
   if (!modes.includes(mode)) {
     console.log(`[trh] mode ${mode} not in alert modes [${modes}] — skip`);
@@ -222,7 +223,7 @@ async function tick() {
   }
 
   const msg = setupMessage(latest);
-  const title = `TRH ${latest.dir === 1 ? "LONG" : "SHORT"} Hunt`;
+  const title = `TRH ${latest.dir === 1 ? "LONG" : "SHORT"} ${latest.mode === "hunt" ? "HUNT" : "Hunt"}`;
 
   console.log("[trh] NEW SETUP\n" + msg);
 

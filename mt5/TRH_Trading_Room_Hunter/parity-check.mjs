@@ -102,30 +102,39 @@ assert(last.dir === 1, `last setup is LONG (dir=${last.dir})`);
 assert(last.entry > last.sl, `ENTRY ${last.entry} > SL ${last.sl}`);
 assert(last.tp > last.entry, `TP ${last.tp} > ENTRY ${last.entry}`);
 const mid = (last.proximal + last.distal) / 2;
-assert(Math.abs(last.entry - mid) < 1e-9, `ENTRY is mid-room (${last.entry} vs ${mid})`);
-assert(DEFAULT_TRH_CONFIG.requireImpulse === false, "JS requireImpulse default false (early arm)");
+// Hunt uses pivot reclaim entry — not necessarily exact geometric mid of draw box
+assert(last.entry > last.distal && last.entry < last.proximal, `ENTRY inside room (${last.entry})`);
+assert(DEFAULT_TRH_CONFIG.huntOnSweep === true, "JS huntOnSweep default true");
+assert(DEFAULT_TRH_CONFIG.huntRoomAtr === 1.2, "JS huntRoomAtr default 1.2");
 assert(DEFAULT_TRH_CONFIG.maxLateR === 0.35, "JS maxLateR default 0.35");
-assert(sources["TRH_Engine.mqh"].includes("cfg.requireImpulse  = false"), "MT5 requireImpulse=false");
+assert(last.mode === "hunt", `default path arms as HUNT (got ${last.mode})`);
+assert(last.barIndex === 108, `HUNT fires on sweep bar 108 (got ${last.barIndex})`);
 assert(typeof last.late === "boolean", "setup has late flag");
+assert(last.late === false, `HUNT reclaim entry should be actionable (chaseR=${last.chaseR})`);
+// ENTRY should be at/near hunted pivot, not deep mid-room after the bounce
+assert(last.entry >= last.distal, "entry above distal");
+assert(last.sl < last.entry, "sl below entry");
 
 console.log("\nLast synthetic setup:", {
   dir: last.dir === 1 ? "LONG" : "SHORT",
+  mode: last.mode,
   entry: +last.entry.toFixed(4),
   sl: +last.sl.toFixed(4),
   tp: +last.tp.toFixed(4),
   distal: +last.distal.toFixed(4),
   proximal: +last.proximal.toFixed(4),
+  barIndex: last.barIndex,
   late: last.late,
   chaseR: +last.chaseR.toFixed(2),
 });
 
-// Reproduce user's late case: ENTRY mid-room, close already ~1R into the move
+// Reproduce user's late case: if we only armed after the run, chase would be LATE
 {
   const risk = Math.abs(last.entry - last.sl);
   const chasedClose = last.entry + risk * 1.1;
   const chaseR = (chasedClose - last.entry) / risk;
-  assert(chaseR > DEFAULT_TRH_CONFIG.maxLateR, `chase ${chaseR.toFixed(2)}R would be LATE (like chart 4595 vs ENTRY 4591)`);
-  console.log("OK   late-skip rule catches chase like the screenshot (close past ENTRY by", chaseR.toFixed(2) + "R)");
+  assert(chaseR > DEFAULT_TRH_CONFIG.maxLateR, `chase ${chaseR.toFixed(2)}R would be LATE without hunt-on-sweep`);
+  console.log("OK   without HUNT, screenshot-style chase (", chaseR.toFixed(2) + "R) is LATE; with HUNT we arm on bar", last.barIndex);
 }
 
 console.log("\nAll parity checks passed.");

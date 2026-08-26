@@ -29,10 +29,14 @@ riskReward     = input.float(2.4, "Risk-Reward Ratio", minval=1.0, maxval=6.0, s
      tooltip="Sample was ~2.39R to 4645.99.")
 useLiquidityTP = input.bool(true, "Prefer Opposing Pivot As TP", group=grpPos,
      tooltip="If a red/green liquidity pivot sits beyond min R:R, use it as TP.")
-requireImpulse = input.bool(false, "Wait For Impulse (micro-break) Before Arm", group=grpPos,
-     tooltip="OFF (recommended): arm mid-room limit as soon as room width is valid — earlier signal.\nON (old): wait until price presses the room top — often too late for ENTRY.")
+huntOnSweep    = input.bool(true, "Hunt On Sweep (arm on reclaim bar)", group=grpPos,
+     tooltip="ON: when sweep+reclaim prints, ENTRY = hunted pivot, SL = distal — alert immediately so you can take the hunt. OFF = wait for base (often LATE).")
+huntRoomAtr    = input.float(1.2, "Hunt Room Draw Height (ATR×)", minval=0.5, maxval=4.0, step=0.1, group=grpPos,
+     tooltip="Visual room height for the HUNT box (entry itself is the reclaimed pivot).")
+requireImpulse = input.bool(false, "Wait For Impulse If Hunt Off", group=grpPos,
+     tooltip="Only used when Hunt On Sweep is OFF. Waiting for top micro-break is usually too late.")
 maxLateR       = input.float(0.35, "Skip If Already Past Entry By (R)", minval=0.1, maxval=2.0, step=0.05, group=grpPos,
-     tooltip="If price has already run this far past mid-room when the setup appears, mark LATE (do not pretend ENTRY filled).")
+     tooltip="If price has already run this far past ENTRY when armed, mark LATE (do not chase).")
 
 grpDisp = "Display"
 onlyLast       = input.bool(true, "Only Last Setup", group=grpDisp)
@@ -47,9 +51,7 @@ slCol       = input.color(#EF5350, "SL", group=grpCol)
 tpCol       = input.color(#26A69A, "TP", group=grpCol)
 
 grpAlert = "Alerts"
-alertSweep = input.bool(true, "Alert: sweep watch (early)", group=grpAlert,
-     tooltip="Fires when selloff/rally sweeps a pivot — before the room arms. Gives time to prepare a limit.")
-alertZone  = input.bool(true, "Alert: room armed", group=grpAlert)
+alertZone  = input.bool(true, "Alert: HUNT / room armed (PLACE LIMIT)", group=grpAlert)
 alertEntry = input.bool(true, "Alert: entry fill", group=grpAlert)
 alertExit  = input.bool(true, "Alert: SL/TP", group=grpAlert)
 alertLate  = input.bool(true, "Alert: late / primary gone", group=grpAlert)
@@ -154,57 +156,8 @@ var float pendBaseHigh = na
 var float pendBaseLow = na
 
 var int lastSetupBar = na
-var bool sweepWatchFired = false
 
-if barstate.isconfirmed
-    // Start new pending sweep (only if flat / cooled down)
-    canStart = pendDir == 0 and (na(lastSetupBar) or bar_index - lastSetupBar >= cooldownBars)
-    if canStart and bullSweepNow
-        pendDir := 1
-        pendDistal := low
-        pendHunt := huntLo
-        pendBar := bar_index
-        pendBaseHigh := high
-        pendBaseLow := low
-        sweepWatchFired := false
-        if alertSweep
-            alert("TRH WATCH LONG · sweep under " + str.tostring(huntLo, format.mintick) + " — room building, prepare limit", alert.freq_once_per_bar_close)
-            sweepWatchFired := true
-    else if canStart and bearSweepNow
-        pendDir := -1
-        pendDistal := high
-        pendHunt := huntHi
-        pendBar := bar_index
-        pendBaseHigh := high
-        pendBaseLow := low
-        sweepWatchFired := false
-        if alertSweep
-            alert("TRH WATCH SHORT · sweep over " + str.tostring(huntHi, format.mintick) + " — room building, prepare limit", alert.freq_once_per_bar_close)
-            sweepWatchFired := true
-
-    // Update pending base
-    if pendDir != 0
-        pendBaseHigh := math.max(nz(pendBaseHigh), high)
-        pendBaseLow := math.min(nz(pendBaseLow), low)
-        // If a deeper sweep happens same direction, deepen distal
-        if pendDir == 1 and low < pendDistal
-            pendDistal := low
-        if pendDir == -1 and high > pendDistal
-            pendDistal := high
-
-        int agePend = bar_index - pendBar
-        // Cancel if base takes too long without confirmation
-        if agePend > maxBaseBars
-            pendDir := 0
-            pendDistal := na
-            pendHunt := na
-            pendBar := na
-            pendBaseHigh := na
-            pendBaseLow := na
-            sweepWatchFired := false
-
-// Confirm room: enough base bars + room width in ATR band.
-// Default: do NOT wait for micro-break (that fires at the top — often too late for mid-room ENTRY).
+// Arm levels (HUNT on sweep bar, or delayed room if hunt off)
 int newDir = 0
 float newDistal = na
 float newProximal = na
@@ -212,67 +165,144 @@ float newEntry = na
 float newSl = na
 float newTp = na
 bool newLate = false
+bool newHunt = false
 
-if barstate.isconfirmed and pendDir != 0 and not na(pendBar)
-    int age = bar_index - pendBar
-    if age >= baseConfirmBars
-        if pendDir == 1
-            float distal = pendDistal
-            float proximal = pendBaseHigh
-            float width = proximal - distal
-            float prevBaseHigh = nz(pendBaseHigh[1], proximal)
-            bool microBreak = close > open and (high >= prevBaseHigh or close >= distal + width * 0.7)
-            bool widthOk = width >= atr * minRoomAtr and width <= atr * maxRoomAtr
-            bool confirm = widthOk and (not requireImpulse or microBreak)
-            if confirm
-                float entry = (distal + proximal) * 0.5
-                float sl = distal - atr * slPadAtr
-                float risk = entry - sl
-                float tpRR = entry + risk * riskReward
-                float liq = f_nextLiquidityHigh(entry, risk * 1.5)
-                float tp = useLiquidityTP and not na(liq) ? math.max(tpRR, liq) : tpRR
-                // How far past mid-room are we already? (positive = chased long)
-                float chaseR = risk > 0 ? (close - entry) / risk : 0.0
-                newDir := 1
-                newDistal := distal
-                newProximal := proximal
-                newEntry := entry
-                newSl := sl
-                newTp := tp
-                newLate := chaseR > maxLateR
-        else if pendDir == -1
-            float distal = pendDistal
-            float proximal = pendBaseLow
-            float width = distal - proximal
-            float prevBaseLow = nz(pendBaseLow[1], proximal)
-            bool microBreak = close < open and (low <= prevBaseLow or close <= distal - width * 0.7)
-            bool widthOk = width >= atr * minRoomAtr and width <= atr * maxRoomAtr
-            bool confirm = widthOk and (not requireImpulse or microBreak)
-            if confirm
-                float entry = (distal + proximal) * 0.5
-                float sl = distal + atr * slPadAtr
-                float risk = sl - entry
-                float tpRR = entry - risk * riskReward
-                float liq = f_nextLiquidityLow(entry, risk * 1.5)
-                float tp = useLiquidityTP and not na(liq) ? math.min(tpRR, liq) : tpRR
-                float chaseR = risk > 0 ? (entry - close) / risk : 0.0
-                newDir := -1
-                newDistal := distal
-                newProximal := proximal
-                newEntry := entry
-                newSl := sl
-                newTp := tp
-                newLate := chaseR > maxLateR
+f_levelsLong(float distal, float proximal) =>
+    float entry = (distal + proximal) * 0.5
+    float sl = distal - atr * slPadAtr
+    float risk = entry - sl
+    float tpRR = entry + risk * riskReward
+    float liq = f_nextLiquidityHigh(entry, risk * 1.5)
+    float tp = useLiquidityTP and not na(liq) ? math.max(tpRR, liq) : tpRR
+    float chaseR = risk > 0 ? (close - entry) / risk : 0.0
+    [entry, sl, tp, chaseR]
 
-    // Clear pending once we fire
-    if newDir != 0
-        pendDir := 0
-        pendDistal := na
-        pendHunt := na
-        pendBar := na
-        pendBaseHigh := na
-        pendBaseLow := na
-        sweepWatchFired := false
+f_levelsShort(float distal, float proximal) =>
+    float entry = (distal + proximal) * 0.5
+    float sl = distal + atr * slPadAtr
+    float risk = sl - entry
+    float tpRR = entry - risk * riskReward
+    float liq = f_nextLiquidityLow(entry, risk * 1.5)
+    float tp = useLiquidityTP and not na(liq) ? math.min(tpRR, liq) : tpRR
+    float chaseR = risk > 0 ? (entry - close) / risk : 0.0
+    [entry, sl, tp, chaseR]
+
+if barstate.isconfirmed
+    canStart = pendDir == 0 and (na(lastSetupBar) or bar_index - lastSetupBar >= cooldownBars)
+
+    // ── HUNT: arm the moment the sweep reclaim prints ──
+    // ENTRY = hunted pivot (just reclaimed) — not delayed mid-room after the bounce.
+    if huntOnSweep and canStart and bullSweepNow
+        float distal = low
+        float entry = math.max(huntLo, distal + atr * 0.25)
+        float proximal = math.max(entry + (entry - distal), distal + atr * huntRoomAtr)
+        float sl = distal - atr * slPadAtr
+        float risk = entry - sl
+        float tpRR = entry + risk * riskReward
+        float liq = f_nextLiquidityHigh(entry, risk * 1.5)
+        float tp = useLiquidityTP and not na(liq) ? math.max(tpRR, liq) : tpRR
+        float chaseR = risk > 0 ? (close - entry) / risk : 0.0
+        newDir := 1
+        newDistal := distal
+        newProximal := proximal
+        newEntry := entry
+        newSl := sl
+        newTp := tp
+        // Sweep reclaim bar IS the hunt — only skip if already blown through ~2R
+        newLate := chaseR > 2.0
+        newHunt := true
+        lastSetupBar := bar_index
+    else if huntOnSweep and canStart and bearSweepNow
+        float distal = high
+        float entry = math.min(huntHi, distal - atr * 0.25)
+        float proximal = math.min(entry - (distal - entry), distal - atr * huntRoomAtr)
+        float sl = distal + atr * slPadAtr
+        float risk = sl - entry
+        float tpRR = entry - risk * riskReward
+        float liq = f_nextLiquidityLow(entry, risk * 1.5)
+        float tp = useLiquidityTP and not na(liq) ? math.min(tpRR, liq) : tpRR
+        float chaseR = risk > 0 ? (entry - close) / risk : 0.0
+        newDir := -1
+        newDistal := distal
+        newProximal := proximal
+        newEntry := entry
+        newSl := sl
+        newTp := tp
+        newLate := chaseR > 2.0
+        newHunt := true
+        lastSetupBar := bar_index
+    else if not huntOnSweep
+        // Legacy path: wait for base room (can go LATE on V-reversals)
+        if canStart and bullSweepNow
+            pendDir := 1
+            pendDistal := low
+            pendHunt := huntLo
+            pendBar := bar_index
+            pendBaseHigh := high
+            pendBaseLow := low
+        else if canStart and bearSweepNow
+            pendDir := -1
+            pendDistal := high
+            pendHunt := huntHi
+            pendBar := bar_index
+            pendBaseHigh := high
+            pendBaseLow := low
+
+        if pendDir != 0
+            pendBaseHigh := math.max(nz(pendBaseHigh), high)
+            pendBaseLow := math.min(nz(pendBaseLow), low)
+            if pendDir == 1 and low < pendDistal
+                pendDistal := low
+            if pendDir == -1 and high > pendDistal
+                pendDistal := high
+
+            int agePend = bar_index - pendBar
+            if agePend > maxBaseBars
+                pendDir := 0
+                pendDistal := na
+                pendHunt := na
+                pendBar := na
+                pendBaseHigh := na
+                pendBaseLow := na
+            else if agePend >= baseConfirmBars and not na(pendBar)
+                if pendDir == 1
+                    float distal = pendDistal
+                    float proximal = pendBaseHigh
+                    float width = proximal - distal
+                    float prevBaseHigh = nz(pendBaseHigh[1], proximal)
+                    bool microBreak = close > open and (high >= prevBaseHigh or close >= distal + width * 0.7)
+                    bool widthOk = width >= atr * minRoomAtr and width <= atr * maxRoomAtr
+                    bool confirm = widthOk and (not requireImpulse or microBreak)
+                    if confirm
+                        [e, s, t, chaseR] = f_levelsLong(distal, proximal)
+                        newDir := 1
+                        newDistal := distal
+                        newProximal := proximal
+                        newEntry := e
+                        newSl := s
+                        newTp := t
+                        newLate := chaseR > maxLateR
+                        newHunt := false
+                        pendDir := 0
+                else if pendDir == -1
+                    float distal = pendDistal
+                    float proximal = pendBaseLow
+                    float width = distal - proximal
+                    float prevBaseLow = nz(pendBaseLow[1], proximal)
+                    bool microBreak = close < open and (low <= prevBaseLow or close <= distal - width * 0.7)
+                    bool widthOk = width >= atr * minRoomAtr and width <= atr * maxRoomAtr
+                    bool confirm = widthOk and (not requireImpulse or microBreak)
+                    if confirm
+                        [e, s, t, chaseR] = f_levelsShort(distal, proximal)
+                        newDir := -1
+                        newDistal := distal
+                        newProximal := proximal
+                        newEntry := e
+                        newSl := s
+                        newTp := t
+                        newLate := chaseR > maxLateR
+                        newHunt := false
+                        pendDir := 0
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DRAWINGS + TRADE STATE
@@ -352,7 +382,8 @@ if newDir != 0
     array.push(labE, label.new(right, newEntry, "ENTRY " + str.tostring(newEntry, format.mintick), style=label.style_label_left, color=entryCol, textcolor=color.white, size=size.small))
     array.push(labS, label.new(right, newSl, "SL " + str.tostring(newSl, format.mintick), style=label.style_label_left, color=slCol, textcolor=color.white, size=size.small))
     array.push(labT, label.new(right, newTp, "TP " + str.tostring(newTp, format.mintick), style=label.style_label_left, color=tpCol, textcolor=color.white, size=size.small))
-    tagTxt = "TRH " + (newDir == 1 ? "LONG" : "SHORT") + (newLate ? " · LATE" : " · SWEEP") + "\nR:R " + str.tostring(riskReward, "#.#")
+    tagKind = newLate ? "LATE" : (newHunt ? "HUNT" : "SWEEP")
+    tagTxt = "TRH " + (newDir == 1 ? "LONG" : "SHORT") + " · " + tagKind + "\nR:R " + str.tostring(riskReward, "#.#")
     array.push(labTag, label.new(bar_index, newDir == 1 ? zTop : zBot, tagTxt, style=newDir == 1 ? label.style_label_down : label.style_label_up, color=newLate ? #F9A825 : (newDir == 1 ? #00897B : #C62828), textcolor=color.white, size=size.small))
 
     array.push(sDir, newDir)
@@ -367,13 +398,9 @@ if newDir != 0
     lastSetupBar := bar_index
 
     if newLate
-        // Primary move already gone — do NOT pretend mid-room filled
         if alertLate
-            alert("TRH LATE " + (newDir == 1 ? "LONG" : "SHORT") + " — primary gone @ " + str.tostring(close, format.mintick) + " | mid ENTRY was " + str.tostring(newEntry, format.mintick) + " | skip chase", alert.freq_once_per_bar_close)
-        if alertZone
-            alert("TRH room LATE | ENTRY " + str.tostring(newEntry, format.mintick) + " | SL " + str.tostring(newSl, format.mintick) + " | TP " + str.tostring(newTp, format.mintick), alert.freq_once_per_bar_close)
+            alert("TRH LATE " + (newDir == 1 ? "LONG" : "SHORT") + " — primary gone @ " + str.tostring(close, format.mintick) + " | ENTRY was " + str.tostring(newEntry, format.mintick) + " | skip chase", alert.freq_once_per_bar_close)
     else
-        // Still actionable: wait for mid-room touch (limit), or fill if price is at/through entry but within maxLateR
         touchedEntry = newDir == 1 ? low <= newEntry : high >= newEntry
         atEntry = (newDir == 1 and close >= newEntry) or (newDir == -1 and close <= newEntry)
         if touchedEntry or atEntry
@@ -389,7 +416,7 @@ if newDir != 0
                 alert("TRH ENTRY " + (newDir == 1 ? "LONG" : "SHORT") + " @ " + str.tostring(newEntry, format.mintick) + " | SL " + str.tostring(newSl, format.mintick) + " | TP " + str.tostring(newTp, format.mintick), alert.freq_once_per_bar_close)
 
         if alertZone
-            alert("TRH room ARMED | ENTRY " + str.tostring(newEntry, format.mintick) + " | SL " + str.tostring(newSl, format.mintick) + " | TP " + str.tostring(newTp, format.mintick) + " — place limit", alert.freq_once_per_bar_close)
+            alert((newHunt ? "TRH HUNT " : "TRH room ARMED ") + (newDir == 1 ? "LONG" : "SHORT") + " | PLACE LIMIT ENTRY " + str.tostring(newEntry, format.mintick) + " | SL " + str.tostring(newSl, format.mintick) + " | TP " + str.tostring(newTp, format.mintick), alert.freq_once_per_bar_close)
 
 // Manage live setups
 n = array.size(sDir)
@@ -461,7 +488,8 @@ if barstate.islast
         table.cell(info, 0, 0, "TRH", text_color=color.white, text_size=size.small)
         table.cell(info, 1, 0, (dir == 1 ? "LONG" : "SHORT") + " · " + stTxt, text_color=st == 5 ? #FFD54F : (dir == 1 ? #69F0AE : #FF8A80), text_size=size.small)
         table.cell(info, 0, 1, "Type", text_color=color.gray, text_size=size.small)
-        table.cell(info, 1, 1, st == 5 ? "SWEEP · primary gone" : "SWEEP (real model)", text_color=color.white, text_size=size.small)
+        typeTxt = st == 5 ? "primary gone — skip" : (huntOnSweep ? "HUNT · place limit now" : "SWEEP room")
+        table.cell(info, 1, 1, typeTxt, text_color=color.white, text_size=size.small)
         table.cell(info, 0, 2, "ENTRY", text_color=color.gray, text_size=size.small)
         table.cell(info, 1, 2, str.tostring(e, format.mintick), text_color=color.white, text_size=size.small)
         table.cell(info, 0, 3, "SL", text_color=color.gray, text_size=size.small)

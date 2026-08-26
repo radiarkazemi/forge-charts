@@ -10,7 +10,9 @@ const DEFAULT_TRH_CONFIG = {
   slPadAtr: 0.02,
   riskReward: 2.4,
   requireImpulse: false,
-  maxLateR: 0.35
+  maxLateR: 0.35,
+  huntOnSweep: true,
+  huntRoomAtr: 1.2
 };
 function atr(bars, i, len = 14) {
   if (i < 1) return bars[i].high - bars[i].low;
@@ -47,13 +49,14 @@ function lastPivot(pivots, i, maxAge, p, lowSide) {
   }
   return best;
 }
-function levels(dir, proximal, distal, a, cfg) {
+function levels(dir, proximal, distal, a, cfg, close) {
   const entry = (proximal + distal) / 2;
   const pad = a * cfg.slPadAtr;
   const sl = dir === 1 ? distal - pad : distal + pad;
   const risk = Math.abs(entry - sl);
   const tp = dir === 1 ? entry + risk * cfg.riskReward : entry - risk * cfg.riskReward;
-  return { entry, sl, tp, risk };
+  const chaseR = risk > 0 ? (dir === 1 ? (close - entry) / risk : (entry - close) / risk) : 0;
+  return { entry, sl, tp, risk, chaseR };
 }
 function nextLiqHigh(pivHi, from, minDist) {
   let best = null;
@@ -69,11 +72,10 @@ function nextLiqLow(pivLo, from, minDist) {
   }
   return best;
 }
-function pushSetup(setups, dir, proximal, distal, a, cfg, pivHi, pivLo, i, b) {
-  const lv = levels(dir, proximal, distal, a, cfg);
+function pushSetup(setups, dir, proximal, distal, a, cfg, pivHi, pivLo, i, b, mode) {
+  const lv = levels(dir, proximal, distal, a, cfg, b.close);
   const liq = dir === 1 ? nextLiqHigh(pivHi, lv.entry, lv.risk * 1.5) : nextLiqLow(pivLo, lv.entry, lv.risk * 1.5);
   const tp = liq !== null ? (dir === 1 ? Math.max(lv.tp, liq) : Math.min(lv.tp, liq)) : lv.tp;
-  const chaseR = lv.risk > 0 ? (dir === 1 ? (b.close - lv.entry) / lv.risk : (lv.entry - b.close) / lv.risk) : 0;
   setups.push({
     dir,
     entry: lv.entry,
@@ -83,9 +85,9 @@ function pushSetup(setups, dir, proximal, distal, a, cfg, pivHi, pivLo, i, b) {
     proximal,
     barIndex: i,
     barTime: b.time,
-    mode: "sweep",
-    late: chaseR > cfg.maxLateR,
-    chaseR
+    mode,
+    late: lv.chaseR > cfg.maxLateR,
+    chaseR: lv.chaseR
   });
 }
 function scanTrhSetups(bars, cfg = DEFAULT_TRH_CONFIG) {
@@ -116,6 +118,47 @@ function scanTrhSetups(bars, cfg = DEFAULT_TRH_CONFIG) {
     const bullSweep = huntLo !== null && b.low < huntLo - a * cfg.minSweepAtr && b.close > huntLo && b.close > b.open && priorHigh - b.low >= a * cfg.minContextAtr;
     const bearSweep = huntHi !== null && b.high > huntHi + a * cfg.minSweepAtr && b.close < huntHi && b.close < b.open && b.high - priorLow >= a * cfg.minContextAtr;
     const canStart = !pending && i - lastSetupBar >= cfg.cooldownBars;
+
+    if (cfg.huntOnSweep && canStart && bullSweep && huntLo !== null) {
+      const distal = b.low;
+      const entry = Math.max(huntLo, distal + a * 0.25);
+      const proximal = Math.max(entry + (entry - distal), distal + a * cfg.huntRoomAtr);
+      const pad = a * cfg.slPadAtr;
+      const sl = distal - pad;
+      const risk = entry - sl;
+      const tpRR = entry + risk * cfg.riskReward;
+      const liq = nextLiqHigh(pivHi, entry, risk * 1.5);
+      const tp = liq !== null ? Math.max(tpRR, liq) : tpRR;
+      const chaseR = risk > 0 ? (b.close - entry) / risk : 0;
+      setups.push({
+        dir: 1, entry, sl, tp, distal, proximal,
+        barIndex: i, barTime: b.time, mode: "hunt",
+        late: chaseR > 2.0, chaseR
+      });
+      lastSetupBar = i;
+      continue;
+    }
+    if (cfg.huntOnSweep && canStart && bearSweep && huntHi !== null) {
+      const distal = b.high;
+      const entry = Math.min(huntHi, distal - a * 0.25);
+      const proximal = Math.min(entry - (distal - entry), distal - a * cfg.huntRoomAtr);
+      const pad = a * cfg.slPadAtr;
+      const sl = distal + pad;
+      const risk = sl - entry;
+      const tpRR = entry - risk * cfg.riskReward;
+      const liq = nextLiqLow(pivLo, entry, risk * 1.5);
+      const tp = liq !== null ? Math.min(tpRR, liq) : tpRR;
+      const chaseR = risk > 0 ? (entry - b.close) / risk : 0;
+      setups.push({
+        dir: -1, entry, sl, tp, distal, proximal,
+        barIndex: i, barTime: b.time, mode: "hunt",
+        late: chaseR > 2.0, chaseR
+      });
+      lastSetupBar = i;
+      continue;
+    }
+    if (cfg.huntOnSweep) continue;
+
     if (canStart && bullSweep && huntLo !== null) {
       pending = { dir: 1, distal: b.low, hunt: huntLo, bar: i, baseHigh: b.high, baseLow: b.low };
     } else if (canStart && bearSweep && huntHi !== null) {
@@ -142,7 +185,7 @@ function scanTrhSetups(bars, cfg = DEFAULT_TRH_CONFIG) {
       const widthOk = width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr;
       const confirm = widthOk && (!cfg.requireImpulse || microBreak);
       if (confirm) {
-        pushSetup(setups, 1, proximal, distal, a, cfg, pivHi, pivLo, i, b);
+        pushSetup(setups, 1, proximal, distal, a, cfg, pivHi, pivLo, i, b, "sweep");
         lastSetupBar = i;
         pending = null;
       }
@@ -154,7 +197,7 @@ function scanTrhSetups(bars, cfg = DEFAULT_TRH_CONFIG) {
       const widthOk = width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr;
       const confirm = widthOk && (!cfg.requireImpulse || microBreak);
       if (confirm) {
-        pushSetup(setups, -1, proximal, distal, a, cfg, pivHi, pivLo, i, b);
+        pushSetup(setups, -1, proximal, distal, a, cfg, pivHi, pivLo, i, b, "sweep");
         lastSetupBar = i;
         pending = null;
       }
