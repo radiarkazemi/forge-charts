@@ -32,11 +32,13 @@ See `android-trh-alert/README.md` for details.
 
 ## Phone alerts via email (already live after push)
 
-GitHub Actions workflow `.github/workflows/trh-alerts.yml` scans XAUUSD every **5 minutes**.
+GitHub Actions workflow `.github/workflows/trh-alerts.yml` scans XAUUSD on a schedule.
+
+**Note:** GitHub cron often runs late (30–60+ min). Alerts now keep a **90-bar** window and dedupe by setup time so late jobs still fire once. For near-instant phone push use the **Android app + VPS** path above.
 
 When TRH finds a setup, it opens a GitHub issue like:
 
-> 🔔 TRH Gold Setup — 2026-08-25 21:30 UTC  
+> TRH Gold Setup — 2026-08-25 21:30 UTC  
 > XAUUSD 1m | TRH LONG SETUP  
 > ENTRY 4627.84 / SL 4620.23 / TP 4645.99
 
