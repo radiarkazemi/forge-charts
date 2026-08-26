@@ -7,11 +7,14 @@
 
 import { createServer } from "http";
 import { readFileSync, writeFileSync, existsSync } from "fs";
+import { createCipheriv, randomBytes, timingSafeEqual } from "crypto";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { WebSocketServer } from "ws";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const STATE_FILE = join(__dir, ".trh-server-state.json");
+const SECRETS_FILE = join(__dir, ".trh-secrets.json");
 const PORT = Number(process.env.TRH_PORT || 3921);
 const POLL_SEC = Number(process.env.TRH_POLL_SEC || 60);
 const NTFY_TOPIC = process.env.NTFY_TOPIC || "trh-forge-radiarkazemi-bc13";
@@ -19,6 +22,42 @@ const NTFY_SERVER = process.env.NTFY_SERVER || "https://ntfy.sh";
 const ALERT_EMAIL = process.env.TRH_ALERT_EMAIL || "radiarkazemi@gmail.com";
 const PRICE_OFFSET = Number(process.env.TRH_PRICE_OFFSET || 56);
 const SYMBOL = process.env.TRH_SYMBOL || "XAUUSD";
+
+function loadSecrets() {
+  if (!existsSync(SECRETS_FILE)) {
+    console.error("Missing", SECRETS_FILE, "— run: node scripts/generate-trh-secrets.mjs");
+    process.exit(1);
+  }
+  return JSON.parse(readFileSync(SECRETS_FILE, "utf8"));
+}
+
+const SECRETS = loadSecrets();
+const SECRET_KEY = Buffer.from(SECRETS.secretKey, "hex");
+const APP_TOKEN = SECRETS.appToken;
+
+function encryptPayload(obj) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", SECRET_KEY, iv);
+  const plain = Buffer.from(JSON.stringify(obj), "utf8");
+  const enc = Buffer.concat([cipher.update(plain), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return {
+    type: "alert",
+    iv: iv.toString("base64"),
+    data: enc.toString("base64"),
+    tag: tag.toString("base64"),
+  };
+}
+
+function safeTokenMatch(got) {
+  try {
+    const a = Buffer.from(got || "", "utf8");
+    const b = Buffer.from(APP_TOKEN, "utf8");
+    return a.length === b.length && timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
 
 const CFG = {
   pivotPeriod: 5,
@@ -77,7 +116,7 @@ function levels(dir, proximal, distal, a) {
   const pad = a * CFG.slPadAtr;
   const sl = dir === 1 ? distal - pad : distal + pad;
   const risk = Math.abs(entry - sl);
-  const tp = dir === 1 ? entry + risk * CFG.riskReward : entry - risk * riskReward;
+  const tp = dir === 1 ? entry + risk * CFG.riskReward : entry - risk * CFG.riskReward;
   return { entry, sl, tp };
 }
 
@@ -231,14 +270,30 @@ function setupPayload(s) {
 }
 
 async function pushNotify(payload) {
-  // ntfy topic publish (works anonymously)
+  // Encrypted envelope → ntfy (phone app decrypts). Plain title stays readable.
+  const envelope = encryptPayload(payload);
   await fetch(`${NTFY_SERVER}/${NTFY_TOPIC}`, {
     method: "POST",
-    headers: { Title: payload.title, Priority: "urgent", Tags: "chart_with_upwards_trend,moneybag" },
+    headers: {
+      Title: payload.title,
+      Priority: "urgent",
+      Tags: "chart_with_upwards_trend,moneybag",
+      "X-TRH-Encrypted": "aes-256-gcm",
+    },
+    body: JSON.stringify(envelope),
+  }).catch((e) => console.error("[ntfy encrypted]", e.message));
+
+  // Plaintext backup for anyone watching the topic in the free ntfy app
+  await fetch(`${NTFY_SERVER}/${NTFY_TOPIC}`, {
+    method: "POST",
+    headers: {
+      Title: payload.title,
+      Priority: "default",
+      Tags: "lock_with_ink_pen",
+    },
     body: payload.message,
   }).catch(() => {});
 
-  // GitHub issue → emails repo owner (radiarkazemi@gmail.com via GitHub notifications)
   if (process.env.GITHUB_TOKEN) {
     await fetch(`https://api.github.com/repos/radiarkazemi/forge-charts/issues`, {
       method: "POST",
@@ -258,6 +313,21 @@ async function pushNotify(payload) {
 let latestSetup = null;
 let lastScanAt = 0;
 const sseClients = new Set();
+const wsClients = new Set();
+
+function broadcastWsEncrypted(payload) {
+  const envelope = encryptPayload(payload);
+  const raw = JSON.stringify(envelope);
+  for (const ws of wsClients) {
+    if (ws.authed && ws.readyState === 1) {
+      try {
+        ws.send(raw);
+      } catch {
+        wsClients.delete(ws);
+      }
+    }
+  }
+}
 
 function broadcast(event, data) {
   const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -280,7 +350,13 @@ async function scanOnce() {
 
   const s = setups[setups.length - 1];
   const barsSince = bars.length - 1 - s.barIndex;
-  if (barsSince > 3) return;
+  // Live VPS polls every ~60s — keep a short window, but log what we saw.
+  if (barsSince > 5) {
+    console.log(
+      `[${new Date().toISOString()}] setup found but stale (${barsSince} bars ago) ${setupPayload(s).side} ENTRY ${fmt(s.entry)}`,
+    );
+    return;
+  }
 
   const state = loadState();
   if (state.lastAlertTime === s.barTime) return;
@@ -301,6 +377,7 @@ async function scanOnce() {
   state.latest = latestSetup;
   saveState(state);
   broadcast("setup", latestSetup);
+  broadcastWsEncrypted(payload);
 }
 
 const server = createServer((req, res) => {
@@ -325,6 +402,26 @@ const server = createServer((req, res) => {
     return;
   }
 
+  if (req.url === "/api/test-alert" && req.method === "GET") {
+    const payload = {
+      side: "LONG",
+      symbol: SYMBOL,
+      entry: 0,
+      sl: 0,
+      tp: 0,
+      barTime: Math.floor(Date.now() / 1000),
+      message: `${SYMBOL} 1m | TRH TEST ALERT\nIf you see this on your phone, encrypted tunnel works.`,
+      title: "TRH Test Alert",
+    };
+    latestSetup = { ...payload, at: Date.now() };
+    broadcast("setup", latestSetup);
+    broadcastWsEncrypted(payload);
+    pushNotify(payload).catch(() => {});
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, sent: true }));
+    return;
+  }
+
   if (req.url === "/events") {
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -342,8 +439,7 @@ const server = createServer((req, res) => {
     res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>TRH Alerts</title></head>
 <body style="font-family:system-ui;background:#111;color:#eee;padding:2rem">
 <h1>TRH Alert Server ✓</h1>
-<p>Mobile: alerts go to <b>${ALERT_EMAIL}</b> (Gmail push)</p>
-<p>Desktop: load the Chrome extension from <code>chrome-extension/</code> folder in this repo.</p>
+<p>Android: install TRH Alert APK — encrypted WebSocket tunnel</p>
 <p>Last scan: <span id="t">…</span></p>
 <pre id="s"></pre>
 <script>
@@ -361,7 +457,35 @@ if(Notification.permission!=='granted')Notification.requestPermission();
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`TRH server http://0.0.0.0:${PORT} email→${ALERT_EMAIL}`);
+  console.log(`TRH secure server http://0.0.0.0:${PORT} | encrypted WS /ws`);
   scanOnce().catch(console.error);
   setInterval(() => scanOnce().catch(console.error), POLL_SEC * 1000);
+});
+
+const wss = new WebSocketServer({ server, path: "/ws" });
+
+wss.on("connection", (ws) => {
+  ws.authed = false;
+  wsClients.add(ws);
+  ws.send(JSON.stringify({ type: "hello", secure: true, algo: "aes-256-gcm" }));
+
+  ws.on("message", (raw) => {
+    try {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type === "auth" && safeTokenMatch(msg.token)) {
+        ws.authed = true;
+        ws.send(JSON.stringify({ type: "auth_ok" }));
+        if (latestSetup) ws.send(JSON.stringify(encryptPayload(latestSetup)));
+        return;
+      }
+      if (!ws.authed) {
+        ws.send(JSON.stringify({ type: "auth_fail" }));
+        ws.close();
+      }
+    } catch {
+      ws.close();
+    }
+  });
+
+  ws.on("close", () => wsClients.delete(ws));
 });

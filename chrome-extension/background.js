@@ -49,7 +49,7 @@ function levels(dir, proximal, distal, a) {
   const pad = a * CFG.slPadAtr;
   const sl = dir === 1 ? distal - pad : distal + pad;
   const risk = Math.abs(entry - sl);
-  const tp = dir === 1 ? entry + risk * CFG.riskReward : entry - risk * riskReward;
+  const tp = dir === 1 ? entry + risk * CFG.riskReward : entry - risk * CFG.riskReward;
   return { entry, sl, tp };
 }
 
