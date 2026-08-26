@@ -1,4 +1,4 @@
-/** TRH classic SWEEP detector — mirrors the original Pine (Aug 25 sample) */
+/** TRH classic SWEEP detector — mirrors Pine (early arm + late skip) */
 
 export type Bar = { time: number; open: number; high: number; low: number; close: number };
 
@@ -13,6 +13,10 @@ export type TrhConfig = {
   cooldownBars: number;
   slPadAtr: number;
   riskReward: number;
+  /** When false (default), arm as soon as room width is valid — do not wait for top micro-break. */
+  requireImpulse: boolean;
+  /** If close already past mid-room by this many R, mark late. */
+  maxLateR: number;
 };
 
 export const DEFAULT_TRH_CONFIG: TrhConfig = {
@@ -26,6 +30,8 @@ export const DEFAULT_TRH_CONFIG: TrhConfig = {
   cooldownBars: 50,
   slPadAtr: 0.02,
   riskReward: 2.4,
+  requireImpulse: false,
+  maxLateR: 0.35,
 };
 
 export type TrhSetup = {
@@ -38,6 +44,8 @@ export type TrhSetup = {
   barIndex: number;
   barTime: number;
   mode: "sweep";
+  late: boolean;
+  chaseR: number;
 };
 
 type Pending = {
@@ -119,7 +127,51 @@ function nextLiqLow(pivLo: { price: number }[], from: number, minDist: number) {
   return best;
 }
 
-/** Classic SWEEP scan — same logic as the restored Pine script. */
+function pushSetup(
+  setups: TrhSetup[],
+  dir: 1 | -1,
+  proximal: number,
+  distal: number,
+  a: number,
+  cfg: TrhConfig,
+  pivHi: { price: number }[],
+  pivLo: { price: number }[],
+  i: number,
+  b: Bar,
+) {
+  const lv = levels(dir, proximal, distal, a, cfg);
+  const liq =
+    dir === 1
+      ? nextLiqHigh(pivHi, lv.entry, lv.risk * 1.5)
+      : nextLiqLow(pivLo, lv.entry, lv.risk * 1.5);
+  const tp =
+    liq !== null
+      ? dir === 1
+        ? Math.max(lv.tp, liq)
+        : Math.min(lv.tp, liq)
+      : lv.tp;
+  const chaseR =
+    lv.risk > 0
+      ? dir === 1
+        ? (b.close - lv.entry) / lv.risk
+        : (lv.entry - b.close) / lv.risk
+      : 0;
+  setups.push({
+    dir,
+    entry: lv.entry,
+    sl: lv.sl,
+    tp,
+    distal,
+    proximal,
+    barIndex: i,
+    barTime: b.time,
+    mode: "sweep",
+    late: chaseR > cfg.maxLateR,
+    chaseR,
+  });
+}
+
+/** Classic SWEEP scan — early arm (no impulse wait) + late flag. */
 export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG): TrhSetup[] {
   const setups: TrhSetup[] = [];
   const p = cfg.pivotPeriod;
@@ -174,7 +226,6 @@ export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG):
 
     if (!pending) continue;
 
-    // Pine: pendBaseHigh[1] after update — capture base before this bar extends it
     const prevBaseHigh = pending.baseHigh;
     const prevBaseLow = pending.baseLow;
 
@@ -196,21 +247,10 @@ export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG):
       const width = proximal - distal;
       const microBreak =
         b.close > b.open && (b.high >= prevBaseHigh || b.close >= distal + width * 0.7);
-      if (width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak) {
-        const lv = levels(1, proximal, distal, a, cfg);
-        const liq = nextLiqHigh(pivHi, lv.entry, lv.risk * 1.5);
-        const tp = liq !== null ? Math.max(lv.tp, liq) : lv.tp;
-        setups.push({
-          dir: 1,
-          entry: lv.entry,
-          sl: lv.sl,
-          tp,
-          distal,
-          proximal,
-          barIndex: i,
-          barTime: b.time,
-          mode: "sweep",
-        });
+      const widthOk = width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr;
+      const confirm = widthOk && (!cfg.requireImpulse || microBreak);
+      if (confirm) {
+        pushSetup(setups, 1, proximal, distal, a, cfg, pivHi, pivLo, i, b);
         lastSetupBar = i;
         pending = null;
       }
@@ -220,21 +260,10 @@ export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG):
       const width = distal - proximal;
       const microBreak =
         b.close < b.open && (b.low <= prevBaseLow || b.close <= distal - width * 0.7);
-      if (width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak) {
-        const lv = levels(-1, proximal, distal, a, cfg);
-        const liq = nextLiqLow(pivLo, lv.entry, lv.risk * 1.5);
-        const tp = liq !== null ? Math.min(lv.tp, liq) : lv.tp;
-        setups.push({
-          dir: -1,
-          entry: lv.entry,
-          sl: lv.sl,
-          tp,
-          distal,
-          proximal,
-          barIndex: i,
-          barTime: b.time,
-          mode: "sweep",
-        });
+      const widthOk = width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr;
+      const confirm = widthOk && (!cfg.requireImpulse || microBreak);
+      if (confirm) {
+        pushSetup(setups, -1, proximal, distal, a, cfg, pivHi, pivLo, i, b);
         lastSetupBar = i;
         pending = null;
       }

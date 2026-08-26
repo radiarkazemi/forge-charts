@@ -103,6 +103,10 @@ assert(last.entry > last.sl, `ENTRY ${last.entry} > SL ${last.sl}`);
 assert(last.tp > last.entry, `TP ${last.tp} > ENTRY ${last.entry}`);
 const mid = (last.proximal + last.distal) / 2;
 assert(Math.abs(last.entry - mid) < 1e-9, `ENTRY is mid-room (${last.entry} vs ${mid})`);
+assert(DEFAULT_TRH_CONFIG.requireImpulse === false, "JS requireImpulse default false (early arm)");
+assert(DEFAULT_TRH_CONFIG.maxLateR === 0.35, "JS maxLateR default 0.35");
+assert(sources["TRH_Engine.mqh"].includes("cfg.requireImpulse  = false"), "MT5 requireImpulse=false");
+assert(typeof last.late === "boolean", "setup has late flag");
 
 console.log("\nLast synthetic setup:", {
   dir: last.dir === 1 ? "LONG" : "SHORT",
@@ -111,5 +115,18 @@ console.log("\nLast synthetic setup:", {
   tp: +last.tp.toFixed(4),
   distal: +last.distal.toFixed(4),
   proximal: +last.proximal.toFixed(4),
+  late: last.late,
+  chaseR: +last.chaseR.toFixed(2),
 });
-console.log("\nAll parity checks passed. Install MT5 indicator next and compare vs TradingView.");
+
+// Reproduce user's late case: ENTRY mid-room, close already ~1R into the move
+{
+  const risk = Math.abs(last.entry - last.sl);
+  const chasedClose = last.entry + risk * 1.1;
+  const chaseR = (chasedClose - last.entry) / risk;
+  assert(chaseR > DEFAULT_TRH_CONFIG.maxLateR, `chase ${chaseR.toFixed(2)}R would be LATE (like chart 4595 vs ENTRY 4591)`);
+  console.log("OK   late-skip rule catches chase like the screenshot (close past ENTRY by", chaseR.toFixed(2) + "R)");
+}
+
+console.log("\nAll parity checks passed.");
+

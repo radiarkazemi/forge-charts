@@ -8,7 +8,9 @@ const DEFAULT_TRH_CONFIG = {
   maxRoomAtr: 3.5,
   cooldownBars: 50,
   slPadAtr: 0.02,
-  riskReward: 2.4
+  riskReward: 2.4,
+  requireImpulse: false,
+  maxLateR: 0.35
 };
 function atr(bars, i, len = 14) {
   if (i < 1) return bars[i].high - bars[i].low;
@@ -67,6 +69,25 @@ function nextLiqLow(pivLo, from, minDist) {
   }
   return best;
 }
+function pushSetup(setups, dir, proximal, distal, a, cfg, pivHi, pivLo, i, b) {
+  const lv = levels(dir, proximal, distal, a, cfg);
+  const liq = dir === 1 ? nextLiqHigh(pivHi, lv.entry, lv.risk * 1.5) : nextLiqLow(pivLo, lv.entry, lv.risk * 1.5);
+  const tp = liq !== null ? (dir === 1 ? Math.max(lv.tp, liq) : Math.min(lv.tp, liq)) : lv.tp;
+  const chaseR = lv.risk > 0 ? (dir === 1 ? (b.close - lv.entry) / lv.risk : (lv.entry - b.close) / lv.risk) : 0;
+  setups.push({
+    dir,
+    entry: lv.entry,
+    sl: lv.sl,
+    tp,
+    distal,
+    proximal,
+    barIndex: i,
+    barTime: b.time,
+    mode: "sweep",
+    late: chaseR > cfg.maxLateR,
+    chaseR
+  });
+}
 function scanTrhSetups(bars, cfg = DEFAULT_TRH_CONFIG) {
   const setups = [];
   const p = cfg.pivotPeriod;
@@ -118,21 +139,10 @@ function scanTrhSetups(bars, cfg = DEFAULT_TRH_CONFIG) {
       const proximal = pending.baseHigh;
       const width = proximal - distal;
       const microBreak = b.close > b.open && (b.high >= prevBaseHigh || b.close >= distal + width * 0.7);
-      if (width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak) {
-        const lv = levels(1, proximal, distal, a, cfg);
-        const liq = nextLiqHigh(pivHi, lv.entry, lv.risk * 1.5);
-        const tp = liq !== null ? Math.max(lv.tp, liq) : lv.tp;
-        setups.push({
-          dir: 1,
-          entry: lv.entry,
-          sl: lv.sl,
-          tp,
-          distal,
-          proximal,
-          barIndex: i,
-          barTime: b.time,
-          mode: "sweep"
-        });
+      const widthOk = width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr;
+      const confirm = widthOk && (!cfg.requireImpulse || microBreak);
+      if (confirm) {
+        pushSetup(setups, 1, proximal, distal, a, cfg, pivHi, pivLo, i, b);
         lastSetupBar = i;
         pending = null;
       }
@@ -141,21 +151,10 @@ function scanTrhSetups(bars, cfg = DEFAULT_TRH_CONFIG) {
       const proximal = pending.baseLow;
       const width = distal - proximal;
       const microBreak = b.close < b.open && (b.low <= prevBaseLow || b.close <= distal - width * 0.7);
-      if (width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak) {
-        const lv = levels(-1, proximal, distal, a, cfg);
-        const liq = nextLiqLow(pivLo, lv.entry, lv.risk * 1.5);
-        const tp = liq !== null ? Math.min(lv.tp, liq) : lv.tp;
-        setups.push({
-          dir: -1,
-          entry: lv.entry,
-          sl: lv.sl,
-          tp,
-          distal,
-          proximal,
-          barIndex: i,
-          barTime: b.time,
-          mode: "sweep"
-        });
+      const widthOk = width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr;
+      const confirm = widthOk && (!cfg.requireImpulse || microBreak);
+      if (confirm) {
+        pushSetup(setups, -1, proximal, distal, a, cfg, pivHi, pivLo, i, b);
         lastSetupBar = i;
         pending = null;
       }

@@ -13,9 +13,10 @@ Classic **SWEEP** model from the real XAUUSD sample: Tue 25 Aug 2026 **04:19 UTC
 ## Model
 
 1. Large selloff/rally into a **major pivot**
-2. **Sweep** that pivot + reclaim close
+2. **Sweep** that pivot + reclaim close → early **WATCH** alert
 3. Build base for ≥ N bars → room = sweep extreme ↔ base extreme
-4. **ENTRY = mid-room**, **SL = distal ± pad**, **TP = R:R (default 2.4)** or next opposing pivot
+4. **ARM mid-room ENTRY as soon as room width is valid** (default — do not wait for top micro-break)
+5. If price already chased past ENTRY by > `maxLateR` (default 0.35R) → mark **LATE / skip** (no fake fill)
 
 ## Install
 
@@ -29,9 +30,13 @@ Classic **SWEEP** model from the real XAUUSD sample: Tue 25 Aug 2026 **04:19 UTC
 
 - Pivot `5` · Context `1.2 ATR` · Base bars `8`  
 - Room width `0.8–3.5 ATR` · R:R **`2.4`** · SL pad `0.02 ATR`  
+- **Wait for impulse = OFF** (earlier arm) · **Max late = 0.35R**  
 - Only last setup ON  
 
 ## Alerts
 
-TradingView chart alerts need a paid plan.  
-Free phone push → [`FREE-ALERTS.md`](./FREE-ALERTS.md)
+- `TRH WATCH` — sweep just happened, room building (place limit soon)  
+- `TRH room ARMED` — mid-room ENTRY/SL/TP ready  
+- `TRH LATE` — primary already gone; do not chase  
+- TradingView chart alerts need a paid plan. Free phone push → [`FREE-ALERTS.md`](./FREE-ALERTS.md)  
+  Phone alerts also skip LATE setups.

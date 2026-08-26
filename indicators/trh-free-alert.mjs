@@ -186,21 +186,38 @@ async function tick() {
     );
     return;
   }
+  if (state.lastAlertTime === latest.barTime) {
+    console.log("[trh] already alerted this setup");
+    return;
+  }
+
   const risk = Math.abs(latest.entry - latest.sl);
   if (risk < minRisk) {
     console.log(`[trh] risk ${risk.toFixed(2)} < min ${minRisk} — skip noisy room`);
     return;
   }
-  // Phone alerts: classic SWEEP only by default (matches cleaner chart hunts).
-  // Set TRH_ALERT_MODES=sweep,level_reject to also alert level-rejects.
+  // Skip chase: mid-room already gone (same as Pine LATE)
+  const maxLateR = Number(process.env.TRH_MAX_LATE_R || 0.35);
+  const lastBar = bars[bars.length - 1];
+  const chaseR =
+    risk > 0
+      ? latest.dir === 1
+        ? (lastBar.close - latest.entry) / risk
+        : (latest.entry - lastBar.close) / risk
+      : 0;
+  const isLate = latest.late === true || chaseR > maxLateR;
+  if (isLate) {
+    console.log(
+      `[trh] LATE chaseR=${chaseR.toFixed(2)} > ${maxLateR} (close ${fmt(lastBar.close)} vs ENTRY ${fmt(latest.entry)}) — skip phone alert`,
+    );
+    state.lastAlertTime = latest.barTime;
+    saveState(state);
+    return;
+  }
   const modes = (process.env.TRH_ALERT_MODES || "sweep").split(",").map((x) => x.trim());
   const mode = latest.mode || "sweep";
   if (!modes.includes(mode)) {
     console.log(`[trh] mode ${mode} not in alert modes [${modes}] — skip`);
-    return;
-  }
-  if (state.lastAlertTime === latest.barTime) {
-    console.log("[trh] already alerted this setup");
     return;
   }
 

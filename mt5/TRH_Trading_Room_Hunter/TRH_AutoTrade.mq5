@@ -56,6 +56,8 @@ void BuildConfig(TrhConfig &cfg)
    cfg.slPadAtr        = InpSlPadAtr;
    cfg.riskReward      = InpRiskReward;
    cfg.useLiquidityTP  = InpUseLiquidityTP;
+   cfg.requireImpulse  = false;
+   cfg.maxLateR        = 0.35;
 }
 
 int CountOurOrders()
