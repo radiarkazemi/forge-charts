@@ -19,31 +19,42 @@ if ! command -v cloudflared >/dev/null 2>&1; then
   bash scripts/install-cloudflared.sh
 fi
 
+# Fresh logs so we never reuse a dead tunnel URL
+: > "$LOG_DIR/server.log"
+: > "$LOG_DIR/tunnel.log"
+
 # Restart server in tmux
 SESSION="trh-alert-server"
 tmux -f /exec-daemon/tmux.portal.conf kill-session -t "$SESSION" 2>/dev/null || true
+sleep 1
 tmux -f /exec-daemon/tmux.portal.conf new-session -d -s "$SESSION" -c "$ROOT" -- \
   "node indicators/trh-alert-server.mjs 2>&1 | tee -a '$LOG_DIR/server.log'"
 
 # Restart tunnel in tmux
 TSESSION="trh-cloudflared"
 tmux -f /exec-daemon/tmux.portal.conf kill-session -t "$TSESSION" 2>/dev/null || true
+sleep 1
 tmux -f /exec-daemon/tmux.portal.conf new-session -d -s "$TSESSION" -c "$ROOT" -- \
   "cloudflared tunnel --url http://127.0.0.1:${PORT} 2>&1 | tee -a '$LOG_DIR/tunnel.log'"
 
 echo "Waiting for Cloudflare tunnel URL..."
-for i in $(seq 1 30); do
-  URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$LOG_DIR/tunnel.log" 2>/dev/null | head -1 || true)
+for i in $(seq 1 45); do
+  # Take the *latest* URL from this run's log (not a stale previous one)
+  URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$LOG_DIR/tunnel.log" 2>/dev/null | tail -1 || true)
   if [[ -n "$URL" ]]; then
-    echo "$URL" > "$TUNNEL_FILE"
-    echo "Tunnel URL: $URL"
-    node scripts/embed-android-config.mjs
-    echo "Server health:"
-    curl -sf "http://127.0.0.1:${PORT}/health" || true
-    exit 0
+    # Wait until DNS / edge is reachable
+    if curl -sf --max-time 8 "$URL/health" >/dev/null 2>&1; then
+      echo "$URL" > "$TUNNEL_FILE"
+      echo "Tunnel URL: $URL"
+      node scripts/embed-android-config.mjs
+      echo "Server health:"
+      curl -sf "http://127.0.0.1:${PORT}/health" || true
+      echo
+      exit 0
+    fi
   fi
   sleep 1
 done
 
-echo "Tunnel URL not found — check $LOG_DIR/tunnel.log"
+echo "Tunnel URL not found / not reachable — check $LOG_DIR/tunnel.log"
 exit 1

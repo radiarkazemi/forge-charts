@@ -20,9 +20,11 @@
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { createCipheriv, randomBytes } from "crypto";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const STATE_FILE = join(__dir, ".trh-alert-state.json");
+const SECRETS_FILE = join(__dir, ".trh-secrets.json");
 
 const POLL_SEC = Number(process.env.TRH_POLL_SEC || 60);
 const NTFY_TOPIC = process.env.NTFY_TOPIC || "trh-forge-radiarkazemi-bc13";
@@ -33,6 +35,33 @@ const TELEGRAM_CHAT = process.env.TELEGRAM_CHAT_ID || "";
 const PRICE_OFFSET = Number(process.env.TRH_PRICE_OFFSET || 56);
 const SYMBOL_LABEL = process.env.TRH_SYMBOL || "XAUUSD";
 const RUN_ONCE = process.argv.includes("--once");
+
+function loadSecrets() {
+  if (!existsSync(SECRETS_FILE)) return null;
+  try {
+    return JSON.parse(readFileSync(SECRETS_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+const SECRETS = loadSecrets();
+
+function encryptPayload(obj) {
+  if (!SECRETS?.secretKey) return null;
+  const key = Buffer.from(SECRETS.secretKey, "hex");
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const plain = Buffer.from(JSON.stringify(obj), "utf8");
+  const enc = Buffer.concat([cipher.update(plain), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return {
+    type: "alert",
+    iv: iv.toString("base64"),
+    data: enc.toString("base64"),
+    tag: tag.toString("base64"),
+  };
+}
 
 // ── minimal TRH engine (inline for .mjs — keep in sync with trh-engine.ts) ──
 
@@ -258,8 +287,27 @@ function setupMessage(s) {
   );
 }
 
-async function notifyNtfy(title, message) {
+async function notifyNtfy(title, message, payloadObj) {
   if (!NTFY_TOPIC) return false;
+  let ok = false;
+  const envelope = encryptPayload({
+    title,
+    message,
+    ...(payloadObj || {}),
+  });
+  if (envelope) {
+    const resEnc = await fetch(`${NTFY_SERVER}/${NTFY_TOPIC}`, {
+      method: "POST",
+      headers: {
+        Title: title,
+        Priority: "urgent",
+        Tags: "chart_with_upwards_trend,moneybag",
+        "X-TRH-Encrypted": "aes-256-gcm",
+      },
+      body: JSON.stringify(envelope),
+    });
+    ok = resEnc.ok || ok;
+  }
   const res = await fetch(`${NTFY_SERVER}/${NTFY_TOPIC}`, {
     method: "POST",
     headers: {
@@ -269,7 +317,7 @@ async function notifyNtfy(title, message) {
     },
     body: message,
   });
-  return res.ok;
+  return res.ok || ok;
 }
 
 async function notifyTelegram(message) {
@@ -295,11 +343,20 @@ async function tick() {
   const latest = setups[setups.length - 1];
   const state = loadState();
 
-  // Only alert if setup bar is recent (last 3 bars) and not already alerted
-  const lastBar = bars[bars.length - 1];
+  // GitHub Actions cron is often delayed (minutes–tens of minutes), so allow a
+  // wider window for --once. Live pollers keep a tight 3-bar window.
+  const maxAgeBars = RUN_ONCE ? Number(process.env.TRH_MAX_AGE_BARS || 45) : 2;
   const barsSinceSetup = bars.length - 1 - latest.barIndex;
-  if (barsSinceSetup > 2) return;
-  if (state.lastAlertTime === latest.barTime) return;
+  if (barsSinceSetup > maxAgeBars) {
+    console.log(
+      `[trh] latest setup is ${barsSinceSetup} bars old (max ${maxAgeBars}) — skip`,
+    );
+    return;
+  }
+  if (state.lastAlertTime === latest.barTime) {
+    console.log("[trh] already alerted this setup");
+    return;
+  }
 
   const msg = setupMessage(latest);
   const title = `TRH ${latest.dir === 1 ? "LONG" : "SHORT"} Hunt`;
@@ -308,7 +365,15 @@ async function tick() {
 
   let sent = false;
   if (NTFY_TOPIC) {
-    sent = (await notifyNtfy(title, msg)) || sent;
+    sent =
+      (await notifyNtfy(title, msg, {
+        side: latest.dir === 1 ? "LONG" : "SHORT",
+        symbol: SYMBOL_LABEL,
+        entry: latest.entry,
+        sl: latest.sl,
+        tp: latest.tp,
+        barTime: latest.barTime,
+      })) || sent;
     console.log("[trh] ntfy →", sent ? "ok" : "fail");
   }
   if (TELEGRAM_BOT) {

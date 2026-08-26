@@ -5,6 +5,6 @@
     <string name="alert_channel">TRH trade alerts</string>
     <string name="service_running">Listening for encrypted TRH setups…</string>
     <string name="status_connected">Connected — waiting for hunts</string>
-    <string name="status_connecting">Connecting to secure tunnel…</string>
+    <string name="status_connecting">Connecting to secure alert feed…</string>
     <string name="status_disconnected">Disconnected — retrying…</string>
 </resources>

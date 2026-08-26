@@ -116,7 +116,7 @@ function levels(dir, proximal, distal, a) {
   const pad = a * CFG.slPadAtr;
   const sl = dir === 1 ? distal - pad : distal + pad;
   const risk = Math.abs(entry - sl);
-  const tp = dir === 1 ? entry + risk * CFG.riskReward : entry - risk * riskReward;
+  const tp = dir === 1 ? entry + risk * CFG.riskReward : entry - risk * CFG.riskReward;
   return { entry, sl, tp };
 }
 
@@ -270,14 +270,30 @@ function setupPayload(s) {
 }
 
 async function pushNotify(payload) {
-  // ntfy topic publish (works anonymously)
+  // Encrypted envelope → ntfy (phone app decrypts). Plain title stays readable.
+  const envelope = encryptPayload(payload);
   await fetch(`${NTFY_SERVER}/${NTFY_TOPIC}`, {
     method: "POST",
-    headers: { Title: payload.title, Priority: "urgent", Tags: "chart_with_upwards_trend,moneybag" },
+    headers: {
+      Title: payload.title,
+      Priority: "urgent",
+      Tags: "chart_with_upwards_trend,moneybag",
+      "X-TRH-Encrypted": "aes-256-gcm",
+    },
+    body: JSON.stringify(envelope),
+  }).catch((e) => console.error("[ntfy encrypted]", e.message));
+
+  // Plaintext backup for anyone watching the topic in the free ntfy app
+  await fetch(`${NTFY_SERVER}/${NTFY_TOPIC}`, {
+    method: "POST",
+    headers: {
+      Title: payload.title,
+      Priority: "default",
+      Tags: "lock_with_ink_pen",
+    },
     body: payload.message,
   }).catch(() => {});
 
-  // GitHub issue → emails repo owner (radiarkazemi@gmail.com via GitHub notifications)
   if (process.env.GITHUB_TOKEN) {
     await fetch(`https://api.github.com/repos/radiarkazemi/forge-charts/issues`, {
       method: "POST",
@@ -334,7 +350,13 @@ async function scanOnce() {
 
   const s = setups[setups.length - 1];
   const barsSince = bars.length - 1 - s.barIndex;
-  if (barsSince > 3) return;
+  // Live VPS polls every ~60s — keep a short window, but log what we saw.
+  if (barsSince > 5) {
+    console.log(
+      `[${new Date().toISOString()}] setup found but stale (${barsSince} bars ago) ${setupPayload(s).side} ENTRY ${fmt(s.entry)}`,
+    );
+    return;
+  }
 
   const state = loadState();
   if (state.lastAlertTime === s.barTime) return;
@@ -377,6 +399,26 @@ const server = createServer((req, res) => {
     const state = loadState();
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ latest: latestSetup || state.latest, lastScanAt }));
+    return;
+  }
+
+  if (req.url === "/api/test-alert" && req.method === "GET") {
+    const payload = {
+      side: "LONG",
+      symbol: SYMBOL,
+      entry: 0,
+      sl: 0,
+      tp: 0,
+      barTime: Math.floor(Date.now() / 1000),
+      message: `${SYMBOL} 1m | TRH TEST ALERT\nIf you see this on your phone, encrypted tunnel works.`,
+      title: "TRH Test Alert",
+    };
+    latestSetup = { ...payload, at: Date.now() };
+    broadcast("setup", latestSetup);
+    broadcastWsEncrypted(payload);
+    pushNotify(payload).catch(() => {});
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, sent: true }));
     return;
   }
 

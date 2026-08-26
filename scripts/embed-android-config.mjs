@@ -1,12 +1,11 @@
 #!/usr/bin/env node
-/** Embed secrets + tunnel URL into Android Config.kt */
+/** Embed secrets + ntfy WS URL into Android Config.kt */
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const secretsPath = join(root, "indicators/.trh-secrets.json");
-const tunnelPath = join(root, "indicators/.trh-tunnel-url");
 const outPath = join(root, "android-trh-alert/app/src/main/java/com/forge/trhalert/Config.kt");
 
 if (!existsSync(secretsPath)) {
@@ -15,24 +14,16 @@ if (!existsSync(secretsPath)) {
 }
 
 const secrets = JSON.parse(readFileSync(secretsPath, "utf8"));
-const serverUrl = existsSync(tunnelPath)
-  ? readFileSync(tunnelPath, "utf8").trim()
-  : process.env.TRH_SERVER_URL || "wss://YOUR-TUNNEL.trycloudflare.com/ws";
-
-function toWsUrl(url) {
-  let u = url.trim();
-  if (!u.endsWith("/ws")) u = u.replace(/\/$/, "") + "/ws";
-  if (u.startsWith("https://")) u = "wss://" + u.slice(8);
-  else if (u.startsWith("http://")) u = "ws://" + u.slice(7);
-  else if (!u.startsWith("ws")) u = "wss://" + u;
-  return u;
-}
+const topic = process.env.NTFY_TOPIC || "trh-forge-radiarkazemi-bc13";
+const ntfyServer = (process.env.NTFY_SERVER || "https://ntfy.sh").replace(/\/$/, "");
+const wsUrl = ntfyServer.replace(/^http/, "ws") + `/${topic}/ws`;
 
 const kt = `package com.forge.trhalert
 
 /** Auto-generated — do not edit. Run: node scripts/embed-android-config.mjs */
 object Config {
-    const val WS_URL = "${toWsUrl(serverUrl)}"
+    // Stable public channel (no VPS tunnel required). Topic name is the secret.
+    const val WS_URL = "${wsUrl}"
     const val APP_TOKEN = "${secrets.appToken}"
     const val SECRET_KEY_HEX = "${secrets.secretKey}"
 }
@@ -40,4 +31,4 @@ object Config {
 
 writeFileSync(outPath, kt);
 console.log("Wrote", outPath);
-console.log("WS_URL =", toWsUrl(serverUrl));
+console.log("WS_URL =", wsUrl);

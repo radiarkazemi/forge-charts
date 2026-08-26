@@ -13,6 +13,10 @@ import okhttp3.WebSocketListener
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
+/**
+ * Listens to the encrypted ntfy WebSocket feed.
+ * VPS publishes AES-256-GCM envelopes; this service decrypts and notifies.
+ */
 class TrhAlertService : Service() {
     companion object {
         const val ACTION_STATUS = "com.forge.trhalert.STATUS"
@@ -25,9 +29,10 @@ class TrhAlertService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var ws: WebSocket? = null
     private var reconnectAttempt = 0
+    private val seenIds = LinkedHashSet<String>()
 
     private val client = OkHttpClient.Builder()
-        .pingInterval(30, TimeUnit.SECONDS)
+        .pingInterval(45, TimeUnit.SECONDS)
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
@@ -61,11 +66,12 @@ class TrhAlertService : Service() {
         ws = client.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 reconnectAttempt = 0
-                webSocket.send(JSONObject().put("type", "auth").put("token", Config.APP_TOKEN).toString())
+                broadcastStatus(getString(R.string.status_connected))
+                updateForeground(getString(R.string.status_connected))
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                handleMessage(text)
+                handleNtfyMessage(text)
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -83,26 +89,39 @@ class TrhAlertService : Service() {
         })
     }
 
-    private fun handleMessage(text: String) {
+    private fun handleNtfyMessage(text: String) {
         try {
-            val json = JSONObject(text)
-            when (json.optString("type")) {
-                "hello" -> Unit
-                "auth_ok" -> {
-                    broadcastStatus(getString(R.string.status_connected))
-                    updateForeground(getString(R.string.status_connected))
-                }
-                "auth_fail" -> {
-                    broadcastStatus("Auth failed — check app build")
-                    scheduleReconnect(30_000)
-                }
-                "alert" -> {
-                    val payload = Crypto.decryptEnvelope(json)
+            val outer = JSONObject(text)
+            val event = outer.optString("event")
+            if (event != "message") return
+
+            val id = outer.optString("id")
+            if (id.isNotEmpty()) {
+                if (seenIds.contains(id)) return
+                seenIds.add(id)
+                while (seenIds.size > 100) seenIds.remove(seenIds.first())
+            }
+
+            val body = outer.optString("message")
+            if (body.isEmpty()) return
+
+            // Encrypted envelope from VPS
+            if (body.trimStart().startsWith("{") && body.contains("\"iv\"") && body.contains("\"tag\"")) {
+                val envelope = JSONObject(body)
+                if (envelope.optString("type") == "alert") {
+                    val payload = Crypto.decryptEnvelope(envelope)
                     onAlert(payload)
+                    return
                 }
             }
+
+            // Plaintext backup (title + message from ntfy)
+            val title = outer.optString("title", "TRH Setup")
+            if (body.contains("TRH") || title.contains("TRH")) {
+                onAlert(JSONObject().put("title", title).put("message", body))
+            }
         } catch (e: Exception) {
-            broadcastStatus("Decrypt error: ${e.message}")
+            broadcastStatus("Parse error: ${e.message}")
         }
     }
 
