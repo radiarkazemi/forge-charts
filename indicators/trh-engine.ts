@@ -1,4 +1,4 @@
-/** TRH detector — mirrors Pine (classic sweep + Aug 26 level-reject) */
+/** TRH classic SWEEP detector — mirrors the original Pine (Aug 25 sample) */
 
 export type Bar = { time: number; open: number; high: number; low: number; close: number };
 
@@ -7,37 +7,25 @@ export type TrhConfig = {
   minContextAtr: number;
   minSweepAtr: number;
   baseConfirmBars: number;
-  rejectConfirmBars: number;
   maxBaseBars: number;
   minRoomAtr: number;
   maxRoomAtr: number;
   cooldownBars: number;
   slPadAtr: number;
   riskReward: number;
-  minLevelTouches: number;
-  levelTouchTolAtr: number;
-  enableLevelReject: boolean;
-  blockCounterTrend: boolean;
-  enableSwingReject: boolean;
 };
 
 export const DEFAULT_TRH_CONFIG: TrhConfig = {
   pivotPeriod: 5,
   minContextAtr: 1.2,
   minSweepAtr: 0.05,
-  baseConfirmBars: 6,
-  rejectConfirmBars: 3,
+  baseConfirmBars: 8,
   maxBaseBars: 40,
-  minRoomAtr: 0.6,
+  minRoomAtr: 0.8,
   maxRoomAtr: 3.5,
-  cooldownBars: 40,
+  cooldownBars: 50,
   slPadAtr: 0.02,
   riskReward: 2.4,
-  minLevelTouches: 2,
-  levelTouchTolAtr: 0.25,
-  enableLevelReject: true,
-  blockCounterTrend: true,
-  enableSwingReject: false,
 };
 
 export type TrhSetup = {
@@ -49,7 +37,7 @@ export type TrhSetup = {
   proximal: number;
   barIndex: number;
   barTime: number;
-  mode: "sweep" | "level_reject";
+  mode: "sweep";
 };
 
 type Pending = {
@@ -59,8 +47,6 @@ type Pending = {
   bar: number;
   baseHigh: number;
   baseLow: number;
-  mode: 0 | 1;
-  needBars: number;
 };
 
 function atr(bars: Bar[], i: number, len = 14): number {
@@ -108,15 +94,6 @@ function lastPivot(
   return best;
 }
 
-function touchCount(bars: Bar[], i: number, level: number, lookback: number, tol: number) {
-  let touches = 0;
-  const start = Math.max(0, i - lookback);
-  for (let k = start; k < i; k++) {
-    if (bars[k].high >= level - tol && bars[k].low <= level + tol) touches++;
-  }
-  return touches;
-}
-
 function levels(dir: 1 | -1, proximal: number, distal: number, a: number, cfg: TrhConfig) {
   const entry = (proximal + distal) / 2;
   const pad = a * cfg.slPadAtr;
@@ -142,6 +119,7 @@ function nextLiqLow(pivLo: { price: number }[], from: number, minDist: number) {
   return best;
 }
 
+/** Classic SWEEP scan — same logic as the restored Pine script. */
 export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG): TrhSetup[] {
   const setups: TrhSetup[] = [];
   const p = cfg.pivotPeriod;
@@ -150,8 +128,6 @@ export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG):
 
   let pending: Pending | null = null;
   let lastSetupBar = -9999;
-  let lastBearRejectBar = -9999;
-  let lastBullRejectBar = -9999;
 
   for (let i = 0; i < bars.length; i++) {
     const b = bars[i];
@@ -161,18 +137,15 @@ export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG):
     const ph = pivotHigh(bars, i - p, p);
     if (pl !== null) {
       pivLo.push({ price: pl, bar: i - p });
-      if (pivLo.length > 40) pivLo.shift();
+      if (pivLo.length > 30) pivLo.shift();
     }
     if (ph !== null) {
       pivHi.push({ price: ph, bar: i - p });
-      if (pivHi.length > 40) pivHi.shift();
+      if (pivHi.length > 30) pivHi.shift();
     }
 
-    const huntLo = lastPivot(pivLo, i, 120, p, true);
-    const huntHi = lastPivot(pivHi, i, 120, p, false);
-    const tol = a * cfg.levelTouchTolAtr;
-    const strongLo = huntLo !== null && touchCount(bars, i, huntLo, 80, tol) >= cfg.minLevelTouches;
-    const strongHi = huntHi !== null && touchCount(bars, i, huntHi, 80, tol) >= cfg.minLevelTouches;
+    const huntLo = lastPivot(pivLo, i, 80, p, true);
+    const huntHi = lastPivot(pivHi, i, 80, p, false);
 
     const slice = bars.slice(Math.max(0, i - 40), i);
     const priorHigh = slice.length ? Math.max(...slice.map((x) => x.high)) : b.high;
@@ -191,100 +164,13 @@ export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG):
       b.close < b.open &&
       b.high - priorLow >= a * cfg.minContextAtr;
 
-    const bullLevelReject =
-      cfg.enableLevelReject &&
-      ((strongLo &&
-        huntLo !== null &&
-        b.low <= huntLo + tol &&
-        b.low < huntLo + a * 0.05 &&
-        b.close > huntLo &&
-        b.close > b.open &&
-        b.close - b.open >= a * 0.08) ||
-        (cfg.enableSwingReject &&
-          (() => {
-            const swingLo = Math.min(...bars.slice(Math.max(0, i - 20), i).map((x) => x.low));
-            return (
-              b.low <= swingLo + a * 0.1 &&
-              b.close > b.open &&
-              b.close - b.low >= a * 0.45 &&
-              b.close > (b.high + b.low) * 0.5
-            );
-          })()));
-    const bearLevelReject =
-      cfg.enableLevelReject &&
-      ((strongHi &&
-        huntHi !== null &&
-        b.high >= huntHi - tol &&
-        b.high > huntHi - a * 0.05 &&
-        b.close < huntHi &&
-        b.close < b.open &&
-        b.open - b.close >= a * 0.08) ||
-        (cfg.enableSwingReject &&
-          (() => {
-            const swingHi = Math.max(...bars.slice(Math.max(0, i - 20), i).map((x) => x.high));
-            return (
-              b.high >= swingHi - a * 0.1 &&
-              b.close < b.open &&
-              b.high - b.close >= a * 0.45 &&
-              b.close < (b.high + b.low) * 0.5
-            );
-          })()));
-
-    if (bearLevelReject) lastBearRejectBar = i;
-    if (bullLevelReject) lastBullRejectBar = i;
-
-    const blockLong = cfg.blockCounterTrend && i - lastBearRejectBar <= 25;
-    const blockShort = cfg.blockCounterTrend && i - lastBullRejectBar <= 25;
     const canStart = !pending && i - lastSetupBar >= cfg.cooldownBars;
 
-    if (canStart && bearLevelReject && !blockShort) {
-      pending = {
-        dir: -1,
-        distal: b.high,
-        hunt: huntHi ?? b.high,
-        bar: i,
-        baseHigh: b.high,
-        baseLow: b.low,
-        mode: 1,
-        needBars: cfg.rejectConfirmBars,
-      };
-    } else if (canStart && bullLevelReject && !blockLong) {
-      pending = {
-        dir: 1,
-        distal: b.low,
-        hunt: huntLo ?? b.low,
-        bar: i,
-        baseHigh: b.high,
-        baseLow: b.low,
-        mode: 1,
-        needBars: cfg.rejectConfirmBars,
-      };
-    } else if (canStart && bearSweep && !blockShort && huntHi !== null) {
-      pending = {
-        dir: -1,
-        distal: b.high,
-        hunt: huntHi,
-        bar: i,
-        baseHigh: b.high,
-        baseLow: b.low,
-        mode: 0,
-        needBars: cfg.baseConfirmBars,
-      };
-    } else if (canStart && bullSweep && !blockLong && huntLo !== null) {
-      pending = {
-        dir: 1,
-        distal: b.low,
-        hunt: huntLo,
-        bar: i,
-        baseHigh: b.high,
-        baseLow: b.low,
-        mode: 0,
-        needBars: cfg.baseConfirmBars,
-      };
+    if (canStart && bullSweep && huntLo !== null) {
+      pending = { dir: 1, distal: b.low, hunt: huntLo, bar: i, baseHigh: b.high, baseLow: b.low };
+    } else if (canStart && bearSweep && huntHi !== null) {
+      pending = { dir: -1, distal: b.high, hunt: huntHi, bar: i, baseHigh: b.high, baseLow: b.low };
     }
-
-    if (pending && pending.dir === 1 && bearLevelReject && cfg.blockCounterTrend) pending = null;
-    if (pending && pending.dir === -1 && bullLevelReject && cfg.blockCounterTrend) pending = null;
 
     if (!pending) continue;
 
@@ -298,12 +184,7 @@ export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG):
       pending = null;
       continue;
     }
-    if (age < pending.needBars) continue;
-    if (pending.dir === 1 && blockLong) continue;
-    if (pending.dir === -1 && blockShort) continue;
-
-    const minW = a * (pending.mode === 1 ? Math.min(cfg.minRoomAtr, 0.45) : cfg.minRoomAtr);
-    const maxW = a * (pending.mode === 1 ? Math.min(cfg.maxRoomAtr, 2.2) : cfg.maxRoomAtr);
+    if (age < cfg.baseConfirmBars) continue;
 
     if (pending.dir === 1) {
       const distal = pending.distal;
@@ -311,8 +192,8 @@ export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG):
       const width = proximal - distal;
       const prevBaseHigh = i > pending.bar ? bars[i - 1].high : proximal;
       const microBreak =
-        b.close > b.open && (b.high >= prevBaseHigh || b.close >= distal + width * 0.65);
-      if (width >= minW && width <= maxW && microBreak) {
+        b.close > b.open && (b.high >= prevBaseHigh || b.close >= distal + width * 0.7);
+      if (width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak) {
         const lv = levels(1, proximal, distal, a, cfg);
         const liq = nextLiqHigh(pivHi, lv.entry, lv.risk * 1.5);
         const tp = liq !== null ? Math.max(lv.tp, liq) : lv.tp;
@@ -325,25 +206,19 @@ export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG):
           proximal,
           barIndex: i,
           barTime: b.time,
-          mode: pending.mode === 1 ? "level_reject" : "sweep",
+          mode: "sweep",
         });
         lastSetupBar = i;
         pending = null;
       }
     } else {
       const distal = pending.distal;
-      let proximal = pending.baseLow;
-      let width = distal - proximal;
-      // Aug 26: keep short room tight under the high if price dumps
-      if (width > maxW) {
-        proximal = distal - maxW;
-        width = maxW;
-      }
+      const proximal = pending.baseLow;
+      const width = distal - proximal;
       const prevBaseLow = i > pending.bar ? bars[i - 1].low : proximal;
       const microBreak =
-        b.close < b.open && (b.low <= prevBaseLow || b.close <= distal - width * 0.65);
-      const rejectHold = pending.mode === 1 && b.close < pending.hunt && b.close < b.open;
-      if (width >= minW && width <= maxW && (microBreak || rejectHold)) {
+        b.close < b.open && (b.low <= prevBaseLow || b.close <= distal - width * 0.7);
+      if (width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak) {
         const lv = levels(-1, proximal, distal, a, cfg);
         const liq = nextLiqLow(pivLo, lv.entry, lv.risk * 1.5);
         const tp = liq !== null ? Math.min(lv.tp, liq) : lv.tp;
@@ -356,7 +231,7 @@ export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG):
           proximal,
           barIndex: i,
           barTime: b.time,
-          mode: pending.mode === 1 ? "level_reject" : "sweep",
+          mode: "sweep",
         });
         lastSetupBar = i;
         pending = null;
