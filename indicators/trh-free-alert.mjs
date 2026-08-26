@@ -110,9 +110,8 @@ function fmt(n) {
 
 function setupMessage(s) {
   const side = s.dir === 1 ? "LONG" : "SHORT";
-  const kind = s.mode === "hunt" ? "HUNT — PLACE LIMIT" : "SETUP";
   return (
-    `${SYMBOL_LABEL} 1m | TRH ${side} ${kind}\n` +
+    `${SYMBOL_LABEL} 1m | TRH ${side} SETUP\n` +
     `ENTRY ${fmt(s.entry)}\n` +
     `SL ${fmt(s.sl)}\n` +
     `TP ${fmt(s.tp)}`
@@ -187,43 +186,26 @@ async function tick() {
     );
     return;
   }
-  if (state.lastAlertTime === latest.barTime) {
-    console.log("[trh] already alerted this setup");
-    return;
-  }
-
   const risk = Math.abs(latest.entry - latest.sl);
   if (risk < minRisk) {
     console.log(`[trh] risk ${risk.toFixed(2)} < min ${minRisk} — skip noisy room`);
     return;
   }
-  // Skip chase: mid-room already gone (same as Pine LATE)
-  const maxLateR = Number(process.env.TRH_MAX_LATE_R || 0.35);
-  const lastBar = bars[bars.length - 1];
-  const chaseR =
-    risk > 0
-      ? latest.dir === 1
-        ? (lastBar.close - latest.entry) / risk
-        : (latest.entry - lastBar.close) / risk
-      : 0;
-  const isLate = latest.late === true || chaseR > maxLateR;
-  if (isLate) {
-    console.log(
-      `[trh] LATE chaseR=${chaseR.toFixed(2)} > ${maxLateR} (close ${fmt(lastBar.close)} vs ENTRY ${fmt(latest.entry)}) — skip phone alert`,
-    );
-    state.lastAlertTime = latest.barTime;
-    saveState(state);
-    return;
-  }
-  const modes = (process.env.TRH_ALERT_MODES || "hunt,sweep").split(",").map((x) => x.trim());
+  // Phone alerts: classic SWEEP only by default (matches cleaner chart hunts).
+  // Set TRH_ALERT_MODES=sweep,level_reject to also alert level-rejects.
+  const modes = (process.env.TRH_ALERT_MODES || "sweep").split(",").map((x) => x.trim());
   const mode = latest.mode || "sweep";
   if (!modes.includes(mode)) {
     console.log(`[trh] mode ${mode} not in alert modes [${modes}] — skip`);
     return;
   }
+  if (state.lastAlertTime === latest.barTime) {
+    console.log("[trh] already alerted this setup");
+    return;
+  }
 
   const msg = setupMessage(latest);
-  const title = `TRH ${latest.dir === 1 ? "LONG" : "SHORT"} ${latest.mode === "hunt" ? "HUNT" : "Hunt"}`;
+  const title = `TRH ${latest.dir === 1 ? "LONG" : "SHORT"} Hunt`;
 
   console.log("[trh] NEW SETUP\n" + msg);
 

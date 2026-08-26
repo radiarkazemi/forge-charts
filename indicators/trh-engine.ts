@@ -1,4 +1,4 @@
-/** TRH classic SWEEP detector — hunt-on-sweep (arm limit immediately) */
+/** TRH classic SWEEP detector — mirrors the original Pine (Aug 25 sample) */
 
 export type Bar = { time: number; open: number; high: number; low: number; close: number };
 
@@ -13,12 +13,6 @@ export type TrhConfig = {
   cooldownBars: number;
   slPadAtr: number;
   riskReward: number;
-  requireImpulse: boolean;
-  maxLateR: number;
-  /** Arm ENTRY/SL/TP on the sweep reclaim bar (default true). */
-  huntOnSweep: boolean;
-  /** ATR× projected room height for hunt mid-entry. */
-  huntRoomAtr: number;
 };
 
 export const DEFAULT_TRH_CONFIG: TrhConfig = {
@@ -32,10 +26,6 @@ export const DEFAULT_TRH_CONFIG: TrhConfig = {
   cooldownBars: 50,
   slPadAtr: 0.02,
   riskReward: 2.4,
-  requireImpulse: false,
-  maxLateR: 0.35,
-  huntOnSweep: true,
-  huntRoomAtr: 1.2,
 };
 
 export type TrhSetup = {
@@ -47,9 +37,7 @@ export type TrhSetup = {
   proximal: number;
   barIndex: number;
   barTime: number;
-  mode: "hunt" | "sweep";
-  late: boolean;
-  chaseR: number;
+  mode: "sweep";
 };
 
 type Pending = {
@@ -106,14 +94,13 @@ function lastPivot(
   return best;
 }
 
-function levels(dir: 1 | -1, proximal: number, distal: number, a: number, cfg: TrhConfig, close: number) {
+function levels(dir: 1 | -1, proximal: number, distal: number, a: number, cfg: TrhConfig) {
   const entry = (proximal + distal) / 2;
   const pad = a * cfg.slPadAtr;
   const sl = dir === 1 ? distal - pad : distal + pad;
   const risk = Math.abs(entry - sl);
   const tp = dir === 1 ? entry + risk * cfg.riskReward : entry - risk * cfg.riskReward;
-  const chaseR = risk > 0 ? (dir === 1 ? (close - entry) / risk : (entry - close) / risk) : 0;
-  return { entry, sl, tp, risk, chaseR };
+  return { entry, sl, tp, risk };
 }
 
 function nextLiqHigh(pivHi: { price: number }[], from: number, minDist: number) {
@@ -132,42 +119,7 @@ function nextLiqLow(pivLo: { price: number }[], from: number, minDist: number) {
   return best;
 }
 
-function pushSetup(
-  setups: TrhSetup[],
-  dir: 1 | -1,
-  proximal: number,
-  distal: number,
-  a: number,
-  cfg: TrhConfig,
-  pivHi: { price: number }[],
-  pivLo: { price: number }[],
-  i: number,
-  b: Bar,
-  mode: "hunt" | "sweep",
-) {
-  const lv = levels(dir, proximal, distal, a, cfg, b.close);
-  const liq =
-    dir === 1
-      ? nextLiqHigh(pivHi, lv.entry, lv.risk * 1.5)
-      : nextLiqLow(pivLo, lv.entry, lv.risk * 1.5);
-  const tp =
-    liq !== null ? (dir === 1 ? Math.max(lv.tp, liq) : Math.min(lv.tp, liq)) : lv.tp;
-  setups.push({
-    dir,
-    entry: lv.entry,
-    sl: lv.sl,
-    tp,
-    distal,
-    proximal,
-    barIndex: i,
-    barTime: b.time,
-    mode,
-    late: lv.chaseR > cfg.maxLateR,
-    chaseR: lv.chaseR,
-  });
-}
-
-/** Scan — default hunts on sweep reclaim bar. */
+/** Classic SWEEP scan — same logic as the restored Pine script. */
 export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG): TrhSetup[] {
   const setups: TrhSetup[] = [];
   const p = cfg.pivotPeriod;
@@ -214,63 +166,6 @@ export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG):
 
     const canStart = !pending && i - lastSetupBar >= cfg.cooldownBars;
 
-    if (cfg.huntOnSweep && canStart && bullSweep && huntLo !== null) {
-      const distal = b.low;
-      const entry = Math.max(huntLo, distal + a * 0.25);
-      const proximal = Math.max(entry + (entry - distal), distal + a * cfg.huntRoomAtr);
-      const pad = a * cfg.slPadAtr;
-      const sl = distal - pad;
-      const risk = entry - sl;
-      const tpRR = entry + risk * cfg.riskReward;
-      const liq = nextLiqHigh(pivHi, entry, risk * 1.5);
-      const tp = liq !== null ? Math.max(tpRR, liq) : tpRR;
-      const chaseR = risk > 0 ? (b.close - entry) / risk : 0;
-      setups.push({
-        dir: 1,
-        entry,
-        sl,
-        tp,
-        distal,
-        proximal,
-        barIndex: i,
-        barTime: b.time,
-        mode: "hunt",
-        late: chaseR > 2.0,
-        chaseR,
-      });
-      lastSetupBar = i;
-      continue;
-    }
-    if (cfg.huntOnSweep && canStart && bearSweep && huntHi !== null) {
-      const distal = b.high;
-      const entry = Math.min(huntHi, distal - a * 0.25);
-      const proximal = Math.min(entry - (distal - entry), distal - a * cfg.huntRoomAtr);
-      const pad = a * cfg.slPadAtr;
-      const sl = distal + pad;
-      const risk = sl - entry;
-      const tpRR = entry - risk * cfg.riskReward;
-      const liq = nextLiqLow(pivLo, entry, risk * 1.5);
-      const tp = liq !== null ? Math.min(tpRR, liq) : tpRR;
-      const chaseR = risk > 0 ? (entry - b.close) / risk : 0;
-      setups.push({
-        dir: -1,
-        entry,
-        sl,
-        tp,
-        distal,
-        proximal,
-        barIndex: i,
-        barTime: b.time,
-        mode: "hunt",
-        late: chaseR > 2.0,
-        chaseR,
-      });
-      lastSetupBar = i;
-      continue;
-    }
-
-    if (cfg.huntOnSweep) continue; // delayed path only when hunt off
-
     if (canStart && bullSweep && huntLo !== null) {
       pending = { dir: 1, distal: b.low, hunt: huntLo, bar: i, baseHigh: b.high, baseLow: b.low };
     } else if (canStart && bearSweep && huntHi !== null) {
@@ -279,8 +174,6 @@ export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG):
 
     if (!pending) continue;
 
-    const prevBaseHigh = pending.baseHigh;
-    const prevBaseLow = pending.baseLow;
     pending.baseHigh = Math.max(pending.baseHigh, b.high);
     pending.baseLow = Math.min(pending.baseLow, b.low);
     if (pending.dir === 1 && b.low < pending.distal) pending.distal = b.low;
@@ -297,12 +190,24 @@ export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG):
       const distal = pending.distal;
       const proximal = pending.baseHigh;
       const width = proximal - distal;
+      const prevBaseHigh = i > pending.bar ? bars[i - 1].high : proximal;
       const microBreak =
         b.close > b.open && (b.high >= prevBaseHigh || b.close >= distal + width * 0.7);
-      const widthOk = width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr;
-      const confirm = widthOk && (!cfg.requireImpulse || microBreak);
-      if (confirm) {
-        pushSetup(setups, 1, proximal, distal, a, cfg, pivHi, pivLo, i, b, "sweep");
+      if (width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak) {
+        const lv = levels(1, proximal, distal, a, cfg);
+        const liq = nextLiqHigh(pivHi, lv.entry, lv.risk * 1.5);
+        const tp = liq !== null ? Math.max(lv.tp, liq) : lv.tp;
+        setups.push({
+          dir: 1,
+          entry: lv.entry,
+          sl: lv.sl,
+          tp,
+          distal,
+          proximal,
+          barIndex: i,
+          barTime: b.time,
+          mode: "sweep",
+        });
         lastSetupBar = i;
         pending = null;
       }
@@ -310,12 +215,24 @@ export function scanTrhSetups(bars: Bar[], cfg: TrhConfig = DEFAULT_TRH_CONFIG):
       const distal = pending.distal;
       const proximal = pending.baseLow;
       const width = distal - proximal;
+      const prevBaseLow = i > pending.bar ? bars[i - 1].low : proximal;
       const microBreak =
         b.close < b.open && (b.low <= prevBaseLow || b.close <= distal - width * 0.7);
-      const widthOk = width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr;
-      const confirm = widthOk && (!cfg.requireImpulse || microBreak);
-      if (confirm) {
-        pushSetup(setups, -1, proximal, distal, a, cfg, pivHi, pivLo, i, b, "sweep");
+      if (width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak) {
+        const lv = levels(-1, proximal, distal, a, cfg);
+        const liq = nextLiqLow(pivLo, lv.entry, lv.risk * 1.5);
+        const tp = liq !== null ? Math.min(lv.tp, liq) : lv.tp;
+        setups.push({
+          dir: -1,
+          entry: lv.entry,
+          sl: lv.sl,
+          tp,
+          distal,
+          proximal,
+          barIndex: i,
+          barTime: b.time,
+          mode: "sweep",
+        });
         lastSetupBar = i;
         pending = null;
       }

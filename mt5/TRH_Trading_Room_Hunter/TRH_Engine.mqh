@@ -24,8 +24,6 @@ struct TrhSetup
    double   proximal;
    datetime barTime;
    int      barIndex;
-   bool     late;      // primary already gone past mid-room
-   double   chaseR;
 };
 
 struct TrhConfig
@@ -41,8 +39,6 @@ struct TrhConfig
    double slPadAtr;
    double riskReward;
    bool   useLiquidityTP;
-   bool   requireImpulse;  // false = arm on room width (earlier)
-   double maxLateR;        // chase past entry → late
 };
 
 void TrhDefaultConfig(TrhConfig &cfg)
@@ -58,8 +54,6 @@ void TrhDefaultConfig(TrhConfig &cfg)
    cfg.slPadAtr        = 0.02;
    cfg.riskReward      = 2.4;
    cfg.useLiquidityTP  = true;
-   cfg.requireImpulse  = false;
-   cfg.maxLateR        = 0.35;
 }
 
 double TrhCalcATR(const int i, const double &h[], const double &l[], const double &c[])
@@ -294,10 +288,8 @@ int TrhScanSetups(const int rates,
          double width     = proximal - distal;
          bool   microBreak = close[i] > open[i] &&
             (high[i] >= prevBaseHigh || close[i] >= distal + width * 0.7);
-         bool widthOk = width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr;
-         bool confirm = widthOk && (!cfg.requireImpulse || microBreak);
 
-         if(confirm)
+         if(width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak)
          {
             double entry = (distal + proximal) * 0.5;
             double sl    = distal - a * cfg.slPadAtr;
@@ -306,12 +298,10 @@ int TrhScanSetups(const int rates,
             double liq;
             if(cfg.useLiquidityTP && TrhNextLiqHigh(pivHi, nHi, entry, risk * 1.5, liq))
                tp = MathMax(tp, liq);
-            double chaseR = risk > 0 ? (close[i] - entry) / risk : 0.0;
 
             s.dir = 1; s.entry = entry; s.sl = sl; s.tp = tp;
             s.distal = distal; s.proximal = proximal;
             s.barIndex = i; s.barTime = time[i];
-            s.chaseR = chaseR; s.late = (chaseR > cfg.maxLateR);
             fired = true;
          }
       }
@@ -322,10 +312,8 @@ int TrhScanSetups(const int rates,
          double width     = distal - proximal;
          bool   microBreak = close[i] < open[i] &&
             (low[i] <= prevBaseLow || close[i] <= distal - width * 0.7);
-         bool widthOk = width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr;
-         bool confirm = widthOk && (!cfg.requireImpulse || microBreak);
 
-         if(confirm)
+         if(width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak)
          {
             double entry = (distal + proximal) * 0.5;
             double sl    = distal + a * cfg.slPadAtr;
@@ -334,12 +322,10 @@ int TrhScanSetups(const int rates,
             double liq;
             if(cfg.useLiquidityTP && TrhNextLiqLow(pivLo, nLo, entry, risk * 1.5, liq))
                tp = MathMin(tp, liq);
-            double chaseR = risk > 0 ? (entry - close[i]) / risk : 0.0;
 
             s.dir = -1; s.entry = entry; s.sl = sl; s.tp = tp;
             s.distal = distal; s.proximal = proximal;
             s.barIndex = i; s.barTime = time[i];
-            s.chaseR = chaseR; s.late = (chaseR > cfg.maxLateR);
             fired = true;
          }
       }
