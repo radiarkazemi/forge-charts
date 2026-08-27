@@ -1,20 +1,31 @@
 {
   "manifest_version": 3,
-  "name": "TRH Hunt Alerts",
-  "version": "1.0.0",
-  "description": "Free XAUUSD TRH setup alerts — zero config",
+  "name": "TRH | Trading Room Hunter",
+  "short_name": "TRH Alerts",
+  "version": "2.0.0",
+  "description": "Classic XAUUSD SWEEP alerts using FOREXCOM data from your VPS (same feed as TradingView).",
   "permissions": ["notifications", "alarms", "storage"],
   "host_permissions": [
-    "https://query1.finance.yahoo.com/*"
+    "http://185.222.163.116/*",
+    "https://goldanil.ir/*",
+    "https://www.goldanil.ir/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "TRH Alerts Active",
-    "default_popup": "popup.html"
+    "default_title": "TRH Alerts — FOREXCOM SWEEP",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "icons": {
-    "128": "icon128.png"
-  }
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "minimum_chrome_version": "110"
 }
