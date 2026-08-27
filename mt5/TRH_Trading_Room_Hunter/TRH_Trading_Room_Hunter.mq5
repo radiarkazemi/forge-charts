@@ -516,7 +516,7 @@ int OnCalculate(const int rates_total,
       else from = MathMax(0, g_nSetups - MathMax(1, InpHistoryCount));
 
       for(int i = from; i < g_nSetups; i++)
-         DrawOneSetup(g_setups[i], t, rates_total);
+         DrawOneSetup(g_setups[i], t, h, l, c, rates_total);
 
       TrhSetup last = g_setups[g_nSetups - 1];
       if(last.barTime != prevTime && last.barTime != g_lastAlertTime)
@@ -529,14 +529,15 @@ int OnCalculate(const int rates_total,
    {
       int from = InpOnlyLast ? g_nSetups - 1 : MathMax(0, g_nSetups - MathMax(1, InpHistoryCount));
       for(int i = from; i < g_nSetups; i++)
-         DrawOneSetup(g_setups[i], t, rates_total);
+         DrawOneSetup(g_setups[i], t, h, l, c, rates_total);
    }
 
    if(g_nSetups > 0)
    {
       TrhSetup last = g_setups[g_nSetups - 1];
       int stCode = 0;
-      string stTxt = StatusText(last, h, l, c, rates_total, stCode);
+      int exitBar = -1;
+      string stTxt = StatusText(last, h, l, c, rates_total, stCode, exitBar);
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
       DrawInfoPanel(last, stTxt, stCode, bid);
 
