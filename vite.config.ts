@@ -9,6 +9,8 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    // VPS serves the SPA at /charts/; hashed bundles under /assets/forge/
+    // (same nginx path that reliably delivers large static files on this host).
     base: production ? "/charts/" : "/",
     build: {
       assetsDir: "assets",
