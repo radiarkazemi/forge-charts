@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "2.00"
-#property description "TRH classic SWEEP — advanced chart graphics (Pine parity)"
+#property version   "2.10"
+#property description "TRH classic SWEEP — freeze box on TP/SL, advanced panel"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -37,7 +37,8 @@ input group "Display — layout"
 input int    InpSetupWidth      = 80;     // Box Width (bars)
 input bool   InpOnlyLast        = true;   // Only Last Setup
 input int    InpHistoryCount    = 5;      // History Setups (if Only Last = false)
-input bool   InpExtendToNow     = true;   // Extend Boxes To Current Bar
+input bool   InpExtendToNow     = true;   // Extend Boxes Until TP/SL (then freeze)
+input bool   InpFreezeOnExit    = true;   // Freeze setup at TP/SL bar (keep until next)
 input ENUM_TRH_PANEL_CORNER InpPanelCorner = TRH_PANEL_LEFT; // Info Panel Corner
 input bool   InpShowPanel       = true;   // Show Info Panel
 input bool   InpShowComment     = false;  // Also Use Chart Comment
@@ -227,11 +228,12 @@ void SetPanelBg(const string name, const int x, const int y,
 }
 
 string StatusText(const TrhSetup &s, const double &high[], const double &low[],
-                  const double &close[], const int rates, int &statusOut)
+                  const double &close[], const int rates, int &statusOut, int &exitBar)
 {
    statusOut = 0;
+   exitBar = -1;
    int bi = s.barIndex;
-   if(bi < 0 || bi >= rates) return "—";
+   if(bi < 0 || bi >= rates) return "-";
 
    bool filled = false;
    int fillBar = -1;
@@ -256,8 +258,19 @@ string StatusText(const TrhSetup &s, const double &high[], const double &low[],
    {
       bool hitT = (s.dir == 1) ? (high[i] >= s.tp) : (low[i] <= s.tp);
       bool hitS = (s.dir == 1) ? (low[i] <= s.sl) : (high[i] >= s.sl);
-      if(hitT) { statusOut = 2; return "TP HIT"; }
-      if(hitS) { statusOut = 3; return "SL HIT"; }
+      // Prefer TP if both wick same bar (same as Pine)
+      if(hitT)
+      {
+         statusOut = 2;
+         exitBar = i;
+         return "TP HIT";
+      }
+      if(hitS)
+      {
+         statusOut = 3;
+         exitBar = i;
+         return "SL HIT";
+      }
    }
    statusOut = 1;
    return "IN TRADE";
@@ -286,7 +299,13 @@ void DrawInfoPanel(const TrhSetup &s, const string stTxt, const int stCode,
    double rr = (risk > 0) ? reward / risk : 0;
    double liveR = 0;
    if(risk > 0)
-      liveR = (s.dir == 1) ? (bid - s.entry) / risk : (s.entry - bid) / risk;
+   {
+      if(stCode == 2) liveR = rr;           // closed at TP
+      else if(stCode == 3) liveR = -1.0;    // closed at SL
+      else liveR = (s.dir == 1) ? (bid - s.entry) / risk : (s.entry - bid) / risk;
+   }
+
+   string liveLabel = (stCode == 2 || stCode == 3) ? "Final  " : "Live   ";
 
    int y = y0 + 8;
    int dy = 16;
@@ -299,19 +318,31 @@ void DrawInfoPanel(const TrhSetup &s, const string stTxt, const int stCode,
    SetPanelLabel(OBJ_PREFIX + "P5", x0 + 10, y,
       "Risk   " + DoubleToString(risk, _Digits) + "   (" + DoubleToString(rr, 1) + "R)", clrSilver, 9, corner); y += dy;
    SetPanelLabel(OBJ_PREFIX + "P6", x0 + 10, y,
-      "Live   " + DoubleToString(liveR, 2) + "R   @ " + DoubleToString(bid, _Digits), stCol, 9, corner); y += dy;
+      liveLabel + DoubleToString(liveR, 2) + "R   @ " + DoubleToString(bid, _Digits), stCol, 9, corner); y += dy;
    SetPanelLabel(OBJ_PREFIX + "P7", x0 + 10, y,
       "Bar    " + TimeToString(s.barTime, TIME_DATE|TIME_MINUTES), clrDimGray, 8, corner);
 }
 
-void DrawOneSetup(const TrhSetup &s, const datetime &time[], const int rates)
+void DrawOneSetup(const TrhSetup &s, const datetime &time[],
+                  const double &high[], const double &low[], const double &close[],
+                  const int rates)
 {
    int bi = s.barIndex;
    if(bi < 0 || bi >= rates) return;
 
+   int stCode = 0;
+   int exitBar = -1;
+   StatusText(s, high, low, close, rates, stCode, exitBar);
+
    datetime t1 = time[bi];
    int rightIdx = MathMin(rates - 1, bi + InpSetupWidth);
-   if(InpExtendToNow) rightIdx = rates - 1;
+
+   // Extend only while active; freeze at TP/SL bar and keep until next setup
+   if(InpFreezeOnExit && (stCode == 2 || stCode == 3) && exitBar >= 0)
+      rightIdx = exitBar;
+   else if(InpExtendToNow && stCode <= 1)
+      rightIdx = rates - 1;
+
    datetime t2 = time[rightIdx];
    if(t2 <= t1 && bi + 1 < rates) t2 = time[bi + 1];
 
@@ -344,11 +375,19 @@ void DrawOneSetup(const TrhSetup &s, const datetime &time[], const int rates)
       SetTrend(OBJ_PREFIX + "TT_" + tag, t1, s.tp, t2, s.tp, InpTpCol, STYLE_DOT, 1);
    }
 
-   if(InpShowHLines)
+   // Full-width HLines only while trade is open; freeze = no endless lines after exit
+   if(InpShowHLines && stCode <= 1)
    {
       SetHLine(OBJ_PREFIX + "HE_" + tag, s.entry, InpEntryCol, STYLE_SOLID, 1);
       SetHLine(OBJ_PREFIX + "HS_" + tag, s.sl, InpSlCol, STYLE_DOT, 1);
       SetHLine(OBJ_PREFIX + "HT_" + tag, s.tp, InpTpCol, STYLE_DOT, 1);
+   }
+   else
+   {
+      // remove old HLines when frozen
+      ObjectDelete(0, OBJ_PREFIX + "HE_" + tag);
+      ObjectDelete(0, OBJ_PREFIX + "HS_" + tag);
+      ObjectDelete(0, OBJ_PREFIX + "HT_" + tag);
    }
 
    if(InpShowPriceLabels)
@@ -366,8 +405,11 @@ void DrawOneSetup(const TrhSetup &s, const datetime &time[], const int rates)
 
    if(InpShowTag)
    {
+      string tagTxt = "TRH " + (s.dir == 1 ? "LONG" : "SHORT") + " · SWEEP";
+      if(stCode == 2) tagTxt += " · TP";
+      if(stCode == 3) tagTxt += " · SL";
       SetText(OBJ_PREFIX + "TAG_" + tag, t1, (s.dir == 1 ? zTop : zBot),
-         "TRH " + (s.dir == 1 ? "LONG" : "SHORT") + " · SWEEP",
+         tagTxt,
          (s.dir == 1 ? InpBullZoneCol : InpBearZoneCol),
          (s.dir == 1 ? ANCHOR_LEFT_LOWER : ANCHOR_LEFT_UPPER));
    }
@@ -381,6 +423,14 @@ void DrawOneSetup(const TrhSetup &s, const datetime &time[], const int rates)
 
    if(InpShowMidRoom)
       SetArrow(OBJ_PREFIX + "MD_" + tag, t1, s.entry, 159, InpEntryCol);
+
+   // Mark exit bar
+   if((stCode == 2 || stCode == 3) && exitBar >= 0 && exitBar < rates)
+   {
+      int xcode = (stCode == 2) ? 252 : 251; // check / X
+      double xp = (stCode == 2) ? s.tp : s.sl;
+      SetArrow(OBJ_PREFIX + "EX_" + tag, time[exitBar], xp, xcode, (stCode == 2 ? InpTpCol : InpSlCol));
+   }
 }
 
 void NotifyNewSetup(const TrhSetup &s)

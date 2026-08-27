@@ -3,7 +3,7 @@
 This is the **MetaTrader 5 version** of `indicators/TRH_Trading_Room_Hunter.pine`.  
 Same math → same **ENTRY / SL / TP** (on the same symbol feed + timeframe).
 
-**v2.00** adds a dashboard panel, live R, TP/SL status, history setups, colors, and toggles for every graphic object.
+**v2.10** freezes boxes on TP/SL. **EA v3** adds filters + dynamic lots. v2 dashboard panel, live R, TP/SL status, history setups, colors, and toggles for every graphic object.
 
 Pine cannot place broker orders. MT5 can (optional EA, off by default).
 
