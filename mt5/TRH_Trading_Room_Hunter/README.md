@@ -53,13 +53,34 @@ You should see room boxes + **ENTRY / SL / TP** lines and a comment panel with t
 Best check: open **FOREXCOM:XAUUSD** on TradingView and the **same broker symbol** on MT5 only if they are the same feed.  
 Morning FOREXCOM sample: LONG ENTRY **4602.87** / SL **4599.63** / TP **4610.64** @ **06:13 UTC**.
 
-## Optional: AutoTrade EA (after levels match)
+## AutoTrade EA
 
-1. Copy `TRH_AutoTrade.mq5` + `TRH_Engine.mqh` into `MQL5/Experts/TRH_Trading_Room_Hunter/`
-2. Compile `TRH_AutoTrade.mq5`
-3. Attach to the same chart
-4. Keep **`Enable live trading = false`** until several setups match TV
-5. Then enable Algo Trading + set `InpAutoTrade = true` on demo first
+1. Copy **both** into `MQL5/Experts/` (same folder):
+   - `TRH_AutoTrade.mq5`
+   - `TRH_Engine.mqh`
+2. Compile `TRH_AutoTrade.mq5` (F7)
+3. Attach to **XAUUSD M1**
+4. Turn on the toolbar **Algo Trading** button
+5. Input `Enable AutoTrade = true` (default in v2)
+
+### How it enters
+
+| Situation | Action |
+|-----------|--------|
+| LONG, price already near/through ENTRY | **Market Buy** + SL/TP |
+| LONG, price still above ENTRY | **Buy Limit** at ENTRY + SL/TP |
+| SHORT, price already near/through ENTRY | **Market Sell** + SL/TP |
+| SHORT, price still below ENTRY | **Sell Limit** at ENTRY + SL/TP |
+
+Unfilled limits cancel after `InpPendingExpiryBars` (default 40).
+
+### Raw download links
+
+- EA: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-pinescript-indicator-992e/mt5/TRH_Trading_Room_Hunter/TRH_AutoTrade.mq5
+- Engine (required): https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-pinescript-indicator-992e/mt5/TRH_Trading_Room_Hunter/TRH_Engine.mqh
+- Zip: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-pinescript-indicator-992e/mt5/TRH_Trading_Room_Hunter_MT5.zip
+
+Start on **demo** until you trust fills.
 
 ## Defaults (= Pine)
 
