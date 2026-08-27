@@ -152,11 +152,12 @@ object Notify {
         val entryIso = sdf.format(java.util.Date(entry * 1000L))
         val expiryIso = sdf.format(java.util.Date(expiry * 1000L))
         val body =
-            "XAUUSD 1m | TRH TEST\n" +
+            "XAUUSD FOREXCOM 1m | TRH TEST\n" +
                 "If you hear this, hunt alarms work.\n" +
                 "ENTRY 0.00\nSL 0.00\nTP 0.00\n" +
                 "ENTRY TIME $entryIso\n" +
-                "EXPIRY $expiryIso (5m window)"
+                "EXPIRY $expiryIso (5m window)\n" +
+                "source mongo-forexcom"
         val json = org.json.JSONObject()
             .put("side", "TEST")
             .put("entry", 0.0)
@@ -167,6 +168,8 @@ object Notify {
             .put("entryTimeIso", entryIso)
             .put("expiryTimeIso", expiryIso)
             .put("expiryBars", 5)
+            .put("source", "mongo-forexcom")
+            .put("message", body)
             .toString()
         // Mirror service state so an already-open MainActivity can refresh without restart.
         TrhAlertService.lastAlert = body

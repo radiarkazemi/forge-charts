@@ -28,7 +28,9 @@ const STATE_FILE = join(__dir, ".trh-alert-state.json");
 const SECRETS_FILE = join(__dir, ".trh-secrets.json");
 
 const POLL_SEC = Number(process.env.TRH_POLL_SEC || 60);
-const NTFY_TOPIC = process.env.NTFY_TOPIC || "trh-forge-radiarkazemi-bc13";
+// Empty by default — Yahoo feed caused false alarms vs FOREXCOM chart.
+// Phone alerts: use VPS trh-mongo-alert.mjs only.
+const NTFY_TOPIC = process.env.NTFY_TOPIC || "";
 const NTFY_SERVER = process.env.NTFY_SERVER || "https://ntfy.sh";
 const ALERT_EMAIL = process.env.TRH_ALERT_EMAIL || "radiarkazemi@gmail.com";
 const TELEGRAM_BOT = process.env.TELEGRAM_BOT_TOKEN || "";

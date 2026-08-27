@@ -9,10 +9,11 @@
  *   MONGO_COLL=xauusd_1m
  *   NTFY_TOPIC=...
  *   TRH_POLL_SEC=3
- *   TRH_MAX_AGE_BARS=5
+ *   TRH_MAX_AGE_BARS=1
  *   TRH_ENTRY_EXPIRY_BARS=5
  *   TRH_MIN_RISK=2.0
  *   TRH_LOOKBACK=1500
+ *   TRH_REQUIRE_CLOSED=1   (only alert on closed 1m bars — matches chart)
  */
 import { MongoClient } from "mongodb";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
@@ -31,12 +32,14 @@ const MONGO_COLL = process.env.MONGO_COLL || "xauusd_1m";
 const POLL_SEC = Number(process.env.TRH_POLL_SEC || 3);
 const NTFY_TOPIC = process.env.NTFY_TOPIC || "trh-forge-radiarkazemi-bc13";
 const NTFY_SERVER = process.env.NTFY_SERVER || "https://ntfy.sh";
-const MAX_AGE = Number(process.env.TRH_MAX_AGE_BARS || 5);
-const EXPIRY_BARS = Number(process.env.TRH_ENTRY_EXPIRY_BARS || MAX_AGE);
+const MAX_AGE = Number(process.env.TRH_MAX_AGE_BARS || 1);
+const EXPIRY_BARS = Number(process.env.TRH_ENTRY_EXPIRY_BARS || 5);
 const MIN_RISK = Number(process.env.TRH_MIN_RISK || 2.0);
 const LOOKBACK = Number(process.env.TRH_LOOKBACK || 1500);
+const REQUIRE_CLOSED = String(process.env.TRH_REQUIRE_CLOSED || "1") !== "0";
 const SYMBOL_LABEL = process.env.TRH_SYMBOL || "XAUUSD FOREXCOM";
 const RUN_ONCE = process.argv.includes("--once");
+const SOURCE_TAG = "mongo-forexcom";
 
 function loadSecrets() {
   if (!existsSync(SECRETS_FILE)) return null;
@@ -116,35 +119,40 @@ async function fetchBars(client) {
     });
   }
 
-  // Live forming candle from `last.1` (updated every tick by cp_fetcher live 1m)
+  // Live tip: refresh SAME minute OHLC only. Do NOT append a forming next-minute
+  // candle for alerts — that creates ghost setups that vanish on the chart.
   const live = await client.db("last").collection("1").findOne({ _id: "xauusd" });
+  let liveTipTime = 0;
+  let formingAppended = false;
   if (live && live.po != null && live.bct) {
-    const t = Number(live.bct);
     const tip = {
-      time: t,
+      time: Number(live.bct),
       open: live.po,
       high: live.pmax,
       low: live.pmin,
       close: live.pl,
     };
+    liveTipTime = tip.time;
     if (bars.length === 0) {
       bars.push(tip);
+      formingAppended = true;
     } else {
       const last = bars[bars.length - 1];
-      if (tip.time > last.time) {
+      if (tip.time === last.time) {
+        bars[bars.length - 1] = tip;
+      } else if (tip.time > last.time && !REQUIRE_CLOSED) {
         bars.push(tip);
-      } else if (tip.time === last.time) {
-        bars[bars.length - 1] = tip; // refresh OHLC of current minute
+        formingAppended = true;
       }
-      // if tip.time < last.time, historical is ahead — ignore
+      // tip.time > last.time && REQUIRE_CLOSED → ignore forming bar (chart parity)
     }
   }
-  return bars;
+  return { bars, liveTipTime, formingAppended };
 }
 
 async function notifyNtfy(title, message, payloadObj) {
   if (!NTFY_TOPIC) return false;
-  let ok = false;
+  // One push only (encrypted). Dual plaintext+encrypted was double-firing the phone.
   const envelope = encryptPayload({
     title,
     message,
@@ -158,25 +166,28 @@ async function notifyNtfy(title, message, payloadObj) {
         Priority: "urgent",
         Tags: "chart_with_upwards_trend,moneybag",
         "X-TRH-Encrypted": "aes-256-gcm",
+        "X-TRH-Source": SOURCE_TAG,
       },
       body: JSON.stringify(envelope),
     });
-    ok = resEnc.ok || ok;
+    if (resEnc.ok) return true;
   }
+  // Fallback plaintext (includes ENTRY TIME / EXPIRY) if encrypt unavailable
   const res = await fetch(`${NTFY_SERVER}/${NTFY_TOPIC}`, {
     method: "POST",
     headers: {
       Title: title,
       Priority: "urgent",
       Tags: "chart_with_upwards_trend,moneybag",
+      "X-TRH-Source": SOURCE_TAG,
     },
     body: message,
   });
-  return res.ok || ok;
+  return res.ok;
 }
 
 async function tick(client) {
-  const bars = await fetchBars(client);
+  const { bars, liveTipTime, formingAppended } = await fetchBars(client);
   if (bars.length < 120) {
     console.log(`[trh-mongo] only ${bars.length} bars — wait`);
     return;
@@ -187,7 +198,7 @@ async function tick(client) {
 
   if (setups.length === 0) {
     console.log(
-      `[trh-mongo] ${new Date().toISOString()} scanning… last=${fmt(last.close)} @ ${new Date(last.time * 1000).toISOString()}`,
+      `[trh-mongo] ${new Date().toISOString()} scanning… last=${fmt(last.close)} @ ${new Date(last.time * 1000).toISOString()} forming=${formingAppended}`,
     );
     return;
   }
@@ -200,6 +211,11 @@ async function tick(client) {
     if (state.lastAlertTime && s.barTime <= state.lastAlertTime) break;
     if (age > MAX_AGE) continue;
     if (risk < MIN_RISK) continue;
+    // Never alert on a still-forming live tip bar (ghost setups)
+    if (REQUIRE_CLOSED && liveTipTime && s.barTime === liveTipTime && formingAppended) {
+      continue;
+    }
+    if (REQUIRE_CLOSED && age === 0 && formingAppended) continue;
     chosen = { ...s, age, risk };
     break;
   }
@@ -231,7 +247,8 @@ async function tick(client) {
     `TP ${fmt(chosen.tp)}\n` +
     `ENTRY TIME ${fmtUtc(entryTime)}\n` +
     `EXPIRY ${fmtUtc(expiryTime)} (${EXPIRY_BARS}m window)\n` +
-    `Risk ${fmt(chosen.risk)} · age ${chosen.age}m · alert lag ${lagSec}s`;
+    `Risk ${fmt(chosen.risk)} · age ${chosen.age}m · alert lag ${lagSec}s\n` +
+    `source ${SOURCE_TAG}`;
   const title = `TRH ${side} SETUP`;
 
   console.log(`[trh-mongo] NEW (age ${chosen.age}m lag ${lagSec}s)\n${msg}`);
@@ -252,7 +269,7 @@ async function tick(client) {
     alertedAtIso: fmtUtc(alertedAt),
     ageBars: chosen.age,
     lagSec,
-    source: "mongo-forexcom",
+    source: SOURCE_TAG,
   };
   const sent = await notifyNtfy(title, msg, payload);
   console.log(`[trh-mongo] ntfy → ${sent ? "ok" : "fail"}`);
@@ -264,7 +281,8 @@ async function tick(client) {
 
 async function main() {
   console.log(
-    `[trh-mongo] FOREXCOM XAUUSD alert — ${RUN_ONCE ? "once" : `poll ${POLL_SEC}s`} hist=${MONGO_DB}.${MONGO_COLL} + live last.1`,
+    `[trh-mongo] FOREXCOM XAUUSD alert — ${RUN_ONCE ? "once" : `poll ${POLL_SEC}s`} ` +
+      `closedOnly=${REQUIRE_CLOSED} maxAge=${MAX_AGE} hist=${MONGO_DB}.${MONGO_COLL}`,
   );
   const client = new MongoClient(MONGO_URI, { maxPoolSize: 4 });
   await client.connect();

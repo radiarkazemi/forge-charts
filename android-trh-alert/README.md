@@ -43,6 +43,6 @@ Regenerate config after tunnel restart:
 node scripts/embed-android-config.mjs
 ```
 
-## v1.3.2
+## v1.3.3
 
-UI refreshes hunt details when an alert arrives while the app is open in the background (no force-close needed). Still shows exact **ENTRY TIME** / **EXPIRY TIME**; VPS poll **3s**.
+Ignores Yahoo/GitHub false alarms on the ntfy topic. Only VPS **FOREXCOM** alerts with **ENTRY TIME / EXPIRY** are shown. Dedupes double pushes. VPS alerts use closed 1m bars only (chart parity).

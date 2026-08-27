@@ -1,53 +1,22 @@
-name: TRH Gold Alerts
+# Disabled: Yahoo GC=F alerts were false vs FOREXCOM chart and used old format.
+# Phone alerts come only from VPS trh-mongo-alert (FOREXCOM Mongo).
+#
+# To re-enable temporarily, rename back to trh-alerts.yml — not recommended.
+
+name: TRH Gold Alerts (DISABLED)
 
 on:
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
-  scan:
+  noop:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Restore alert state
-        uses: actions/cache@v4
-        with:
-          path: indicators/.trh-alert-state.json
-          key: trh-alert-state-v1
-
-      - name: Scan XAUUSD TRH
-        id: scan
-        env:
-          TRH_PRICE_OFFSET: "56"
-          TRH_MAX_AGE_BARS: "90"
-          TRH_MIN_RISK: "2.0"
-          NTFY_TOPIC: trh-forge-radiarkazemi-bc13
-        run: node indicators/trh-free-alert.mjs --once
-
-      - name: Notify via GitHub (email to your inbox)
-        if: steps.scan.outputs.alert == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ALERT_BODY: ${{ steps.scan.outputs.alert_body }}
+      - name: Disabled
         run: |
-          python3 -c "import os,urllib.parse; print(urllib.parse.unquote(os.environ.get('ALERT_BODY','')))" > /tmp/trh-body.txt
-          gh issue create \
-            --title "TRH Gold Setup — $(date -u '+%Y-%m-%d %H:%M UTC')" \
-            --body-file /tmp/trh-body.txt
-
-      - name: Push ntfy (backup)
-        if: steps.scan.outputs.alert == 'true'
-        env:
-          ALERT_BODY: ${{ steps.scan.outputs.alert_body }}
-        run: |
-          BODY=$(python3 -c "import os,urllib.parse; print(urllib.parse.unquote(os.environ.get('ALERT_BODY','')))")
-          curl -sS -H "Title: TRH SETUP" -H "Priority: urgent" \
-            -H "Tags: chart_with_upwards_trend,moneybag" \
-            -d "$BODY" \
-            "https://ntfy.sh/trh-forge-radiarkazemi-bc13" || true
+          echo "Yahoo/GitHub TRH alerts are DISABLED."
+          echo "Use VPS trh-alert (FOREXCOM) + Android app only."
+          exit 0

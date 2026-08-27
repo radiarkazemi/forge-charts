@@ -32,6 +32,8 @@ class TrhAlertService : Service() {
     private var ws: WebSocket? = null
     private var reconnectAttempt = 0
     private val seenIds = LinkedHashSet<String>()
+    private var lastFingerprint = ""
+    private var lastFingerprintAt = 0L
 
     private val client = OkHttpClient.Builder()
         .pingInterval(45, TimeUnit.SECONDS)
@@ -112,19 +114,64 @@ class TrhAlertService : Service() {
                 val envelope = JSONObject(body)
                 if (envelope.optString("type") == "alert") {
                     val payload = Crypto.decryptEnvelope(envelope)
+                    if (!isTrustedVpsAlert(payload, payload.optString("message"))) {
+                        broadcastStatus("Ignored non-VPS alert")
+                        return
+                    }
                     onAlert(payload)
                     return
                 }
             }
 
-            // Plaintext backup (title + message from ntfy)
+            // Plaintext backup — only FOREXCOM VPS format with ENTRY TIME (reject Yahoo/GH)
             val title = outer.optString("title", "TRH Setup")
             if (body.contains("TRH") || title.contains("TRH")) {
-                onAlert(JSONObject().put("title", title).put("message", body))
+                val plain = JSONObject().put("title", title).put("message", body)
+                if (!isTrustedVpsAlert(plain, body)) {
+                    broadcastStatus("Ignored old/Yahoo alert")
+                    return
+                }
+                onAlert(plain)
             }
         } catch (e: Exception) {
             broadcastStatus("Parse error: ${e.message}")
         }
+    }
+
+    /**
+     * Accept only VPS FOREXCOM alerts (new format with ENTRY TIME).
+     * Rejects Yahoo GC=F / GitHub Actions false alarms on the same ntfy topic.
+     */
+    private fun isTrustedVpsAlert(payload: JSONObject, body: String): Boolean {
+        val source = payload.optString("source")
+        if (source.equals("mongo-forexcom", ignoreCase = true)) return true
+        if (payload.has("entryTime") || payload.optString("entryTimeIso").isNotBlank()) {
+            val msg = body.ifBlank { payload.optString("message") }
+            if (msg.contains("FOREXCOM", ignoreCase = true)) return true
+            if (msg.contains("ENTRY TIME", ignoreCase = true)) return true
+        }
+        val msg = body.ifBlank { payload.optString("message") }
+        val hasForex = msg.contains("FOREXCOM", ignoreCase = true)
+        val hasTimes = msg.contains("ENTRY TIME", ignoreCase = true) &&
+            msg.contains("EXPIRY", ignoreCase = true)
+        return hasForex && hasTimes
+    }
+
+    private fun fingerprint(payload: JSONObject, message: String): String {
+        val side = payload.optString("side").ifBlank {
+            when {
+                message.contains("LONG", true) -> "LONG"
+                message.contains("SHORT", true) -> "SHORT"
+                else -> "X"
+            }
+        }
+        val entry = if (payload.has("entry")) payload.getDouble("entry").toString()
+        else Regex("""ENTRY\s+([0-9.]+)""", RegexOption.IGNORE_CASE).find(message)?.groupValues?.get(1) ?: ""
+        val et = payload.optString("entryTimeIso").ifBlank {
+            if (payload.has("entryTime")) payload.getLong("entryTime").toString()
+            else Regex("""ENTRY TIME\s+(.+)""", RegexOption.IGNORE_CASE).find(message)?.groupValues?.get(1)?.trim() ?: ""
+        }
+        return "$side|$entry|$et"
     }
 
     private fun onAlert(payload: JSONObject) {
@@ -154,6 +201,15 @@ class TrhAlertService : Service() {
             if (entryIso.isNotBlank()) message += "\nENTRY TIME $entryIso"
             if (expiryIso.isNotBlank()) message += "\nEXPIRY $expiryIso"
         }
+
+        val fp = fingerprint(payload, message)
+        val now = System.currentTimeMillis()
+        if (fp == lastFingerprint && now - lastFingerprintAt < 120_000L) {
+            // Encrypted + plaintext duplicate (or double push) — keep first only
+            return
+        }
+        lastFingerprint = fp
+        lastFingerprintAt = now
 
         lastAlert = message
         lastAlertJson = payload.toString()
