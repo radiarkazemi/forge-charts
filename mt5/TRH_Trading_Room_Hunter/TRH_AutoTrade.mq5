@@ -1,47 +1,50 @@
 //+------------------------------------------------------------------+
 //| TRH_AutoTrade.mq5                                                |
-//| Classic SWEEP EA — same detector as indicator / TradingView Pine |
-//| AutoTrade is OFF by default. Validate levels vs TV first.        |
+//| Classic SWEEP autotrade — same detector as Pine / indicator      |
+//| On setup: Buy/Sell LIMIT at ENTRY, or MARKET if price is there   |
 //+------------------------------------------------------------------+
 #property copyright "TRH"
-#property version   "1.00"
+#property link      "https://github.com/radiarkazemi/forge-charts"
+#property version   "2.00"
+#property description "TRH SWEEP EA: limit at ENTRY, or market if already there"
 #property strict
 
 #include <Trade/Trade.mqh>
 #include "TRH_Engine.mqh"
 
-input group "⚠ Safety"
-input bool   InpAutoTrade       = false;  // Enable live trading (OFF until validated)
-input bool   InpAlertOnSetup    = true;   // Alert when setup fires (even if AutoTrade OFF)
-input ulong  InpMagic           = 260825; // Magic number
-input int    InpMaxSlippagePts  = 30;     // Max slippage (points)
-input int    InpPendingExpiryBars = 40;   // Cancel pending after N bars
+input group "Trading"
+input bool   InpAutoTrade         = true;   // Enable AutoTrade (needs Algo Trading ON)
+input bool   InpAlertOnSetup      = true;   // Alert on new setup
+input ulong  InpMagic             = 260825; // Magic number
+input int    InpMaxSlippagePts    = 30;     // Max slippage (points)
+input int    InpPendingExpiryBars = 40;     // Cancel unfilled limit after N bars
+input int    InpLookbackBars      = 2000;   // History bars to scan
 
-input group "TRH Detection (match Pine / indicator)"
-input int    InpPivotPeriod     = 5;
-input double InpMinContextAtr   = 1.2;
-input double InpMinSweepAtr     = 0.05;
-input int    InpBaseConfirmBars = 8;
-input int    InpMaxBaseBars     = 40;
-input double InpMinRoomAtr      = 0.8;
-input double InpMaxRoomAtr      = 3.5;
-input int    InpCooldownBars    = 50;
+input group "TRH Detection (= Pine)"
+input int    InpPivotPeriod     = 5;      // Pivot Period
+input double InpMinContextAtr   = 1.2;    // Min Selloff/Rally Into Sweep (ATR×)
+input double InpMinSweepAtr     = 0.05;   // Min Sweep Beyond Pivot (ATR×)
+input int    InpBaseConfirmBars = 8;      // Min Base Bars After Sweep
+input int    InpMaxBaseBars     = 40;     // Max Bars To Confirm Room
+input double InpMinRoomAtr      = 0.8;    // Min Room Width (ATR×)
+input double InpMaxRoomAtr      = 3.5;    // Max Room Width (ATR×)
+input int    InpCooldownBars    = 50;     // Cooldown Between Setups
 
 input group "Entry / SL / TP"
-input double InpSlPadAtr        = 0.02;
-input double InpRiskReward      = 2.4;
-input bool   InpUseLiquidityTP  = true;
-input double InpMarketTolAtr    = 0.15;   // Market fill if price within this ATR of ENTRY
+input double InpSlPadAtr        = 0.02;   // SL Pad (ATR×)
+input double InpRiskReward      = 2.4;    // Risk-Reward Ratio
+input bool   InpUseLiquidityTP  = true;   // Prefer Opposing Pivot As TP
+input double InpMarketTolAtr    = 0.15;   // Market if price within this ATR of ENTRY
+input int    InpFreshMaxAgeBars = 3;      // Only trade setups this fresh (bars)
 
 input group "Risk"
-input double InpRiskPercent     = 0.5;    // Risk % of equity per trade
+input double InpRiskPercent     = 0.5;    // Risk % of equity (if FixedLots=0)
 input double InpFixedLots       = 0.0;    // Fixed lots (0 = use risk %)
-input int    InpMaxOpenTrades   = 1;      // Max concurrent TRH positions/orders
+input int    InpMaxOpenTrades   = 1;      // Max open positions + pendings
 
 CTrade   g_trade;
 datetime g_lastBarTime   = 0;
 datetime g_lastSetupTime = 0;
-datetime g_pendingPlaced = 0;
 
 void BuildConfig(TrhConfig &cfg)
 {
@@ -63,7 +66,8 @@ int CountOurOrders()
    int n = 0;
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
-      if(!PositionSelectByTicket(PositionGetTicket(i))) continue;
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || !PositionSelectByTicket(ticket)) continue;
       if(PositionGetInteger(POSITION_MAGIC) != (long)InpMagic) continue;
       if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
       n++;
@@ -71,8 +75,7 @@ int CountOurOrders()
    for(int i = OrdersTotal() - 1; i >= 0; i--)
    {
       ulong ticket = OrderGetTicket(i);
-      if(ticket == 0) continue;
-      if(!OrderSelect(ticket)) continue;
+      if(ticket == 0 || !OrderSelect(ticket)) continue;
       if(OrderGetInteger(ORDER_MAGIC) != (long)InpMagic) continue;
       if(OrderGetString(ORDER_SYMBOL) != _Symbol) continue;
       n++;
@@ -80,49 +83,71 @@ int CountOurOrders()
    return n;
 }
 
-void CancelOurPendings()
-{
-   for(int i = OrdersTotal() - 1; i >= 0; i--)
-   {
-      ulong ticket = OrderGetTicket(i);
-      if(ticket == 0) continue;
-      if(!OrderSelect(ticket)) continue;
-      if(OrderGetInteger(ORDER_MAGIC) != (long)InpMagic) continue;
-      if(OrderGetString(ORDER_SYMBOL) != _Symbol) continue;
-      g_trade.OrderDelete(ticket);
-   }
-}
-
 double CalcLots(const double entry, const double sl)
 {
-   if(InpFixedLots > 0.0)
-      return InpFixedLots;
-
-   double riskMoney = AccountInfoDouble(ACCOUNT_EQUITY) * (InpRiskPercent / 100.0);
-   double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-   double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double volMin     = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double volMax     = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
    double volumeStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-   double volMin    = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   double volMax    = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   if(volumeStep <= 0) volumeStep = 0.01;
 
-   if(tickSize <= 0 || tickValue <= 0) return volMin;
+   double lots;
+   if(InpFixedLots > 0.0)
+      lots = InpFixedLots;
+   else
+   {
+      double riskMoney = AccountInfoDouble(ACCOUNT_EQUITY) * (InpRiskPercent / 100.0);
+      double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+      double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+      double dist = MathAbs(entry - sl);
+      if(tickSize <= 0 || tickValue <= 0 || dist <= 0) return volMin;
+      lots = riskMoney / ((dist / tickSize) * tickValue);
+   }
 
-   double dist = MathAbs(entry - sl);
-   if(dist <= 0) return volMin;
-
-   double ticks = dist / tickSize;
-   double lots  = riskMoney / (ticks * tickValue);
    lots = MathFloor(lots / volumeStep) * volumeStep;
    if(lots < volMin) lots = volMin;
    if(lots > volMax) lots = volMax;
-   return NormalizeDouble(lots, 2);
+
+   int digits = 0;
+   double step = volumeStep;
+   while(step < 1.0 && digits < 8) { step *= 10.0; digits++; }
+   return NormalizeDouble(lots, digits);
 }
 
+bool AdjustStops(const int dir, const double entry, double &sl, double &tp)
+{
+   long stopsLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   if(point <= 0) return false;
+   double minDist = stopsLevel * point;
+   if(minDist <= 0) minDist = point;
+
+   if(dir == 1)
+   {
+      if(entry - sl < minDist) sl = entry - minDist;
+      if(tp - entry < minDist) tp = entry + minDist;
+   }
+   else
+   {
+      if(sl - entry < minDist) sl = entry + minDist;
+      if(entry - tp < minDist) tp = entry - minDist;
+   }
+   sl = NormalizeDouble(sl, _Digits);
+   tp = NormalizeDouble(tp, _Digits);
+   return true;
+}
+
+// LONG:  ask near/through ENTRY → MARKET buy, else BUY LIMIT at ENTRY
+// SHORT: bid near/through ENTRY → MARKET sell, else SELL LIMIT at ENTRY
 bool PlaceSetupTrade(const TrhSetup &s, const double atrNow)
 {
+   if(!InpAutoTrade)
+   {
+      Print("TRH: AutoTrade disabled — skip order");
+      return false;
+   }
    if(CountOurOrders() >= InpMaxOpenTrades)
    {
-      Print("TRH: skip trade — already at MaxOpenTrades");
+      Print("TRH: skip — already at MaxOpenTrades");
       return false;
    }
 
@@ -131,8 +156,10 @@ bool PlaceSetupTrade(const TrhSetup &s, const double atrNow)
    double entry = NormalizeDouble(s.entry, _Digits);
    double sl    = NormalizeDouble(s.sl, _Digits);
    double tp    = NormalizeDouble(s.tp, _Digits);
-   double lots  = CalcLots(entry, sl);
-   double tol   = atrNow * InpMarketTolAtr;
+   if(!AdjustStops(s.dir, entry, sl, tp)) return false;
+
+   double lots = CalcLots(entry, sl);
+   double tol  = MathMax(atrNow * InpMarketTolAtr, SymbolInfoDouble(_Symbol, SYMBOL_POINT) * 10.0);
 
    g_trade.SetExpertMagicNumber(InpMagic);
    g_trade.SetDeviationInPoints(InpMaxSlippagePts);
@@ -140,37 +167,52 @@ bool PlaceSetupTrade(const TrhSetup &s, const double atrNow)
 
    string comment = StringFormat("TRH %s", s.dir == 1 ? "LONG" : "SHORT");
    bool ok = false;
+   string mode = "";
 
    if(s.dir == 1)
    {
-      // Near entry → market buy; otherwise buy limit at mid-room
+      // Price already at/through mid-room → open now
       if(ask <= entry + tol)
+      {
+         mode = "MARKET BUY";
          ok = g_trade.Buy(lots, _Symbol, 0, sl, tp, comment);
-      else if(ask > entry)
-         ok = g_trade.BuyLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
+      }
       else
-         ok = g_trade.BuyStop(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
+      {
+         // Price above ENTRY → wait for pullback with Buy Limit
+         mode = "BUY LIMIT";
+         ok = g_trade.BuyLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
+      }
    }
    else
    {
       if(bid >= entry - tol)
+      {
+         mode = "MARKET SELL";
          ok = g_trade.Sell(lots, _Symbol, 0, sl, tp, comment);
-      else if(bid < entry)
-         ok = g_trade.SellLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
+      }
       else
-         ok = g_trade.SellStop(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
+      {
+         mode = "SELL LIMIT";
+         ok = g_trade.SellLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
+      }
    }
 
    if(ok)
    {
-      g_pendingPlaced = TimeCurrent();
-      PrintFormat("TRH ORDER %s lots=%.2f E=%.2f SL=%.2f TP=%.2f ret=%d",
-         s.dir == 1 ? "LONG" : "SHORT", lots, entry, sl, tp, g_trade.ResultRetcode());
+      PrintFormat("TRH %s %s lots=%s E=%s SL=%s TP=%s ask=%s bid=%s",
+         mode, s.dir == 1 ? "LONG" : "SHORT",
+         DoubleToString(lots, 2),
+         DoubleToString(entry, _Digits),
+         DoubleToString(sl, _Digits),
+         DoubleToString(tp, _Digits),
+         DoubleToString(ask, _Digits),
+         DoubleToString(bid, _Digits));
    }
    else
    {
-      PrintFormat("TRH ORDER FAIL %s ret=%d %s",
-         s.dir == 1 ? "LONG" : "SHORT",
+      PrintFormat("TRH ORDER FAIL %s %s ret=%d %s",
+         mode, s.dir == 1 ? "LONG" : "SHORT",
          g_trade.ResultRetcode(),
          g_trade.ResultRetcodeDescription());
    }
@@ -186,8 +228,7 @@ void ExpireStalePendings()
    for(int i = OrdersTotal() - 1; i >= 0; i--)
    {
       ulong ticket = OrderGetTicket(i);
-      if(ticket == 0) continue;
-      if(!OrderSelect(ticket)) continue;
+      if(ticket == 0 || !OrderSelect(ticket)) continue;
       if(OrderGetInteger(ORDER_MAGIC) != (long)InpMagic) continue;
       if(OrderGetString(ORDER_SYMBOL) != _Symbol) continue;
 
@@ -195,7 +236,7 @@ void ExpireStalePendings()
       int ageBars = (int)((TimeCurrent() - setup) / periodSec);
       if(ageBars >= InpPendingExpiryBars)
       {
-         PrintFormat("TRH: expire pending #%d after %d bars", ticket, ageBars);
+         PrintFormat("TRH: expire pending #%I64u after %d bars", ticket, ageBars);
          g_trade.OrderDelete(ticket);
       }
    }
@@ -204,11 +245,16 @@ void ExpireStalePendings()
 int OnInit()
 {
    g_trade.SetExpertMagicNumber(InpMagic);
-   PrintFormat("TRH AutoTrade EA init | AutoTrade=%s | symbol=%s tf=%s",
-      InpAutoTrade ? "ON" : "OFF (validate first)",
-      _Symbol, EnumToString(_Period));
-   if(!InpAutoTrade)
-      Comment("TRH EA: AutoTrade OFF — detection only. Match ENTRY/SL/TP vs TradingView, then enable.");
+   g_trade.SetDeviationInPoints(InpMaxSlippagePts);
+   g_trade.SetTypeFillingBySymbol(_Symbol);
+
+   PrintFormat("TRH AutoTrade v2 | AutoTrade=%s | %s %s | magic=%I64u",
+      InpAutoTrade ? "ON" : "OFF",
+      _Symbol, EnumToString(_Period), InpMagic);
+
+   Comment(InpAutoTrade
+      ? "TRH EA: AutoTrade ON\nLimit at ENTRY, or market if price is there.\nEnable Algo Trading toolbar button."
+      : "TRH EA: AutoTrade OFF — detection only.");
    return INIT_SUCCEEDED;
 }
 
@@ -219,25 +265,23 @@ void OnDeinit(const int reason)
 
 void OnTick()
 {
+   ExpireStalePendings();
+
    datetime barTime = iTime(_Symbol, _Period, 0);
    if(barTime == 0) return;
 
-   ExpireStalePendings();
-
-   // New-bar only (setup confirmation is bar-close model, same as Pine)
+   // New-bar only — same bar-close confirm model as Pine
    if(barTime == g_lastBarTime) return;
    g_lastBarTime = barTime;
 
    MqlRates rates[];
-   int copied = CopyRates(_Symbol, _Period, 0, 2000, rates);
+   ArraySetAsSeries(rates, false);
+   int copied = CopyRates(_Symbol, _Period, 0, InpLookbackBars, rates);
    if(copied < 120)
    {
       Print("TRH: not enough bars (", copied, ")");
       return;
    }
-
-   // CopyRates returns oldest→newest when ArraySetAsSeries is false
-   ArraySetAsSeries(rates, false);
 
    datetime t[];
    double o[], h[], l[], c[];
@@ -262,37 +306,40 @@ void OnTick()
 
    if(n <= 0)
    {
-      Comment(InpAutoTrade
-         ? "TRH EA: AutoTrade ON — scanning…"
-         : "TRH EA: AutoTrade OFF — scanning…");
+      Comment(InpAutoTrade ? "TRH EA ON — scanning…" : "TRH EA OFF — scanning…");
       return;
    }
 
    TrhSetup last = setups[n - 1];
-   string status = StringFormat(
-      "TRH %s · SWEEP\nENTRY %s\nSL %s\nTP %s\nBar %s\nAutoTrade %s",
+   int ageBars = (copied - 1) - last.barIndex;
+
+   Comment(StringFormat(
+      "TRH %s · SWEEP\nENTRY %s\nSL %s\nTP %s\nBar %s (age %d)\nAutoTrade %s | orders %d",
       last.dir == 1 ? "LONG" : "SHORT",
       DoubleToString(last.entry, _Digits),
       DoubleToString(last.sl, _Digits),
       DoubleToString(last.tp, _Digits),
       TimeToString(last.barTime, TIME_DATE|TIME_MINUTES),
-      InpAutoTrade ? "ON" : "OFF");
-   Comment(status);
+      ageBars,
+      InpAutoTrade ? "ON" : "OFF",
+      CountOurOrders()));
 
-   // Fire only when the newest setup is on the bar that just closed
-   // (index copied-2 is previous completed bar after new bar opens)
+   // Only act on a fresh confirm (just closed / current forming bar)
    datetime closedBar = (copied >= 2) ? t[copied - 2] : last.barTime;
-   bool isFresh = (last.barTime == closedBar || last.barTime == t[copied - 1]);
-
-   if(!isFresh || last.barTime == g_lastSetupTime)
-      return;
+   bool isFreshBar = (last.barTime == closedBar || last.barTime == t[copied - 1]);
+   if(!isFreshBar) return;
+   if(ageBars > InpFreshMaxAgeBars) return;
+   if(last.barTime == g_lastSetupTime) return;
 
    g_lastSetupTime = last.barTime;
 
-   PrintFormat("TRH SETUP %s E=%.2f SL=%.2f TP=%.2f @ %s",
+   PrintFormat("TRH SETUP %s E=%s SL=%s TP=%s @ %s age=%d",
       last.dir == 1 ? "LONG" : "SHORT",
-      last.entry, last.sl, last.tp,
-      TimeToString(last.barTime, TIME_DATE|TIME_MINUTES));
+      DoubleToString(last.entry, _Digits),
+      DoubleToString(last.sl, _Digits),
+      DoubleToString(last.tp, _Digits),
+      TimeToString(last.barTime, TIME_DATE|TIME_MINUTES),
+      ageBars);
 
    if(InpAlertOnSetup)
    {
@@ -304,11 +351,7 @@ void OnTick()
          InpAutoTrade ? "ON" : "OFF"));
    }
 
-   if(!InpAutoTrade)
-   {
-      Print("TRH: AutoTrade OFF — would have traded this setup. Enable after TV match.");
-      return;
-   }
+   if(!InpAutoTrade) return;
 
    double atrNow = TrhCalcATR(copied - 1, h, l, c);
    PlaceSetupTrade(last, atrNow);
