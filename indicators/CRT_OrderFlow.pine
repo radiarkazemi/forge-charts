@@ -1,0 +1,237 @@
+//@version=5
+indicator("CRT OrderFlow", overlay=true, max_boxes_count=80, max_lines_count=80, max_labels_count=80)
+
+// Standalone CRT OrderFlow (Candle Range Theory)
+// Rule 1: >= N CRT models same direction (bias)
+// Rule 2: HTF FVG = Area of Interest
+// Rule 3: new CRT confirms inside HTF FVG
+// RunRox tools inspired the visualization — this is NOT their product.
+
+grpCrt = "CRT Model"
+rcLookback     = input.int(8, "RC Lookback", minval=2, group=grpCrt)
+minSweepAtr    = input.float(0.02, "Min Sweep ATR", step=0.01, group=grpCrt)
+requireCloseBack = input.bool(true, "Confirm Close Back Into RC", group=grpCrt)
+minBiasModels  = input.int(2, "Min CRT Same Direction (bias)", minval=1, group=grpCrt)
+biasLookback   = input.int(80, "Bias Lookback Bars", group=grpCrt)
+cooldownBars   = input.int(15, "Cooldown Bars", group=grpCrt)
+
+grpHtf = "HTF FVG AOI"
+htfTf          = input.timeframe("15", "HTF for FVG", group=grpHtf)
+minHtfFvgAtr   = input.float(0.08, "Min HTF FVG ATR", step=0.01, group=grpHtf)
+requireHtfFvg  = input.bool(true, "Require HTF FVG", group=grpHtf)
+entryInsideFvg = input.bool(true, "CRT Must Touch HTF FVG", group=grpHtf)
+
+grpRisk = "Risk"
+slPadAtr       = input.float(0.06, "SL Pad ATR", step=0.01, group=grpRisk)
+riskReward     = input.float(2.5, "Risk Reward", step=0.1, group=grpRisk)
+onlyLast       = input.bool(true, "Only Last Setup", group=grpRisk)
+
+grpAlert = "Alerts"
+alertOnSetup   = input.bool(true, "Alert On Setup", group=grpAlert)
+
+atr = ta.atr(14)
+
+// Detect CRT on confirmed bar (confirm = current closed bar)
+var int[] crtBars = array.new_int()
+var int[] crtDirs = array.new_int()
+var float[] crtSweep = array.new_float()
+var float[] crtEntry = array.new_float()
+var float[] crtRcH = array.new_float()
+var float[] crtRcL = array.new_float()
+
+if barstate.isconfirmed
+    float minPierce = atr * minSweepAtr
+    bool foundNow = false
+    int dirNow = 0
+    float rcHnow = na
+    float rcLnow = na
+    float sweepNow = na
+    float entryNow = na
+    int from = rcLookback
+    for rc = 2 to from
+        float bullExt = low[rc]
+        bool hadBull = false
+        for s = 1 to rc - 1
+            if low[s] < low[rc] - minPierce
+                hadBull := true
+                bullExt := math.min(bullExt, low[s])
+        bool bullOk = hadBull and close > low[rc]
+        if requireCloseBack
+            bullOk := bullOk and close > open
+
+        float bearExt = high[rc]
+        bool hadBear = false
+        for s = 1 to rc - 1
+            if high[s] > high[rc] + minPierce
+                hadBear := true
+                bearExt := math.max(bearExt, high[s])
+        bool bearOk = hadBear and close < high[rc]
+        if requireCloseBack
+            bearOk := bearOk and close < open
+
+        if bullOk and (not bearOk or close > open)
+            foundNow := true
+            dirNow := 1
+            rcHnow := high[rc]
+            rcLnow := low[rc]
+            sweepNow := bullExt
+            entryNow := (high[rc] + low[rc]) * 0.5
+            break
+        if bearOk
+            foundNow := true
+            dirNow := -1
+            rcHnow := high[rc]
+            rcLnow := low[rc]
+            sweepNow := bearExt
+            entryNow := (high[rc] + low[rc]) * 0.5
+            break
+
+    if foundNow
+        bool dup = array.size(crtBars) > 0 and (bar_index - array.get(crtBars, array.size(crtBars) - 1) < 2)
+        if not dup
+            array.push(crtBars, bar_index)
+            array.push(crtDirs, dirNow)
+            array.push(crtSweep, sweepNow)
+            array.push(crtEntry, entryNow)
+            array.push(crtRcH, rcHnow)
+            array.push(crtRcL, rcLnow)
+            if array.size(crtBars) > 64
+                array.shift(crtBars)
+                array.shift(crtDirs)
+                array.shift(crtSweep)
+                array.shift(crtEntry)
+                array.shift(crtRcH)
+                array.shift(crtRcL)
+
+f_bias_count(int dir) =>
+    int count = 0
+    int sz = array.size(crtBars)
+    if sz > 0
+        for i = sz - 1 to 0
+            int b = array.get(crtBars, i)
+            if bar_index - b > biasLookback
+                break
+            if array.get(crtDirs, i) == dir
+                count += 1
+    count
+
+// HTF FVG
+htfHigh = request.security(syminfo.tickerid, htfTf, high)
+htfLow  = request.security(syminfo.tickerid, htfTf, low)
+htfClose= request.security(syminfo.tickerid, htfTf, close)
+htfAtr  = request.security(syminfo.tickerid, htfTf, ta.atr(14))
+htfTime = request.security(syminfo.tickerid, htfTf, time)
+
+// Track last unmitigated HTF FVGs via security-confirmed 3-candle gaps
+htfBullGap = htfLow > htfHigh[2] and (htfLow - htfHigh[2]) >= htfAtr * minHtfFvgAtr
+htfBearGap = htfHigh < htfLow[2] and (htfLow[2] - htfHigh) >= htfAtr * minHtfFvgAtr
+
+var float aoiTop = na
+var float aoiBot = na
+var int aoiDir = 0
+var bool aoiLive = false
+
+if barstate.isconfirmed and htfBullGap
+    aoiTop := htfLow
+    aoiBot := htfHigh[2]
+    aoiDir := 1
+    aoiLive := true
+if barstate.isconfirmed and htfBearGap
+    aoiTop := htfLow[2]
+    aoiBot := htfHigh
+    aoiDir := -1
+    aoiLive := true
+
+// mitigate AOI
+if aoiLive and aoiDir == 1 and not na(aoiBot) and low < aoiBot
+    aoiLive := false
+if aoiLive and aoiDir == -1 and not na(aoiTop) and high > aoiTop
+    aoiLive := false
+
+// Setup on newest CRT
+var float setupEntry = na
+var float setupSl = na
+var float setupTp = na
+var int setupDir = 0
+var int setupBar = na
+var int setupBias = 0
+var float setupFvgTop = na
+var float setupFvgBot = na
+
+newSetup = false
+if barstate.isconfirmed and array.size(crtBars) > 0
+    int lastIdx = array.size(crtBars) - 1
+    int lastBar = array.get(crtBars, lastIdx)
+    if lastBar == bar_index
+        int dir = array.get(crtDirs, lastIdx)
+        int bias = f_bias_count(dir)
+        bool biasOk = bias >= minBiasModels
+        bool fvgOk = not requireHtfFvg
+        float fTop = na
+        float fBot = na
+        if requireHtfFvg
+            fvgOk := aoiLive and aoiDir == dir
+            if fvgOk and entryInsideFvg
+                float eHint = array.get(crtEntry, lastIdx)
+                float sw = array.get(crtSweep, lastIdx)
+                float rH = array.get(crtRcH, lastIdx)
+                float rL = array.get(crtRcL, lastIdx)
+                bool touch = (close <= aoiTop and close >= aoiBot) or (eHint <= aoiTop and eHint >= aoiBot) or (math.max(rH, sw) >= aoiBot and math.min(rL, sw) <= aoiTop)
+                fvgOk := fvgOk and touch
+            fTop := aoiTop
+            fBot := aoiBot
+        bool coolOk = na(setupBar) or (bar_index - setupBar >= cooldownBars)
+        if biasOk and fvgOk and coolOk
+            float sweep = array.get(crtSweep, lastIdx)
+            float entry = requireHtfFvg and not na(fTop) ? (fTop + fBot) * 0.5 : array.get(crtEntry, lastIdx)
+            float pad = atr * slPadAtr
+            float sl = dir == 1 ? sweep - pad : sweep + pad
+            float risk = math.abs(entry - sl)
+            if risk > 0
+                float tp = dir == 1 ? entry + risk * riskReward : entry - risk * riskReward
+                setupEntry := entry
+                setupSl := sl
+                setupTp := tp
+                setupDir := dir
+                setupBar := bar_index
+                setupBias := bias
+                setupFvgTop := fTop
+                setupFvgBot := fBot
+                newSetup := true
+
+// Draw
+var box fvgBox = na
+var line le = na
+var line ls = na
+var line lt = na
+var label lab = na
+
+if newSetup
+    if onlyLast
+        if not na(fvgBox)
+            box.delete(fvgBox)
+        if not na(le)
+            line.delete(le)
+        if not na(ls)
+            line.delete(ls)
+        if not na(lt)
+            line.delete(lt)
+        if not na(lab)
+            label.delete(lab)
+    col = setupDir == 1 ? color.new(color.teal, 70) : color.new(color.red, 70)
+    if not na(setupFvgTop) and not na(setupFvgBot)
+        fvgBox := box.new(bar_index, setupFvgTop, bar_index + 25, setupFvgBot, bgcolor=col, border_color=color.new(color.white, 80))
+    le := line.new(bar_index, setupEntry, bar_index + 25, setupEntry, color=color.gray, style=line.style_dashed)
+    ls := line.new(bar_index, setupSl, bar_index + 25, setupSl, color=color.red, style=line.style_dashed)
+    lt := line.new(bar_index, setupTp, bar_index + 25, setupTp, color=color.teal, style=line.style_dashed)
+    lab := label.new(bar_index, setupEntry, (setupDir == 1 ? "CRT LONG" : "CRT SHORT") + " x" + str.tostring(setupBias), style=label.style_label_left, color=color.new(color.black, 30), textcolor=color.white, size=size.small)
+
+if alertOnSetup and newSetup
+    alert((setupDir == 1 ? "CRT LONG" : "CRT SHORT") + " bias x" + str.tostring(setupBias) + " ENTRY " + str.tostring(setupEntry), alert.freq_once_per_bar_close)
+
+plotshape(newSetup and setupDir == 1, title="CRT Long", style=shape.triangleup, location=location.belowbar, color=color.teal, size=size.small)
+plotshape(newSetup and setupDir == -1, title="CRT Short", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small)
+
+// AOI visualization
+plot(aoiLive ? aoiTop : na, "AOI Top", color=color.new(color.blue, 50))
+plot(aoiLive ? aoiBot : na, "AOI Bot", color=color.new(color.blue, 50))
