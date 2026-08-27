@@ -281,7 +281,7 @@ if showAoiBox and barstate.islast
             array.push(aoiBoxes, box.new(sb, t, bar_index + 30, b, bgcolor=col, border_color=color.new(#42A5F5, 35), border_width=1, extend=extend.right))
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Setup signal
+// Setup signal + state (declare before use — Pine requires this)
 // ═══════════════════════════════════════════════════════════════════════════
 var int   newDir = 0
 var float newEntry = na
@@ -291,6 +291,18 @@ var float newProximal = na
 var float newDistal = na
 var int   newBias = 0
 var int   lastSetupBar = na
+
+var int[]   sDir = array.new<int>()
+var float[] sEntry = array.new<float>()
+var float[] sSl = array.new<float>()
+var float[] sTp = array.new<float>()
+var int[]   sBar = array.new<int>()
+var int[]   sStat = array.new<int>()
+var int[]   sBias = array.new<int>()
+
+var float activeE = na
+var float activeS = na
+var float activeT = na
 
 newDir := 0
 
@@ -342,18 +354,6 @@ var label[] labE = array.new<label>()
 var label[] labS = array.new<label>()
 var label[] labT = array.new<label>()
 var label[] labTag = array.new<label>()
-
-var int[]   sDir = array.new<int>()
-var float[] sEntry = array.new<float>()
-var float[] sSl = array.new<float>()
-var float[] sTp = array.new<float>()
-var int[]   sBar = array.new<int>()
-var int[]   sStat = array.new<int>()
-var int[]   sBias = array.new<int>()
-
-var float activeE = na
-var float activeS = na
-var float activeT = na
 
 if newDir != 0
     if onlyLast and array.size(sDir) > 0
