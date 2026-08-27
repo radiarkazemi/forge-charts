@@ -324,7 +324,9 @@ if barstate.isconfirmed and array.size(crtBars) > 0
             fvgOk := ok
             fTop := t
             fBot := b
-        bool lastExited = array.size(sStat) > 0 and array.get(sStat, array.size(sStat) - 1) >= 2
+        bool lastExited = false
+        if array.size(sStat) > 0
+            lastExited := array.get(sStat, array.size(sStat) - 1) >= 2
         bool coolOk = lastExited or na(lastSetupBar) or (bar_index - lastSetupBar >= cooldownBars)
         if biasOk and fvgOk and coolOk
             float entry = requireHtfFvg and not na(fTop) ? (fTop + fBot) * 0.5 : eHint
