@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.20"
-#property description "TRH EA v3.20: Mode A SWEEP + Mode B Sweep/Disp/FVG"
+#property version   "3.21"
+#property description "TRH EA v3.21: closed-bar only + FVG retest + BE@0.5R + quiet alerts"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -15,8 +15,8 @@
 #ifndef TRH_ENGINE_VERSION
 #error TRH_Engine.mqh is outdated. Copy the NEW TRH_Engine.mqh into the SAME folder as this .mq5 and recompile.
 #endif
-#if TRH_ENGINE_VERSION < 220
-#error TRH_Engine.mqh is outdated (need v220 Mode B). Replace TRH_Engine.mqh next to this file.
+#if TRH_ENGINE_VERSION < 221
+#error TRH_Engine.mqh is outdated (need v221 FVG retest/hold). Replace TRH_Engine.mqh next to this file.
 #endif
 
 enum ENUM_TRH_TRADE_MODE
@@ -28,7 +28,7 @@ enum ENUM_TRH_TRADE_MODE
 
 input group "Trading"
 input bool   InpAutoTrade         = true;   // Enable AutoTrade (Algo Trading ON)
-input bool   InpAlertOnSetup      = true;   // Alert on new setup
+input bool   InpAlertOnSetup      = false;  // Alert on new setup (OFF: indicator alerts; avoids double popups)
 input ulong  InpMagic             = 260825; // Magic number
 input int    InpMaxSlippagePts    = 30;     // Max slippage (points)
 input int    InpPendingExpiryBars = 40;     // Cancel unfilled limit after N bars
@@ -53,7 +53,7 @@ input int    InpMaxDailyTrades    = 5;      // Max new trades per day (0=off)
 
 input group "4) Break-even"
 input bool   InpUseBreakEven      = true;   // Move SL to BE after +XR
-input double InpBreakEvenAtR      = 1.0;    // Trigger at this R multiple
+input double InpBreakEvenAtR      = 0.5;    // Trigger at this R multiple (0.5 = earlier protect)
 input double InpBreakEvenLockR    = 0.05;   // Lock +this R past entry (0=exact BE)
 
 input group "5) Max chase (no late market)"
@@ -77,6 +77,9 @@ input double InpMinDispAtr      = 0.55;   // Min Displacement Body (ATRx)
 input int    InpMaxDispBars     = 6;      // Max Bars After Sweep For Displacement
 input int    InpMaxFvgBars      = 10;     // Max Bars After Displacement For FVG
 input double InpMinFvgAtr       = 0.12;   // Min FVG Gap Size (ATRx)
+input bool   InpRequireFvgRetest= true;   // Wait For FVG Retest Before Entry
+input int    InpMaxRetestBars   = 8;      // Max Bars To Wait For Retest
+input double InpFvgSlExtraAtr   = 0.20;   // Extra SL Beyond Sweep (ATRx)
 
 input group "Entry / SL / TP"
 input double InpSlPadAtr        = 0.02;
@@ -117,6 +120,9 @@ void BuildConfig(TrhConfig &cfg)
    cfg.maxDispBars     = InpMaxDispBars;
    cfg.maxFvgBars      = InpMaxFvgBars;
    cfg.minFvgAtr       = InpMinFvgAtr;
+   cfg.requireFvgRetest= InpRequireFvgRetest;
+   cfg.maxRetestBars   = InpMaxRetestBars;
+   cfg.fvgSlExtraAtr   = InpFvgSlExtraAtr;
 }
 
 void ResetDayIfNeeded()
@@ -467,12 +473,14 @@ int OnInit()
    g_trade.SetTypeFillingBySymbol(_Symbol);
    ResetDayIfNeeded();
 
-   PrintFormat("TRH AutoTrade v3.20 | mode=%d | AutoTrade=%s | %s %s | risk=%.2f%%",
+   PrintFormat("TRH AutoTrade v3.21 | mode=%d | AutoTrade=%s | BE@%.2fR | FVG retest=%s | %s %s | risk=%.2f%%",
       (int)InpTradeMode,
       InpAutoTrade ? "ON" : "OFF",
+      InpBreakEvenAtR,
+      InpRequireFvgRetest ? "ON" : "OFF",
       _Symbol, EnumToString(_Period), InpRiskPercent);
 
-   Comment("TRH EA v3.20\nMode A SWEEP + Mode B FVG\n1 Spread  2 Session  3 Daily\n4 BE  5 Chase | Dyn lots");
+   Comment("TRH EA v3.21\nClosed-bar only + FVG retest\nBE@0.5R | quiet alerts\n1 Spread  2 Session  3 Daily");
    return INIT_SUCCEEDED;
 }
 
@@ -524,17 +532,20 @@ void OnTick()
 
    if(n <= 0)
    {
-      Comment(StringFormat("TRH EA v3.20 %s - scanning...\nday trades %d | equity %.2f",
+      Comment(StringFormat("TRH EA v3.21 %s - scanning...\nday trades %d | equity %.2f",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades, AccountInfoDouble(ACCOUNT_EQUITY)));
       return;
    }
 
    TrhSetup last = setups[n - 1];
-   int ageBars = (copied - 1) - last.barIndex;
+   // Age vs last CLOSED bar (copied-2). Forming tip is never a valid signal bar.
+   int ageBars = (copied >= 2) ? ((copied - 2) - last.barIndex) : ((copied - 1) - last.barIndex);
+   if(ageBars < 0) ageBars = 0;
    double previewLots = CalcLots(last.entry, last.sl);
+   int openNow = CountOurOrders();
 
    Comment(StringFormat(
-      "TRH %s | %s\nENTRY %s  SL %s  TP %s\nBar %s (age %d)\nAutoTrade %s | orders %d | day %d\nDyn lots ? %s (risk %.2f%% bal)",
+      "TRH %s | %s\nENTRY %s  SL %s  TP %s\nBar %s (age %d)\nAutoTrade %s | orders %d | day %d\nDyn lots ? %s (risk %.2f%% bal) BE@%.1fR",
       last.dir == 1 ? "LONG" : "SHORT",
       TrhModeLabel(last.setupMode),
       DoubleToString(last.entry, _Digits),
@@ -543,16 +554,26 @@ void OnTick()
       TimeToString(last.barTime, TIME_DATE|TIME_MINUTES),
       ageBars,
       InpAutoTrade ? "ON" : "OFF",
-      CountOurOrders(),
+      openNow,
       g_dayTrades,
       DoubleToString(previewLots, 2),
-      InpRiskPercent));
+      InpRiskPercent,
+      InpBreakEvenAtR));
 
-   datetime closedBar = (copied >= 2) ? t[copied - 2] : last.barTime;
-   bool isFreshBar = (last.barTime == closedBar || last.barTime == t[copied - 1]);
-   if(!isFreshBar) return;
+   // Closed-bar only: never trade/alert on the forming tip candle
+   datetime closedBar = (copied >= 2) ? t[copied - 2] : 0;
+   if(closedBar == 0 || last.barTime != closedBar) return;
    if(ageBars > InpFreshMaxAgeBars) return;
    if(last.barTime == g_lastSetupTime) return;
+
+   // While a TRH position/pending is already open, do not fire a second alarm
+   // or try to open another setup (prevents wipe-then-realert while in trade).
+   if(openNow > 0)
+   {
+      PrintFormat("TRH: hold - already %d open order(s); ignore new setup %s",
+         openNow, TimeToString(last.barTime, TIME_DATE|TIME_MINUTES));
+      return;
+   }
 
    g_lastSetupTime = last.barTime;
 
@@ -579,7 +600,7 @@ void OnTick()
 
    if(!InpAutoTrade) return;
 
-   double atrNow = TrhCalcATR(copied - 1, h, l, c);
+   double atrNow = TrhCalcATR(copied - 2, h, l, c);
    PlaceSetupTrade(last, atrNow);
 }
 //+------------------------------------------------------------------+

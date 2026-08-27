@@ -5,7 +5,7 @@
 #ifndef TRH_ENGINE_MQH
 #define TRH_ENGINE_MQH
 
-#define TRH_ENGINE_VERSION 220
+#define TRH_ENGINE_VERSION 221
 #define TRH_MAX_PIVOTS 30
 #define TRH_ATR_LEN    14
 
@@ -50,6 +50,9 @@ struct TrhConfig
    int    maxDispBars;     // Bars after sweep to find displacement
    int    maxFvgBars;      // Bars after displacement to find FVG
    double minFvgAtr;       // Min FVG gap size (ATRx)
+   bool   requireFvgRetest;// Wait for FVG retest before ENTRY signal
+   int    maxRetestBars;   // Bars allowed to wait for retest
+   double fvgSlExtraAtr;   // Extra SL pad beyond sweep (ATRx) for Mode B
 };
 
 void TrhDefaultConfig(TrhConfig &cfg)
@@ -69,6 +72,9 @@ void TrhDefaultConfig(TrhConfig &cfg)
    cfg.maxDispBars     = 6;
    cfg.maxFvgBars      = 10;
    cfg.minFvgAtr       = 0.12;
+   cfg.requireFvgRetest= true;
+   cfg.maxRetestBars   = 8;
+   cfg.fvgSlExtraAtr   = 0.20;
 }
 
 string TrhModeLabel(const int mode)
@@ -210,8 +216,10 @@ int TrhScanSetups(const int rates,
    int    lastSetupBar = -9999;
    int    nSetups = 0;
    int    p = cfg.pivotPeriod;
+   int    lastClosed = rates - 2; // never confirm on forming tip (rates-1)
+   if(lastClosed < 50) return 0;
 
-   for(int i = 0; i < rates; i++)
+   for(int i = 0; i <= lastClosed; i++)
    {
       double a = TrhCalcATR(i, high, low, close);
 
@@ -366,7 +374,8 @@ int TrhScanSetups(const int rates,
    return nSetups;
 }
 
-// Mode B: liquidity sweep -> displacement candle -> 3-candle FVG -> mid-gap ENTRY
+// Mode B: sweep -> displacement -> FVG -> optional retest -> mid-gap ENTRY
+// Never confirms on the forming tip bar (rates-1).
 int TrhScanFvgSetups(const int rates,
                      const datetime &time[],
                      const double &open[],
@@ -383,18 +392,22 @@ int TrhScanFvgSetups(const int rates,
    TrhPivot pivLo[TRH_MAX_PIVOTS];
    int nHi = 0, nLo = 0;
 
-   // phase: 0 idle, 1 wait displacement, 2 wait FVG
+   // phase: 0 idle, 1 wait disp, 2 wait FVG form, 3 wait retest
    int    phase = 0;
    int    pendDir = 0;
    double pendDistal = 0;
    double pendHunt = 0;
+   double gapBot = 0, gapTop = 0;
    int    sweepBar = -1;
    int    dispBar = -1;
+   int    fvgBar = -1;
    int    lastSetupBar = -9999;
    int    nSetups = 0;
    int    p = cfg.pivotPeriod;
+   int    lastClosed = rates - 2; // never signal on forming tip (rates-1)
+   if(lastClosed < 50) return 0;
 
-   for(int i = 0; i < rates; i++)
+   for(int i = 0; i <= lastClosed; i++)
    {
       double a = TrhCalcATR(i, high, low, close);
 
@@ -441,39 +454,24 @@ int TrhScanFvgSetups(const int rates,
          close[i] < huntHi && close[i] < open[i] &&
          (high[i] - priorLow) >= a * cfg.minContextAtr;
 
-      // Expire pending if windows elapsed
-      if(phase == 1 && (i - sweepBar) > cfg.maxDispBars)
-      {
-         phase = 0; pendDir = 0;
-      }
-      if(phase == 2 && (i - dispBar) > cfg.maxFvgBars)
-      {
-         phase = 0; pendDir = 0;
-      }
+      if(phase == 1 && (i - sweepBar) > cfg.maxDispBars) { phase = 0; pendDir = 0; }
+      if(phase == 2 && (i - dispBar) > cfg.maxFvgBars)  { phase = 0; pendDir = 0; }
+      if(phase == 3 && (i - fvgBar) > cfg.maxRetestBars) { phase = 0; pendDir = 0; }
 
       bool canStart = (phase == 0) && (i - lastSetupBar >= cfg.cooldownBars);
       if(canStart && bullSweep)
       {
-         phase      = 1;
-         pendDir    = 1;
-         pendDistal = low[i];
-         pendHunt   = huntLo;
-         sweepBar   = i;
-         dispBar    = -1;
+         phase = 1; pendDir = 1; pendDistal = low[i]; pendHunt = huntLo;
+         sweepBar = i; dispBar = -1; fvgBar = -1;
       }
       else if(canStart && bearSweep)
       {
-         phase      = 1;
-         pendDir    = -1;
-         pendDistal = high[i];
-         pendHunt   = huntHi;
-         sweepBar   = i;
-         dispBar    = -1;
+         phase = 1; pendDir = -1; pendDistal = high[i]; pendHunt = huntHi;
+         sweepBar = i; dispBar = -1; fvgBar = -1;
       }
 
       if(phase == 0) continue;
 
-      // Track worst distal during wait
       if(pendDir == 1 && low[i] < pendDistal) pendDistal = low[i];
       if(pendDir == -1 && high[i] > pendDistal) pendDistal = high[i];
 
@@ -494,70 +492,140 @@ int TrhScanFvgSetups(const int rates,
          continue;
       }
 
-      // Phase 2 -> FVG (need i-2 available and after displacement)
+      // Phase 2 -> detect FVG box (do not enter yet if retest required)
       if(phase == 2 && i >= 2 && i > dispBar)
       {
-         TrhSetup s;
-         bool fired = false;
-
+         bool found = false;
          if(pendDir == 1)
          {
-            // Bullish FVG: gap between candle[i-2].high and candle[i].low
-            double gapBot = high[i - 2];
-            double gapTop = low[i];
-            double gap = gapTop - gapBot;
-            if(gap >= a * cfg.minFvgAtr)
+            double bot = high[i - 2];
+            double top = low[i];
+            if(top - bot >= a * cfg.minFvgAtr)
             {
-               double entry = (gapTop + gapBot) * 0.5;
-               double sl    = pendDistal - a * cfg.slPadAtr;
-               if(entry <= sl) continue;
-               double risk  = entry - sl;
-               double tp    = entry + risk * cfg.riskReward;
-               double liq;
-               if(cfg.useLiquidityTP && TrhNextLiqHigh(pivHi, nHi, entry, risk * 1.5, liq))
-                  tp = MathMax(tp, liq);
-
-               s.dir = 1; s.entry = entry; s.sl = sl; s.tp = tp;
-               s.distal = gapBot; s.proximal = gapTop; // room = FVG box
-               s.barIndex = i; s.barTime = time[i];
-               s.setupMode = TRH_MODE_FVG;
-               fired = true;
+               gapBot = bot; gapTop = top; found = true;
             }
          }
-         else if(pendDir == -1)
+         else
          {
-            // Bearish FVG: gap between candle[i].high and candle[i-2].low
-            double gapTop = low[i - 2];
-            double gapBot = high[i];
-            double gap = gapTop - gapBot;
-            if(gap >= a * cfg.minFvgAtr)
+            double top = low[i - 2];
+            double bot = high[i];
+            if(top - bot >= a * cfg.minFvgAtr)
             {
-               double entry = (gapTop + gapBot) * 0.5;
-               double sl    = pendDistal + a * cfg.slPadAtr;
-               if(sl <= entry) continue;
-               double risk  = sl - entry;
-               double tp    = entry - risk * cfg.riskReward;
-               double liq;
-               if(cfg.useLiquidityTP && TrhNextLiqLow(pivLo, nLo, entry, risk * 1.5, liq))
-                  tp = MathMin(tp, liq);
-
-               s.dir = -1; s.entry = entry; s.sl = sl; s.tp = tp;
-               s.distal = gapTop; s.proximal = gapBot; // room = FVG box
-               s.barIndex = i; s.barTime = time[i];
-               s.setupMode = TRH_MODE_FVG;
-               fired = true;
+               gapBot = bot; gapTop = top; found = true;
             }
          }
 
-         if(fired)
+         if(found)
          {
-            ArrayResize(outSetups, nSetups + 1);
-            outSetups[nSetups] = s;
-            nSetups++;
-            lastSetupBar = i;
+            fvgBar = i;
+            if(cfg.requireFvgRetest)
+            {
+               phase = 3; // wait for retest on a later closed bar
+               continue;
+            }
+
+            // Immediate entry at FVG mid (retest disabled)
+            double entry = (gapTop + gapBot) * 0.5;
+            double pad = a * (cfg.slPadAtr + cfg.fvgSlExtraAtr);
+            TrhSetup s;
+            bool ok = false;
+            if(pendDir == 1)
+            {
+               double sl = pendDistal - pad;
+               if(entry > sl)
+               {
+                  double risk = entry - sl;
+                  double tp = entry + risk * cfg.riskReward;
+                  double liq;
+                  if(cfg.useLiquidityTP && TrhNextLiqHigh(pivHi, nHi, entry, risk * 1.5, liq))
+                     tp = MathMax(tp, liq);
+                  s.dir = 1; s.entry = entry; s.sl = sl; s.tp = tp;
+                  s.distal = gapBot; s.proximal = gapTop;
+                  ok = true;
+               }
+            }
+            else
+            {
+               double sl = pendDistal + pad;
+               if(sl > entry)
+               {
+                  double risk = sl - entry;
+                  double tp = entry - risk * cfg.riskReward;
+                  double liq;
+                  if(cfg.useLiquidityTP && TrhNextLiqLow(pivLo, nLo, entry, risk * 1.5, liq))
+                     tp = MathMin(tp, liq);
+                  s.dir = -1; s.entry = entry; s.sl = sl; s.tp = tp;
+                  s.distal = gapTop; s.proximal = gapBot;
+                  ok = true;
+               }
+            }
+            if(ok)
+            {
+               s.barIndex = i; s.barTime = time[i];
+               s.setupMode = TRH_MODE_FVG;
+               ArrayResize(outSetups, nSetups + 1);
+               outSetups[nSetups] = s;
+               nSetups++;
+               lastSetupBar = i;
+            }
             phase = 0;
             pendDir = 0;
          }
+         continue;
+      }
+
+      // Phase 3 -> retest FVG then confirm close back in trade direction
+      if(phase == 3 && i > fvgBar)
+      {
+         bool confirmed = false;
+         if(pendDir == 1)
+         {
+            bool retested = (low[i] <= gapTop && low[i] >= gapBot - a * 0.05);
+            confirmed = retested && close[i] > open[i] && close[i] >= (gapBot + gapTop) * 0.5;
+         }
+         else
+         {
+            bool retested = (high[i] >= gapBot && high[i] <= gapTop + a * 0.05);
+            confirmed = retested && close[i] < open[i] && close[i] <= (gapBot + gapTop) * 0.5;
+         }
+         if(!confirmed) continue;
+
+         double entry = (gapTop + gapBot) * 0.5;
+         double pad = a * (cfg.slPadAtr + cfg.fvgSlExtraAtr);
+         TrhSetup s;
+         if(pendDir == 1)
+         {
+            double sl = pendDistal - pad;
+            if(entry <= sl) { phase = 0; pendDir = 0; continue; }
+            double risk = entry - sl;
+            double tp = entry + risk * cfg.riskReward;
+            double liq;
+            if(cfg.useLiquidityTP && TrhNextLiqHigh(pivHi, nHi, entry, risk * 1.5, liq))
+               tp = MathMax(tp, liq);
+            s.dir = 1; s.entry = entry; s.sl = sl; s.tp = tp;
+            s.distal = gapBot; s.proximal = gapTop;
+         }
+         else
+         {
+            double sl = pendDistal + pad;
+            if(sl <= entry) { phase = 0; pendDir = 0; continue; }
+            double risk = sl - entry;
+            double tp = entry - risk * cfg.riskReward;
+            double liq;
+            if(cfg.useLiquidityTP && TrhNextLiqLow(pivLo, nLo, entry, risk * 1.5, liq))
+               tp = MathMin(tp, liq);
+            s.dir = -1; s.entry = entry; s.sl = sl; s.tp = tp;
+            s.distal = gapTop; s.proximal = gapBot;
+         }
+
+         s.barIndex = i; s.barTime = time[i];
+         s.setupMode = TRH_MODE_FVG;
+         ArrayResize(outSetups, nSetups + 1);
+         outSetups[nSetups] = s;
+         nSetups++;
+         lastSetupBar = i;
+         phase = 0;
+         pendDir = 0;
       }
    }
 

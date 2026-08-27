@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "2.20"
-#property description "TRH classic SWEEP + Mode B Sweep/Displacement/FVG"
+#property version   "2.21"
+#property description "TRH Mode B FVG retest + hold active setup (no wipe)"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -15,8 +15,8 @@
 #ifndef TRH_ENGINE_VERSION
 #error TRH_Engine.mqh is outdated. Copy the NEW TRH_Engine.mqh into the SAME folder as this .mq5 and recompile.
 #endif
-#if TRH_ENGINE_VERSION < 220
-#error TRH_Engine.mqh is outdated (need v220 Mode B). Replace TRH_Engine.mqh next to this file.
+#if TRH_ENGINE_VERSION < 221
+#error TRH_Engine.mqh is outdated (need v221 FVG retest/hold). Replace TRH_Engine.mqh next to this file.
 #endif
 
 enum ENUM_TRH_PANEL_CORNER
@@ -50,6 +50,9 @@ input double InpMinDispAtr      = 0.55;   // Min Displacement Body (ATRx)
 input int    InpMaxDispBars     = 6;      // Max Bars After Sweep For Displacement
 input int    InpMaxFvgBars      = 10;     // Max Bars After Displacement For FVG
 input double InpMinFvgAtr       = 0.12;   // Min FVG Gap Size (ATRx)
+input bool   InpRequireFvgRetest= true;   // Wait For FVG Retest Before Signal
+input int    InpMaxRetestBars   = 8;      // Max Bars To Wait For Retest
+input double InpFvgSlExtraAtr   = 0.20;   // Extra SL Beyond Sweep (ATRx)
 
 input group "Entry / SL / TP"
 input double InpSlPadAtr        = 0.02;   // SL Pad (ATRx)
@@ -102,6 +105,8 @@ int      g_nSetups = 0;
 datetime g_lastAlertTime = 0;
 datetime g_lastTpAlert = 0;
 datetime g_lastSlAlert = 0;
+TrhSetup g_holdSetup;          // keep visible while WAIT/IN TRADE
+bool     g_holdValid = false;
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -488,6 +493,9 @@ void BuildConfig(TrhConfig &cfg)
    cfg.maxDispBars     = InpMaxDispBars;
    cfg.maxFvgBars      = InpMaxFvgBars;
    cfg.minFvgAtr       = InpMinFvgAtr;
+   cfg.requireFvgRetest= InpRequireFvgRetest;
+   cfg.maxRetestBars   = InpMaxRetestBars;
+   cfg.fvgSlExtraAtr   = InpFvgSlExtraAtr;
 }
 
 //+------------------------------------------------------------------+
@@ -521,11 +529,42 @@ int OnCalculate(const int rates_total,
       TrhConfig cfg;
       BuildConfig(cfg);
       datetime prevTime = (g_nSetups > 0) ? g_setups[g_nSetups - 1].barTime : 0;
-      g_nSetups = TrhScanByMode(rates_total, t, o, h, l, c, cfg, (int)InpTradeMode, g_setups);
+      int nNew = TrhScanByMode(rates_total, t, o, h, l, c, cfg, (int)InpTradeMode, g_setups);
+      g_nSetups = nNew;
+
+      // If an active setup is WAIT FILL / IN TRADE, keep it locked so a newer
+      // scan cannot wipe the chart while the EA position is still open.
+      bool holdActive = false;
+      if(g_holdValid)
+      {
+         int hs = 0, heb = -1;
+         StatusText(g_holdSetup, h, l, c, rates_total, hs, heb);
+         holdActive = (hs == 0 || hs == 1);
+      }
+
+      if(g_nSetups > 0)
+      {
+         TrhSetup newest = g_setups[g_nSetups - 1];
+         if(!holdActive)
+         {
+            g_holdSetup = newest;
+            g_holdValid = true;
+            if(newest.barTime != prevTime && newest.barTime != g_lastAlertTime)
+            {
+               g_lastAlertTime = newest.barTime;
+               NotifyNewSetup(newest);
+            }
+         }
+         // else: ignore newer signals/alerts until hold exits TP/SL
+      }
+      else if(!holdActive)
+      {
+         g_holdValid = false;
+      }
 
       ClearDrawings();
 
-      if(g_nSetups <= 0)
+      if(!g_holdValid && g_nSetups <= 0)
       {
          if(InpShowPanel)
          {
@@ -539,19 +578,24 @@ int OnCalculate(const int rates_total,
          return rates_total;
       }
 
-      int from = 0;
-      if(InpOnlyLast) from = g_nSetups - 1;
-      else from = MathMax(0, g_nSetups - MathMax(1, InpHistoryCount));
-
-      for(int i = from; i < g_nSetups; i++)
-         DrawOneSetup(g_setups[i], t, h, l, c, rates_total);
-
-      TrhSetup last = g_setups[g_nSetups - 1];
-      if(last.barTime != prevTime && last.barTime != g_lastAlertTime)
+      // Draw hold (active trade setup) first; optionally history behind it
+      if(!InpOnlyLast && g_nSetups > 0)
       {
-         g_lastAlertTime = last.barTime;
-         NotifyNewSetup(last);
+         int from = MathMax(0, g_nSetups - MathMax(1, InpHistoryCount));
+         for(int i = from; i < g_nSetups; i++)
+         {
+            if(g_holdValid && g_setups[i].barTime == g_holdSetup.barTime) continue;
+            DrawOneSetup(g_setups[i], t, h, l, c, rates_total);
+         }
       }
+      if(g_holdValid)
+         DrawOneSetup(g_holdSetup, t, h, l, c, rates_total);
+      else if(g_nSetups > 0)
+         DrawOneSetup(g_setups[g_nSetups - 1], t, h, l, c, rates_total);
+   }
+   else if(g_holdValid)
+   {
+      DrawOneSetup(g_holdSetup, t, h, l, c, rates_total);
    }
    else if(g_nSetups > 0)
    {
@@ -560,29 +604,39 @@ int OnCalculate(const int rates_total,
          DrawOneSetup(g_setups[i], t, h, l, c, rates_total);
    }
 
-   if(g_nSetups > 0)
+   TrhSetup panelSetup;
+   bool havePanel = false;
+   if(g_holdValid) { panelSetup = g_holdSetup; havePanel = true; }
+   else if(g_nSetups > 0) { panelSetup = g_setups[g_nSetups - 1]; havePanel = true; }
+
+   if(havePanel)
    {
-      TrhSetup last = g_setups[g_nSetups - 1];
       int stCode = 0;
       int exitBar = -1;
-      string stTxt = StatusText(last, h, l, c, rates_total, stCode, exitBar);
+      string stTxt = StatusText(panelSetup, h, l, c, rates_total, stCode, exitBar);
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      DrawInfoPanel(last, stTxt, stCode, bid);
+      DrawInfoPanel(panelSetup, stTxt, stCode, bid);
+
+      // Release hold after TP/SL so next setup can take over
+      if(g_holdValid && (stCode == 2 || stCode == 3))
+      {
+         // keep showing until next new setup replaces hold
+      }
 
       if(InpAlertOnTpSl)
       {
-         if(stCode == 2 && last.barTime != g_lastTpAlert)
+         if(stCode == 2 && panelSetup.barTime != g_lastTpAlert)
          {
-            g_lastTpAlert = last.barTime;
-            string m = "TRH TP HIT @ " + DoubleToString(last.tp, _Digits);
+            g_lastTpAlert = panelSetup.barTime;
+            string m = "TRH TP HIT @ " + DoubleToString(panelSetup.tp, _Digits);
             if(InpAlertPopup) Alert(m);
             if(InpAlertPush) SendNotification(m);
             if(InpAlertSound) PlaySound(InpAlertSoundFile);
          }
-         if(stCode == 3 && last.barTime != g_lastSlAlert)
+         if(stCode == 3 && panelSetup.barTime != g_lastSlAlert)
          {
-            g_lastSlAlert = last.barTime;
-            string m = "TRH SL HIT @ " + DoubleToString(last.sl, _Digits);
+            g_lastSlAlert = panelSetup.barTime;
+            string m = "TRH SL HIT @ " + DoubleToString(panelSetup.sl, _Digits);
             if(InpAlertPopup) Alert(m);
             if(InpAlertPush) SendNotification(m);
             if(InpAlertSound) PlaySound(InpAlertSoundFile);
@@ -593,11 +647,11 @@ int OnCalculate(const int rates_total,
       {
          Comment(
             "TRH | Trading Room Hunter\n",
-            (last.dir == 1 ? "LONG" : "SHORT"), " | ", TrhModeLabel(last.setupMode), " | ", stTxt, "\n",
-            "ENTRY ", DoubleToString(last.entry, _Digits), "\n",
-            "SL    ", DoubleToString(last.sl, _Digits), "\n",
-            "TP    ", DoubleToString(last.tp, _Digits), "\n",
-            "Bar   ", TimeToString(last.barTime, TIME_DATE|TIME_MINUTES)
+            (panelSetup.dir == 1 ? "LONG" : "SHORT"), " | ", TrhModeLabel(panelSetup.setupMode), " | ", stTxt, "\n",
+            "ENTRY ", DoubleToString(panelSetup.entry, _Digits), "\n",
+            "SL    ", DoubleToString(panelSetup.sl, _Digits), "\n",
+            "TP    ", DoubleToString(panelSetup.tp, _Digits), "\n",
+            "Bar   ", TimeToString(panelSetup.barTime, TIME_DATE|TIME_MINUTES)
          );
       }
       else Comment("");
