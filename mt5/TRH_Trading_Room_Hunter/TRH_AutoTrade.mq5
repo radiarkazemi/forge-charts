@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.00"
-#property description "TRH SWEEP EA v3: filters, dynamic lots, break-even"
+#property version   "3.10"
+#property description "TRH SWEEP EA v3.10: risk 1.5%, RR 2.4, daily 4%, BE@1R"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -31,7 +31,7 @@ input int    InpSessionEndHour    = 21;     // Session end hour (exclusive)
 
 input group "3) Daily limits"
 input bool   InpUseDailyLimits    = true;   // Enable daily loss / trade caps
-input double InpMaxDailyLossPct   = 2.0;    // Max daily loss % of equity (0=off)
+input double InpMaxDailyLossPct   = 4.0;    // Max daily loss % of equity (0=off)
 input int    InpMaxDailyTrades    = 5;      // Max new trades per day (0=off)
 
 input group "4) Break-even"
@@ -57,18 +57,18 @@ input int    InpCooldownBars    = 50;
 
 input group "Entry / SL / TP"
 input double InpSlPadAtr        = 0.02;
-input double InpRiskReward      = 2.4;
-input bool   InpUseLiquidityTP  = true;
+input double InpRiskReward      = 2.4;    // Target RR (use 1.2..2.4; liquidity may extend)
+input bool   InpUseLiquidityTP  = true;   // Prefer opposing pivot if farther (up to better TP)
 
 input group "Dynamic lot size (balance-based)"
 input bool   InpUseDynamicLots  = true;   // lots = (Balance * Risk%) / SL$
-input double InpRiskPercent     = 0.5;    // Risk % of balance per trade
+input double InpRiskPercent     = 1.5;    // Risk % of balance per trade (max 1.5%)
 input double InpBalanceBase     = 0;      // 0 = use live balance; else use this base
 input double InpLotScale        = 1.0;    // Multiply final lots (1.0 = normal)
 input double InpFixedLots       = 0.0;    // If >0, ignore dynamic and use fixed
 input double InpMinLots         = 0.0;    // Extra floor (0 = broker min)
 input double InpMaxLots         = 0.0;    // Extra cap (0 = broker max)
-input int    InpMaxOpenTrades   = 1;      // Max open positions + pendings
+input int    InpMaxOpenTrades   = 1;      // Max open at the same time
 
 CTrade   g_trade;
 datetime g_lastBarTime   = 0;
