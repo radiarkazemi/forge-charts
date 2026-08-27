@@ -3,6 +3,8 @@
 This is the **MetaTrader 5 version** of `indicators/TRH_Trading_Room_Hunter.pine`.  
 Same math → same **ENTRY / SL / TP** (on the same symbol feed + timeframe).
 
+**v2.00** adds a dashboard panel, live R, TP/SL status, history setups, colors, and toggles for every graphic object.
+
 Pine cannot place broker orders. MT5 can (optional EA, off by default).
 
 ## Where are the files?
@@ -72,6 +74,23 @@ Morning FOREXCOM sample: LONG ENTRY **4602.87** / SL **4599.63** / TP **4610.64*
 | Cooldown | 50 |
 | SL Pad ATR | 0.02 |
 | Risk Reward | 2.4 |
+
+## New display options (v2)
+
+| Option | What it does |
+|--------|----------------|
+| Info Panel | Dashboard with ENTRY/SL/TP, status, **live R** |
+| Panel Corner | Top-left or top-right |
+| Only Last / History | One setup or last N setups |
+| Extend To Now | Stretch boxes to the current bar |
+| Room / TP / SL zones | Toggle each shade box |
+| HLines / trend levels | Full-width lines and/or window-only lines |
+| Arrow + mid-room dot | Confirm markers |
+| Distal / Proximal labels | Optional room edges |
+| Colors | Long/short/TP/SL/entry/panel |
+| Alerts | Popup, sound, MetaQuotes push, TP/SL hit |
+
+Detection inputs stay identical to Pine — only the **look** and **alerts** are expanded.
 
 ## Troubleshooting
 
