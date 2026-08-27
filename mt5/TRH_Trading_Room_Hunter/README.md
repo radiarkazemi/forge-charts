@@ -1,78 +1,48 @@
-# TRH for MetaTrader 5 — classic SWEEP + Mode B FVG
-
-This is the **MetaTrader 5 version** of classic TRH, plus **Mode B**:
-**liquidity sweep → displacement → Fair Value Gap (FVG) → retest → entry**.
+# TRH for MetaTrader 5 — SWEEP + FVG + Pro BTB
 
 | Mode | What it does |
 |------|----------------|
-| **A — Classic SWEEP** | Same as Pine room mid-entry after base confirm |
-| **B — Sweep + Disp + FVG** | Sweep, displacement, FVG, then **retest** before ENTRY |
-| **Both** (default) | Runs A+B with shared cooldown (FVG wins if same bar) |
+| **A — Classic SWEEP** | Pine room mid-entry after base confirm |
+| **B — Sweep + Disp + FVG** | Sweep → displacement → FVG → retest → mid ENTRY |
+| **C — Pro BTB** | Break key pivot → return to breakout BE → confirm → ENTRY |
+| **Both** | A + B |
+| **All** (default) | A + B + C |
 
-**Indicator v2.21** · **EA v3.21** · **Engine v221**
+**Indicator v2.22** · **EA v3.22** · **Engine v222**
 
-### Fixes in this build
-- **Closed-bar only** — no signal on the forming tip (stops setup wipe ~20s later)
-- **Hold active setup** — chart keeps ENTRY/SL/TP while WAIT / IN TRADE
-- **Quiet EA alerts** — `Alert on new setup` default **OFF** (indicator owns popups)
-- **FVG retest** before entry (default ON)
-- **Extra SL pad** beyond sweep (default 0.20 ATR)
-- **BE @ 0.5R** (earlier protect)
+### Mode C — Pro BTB (Poursamadi)
+1. Strong **breakout** of a pivot high/low (body + close beyond level)
+2. Wait for price to **return to breakeven** (breakout candle close) or broken level
+3. Optional **rejection candle** confirm
+4. **ENTRY** = breakout candle close (BTB)
+5. **SL** behind breakout extreme + pad
+6. **TP** at **≥ 2.0R** (default)
 
-## Where are the files?
-
-```
-forge-charts/
-  mt5/
-    TRH_Trading_Room_Hunter/
-      TRH_Engine.mqh                  shared detector (A + B)
-      TRH_Trading_Room_Hunter.mq5     indicator
-      TRH_AutoTrade.mq5               EA
-      README.md
-```
+Closed-bar only · hold active setup · quiet EA alerts · BE @ 0.5R
 
 ## Install (overwrite ALL three files)
 
-1. **File → Open Data Folder** → `MQL5/Indicators/TRH_Trading_Room_Hunter/`
-2. Copy **all three**: `.mq5` indicator + `TRH_Engine.mqh` + (for EA folder) `TRH_AutoTrade.mq5`
-3. MetaEditor → Compile each (F7) — Engine must be **same folder** as the `.mq5`
-4. Remove old indicator/EA from chart, re-attach
-5. Input **Detection Mode** = `Both` (or FVG-only / Classic-only)
-
-EA: same Engine into `MQL5/Experts/TRH_Trading_Room_Hunter/`, compile `TRH_AutoTrade.mq5`, enable Algo Trading.
+1. Copy Engine + Indicator into `MQL5/Indicators/TRH_Trading_Room_Hunter/`
+2. Copy Engine + EA into `MQL5/Experts/TRH_Trading_Room_Hunter/`
+3. MetaEditor → Compile (F7) — Engine must be **same folder** as each `.mq5`
+4. Re-attach; Detection Mode = `All` or `Mode C - Pro BTB`
 
 ### Download
 
-- Folder: https://goldanil.ir/trh-mt5/
-- Zip: https://goldanil.ir/trh-mt5/TRH_Trading_Room_Hunter_MT5.zip
-- Raw (branch): https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-fvg-mode-b-992e/mt5/TRH_Trading_Room_Hunter/
+- https://goldanil.ir/trh-mt5/TRH_Trading_Room_Hunter_MT5.zip
+- Engine: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-pro-btb-992e/mt5/TRH_Trading_Room_Hunter/TRH_Engine.mqh
+- Indicator: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-pro-btb-992e/mt5/TRH_Trading_Room_Hunter/TRH_Trading_Room_Hunter.mq5
+- EA: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-pro-btb-992e/mt5/TRH_Trading_Room_Hunter/TRH_AutoTrade.mq5
 
-## Mode B defaults
-
-| Input | Value |
-|-------|-------|
-| Min Displacement Body | 0.55 ATR |
-| Max Bars For Displacement | 6 |
-| Max Bars For FVG | 10 |
-| Min FVG Gap | 0.12 ATR |
-| Require FVG Retest | true |
-| Max Retest Bars | 8 |
-| Extra SL Beyond Sweep | 0.20 ATR |
-| ENTRY | Mid of FVG (after retest) |
-| TP | RR 2.4 (liquidity optional) |
-| Break-even | at +0.5R |
-
-## Classic defaults (= Pine)
+## Mode C defaults
 
 | Input | Value |
 |-------|-------|
-| Pivot Period | 5 |
-| Min Context ATR | 1.2 |
-| Min Sweep ATR | 0.05 |
-| Base Confirm Bars | 8 |
-| Max Base Bars | 40 |
-| Min / Max Room ATR | 0.8 / 3.5 |
-| Cooldown | 50 |
-| Risk Reward | 2.4 |
+| Min Break Beyond Pivot | 0.15 ATR |
+| Min Breakout Body | 0.35 ATR |
+| Max BTB Retest Bars | 12 |
+| BTB RR | 2.0 |
+| Extra SL | 0.10 ATR |
+| Require Confirm Candle | true |
 
-Start on **demo** until you trust Mode B fills.
+Start on **demo** until you trust Pro BTB fills.

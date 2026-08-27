@@ -1,17 +1,23 @@
 //+------------------------------------------------------------------+
-//| TRH_Engine.mqh - Classic SWEEP + Mode B Sweep/Displacement/FVG   |
+//| TRH_Engine.mqh - Classic SWEEP + FVG + Pro BTB                   |
 //| Used by indicator (draw) and EA (optional autotrade).            |
 //+------------------------------------------------------------------+
 #ifndef TRH_ENGINE_MQH
 #define TRH_ENGINE_MQH
 
-#define TRH_ENGINE_VERSION 221
+#define TRH_ENGINE_VERSION 222
 #define TRH_MAX_PIVOTS 30
 #define TRH_ATR_LEN    14
 
-#define TRH_MODE_CLASSIC 0   // Mode A - classic room SWEEP
+#define TRH_MODE_CLASSIC 0   // Mode A - classic room SWEEP (setup tag)
 #define TRH_MODE_FVG     1   // Mode B - sweep + displacement + FVG
-#define TRH_MODE_BOTH    2   // Merge A + B (cooldown shared)
+#define TRH_MODE_BTB     2   // Mode C - Pro BTB breakout + retest
+// Scan modes (InpTradeMode): 0 Classic, 1 FVG, 2 Both A+B, 3 BTB, 4 All
+#define TRH_SCAN_CLASSIC 0
+#define TRH_SCAN_FVG     1
+#define TRH_SCAN_BOTH_AB 2
+#define TRH_SCAN_BTB     3
+#define TRH_SCAN_ALL     4
 
 struct TrhPivot
 {
@@ -29,7 +35,7 @@ struct TrhSetup
    double   proximal;
    datetime barTime;
    int      barIndex;
-   int      setupMode; // TRH_MODE_CLASSIC or TRH_MODE_FVG
+   int      setupMode; // TRH_MODE_CLASSIC / FVG / BTB
 };
 
 struct TrhConfig
@@ -53,6 +59,13 @@ struct TrhConfig
    bool   requireFvgRetest;// Wait for FVG retest before ENTRY signal
    int    maxRetestBars;   // Bars allowed to wait for retest
    double fvgSlExtraAtr;   // Extra SL pad beyond sweep (ATRx) for Mode B
+   // Mode C - Pro BTB (breakout -> back to breakeven)
+   double minBreakAtr;     // Min close beyond key level (ATRx)
+   double minBreakBodyAtr; // Min breakout candle body (ATRx)
+   int    maxBtbRetestBars;// Bars after breakout to wait for retest
+   double btbRiskReward;   // RR for BTB (min 2.0 recommended)
+   double btbSlExtraAtr;   // Extra SL beyond breakout extreme (ATRx)
+   bool   btbRequireConfirm;// Require rejection candle on retest
 };
 
 void TrhDefaultConfig(TrhConfig &cfg)
@@ -75,11 +88,18 @@ void TrhDefaultConfig(TrhConfig &cfg)
    cfg.requireFvgRetest= true;
    cfg.maxRetestBars   = 8;
    cfg.fvgSlExtraAtr   = 0.20;
+   cfg.minBreakAtr     = 0.15;
+   cfg.minBreakBodyAtr = 0.35;
+   cfg.maxBtbRetestBars= 12;
+   cfg.btbRiskReward   = 2.0;
+   cfg.btbSlExtraAtr   = 0.10;
+   cfg.btbRequireConfirm = true;
 }
 
 string TrhModeLabel(const int mode)
 {
    if(mode == TRH_MODE_FVG) return "FVG";
+   if(mode == TRH_MODE_BTB) return "BTB";
    return "SWEEP";
 }
 
@@ -632,14 +652,185 @@ int TrhScanFvgSetups(const int rates,
    return nSetups;
 }
 
+// Mode C: Pro BTB — break key pivot -> return to breakout BE -> confirm -> ENTRY
+// ENTRY = breakout candle close (breakeven). SL behind breakout extreme. RR >= 2.
+int TrhScanBtbSetups(const int rates,
+                     const datetime &time[],
+                     const double &open[],
+                     const double &high[],
+                     const double &low[],
+                     const double &close[],
+                     const TrhConfig &cfg,
+                     TrhSetup &outSetups[])
+{
+   ArrayResize(outSetups, 0);
+   if(rates < 120) return 0;
+
+   TrhPivot pivHi[TRH_MAX_PIVOTS];
+   TrhPivot pivLo[TRH_MAX_PIVOTS];
+   int nHi = 0, nLo = 0;
+
+   // phase: 0 idle, 1 wait retest after breakout
+   int    phase = 0;
+   int    pendDir = 0;
+   double breakLevel = 0;   // key pivot that was broken
+   double beLevel = 0;      // breakout candle close (BTB entry)
+   double breakExt = 0;     // breakout candle extreme for SL
+   int    breakBar = -1;
+   int    lastSetupBar = -9999;
+   int    nSetups = 0;
+   int    p = cfg.pivotPeriod;
+   int    lastClosed = rates - 2;
+   if(lastClosed < 50) return 0;
+
+   double rr = cfg.btbRiskReward;
+   if(rr < 2.0) rr = 2.0;
+
+   for(int i = 0; i <= lastClosed; i++)
+   {
+      double a = TrhCalcATR(i, high, low, close);
+
+      int pivI = i - p;
+      if(pivI >= p && TrhIsPivotLow(pivI, p, low, rates))
+         TrhPushPivot(pivLo, nLo, low[pivI], pivI);
+      if(pivI >= p && TrhIsPivotHigh(pivI, p, high, rates))
+         TrhPushPivot(pivHi, nHi, high[pivI], pivI);
+
+      if(phase == 1 && (i - breakBar) > cfg.maxBtbRetestBars)
+      {
+         phase = 0;
+         pendDir = 0;
+      }
+
+      double huntLo = 0, huntHi = 0;
+      bool hasLo = TrhLastPivot(pivLo, nLo, i, 80, p, true, huntLo);
+      bool hasHi = TrhLastPivot(pivHi, nHi, i, 80, p, false, huntHi);
+
+      double body = MathAbs(close[i] - open[i]);
+      bool canStart = (phase == 0) && (i - lastSetupBar >= cfg.cooldownBars);
+
+      // Bullish breakout of resistance (pivot high)
+      if(canStart && hasHi)
+      {
+         bool broke = close[i] > huntHi + a * cfg.minBreakAtr &&
+                      close[i] > open[i] &&
+                      body >= a * cfg.minBreakBodyAtr;
+         if(broke)
+         {
+            phase = 1;
+            pendDir = 1;
+            breakLevel = huntHi;
+            beLevel = close[i];
+            breakExt = low[i];
+            breakBar = i;
+         }
+      }
+      // Bearish breakout of support (pivot low)
+      if(canStart && hasLo && phase == 0)
+      {
+         bool broke = close[i] < huntLo - a * cfg.minBreakAtr &&
+                      close[i] < open[i] &&
+                      body >= a * cfg.minBreakBodyAtr;
+         if(broke)
+         {
+            phase = 1;
+            pendDir = -1;
+            breakLevel = huntLo;
+            beLevel = close[i];
+            breakExt = high[i];
+            breakBar = i;
+         }
+      }
+
+      if(phase != 1 || i <= breakBar) continue;
+
+      // Track worse extreme during retest wait (for SL)
+      if(pendDir == 1 && low[i] < breakExt) breakExt = low[i];
+      if(pendDir == -1 && high[i] > breakExt) breakExt = high[i];
+
+      // Retest: price returns to BE (breakout close) or broken pivot level
+      double touchHi = MathMax(beLevel, breakLevel) + a * 0.05;
+      double touchLo = MathMin(beLevel, breakLevel) - a * 0.05;
+      bool touched = (low[i] <= touchHi && high[i] >= touchLo);
+
+      if(!touched) continue;
+
+      bool confirmed = true;
+      if(cfg.btbRequireConfirm)
+      {
+         if(pendDir == 1)
+            confirmed = close[i] > open[i] && close[i] >= MathMin(beLevel, breakLevel);
+         else
+            confirmed = close[i] < open[i] && close[i] <= MathMax(beLevel, breakLevel);
+      }
+      if(!confirmed) continue;
+
+      // Invalidate if retest blew through BE too far against us
+      if(pendDir == 1 && close[i] < breakExt) { phase = 0; pendDir = 0; continue; }
+      if(pendDir == -1 && close[i] > breakExt) { phase = 0; pendDir = 0; continue; }
+
+      double entry = beLevel; // Back To Breakeven = breakout candle close
+      double pad = a * (cfg.slPadAtr + cfg.btbSlExtraAtr);
+      TrhSetup s;
+      bool ok = false;
+
+      if(pendDir == 1)
+      {
+         double sl = breakExt - pad;
+         if(entry > sl)
+         {
+            double risk = entry - sl;
+            double tp = entry + risk * rr;
+            double liq;
+            if(cfg.useLiquidityTP && TrhNextLiqHigh(pivHi, nHi, entry, risk * 1.5, liq))
+               tp = MathMax(tp, liq);
+            s.dir = 1; s.entry = entry; s.sl = sl; s.tp = tp;
+            s.distal = sl; s.proximal = breakLevel;
+            ok = true;
+         }
+      }
+      else
+      {
+         double sl = breakExt + pad;
+         if(sl > entry)
+         {
+            double risk = sl - entry;
+            double tp = entry - risk * rr;
+            double liq;
+            if(cfg.useLiquidityTP && TrhNextLiqLow(pivLo, nLo, entry, risk * 1.5, liq))
+               tp = MathMin(tp, liq);
+            s.dir = -1; s.entry = entry; s.sl = sl; s.tp = tp;
+            s.distal = sl; s.proximal = breakLevel;
+            ok = true;
+         }
+      }
+
+      if(ok)
+      {
+         s.barIndex = i;
+         s.barTime = time[i];
+         s.setupMode = TRH_MODE_BTB;
+         ArrayResize(outSetups, nSetups + 1);
+         outSetups[nSetups] = s;
+         nSetups++;
+         lastSetupBar = i;
+      }
+      phase = 0;
+      pendDir = 0;
+   }
+
+   return nSetups;
+}
+
 void TrhSortSetupsByBar(TrhSetup &arr[], const int n)
 {
    for(int i = 0; i < n; i++)
    {
       for(int j = i + 1; j < n; j++)
       {
+         // Prefer BTB > FVG > classic on same bar
          if(arr[j].barIndex < arr[i].barIndex ||
-            (arr[j].barIndex == arr[i].barIndex && arr[j].setupMode < arr[i].setupMode))
+            (arr[j].barIndex == arr[i].barIndex && arr[j].setupMode > arr[i].setupMode))
          {
             TrhSetup tmp = arr[i];
             arr[i] = arr[j];
@@ -649,27 +840,11 @@ void TrhSortSetupsByBar(TrhSetup &arr[], const int n)
    }
 }
 
-// Scan by mode: Classic, FVG, or Both (dedupe near-duplicate bars; prefer FVG on same bar)
-int TrhScanByMode(const int rates,
-                  const datetime &time[],
-                  const double &open[],
-                  const double &high[],
-                  const double &low[],
-                  const double &close[],
+int TrhMergeScans(TrhSetup &a[], const int na,
+                  TrhSetup &b[], const int nb,
                   const TrhConfig &cfg,
-                  const int tradeMode,
                   TrhSetup &outSetups[])
 {
-   ArrayResize(outSetups, 0);
-   if(tradeMode == TRH_MODE_CLASSIC)
-      return TrhScanSetups(rates, time, open, high, low, close, cfg, outSetups);
-   if(tradeMode == TRH_MODE_FVG)
-      return TrhScanFvgSetups(rates, time, open, high, low, close, cfg, outSetups);
-
-   TrhSetup a[], b[];
-   int na = TrhScanSetups(rates, time, open, high, low, close, cfg, a);
-   int nb = TrhScanFvgSetups(rates, time, open, high, low, close, cfg, b);
-
    TrhSetup merged[];
    int nm = 0;
    ArrayResize(merged, na + nb);
@@ -677,7 +852,6 @@ int TrhScanByMode(const int rates,
    for(int i = 0; i < nb; i++) merged[nm++] = b[i];
    TrhSortSetupsByBar(merged, nm);
 
-   // Apply shared cooldown + same-bar prefer FVG
    ArrayResize(outSetups, 0);
    int nOut = 0;
    int lastBar = -9999;
@@ -685,10 +859,8 @@ int TrhScanByMode(const int rates,
    {
       if(merged[i].barIndex - lastBar < cfg.cooldownBars && lastBar >= 0)
       {
-         // Same bar: keep FVG over classic
          if(merged[i].barIndex == lastBar && nOut > 0 &&
-            outSetups[nOut - 1].setupMode == TRH_MODE_CLASSIC &&
-            merged[i].setupMode == TRH_MODE_FVG)
+            merged[i].setupMode > outSetups[nOut - 1].setupMode)
          {
             outSetups[nOut - 1] = merged[i];
          }
@@ -700,6 +872,44 @@ int TrhScanByMode(const int rates,
       nOut++;
    }
    return nOut;
+}
+
+// Scan by mode: Classic / FVG / Both A+B / BTB / All
+int TrhScanByMode(const int rates,
+                  const datetime &time[],
+                  const double &open[],
+                  const double &high[],
+                  const double &low[],
+                  const double &close[],
+                  const TrhConfig &cfg,
+                  const int tradeMode,
+                  TrhSetup &outSetups[])
+{
+   ArrayResize(outSetups, 0);
+   if(tradeMode == TRH_SCAN_CLASSIC)
+      return TrhScanSetups(rates, time, open, high, low, close, cfg, outSetups);
+   if(tradeMode == TRH_SCAN_FVG)
+      return TrhScanFvgSetups(rates, time, open, high, low, close, cfg, outSetups);
+   if(tradeMode == TRH_SCAN_BTB)
+      return TrhScanBtbSetups(rates, time, open, high, low, close, cfg, outSetups);
+
+   TrhSetup a[], b[], c[];
+   int na = 0, nb = 0, nc = 0;
+   if(tradeMode == TRH_SCAN_BOTH_AB || tradeMode == TRH_SCAN_ALL)
+   {
+      na = TrhScanSetups(rates, time, open, high, low, close, cfg, a);
+      nb = TrhScanFvgSetups(rates, time, open, high, low, close, cfg, b);
+   }
+   if(tradeMode == TRH_SCAN_ALL)
+      nc = TrhScanBtbSetups(rates, time, open, high, low, close, cfg, c);
+
+   if(tradeMode == TRH_SCAN_BOTH_AB)
+      return TrhMergeScans(a, na, b, nb, cfg, outSetups);
+
+   // ALL: merge A+B first, then with C
+   TrhSetup ab[];
+   int nab = TrhMergeScans(a, na, b, nb, cfg, ab);
+   return TrhMergeScans(ab, nab, c, nc, cfg, outSetups);
 }
 
 // Copy MT5 series (newest-first or oldest-first) into oldest->newest buffers.

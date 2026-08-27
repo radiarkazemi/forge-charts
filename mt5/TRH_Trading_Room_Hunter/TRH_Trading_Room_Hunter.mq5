@@ -4,15 +4,15 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "2.21"
-#property description "TRH Mode B FVG retest + hold active setup (no wipe)"
+#property version   "2.22"
+#property description "TRH Mode A/B/C: SWEEP + FVG + Pro BTB"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
 
 #include "TRH_Engine.mqh"
 
-// MQL5 has no #error — version is checked in OnInit (need Engine v221+ in SAME folder).
+// MQL5 has no #error — version is checked in OnInit (need Engine v222+ in SAME folder).
 #ifndef TRH_ENGINE_VERSION
 #define TRH_ENGINE_VERSION 0
 #endif
@@ -27,11 +27,13 @@ enum ENUM_TRH_TRADE_MODE
 {
    TRH_TM_CLASSIC = 0, // Mode A - classic SWEEP room
    TRH_TM_FVG     = 1, // Mode B - sweep + displacement + FVG
-   TRH_TM_BOTH    = 2  // Both (shared cooldown; FVG wins same bar)
+   TRH_TM_BOTH    = 2, // A + B (shared cooldown)
+   TRH_TM_BTB     = 3, // Mode C - Pro BTB breakout + retest
+   TRH_TM_ALL     = 4  // A + B + C
 };
 
 input group "Strategy mode"
-input ENUM_TRH_TRADE_MODE InpTradeMode = TRH_TM_BOTH; // Detection Mode
+input ENUM_TRH_TRADE_MODE InpTradeMode = TRH_TM_ALL; // Detection Mode
 
 input group "TRH Detection"
 input int    InpPivotPeriod     = 5;      // Pivot Period
@@ -52,9 +54,17 @@ input bool   InpRequireFvgRetest= true;   // Wait For FVG Retest Before Signal
 input int    InpMaxRetestBars   = 8;      // Max Bars To Wait For Retest
 input double InpFvgSlExtraAtr   = 0.20;   // Extra SL Beyond Sweep (ATRx)
 
+input group "Mode C - Pro BTB (Break + Retest)"
+input double InpMinBreakAtr     = 0.15;   // Min Break Beyond Pivot (ATRx)
+input double InpMinBreakBodyAtr = 0.35;   // Min Breakout Candle Body (ATRx)
+input int    InpMaxBtbRetestBars= 12;     // Max Bars To Wait For BTB Retest
+input double InpBtbRiskReward   = 2.0;    // BTB Risk-Reward (min 2.0)
+input double InpBtbSlExtraAtr   = 0.10;   // Extra SL Beyond Breakout Extreme
+input bool   InpBtbRequireConfirm = true; // Require Rejection Candle On Retest
+
 input group "Entry / SL / TP"
 input double InpSlPadAtr        = 0.02;   // SL Pad (ATRx)
-input double InpRiskReward      = 2.4;    // Risk-Reward Ratio
+input double InpRiskReward      = 2.4;    // Risk-Reward Ratio (Mode A/B)
 input bool   InpUseLiquidityTP  = true;   // Prefer Opposing Pivot As TP
 
 input group "Display - layout"
@@ -109,13 +119,13 @@ bool     g_holdValid = false;
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   if(TRH_ENGINE_VERSION < 221)
+   if(TRH_ENGINE_VERSION < 222)
    {
       Alert("TRH: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
             "). Put NEW TRH_Engine.mqh in the SAME folder as this .mq5 and recompile.");
       return INIT_FAILED;
    }
-   IndicatorSetString(INDICATOR_SHORTNAME, "TRH Sweep+FVG Pro");
+   IndicatorSetString(INDICATOR_SHORTNAME, "TRH Sweep+FVG+BTB");
    return INIT_SUCCEEDED;
 }
 
@@ -500,6 +510,12 @@ void BuildConfig(TrhConfig &cfg)
    cfg.requireFvgRetest= InpRequireFvgRetest;
    cfg.maxRetestBars   = InpMaxRetestBars;
    cfg.fvgSlExtraAtr   = InpFvgSlExtraAtr;
+   cfg.minBreakAtr     = InpMinBreakAtr;
+   cfg.minBreakBodyAtr = InpMinBreakBodyAtr;
+   cfg.maxBtbRetestBars= InpMaxBtbRetestBars;
+   cfg.btbRiskReward   = InpBtbRiskReward;
+   cfg.btbSlExtraAtr   = InpBtbSlExtraAtr;
+   cfg.btbRequireConfirm = InpBtbRequireConfirm;
 }
 
 //+------------------------------------------------------------------+
@@ -576,7 +592,7 @@ int OnCalculate(const int rates_total,
             int y0 = (InpPanelCorner == TRH_PANEL_LEFT) ? 70 : 28;
             SetPanelBg(OBJ_PREFIX + "PBG", 12, y0, 248, 56, corner);
             SetPanelLabel(OBJ_PREFIX + "P0", 22, y0 + 10, "TRH | scanning...", clrSilver, 10, corner);
-            SetPanelLabel(OBJ_PREFIX + "P1", 22, y0 + 30, "No SWEEP / FVG yet", clrDimGray, 9, corner);
+            SetPanelLabel(OBJ_PREFIX + "P1", 22, y0 + 30, "No SWEEP / FVG / BTB yet", clrDimGray, 9, corner);
          }
          if(InpShowComment) Comment("TRH scanning... (no setup yet)");
          return rates_total;

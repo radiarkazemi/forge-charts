@@ -5,14 +5,14 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.21"
-#property description "TRH EA v3.21: closed-bar only + FVG retest + BE@0.5R + quiet alerts"
+#property version   "3.22"
+#property description "TRH EA v3.22: SWEEP + FVG + Pro BTB"
 #property strict
 
 #include <Trade/Trade.mqh>
 #include "TRH_Engine.mqh"
 
-// MQL5 has no #error — version is checked in OnInit (need Engine v221+ in SAME folder).
+// MQL5 has no #error — version is checked in OnInit (need Engine v222+ in SAME folder).
 #ifndef TRH_ENGINE_VERSION
 #define TRH_ENGINE_VERSION 0
 #endif
@@ -21,7 +21,9 @@ enum ENUM_TRH_TRADE_MODE
 {
    TRH_TM_CLASSIC = 0, // Mode A - classic SWEEP room
    TRH_TM_FVG     = 1, // Mode B - sweep + displacement + FVG
-   TRH_TM_BOTH    = 2  // Both (shared cooldown)
+   TRH_TM_BOTH    = 2, // A + B (shared cooldown)
+   TRH_TM_BTB     = 3, // Mode C - Pro BTB breakout + retest
+   TRH_TM_ALL     = 4  // A + B + C
 };
 
 input group "Trading"
@@ -33,7 +35,7 @@ input int    InpPendingExpiryBars = 40;     // Cancel unfilled limit after N bar
 input int    InpLookbackBars      = 2000;   // History bars to scan
 
 input group "Strategy mode"
-input ENUM_TRH_TRADE_MODE InpTradeMode = TRH_TM_BOTH; // Detection Mode
+input ENUM_TRH_TRADE_MODE InpTradeMode = TRH_TM_ALL; // Detection Mode
 
 input group "1) Spread filter"
 input bool   InpUseSpreadFilter   = true;   // Enable max spread filter
@@ -79,9 +81,17 @@ input bool   InpRequireFvgRetest= true;   // Wait For FVG Retest Before Entry
 input int    InpMaxRetestBars   = 8;      // Max Bars To Wait For Retest
 input double InpFvgSlExtraAtr   = 0.20;   // Extra SL Beyond Sweep (ATRx)
 
+input group "Mode C - Pro BTB (Break + Retest)"
+input double InpMinBreakAtr     = 0.15;   // Min Break Beyond Pivot (ATRx)
+input double InpMinBreakBodyAtr = 0.35;   // Min Breakout Candle Body (ATRx)
+input int    InpMaxBtbRetestBars= 12;     // Max Bars To Wait For BTB Retest
+input double InpBtbRiskReward   = 2.0;    // BTB Risk-Reward (min 2.0)
+input double InpBtbSlExtraAtr   = 0.10;   // Extra SL Beyond Breakout Extreme
+input bool   InpBtbRequireConfirm = true; // Require Rejection Candle On Retest
+
 input group "Entry / SL / TP"
 input double InpSlPadAtr        = 0.02;
-input double InpRiskReward      = 2.4;    // Target RR (use 1.2..2.4; liquidity may extend)
+input double InpRiskReward      = 2.4;    // Target RR Mode A/B (liquidity may extend)
 input bool   InpUseLiquidityTP  = true;   // Prefer opposing pivot if farther (up to better TP)
 
 input group "Dynamic lot size (balance-based)"
@@ -121,6 +131,12 @@ void BuildConfig(TrhConfig &cfg)
    cfg.requireFvgRetest= InpRequireFvgRetest;
    cfg.maxRetestBars   = InpMaxRetestBars;
    cfg.fvgSlExtraAtr   = InpFvgSlExtraAtr;
+   cfg.minBreakAtr     = InpMinBreakAtr;
+   cfg.minBreakBodyAtr = InpMinBreakBodyAtr;
+   cfg.maxBtbRetestBars= InpMaxBtbRetestBars;
+   cfg.btbRiskReward   = InpBtbRiskReward;
+   cfg.btbSlExtraAtr   = InpBtbSlExtraAtr;
+   cfg.btbRequireConfirm = InpBtbRequireConfirm;
 }
 
 void ResetDayIfNeeded()
@@ -466,7 +482,7 @@ void ManageBreakEven()
 
 int OnInit()
 {
-   if(TRH_ENGINE_VERSION < 221)
+   if(TRH_ENGINE_VERSION < 222)
    {
       Alert("TRH EA: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
             "). Put NEW TRH_Engine.mqh in the SAME folder as this .mq5 and recompile.");
@@ -478,14 +494,14 @@ int OnInit()
    g_trade.SetTypeFillingBySymbol(_Symbol);
    ResetDayIfNeeded();
 
-   PrintFormat("TRH AutoTrade v3.21 | mode=%d | AutoTrade=%s | BE@%.2fR | FVG retest=%s | %s %s | risk=%.2f%%",
+   PrintFormat("TRH AutoTrade v3.22 | mode=%d | AutoTrade=%s | BE@%.2fR | BTB RR=%.1f | %s %s | risk=%.2f%%",
       (int)InpTradeMode,
       InpAutoTrade ? "ON" : "OFF",
       InpBreakEvenAtR,
-      InpRequireFvgRetest ? "ON" : "OFF",
+      InpBtbRiskReward,
       _Symbol, EnumToString(_Period), InpRiskPercent);
 
-   Comment("TRH EA v3.21\nClosed-bar only + FVG retest\nBE@0.5R | quiet alerts\n1 Spread  2 Session  3 Daily");
+   Comment("TRH EA v3.22\nSWEEP + FVG + Pro BTB\nBE@0.5R | quiet alerts");
    return INIT_SUCCEEDED;
 }
 
@@ -537,7 +553,7 @@ void OnTick()
 
    if(n <= 0)
    {
-      Comment(StringFormat("TRH EA v3.21 %s - scanning...\nday trades %d | equity %.2f",
+      Comment(StringFormat("TRH EA v3.22 %s - scanning...\nday trades %d | equity %.2f",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades, AccountInfoDouble(ACCOUNT_EQUITY)));
       return;
    }
