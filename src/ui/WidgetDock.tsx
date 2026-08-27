@@ -4,7 +4,7 @@ import { formatPrice, formatVolume } from "../engine/math";
 import type { SymbolInfo } from "../engine/types";
 import { useEngine } from "./useEngine";
 
-export type WidgetId = "watchlist" | "alerts" | "object" | "data" | "news" | "calendar";
+export type WidgetId = "watchlist" | "alerts" | "object" | "data" | "news" | "calendar" | "ideas";
 
 const ICONS: { id: WidgetId; label: string; glyph: string }[] = [
   { id: "watchlist", label: "Watchlist", glyph: "☰" },
@@ -13,6 +13,7 @@ const ICONS: { id: WidgetId; label: string; glyph: string }[] = [
   { id: "data", label: "Data Window", glyph: "▤" },
   { id: "news", label: "News", glyph: "◉" },
   { id: "calendar", label: "Calendar", glyph: "▦" },
+  { id: "ideas", label: "Ideas", glyph: "✎" },
 ];
 
 type Props = {
@@ -130,6 +131,20 @@ export function WidgetDock({ engine, active, onActive, quotes, onPick, alerts }:
               <li>CPI — tomorrow 12:30 UTC</li>
               <li>FOMC minutes — Wed</li>
               <li>NFP — Friday</li>
+              <li className="muted">Seasonality: {snap?.symbol.ticker ?? "symbol"} 5y same-week bias</li>
+            </ul>
+          ) : null}
+          {active === "ideas" ? (
+            <ul className="objects">
+              <li>
+                <strong>Break & retest</strong>
+                <span className="muted"> — local idea on {snap?.symbol.ticker}</span>
+              </li>
+              <li>
+                <strong>Range fade</strong>
+                <span className="muted"> — wait for failed auction</span>
+              </li>
+              <li className="muted">Community publish is OUT — ideas stay on-device only.</li>
             </ul>
           ) : null}
         </div>

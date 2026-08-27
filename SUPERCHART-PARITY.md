@@ -20,7 +20,7 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | ID | Supercharts item | Forge | Notes |
 | --- | --- | --- | --- |
 | C-01 | App header (product, search, alerts, profile) | MATCH | Brand + Products/Community/Markets/Brokers/More menus, search (⌘K), alerts badge, local profile menu. Cloud account/sync remains OUT |
-| C-02 | Top chart toolbar | PARTIAL | See section 1 |
+| C-02 | Top chart toolbar | PARTIAL | T-02/T-03/T-04 advanced; remaining T-* still open |
 | C-03 | Left drawing toolbar | PARTIAL | See section 2 |
 | C-04 | Chart canvas + legend + overlays | PARTIAL | See section 4 |
 | C-05 | Right widget bar | PARTIAL | See section 8 |
@@ -37,9 +37,9 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | ID | Supercharts control | Forge |
 | --- | --- | --- |
 | T-01 | Symbol search (type-to-open, categories: Stocks / Funds / Futures / Forex / Crypto / Indices / Bonds / Economy / Options, exchange, description) | MATCH |
-| T-02 | Symbol button shows ticker + live flag | PARTIAL |
-| T-03 | Data switcher beside symbol: Technicals / Seasonals / News / Ideas | MISSING |
-| T-04 | Compare / overlay symbol | PARTIAL |
+| T-02 | Symbol button shows ticker + live flag | MATCH | Ticker + exchange + LIVE/DELAYED pill with pulse |
+| T-03 | Data switcher beside symbol: Technicals / Seasonals / News / Ideas | MATCH | Switches right-dock panels (data / calendar / news / ideas) |
+| T-04 | Compare / overlay symbol | MATCH | Compare control + removable overlay chip |
 | T-05 | Interval dropdown (seconds → months, Range, custom, favorites) | MATCH |
 | T-06 | Quick interval favorites on the bar | MATCH |
 | T-07 | Chart type menu (20+ types, favorites) | MATCH |

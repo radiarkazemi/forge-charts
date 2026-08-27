@@ -7,7 +7,7 @@ import { CHART_STYLE_KEY } from "./chartStyle";
 import { loadJson, saveJson } from "./persist";
 import { BottomDock } from "./ui/BottomDock";
 import { ChartOverlays } from "./ui/ChartOverlays";
-import { ChartToolbar } from "./ui/ChartToolbar";
+import { ChartToolbar, type DataMode } from "./ui/ChartToolbar";
 import { DrawingToolbar } from "./ui/DrawingToolbar";
 import { IndicatorModal, SettingsModal, SymbolModal } from "./ui/Modals";
 import { ProductHeader } from "./ui/ProductHeader";
@@ -37,6 +37,7 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [symbolQuery, setSymbolQuery] = useState("");
   const [widget, setWidget] = useState<WidgetId | null>("watchlist");
+  const [dataMode, setDataMode] = useState<DataMode>("technicals");
   const [bottomOpen, setBottomOpen] = useState(false);
   const [alerts, setAlerts] = useState<string[]>([]);
   const [quotes, setQuotes] = useState<Record<string, { price: number; change: number }>>({});
@@ -174,6 +175,14 @@ export default function App() {
     void attachFeed(eng.getSnapshot().symbol, interval, "interval");
   };
 
+  const applyDataMode = (mode: DataMode) => {
+    setDataMode(mode);
+    if (mode === "technicals") setWidget("data");
+    else if (mode === "seasonals") setWidget("calendar");
+    else if (mode === "news") setWidget("news");
+    else setWidget("ideas");
+  };
+
   return (
     <div className="shell" data-theme={snap?.theme ?? "dark"}>
       <ProductHeader
@@ -189,12 +198,15 @@ export default function App() {
       <ChartToolbar
         engine={engine}
         live={live}
+        dataMode={dataMode}
+        onDataMode={applyDataMode}
         onOpenSymbol={() => setSymbolOpen(true)}
         onOpenIndicators={() => setIndOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenSearch={() => setSearchOpen(true)}
         onInterval={loadInterval}
         onCompare={() => setCompareOpen(true)}
+        onClearCompare={() => engineRef.current?.setCompare(null, null)}
         onAlert={() => {
           const s = engine?.getSnapshot();
           if (s?.last) {
