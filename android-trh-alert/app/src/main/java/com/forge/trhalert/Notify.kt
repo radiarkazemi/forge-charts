@@ -88,7 +88,10 @@ object Notify {
         wakeScreen(ctx)
 
         val openIntent = Intent(ctx, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            // singleTask activity: deliver extras via onNewIntent without killing the UI.
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra("from_alert", true)
             putExtra("alert_body", body)
             putExtra("alert_title", title)
@@ -165,6 +168,15 @@ object Notify {
             .put("expiryTimeIso", expiryIso)
             .put("expiryBars", 5)
             .toString()
+        // Mirror service state so an already-open MainActivity can refresh without restart.
+        TrhAlertService.lastAlert = body
+        TrhAlertService.lastAlertJson = json
+        ctx.sendBroadcast(
+            Intent(TrhAlertService.ACTION_ALERT)
+                .putExtra(TrhAlertService.EXTRA_TEXT, body)
+                .putExtra(TrhAlertService.EXTRA_JSON, json)
+                .setPackage(ctx.packageName),
+        )
         showTradeAlert(ctx, "TRH Test Alarm", body, json)
     }
 

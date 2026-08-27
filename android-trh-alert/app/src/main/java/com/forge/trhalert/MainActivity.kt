@@ -32,6 +32,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tpValue: TextView
     private lateinit var entryTimeValue: TextView
     private lateinit var expiryTimeValue: TextView
+    private var receiverRegistered = false
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -67,30 +68,50 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.testSoundBtn).setOnClickListener {
             Notify.playTestSound(this)
+            // Test path also updates service state + broadcast; refresh UI immediately.
+            syncFromService(intent)
         }
 
         requestNotificationPermission()
         ContextCompat.startForegroundService(this, Intent(this, TrhAlertService::class.java))
 
-        applyStatus(TrhAlertService.lastStatus.ifEmpty { getString(R.string.status_connecting) })
-        if (TrhAlertService.lastAlert.isNotEmpty()) {
-            applyAlert(TrhAlertService.lastAlert, TrhAlertService.lastAlertJson)
-        }
-
-        intent?.getStringExtra("alert_body")?.let {
-            applyAlert(it, intent.getStringExtra("alert_json"))
-        }
+        // Keep listening while this activity instance is alive (incl. backgrounded).
+        // Unregistering in onStop caused missed hunts until force-close/reopen.
+        registerAlertReceiver()
+        syncFromService(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        intent.getStringExtra("alert_body")?.let {
-            applyAlert(it, intent.getStringExtra("alert_json"))
+        setIntent(intent)
+        syncFromService(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Catch alerts that arrived while we were paused / receiver briefly missed.
+        syncFromService(intent)
+    }
+
+    override fun onDestroy() {
+        unregisterAlertReceiver()
+        super.onDestroy()
+    }
+
+    /** Pull latest status/alert from the foreground service (+ optional notification extras). */
+    private fun syncFromService(src: Intent? = null) {
+        applyStatus(TrhAlertService.lastStatus.ifEmpty { getString(R.string.status_connecting) })
+        val bodyFromIntent = src?.getStringExtra("alert_body")
+        val jsonFromIntent = src?.getStringExtra("alert_json")
+        when {
+            !bodyFromIntent.isNullOrBlank() -> applyAlert(bodyFromIntent, jsonFromIntent)
+            TrhAlertService.lastAlert.isNotEmpty() ->
+                applyAlert(TrhAlertService.lastAlert, TrhAlertService.lastAlertJson)
         }
     }
 
-    override fun onStart() {
-        super.onStart()
+    private fun registerAlertReceiver() {
+        if (receiverRegistered) return
         val filter = IntentFilter().apply {
             addAction(TrhAlertService.ACTION_STATUS)
             addAction(TrhAlertService.ACTION_ALERT)
@@ -101,11 +122,16 @@ class MainActivity : AppCompatActivity() {
             @Suppress("DEPRECATION")
             registerReceiver(receiver, filter)
         }
+        receiverRegistered = true
     }
 
-    override fun onStop() {
-        unregisterReceiver(receiver)
-        super.onStop()
+    private fun unregisterAlertReceiver() {
+        if (!receiverRegistered) return
+        try {
+            unregisterReceiver(receiver)
+        } catch (_: Exception) {
+        }
+        receiverRegistered = false
     }
 
     private fun applyStatus(status: String) {

@@ -43,6 +43,6 @@ Regenerate config after tunnel restart:
 node scripts/embed-android-config.mjs
 ```
 
-## v1.3.1
+## v1.3.2
 
-Alerts show exact **ENTRY TIME** and **EXPIRY TIME** (UTC + your phone local clock). VPS poll is **3s** to cut late alarms.
+UI refreshes hunt details when an alert arrives while the app is open in the background (no force-close needed). Still shows exact **ENTRY TIME** / **EXPIRY TIME**; VPS poll **3s**.
