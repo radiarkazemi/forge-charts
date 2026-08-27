@@ -8,12 +8,15 @@ indicator("CRT OrderFlow", shorttitle="CRT", overlay=true, max_boxes_count=100, 
 // Drawings = TRH style
 
 grpCrt = "CRT Model"
-rcLookback       = input.int(8, "RC Lookback", minval=2, group=grpCrt)
-minSweepAtr      = input.float(0.02, "Min Sweep ATR", step=0.01, group=grpCrt)
+rcLookback       = input.int(3, "RC Lookback", minval=1, maxval=8, group=grpCrt)
+minSweepAtr      = input.float(0.08, "Min Sweep ATR", step=0.01, group=grpCrt)
+minRcRangeAtr    = input.float(0.25, "Min RC Range ATR", step=0.05, group=grpCrt)
 requireCloseBack = input.bool(true, "Confirm Close Back Into RC", group=grpCrt)
+requireCloseMid  = input.bool(true, "Confirm Close Beyond RC Mid", group=grpCrt)
 minBiasModels    = input.int(2, "Min CRT Same Direction (bias)", minval=1, group=grpCrt)
-biasLookback     = input.int(120, "Bias Lookback Bars", group=grpCrt)
-cooldownBars     = input.int(10, "Cooldown Bars", group=grpCrt)
+biasLookback     = input.int(40, "Bias Lookback Bars", group=grpCrt)
+minCrtGapBars    = input.int(5, "Min Bars Between CRT Marks", minval=1, group=grpCrt)
+cooldownBars     = input.int(10, "Cooldown Bars Between Setups", group=grpCrt)
 
 grpHtf = "HTF FVG AOI"
 htfTf            = input.timeframe("15", "HTF for FVG", group=grpHtf)
@@ -64,6 +67,7 @@ crtDirNow = 0
 
 if barstate.isconfirmed
     float minPierce = math.max(atr * minSweepAtr, syminfo.mintick)
+    float minRc = math.max(atr * minRcRangeAtr, syminfo.mintick * 5)
     bool foundNow = false
     int dirNow = 0
     float rcHnow = na
@@ -71,50 +75,71 @@ if barstate.isconfirmed
     float sweepNow = na
     float entryNow = na
 
+    // Quality CRT: RC candle has real range; a PRIOR bar sweeps the extreme;
+    // confirm closes back into/through RC toward delivery (not every wick).
     for rc = 1 to rcLookback
-        // Bullish CRT: wick below RC low, close back above RC low
-        float bullExt = low[rc]
-        bool hadBull = false
-        for s = 0 to rc - 1
-            if low[s] < low[rc] - minPierce
-                hadBull := true
-                bullExt := math.min(bullExt, low[s])
-        bool bullOk = hadBull and close > low[rc]
+        float rcH = high[rc]
+        float rcL = low[rc]
+        float rcMid = (rcH + rcL) * 0.5
+        if rcH - rcL < minRc
+            continue
+
+        float bullExt = rcL
+        int bullSw = -1
+        for s = 1 to rc - 1
+            if low[s] < rcL - minPierce
+                if bullSw < 0 or low[s] < bullExt
+                    bullSw := s
+                    bullExt := low[s]
+        // also allow confirm bar wick as sweep if a prior bar started the raid OR rc==1
+        if rc == 1 and low < rcL - minPierce
+            bullSw := 0
+            bullExt := math.min(low, bullExt)
+
+        bool bullOk = bullSw >= 0 and close > rcL
         if requireCloseBack
             bullOk := bullOk and close > open
+        if requireCloseMid
+            bullOk := bullOk and close >= rcMid
 
-        // Bearish CRT: wick above RC high, close back below RC high
-        float bearExt = high[rc]
-        bool hadBear = false
-        for s = 0 to rc - 1
-            if high[s] > high[rc] + minPierce
-                hadBear := true
-                bearExt := math.max(bearExt, high[s])
-        bool bearOk = hadBear and close < high[rc]
+        float bearExt = rcH
+        int bearSw = -1
+        for s = 1 to rc - 1
+            if high[s] > rcH + minPierce
+                if bearSw < 0 or high[s] > bearExt
+                    bearSw := s
+                    bearExt := high[s]
+        if rc == 1 and high > rcH + minPierce
+            bearSw := 0
+            bearExt := math.max(high, bearExt)
+
+        bool bearOk = bearSw >= 0 and close < rcH
         if requireCloseBack
             bearOk := bearOk and close < open
+        if requireCloseMid
+            bearOk := bearOk and close <= rcMid
 
         if bullOk and (not bearOk or close > open)
             foundNow := true
             dirNow := 1
-            rcHnow := high[rc]
-            rcLnow := low[rc]
+            rcHnow := rcH
+            rcLnow := rcL
             sweepNow := bullExt
-            entryNow := (high[rc] + low[rc]) * 0.5
+            entryNow := rcMid
             break
         if bearOk
             foundNow := true
             dirNow := -1
-            rcHnow := high[rc]
-            rcLnow := low[rc]
+            rcHnow := rcH
+            rcLnow := rcL
             sweepNow := bearExt
-            entryNow := (high[rc] + low[rc]) * 0.5
+            entryNow := rcMid
             break
 
     if foundNow
         bool dup = false
         if array.size(crtBars) > 0
-            dup := bar_index - array.get(crtBars, array.size(crtBars) - 1) < 2
+            dup := bar_index - array.get(crtBars, array.size(crtBars) - 1) < minCrtGapBars
         if not dup
             array.push(crtBars, bar_index)
             array.push(crtDirs, dirNow)
@@ -211,7 +236,7 @@ f_find_aoi(int dir, float px1, float px2, float px3) =>
             if not entryInsideFvg
                 touch := true
             else
-                touch := (px1 <= t and px1 >= b) or (px2 <= t and px2 >= b) or (px3 <= t and px3 >= b) or (math.max(px1, px2, px3) >= b and math.min(px1, px2, px3) <= t)
+                touch := (px1 <= t and px1 >= b) or (px2 <= t and px2 >= b) or (px3 <= t and px3 >= b) or (math.max(math.max(px1, px2), px3) >= b and math.min(math.min(px1, px2), px3) <= t)
             if touch
                 bestTop := t
                 bestBot := b
