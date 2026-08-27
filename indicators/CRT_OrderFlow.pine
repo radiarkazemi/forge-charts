@@ -34,11 +34,14 @@ riskReward       = input.float(2.5, "Risk Reward", step=0.1, group=grpRisk)
 
 grpDisp = "Display"
 onlyLast         = input.bool(true, "Only Last Setup", group=grpDisp)
+clearExpired     = input.bool(true, "Clear Drawings After TP/SL (less noise)", group=grpDisp)
 setupWidth       = input.int(80, "Box Width (bars)", minval=20, maxval=400, group=grpDisp)
 extendLive       = input.bool(true, "Extend Until TP/SL", group=grpDisp)
 showFillMark     = input.bool(true, "Show ENTRY/TP/SL Markers", group=grpDisp)
-showCrtMarks     = input.bool(true, "Show CRT Confirm Dots", group=grpDisp)
+showCrtMarks     = input.bool(false, "Show CRT Confirm Dots", group=grpDisp)
 showAoiBox       = input.bool(true, "Show Live AOI FVG", group=grpDisp)
+maxAoiDraw       = input.int(2, "Max AOI Boxes Drawn", minval=1, maxval=12, group=grpDisp,
+     tooltip="Older mitigated/far AOIs stay in logic but only the newest N are drawn.")
 showPanel        = input.bool(true, "Info Panel", group=grpDisp)
 
 grpCol = "Colors"
@@ -265,14 +268,16 @@ f_find_aoi(int dir, float px1, float px2, float px3) =>
                 break
     [found, bestTop, bestBot]
 
-// Redraw ALL live AOI boxes every last bar (1m keeps HTF blue zones; Auto HTF = 1m→5m)
+// Redraw newest live AOI boxes only (cap count to cut purple-stack noise)
 if showAoiBox and barstate.islast
     if array.size(aoiBoxes) > 0
         for i = 0 to array.size(aoiBoxes) - 1
             box.delete(array.get(aoiBoxes, i))
         array.clear(aoiBoxes)
     if array.size(aoiTops) > 0
-        for i = 0 to array.size(aoiTops) - 1
+        int aoiN = array.size(aoiTops)
+        int drawFrom = math.max(0, aoiN - maxAoiDraw)
+        for i = drawFrom to aoiN - 1
             float t = array.get(aoiTops, i)
             float b = array.get(aoiBots, i)
             int d = array.get(aoiDirs, i)
@@ -344,7 +349,7 @@ if barstate.isconfirmed and array.size(crtBars) > 0
                 lastSetupBar := bar_index
 
 // ═══════════════════════════════════════════════════════════════════════════
-// TRH-style drawings
+// TRH-style drawings (clear expired to reduce noise)
 // ═══════════════════════════════════════════════════════════════════════════
 var box[]   bZone = array.new<box>()
 var box[]   bTp = array.new<box>()
@@ -356,30 +361,64 @@ var label[] labE = array.new<label>()
 var label[] labS = array.new<label>()
 var label[] labT = array.new<label>()
 var label[] labTag = array.new<label>()
+var label[] labEvt = array.new<label>()  // ENTRY / TP EXIT / SL EXIT markers
+
+f_del_setup_draw(int i) =>
+    if i >= 0 and i < array.size(bZone)
+        box bx = array.get(bZone, i)
+        box bt = array.get(bTp, i)
+        box bs = array.get(bSl, i)
+        line le = array.get(lEntry, i)
+        line ls = array.get(lSl, i)
+        line lt = array.get(lTp, i)
+        label a = array.get(labE, i)
+        label b = array.get(labS, i)
+        label c = array.get(labT, i)
+        label d = array.get(labTag, i)
+        if not na(bx)
+            box.delete(bx)
+        if not na(bt)
+            box.delete(bt)
+        if not na(bs)
+            box.delete(bs)
+        if not na(le)
+            line.delete(le)
+        if not na(ls)
+            line.delete(ls)
+        if not na(lt)
+            line.delete(lt)
+        if not na(a)
+            label.delete(a)
+        if not na(b)
+            label.delete(b)
+        if not na(c)
+            label.delete(c)
+        if not na(d)
+            label.delete(d)
+        if i < array.size(labEvt)
+            label ev = array.get(labEvt, i)
+            if not na(ev)
+                label.delete(ev)
+
+f_clear_all_draws() =>
+    if array.size(bZone) > 0
+        for i = 0 to array.size(bZone) - 1
+            f_del_setup_draw(i)
+    array.clear(bZone)
+    array.clear(bTp)
+    array.clear(bSl)
+    array.clear(lEntry)
+    array.clear(lSl)
+    array.clear(lTp)
+    array.clear(labE)
+    array.clear(labS)
+    array.clear(labT)
+    array.clear(labTag)
+    array.clear(labEvt)
 
 if newDir != 0
     if onlyLast and array.size(sDir) > 0
-        for i = 0 to array.size(bZone) - 1
-            box.delete(array.get(bZone, i))
-            box.delete(array.get(bTp, i))
-            box.delete(array.get(bSl, i))
-            line.delete(array.get(lEntry, i))
-            line.delete(array.get(lSl, i))
-            line.delete(array.get(lTp, i))
-            label.delete(array.get(labE, i))
-            label.delete(array.get(labS, i))
-            label.delete(array.get(labT, i))
-            label.delete(array.get(labTag, i))
-        array.clear(bZone)
-        array.clear(bTp)
-        array.clear(bSl)
-        array.clear(lEntry)
-        array.clear(lSl)
-        array.clear(lTp)
-        array.clear(labE)
-        array.clear(labS)
-        array.clear(labT)
-        array.clear(labTag)
+        f_clear_all_draws()
         array.clear(sDir)
         array.clear(sEntry)
         array.clear(sSl)
@@ -408,6 +447,7 @@ if newDir != 0
     array.push(labS, label.new(right, newSl, "SL " + str.tostring(newSl, format.mintick), style=label.style_label_left, color=slCol, textcolor=color.white, size=size.small))
     array.push(labT, label.new(right, newTp, "TP " + str.tostring(newTp, format.mintick), style=label.style_label_left, color=tpCol, textcolor=color.white, size=size.small))
     array.push(labTag, label.new(bar_index, newDir == 1 ? zTop : zBot, "CRT " + (newDir == 1 ? "LONG" : "SHORT") + " · OrderFlow\nbias x" + str.tostring(newBias) + " · R:R " + str.tostring(riskReward, "#.#"), style=newDir == 1 ? label.style_label_down : label.style_label_up, color=newDir == 1 ? #00897B : #C62828, textcolor=color.white, size=size.small))
+    array.push(labEvt, na)
 
     array.push(sDir, newDir)
     array.push(sEntry, newEntry)
@@ -424,7 +464,12 @@ if newDir != 0
         activeS := newSl
         activeT := newTp
         if showFillMark
-            label.new(bar_index, newEntry, "▶ ENTRY", style=label.style_label_center, color=newDir == 1 ? #00897B : #C62828, textcolor=color.white, size=size.normal)
+            int ei = array.size(labEvt) - 1
+            if ei >= 0
+                label oldE = array.get(labEvt, ei)
+                if not na(oldE)
+                    label.delete(oldE)
+                array.set(labEvt, ei, label.new(bar_index, newEntry, "▶ ENTRY", style=label.style_label_center, color=newDir == 1 ? #00897B : #C62828, textcolor=color.white, size=size.normal))
         if alertEntry
             alert("CRT ENTRY " + (newDir == 1 ? "LONG" : "SHORT") + " @ " + str.tostring(newEntry, format.mintick), alert.freq_once_per_bar_close)
 
@@ -435,7 +480,8 @@ n = array.size(sDir)
 if n > 0
     for i = 0 to n - 1
         st = array.get(sStat, i)
-        if st <= 1
+        // Live setups only; expired drawings already removed
+        if st <= 1 and i < array.size(bZone) and not na(array.get(bZone, i))
             dir = array.get(sDir, i)
             e = array.get(sEntry, i)
             s = array.get(sSl, i)
@@ -459,26 +505,41 @@ if n > 0
                     activeE := e
                     activeS := s
                     activeT := t
-                    if showFillMark
-                        label.new(bar_index, e, "▶ ENTRY", style=label.style_label_center, color=dir == 1 ? #00897B : #C62828, textcolor=color.white, size=size.normal)
+                    if showFillMark and i < array.size(labEvt)
+                        label oldF = array.get(labEvt, i)
+                        if not na(oldF)
+                            label.delete(oldF)
+                        array.set(labEvt, i, label.new(bar_index, e, "▶ ENTRY", style=label.style_label_center, color=dir == 1 ? #00897B : #C62828, textcolor=color.white, size=size.normal))
                     if alertEntry
                         alert("CRT ENTRY @ " + str.tostring(e, format.mintick), alert.freq_once_per_bar_close)
 
             if array.get(sStat, i) == 1
                 hitT = dir == 1 ? high >= t : low <= t
                 hitS = dir == 1 ? low <= s : high >= s
-                if hitT
-                    array.set(sStat, i, 2)
-                    if showFillMark
-                        label.new(bar_index, t, "✓ TP EXIT", style=label.style_label_center, color=#26A69A, textcolor=color.white, size=size.normal)
+                if hitT or hitS
+                    array.set(sStat, i, hitT ? 2 : 3)
+                    if showFillMark and i < array.size(labEvt)
+                        label oldX = array.get(labEvt, i)
+                        if not na(oldX)
+                            label.delete(oldX)
+                        array.set(labEvt, i, label.new(bar_index, hitT ? t : s, hitT ? "✓ TP EXIT" : "✗ SL EXIT", style=label.style_label_center, color=hitT ? #26A69A : #EF5350, textcolor=color.white, size=size.normal))
                     if alertExit
-                        alert("CRT TP EXIT @ " + str.tostring(t, format.mintick), alert.freq_once_per_bar_close)
-                else if hitS
-                    array.set(sStat, i, 3)
-                    if showFillMark
-                        label.new(bar_index, s, "✗ SL EXIT", style=label.style_label_center, color=#EF5350, textcolor=color.white, size=size.normal)
-                    if alertExit
-                        alert("CRT SL EXIT @ " + str.tostring(s, format.mintick), alert.freq_once_per_bar_close)
+                        alert((hitT ? "CRT TP EXIT @ " : "CRT SL EXIT @ ") + str.tostring(hitT ? t : s, format.mintick), alert.freq_once_per_bar_close)
+                    // Wipe expired zone + markers; panel still shows last result
+                    if clearExpired
+                        f_del_setup_draw(i)
+                        array.set(bZone, i, na)
+                        array.set(bTp, i, na)
+                        array.set(bSl, i, na)
+                        array.set(lEntry, i, na)
+                        array.set(lSl, i, na)
+                        array.set(lTp, i, na)
+                        array.set(labE, i, na)
+                        array.set(labS, i, na)
+                        array.set(labT, i, na)
+                        array.set(labTag, i, na)
+                        if i < array.size(labEvt)
+                            array.set(labEvt, i, na)
 
 plot(activeE, "ENTRY", color=entryCol, display=display.data_window)
 plot(activeS, "SL", color=slCol, display=display.data_window)
