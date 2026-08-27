@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "2.10"
-#property description "TRH classic SWEEP — freeze box on TP/SL, advanced panel"
+#property version   "2.20"
+#property description "TRH classic SWEEP + Mode B Sweep/Displacement/FVG"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -18,15 +18,31 @@ enum ENUM_TRH_PANEL_CORNER
    TRH_PANEL_RIGHT = 1   // Top-right
 };
 
+enum ENUM_TRH_TRADE_MODE
+{
+   TRH_TM_CLASSIC = 0, // Mode A — classic SWEEP room
+   TRH_TM_FVG     = 1, // Mode B — sweep + displacement + FVG
+   TRH_TM_BOTH    = 2  // Both (shared cooldown; FVG wins same bar)
+};
+
+input group "Strategy mode"
+input ENUM_TRH_TRADE_MODE InpTradeMode = TRH_TM_BOTH; // Detection Mode
+
 input group "TRH Detection"
 input int    InpPivotPeriod     = 5;      // Pivot Period
 input double InpMinContextAtr   = 1.2;    // Min Selloff/Rally Into Sweep (ATR×)
 input double InpMinSweepAtr     = 0.05;   // Min Sweep Beyond Pivot (ATR×)
-input int    InpBaseConfirmBars = 8;      // Min Base Bars After Sweep
-input int    InpMaxBaseBars     = 40;     // Max Bars To Confirm Room
-input double InpMinRoomAtr      = 0.8;    // Min Room Width (ATR×)
-input double InpMaxRoomAtr      = 3.5;    // Max Room Width (ATR×)
+input int    InpBaseConfirmBars = 8;      // Min Base Bars After Sweep (Mode A)
+input int    InpMaxBaseBars     = 40;     // Max Bars To Confirm Room (Mode A)
+input double InpMinRoomAtr      = 0.8;    // Min Room Width (ATR×) Mode A
+input double InpMaxRoomAtr      = 3.5;    // Max Room Width (ATR×) Mode A
 input int    InpCooldownBars    = 50;     // Cooldown Between Setups
+
+input group "Mode B — Sweep + Displacement + FVG"
+input double InpMinDispAtr      = 0.55;   // Min Displacement Body (ATR×)
+input int    InpMaxDispBars     = 6;      // Max Bars After Sweep For Displacement
+input int    InpMaxFvgBars      = 10;     // Max Bars After Displacement For FVG
+input double InpMinFvgAtr       = 0.12;   // Min FVG Gap Size (ATR×)
 
 input group "Entry / SL / TP"
 input double InpSlPadAtr        = 0.02;   // SL Pad (ATR×)
@@ -83,7 +99,7 @@ datetime g_lastSlAlert = 0;
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   IndicatorSetString(INDICATOR_SHORTNAME, "TRH Sweep Pro");
+   IndicatorSetString(INDICATOR_SHORTNAME, "TRH Sweep+FVG Pro");
    return INIT_SUCCEEDED;
 }
 
@@ -311,7 +327,7 @@ void DrawInfoPanel(const TrhSetup &s, const string stTxt, const int stCode,
    int dy = 16;
    SetPanelLabel(OBJ_PREFIX + "P0", x0 + 10, y, "TRH | Trading Room Hunter", clrWhite, 10, corner); y += dy + 2;
    SetPanelLabel(OBJ_PREFIX + "P1", x0 + 10, y,
-      (s.dir == 1 ? "LONG" : "SHORT") + " · SWEEP · " + stTxt, sideCol, 9, corner); y += dy;
+      (s.dir == 1 ? "LONG" : "SHORT") + " · " + TrhModeLabel(s.mode) + " · " + stTxt, sideCol, 9, corner); y += dy;
    SetPanelLabel(OBJ_PREFIX + "P2", x0 + 10, y, "ENTRY  " + DoubleToString(s.entry, _Digits), InpEntryCol, 9, corner); y += dy;
    SetPanelLabel(OBJ_PREFIX + "P3", x0 + 10, y, "SL     " + DoubleToString(s.sl, _Digits), InpSlCol, 9, corner); y += dy;
    SetPanelLabel(OBJ_PREFIX + "P4", x0 + 10, y, "TP     " + DoubleToString(s.tp, _Digits), InpTpCol, 9, corner); y += dy;
@@ -405,7 +421,7 @@ void DrawOneSetup(const TrhSetup &s, const datetime &time[],
 
    if(InpShowTag)
    {
-      string tagTxt = "TRH " + (s.dir == 1 ? "LONG" : "SHORT") + " · SWEEP";
+      string tagTxt = "TRH " + (s.dir == 1 ? "LONG" : "SHORT") + " · " + TrhModeLabel(s.mode);
       if(stCode == 2) tagTxt += " · TP";
       if(stCode == 3) tagTxt += " · SL";
       SetText(OBJ_PREFIX + "TAG_" + tag, t1, (s.dir == 1 ? zTop : zBot),
@@ -435,8 +451,9 @@ void DrawOneSetup(const TrhSetup &s, const datetime &time[],
 
 void NotifyNewSetup(const TrhSetup &s)
 {
-   string msg = StringFormat("TRH %s SETUP\nENTRY %s\nSL %s\nTP %s",
+   string msg = StringFormat("TRH %s %s SETUP\nENTRY %s\nSL %s\nTP %s",
       s.dir == 1 ? "LONG" : "SHORT",
+      TrhModeLabel(s.mode),
       DoubleToString(s.entry, _Digits),
       DoubleToString(s.sl, _Digits),
       DoubleToString(s.tp, _Digits));
@@ -460,6 +477,10 @@ void BuildConfig(TrhConfig &cfg)
    cfg.slPadAtr        = InpSlPadAtr;
    cfg.riskReward      = InpRiskReward;
    cfg.useLiquidityTP  = InpUseLiquidityTP;
+   cfg.minDispAtr      = InpMinDispAtr;
+   cfg.maxDispBars     = InpMaxDispBars;
+   cfg.maxFvgBars      = InpMaxFvgBars;
+   cfg.minFvgAtr       = InpMinFvgAtr;
 }
 
 //+------------------------------------------------------------------+
@@ -493,7 +514,7 @@ int OnCalculate(const int rates_total,
       TrhConfig cfg;
       BuildConfig(cfg);
       datetime prevTime = (g_nSetups > 0) ? g_setups[g_nSetups - 1].barTime : 0;
-      g_nSetups = TrhScanSetups(rates_total, t, o, h, l, c, cfg, g_setups);
+      g_nSetups = TrhScanByMode(rates_total, t, o, h, l, c, cfg, (int)InpTradeMode, g_setups);
 
       ClearDrawings();
 
@@ -505,7 +526,7 @@ int OnCalculate(const int rates_total,
             int y0 = (InpPanelCorner == TRH_PANEL_LEFT) ? 70 : 28;
             SetPanelBg(OBJ_PREFIX + "PBG", 12, y0, 248, 56, corner);
             SetPanelLabel(OBJ_PREFIX + "P0", 22, y0 + 10, "TRH | scanning…", clrSilver, 10, corner);
-            SetPanelLabel(OBJ_PREFIX + "P1", 22, y0 + 30, "No SWEEP room yet", clrDimGray, 9, corner);
+            SetPanelLabel(OBJ_PREFIX + "P1", 22, y0 + 30, "No SWEEP / FVG yet", clrDimGray, 9, corner);
          }
          if(InpShowComment) Comment("TRH scanning… (no setup yet)");
          return rates_total;
@@ -565,7 +586,7 @@ int OnCalculate(const int rates_total,
       {
          Comment(
             "TRH | Trading Room Hunter\n",
-            (last.dir == 1 ? "LONG" : "SHORT"), " · SWEEP · ", stTxt, "\n",
+            (last.dir == 1 ? "LONG" : "SHORT"), " · ", TrhModeLabel(last.mode), " · ", stTxt, "\n",
             "ENTRY ", DoubleToString(last.entry, _Digits), "\n",
             "SL    ", DoubleToString(last.sl, _Digits), "\n",
             "TP    ", DoubleToString(last.tp, _Digits), "\n",

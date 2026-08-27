@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| TRH_Engine.mqh — Classic SWEEP detector (parity with Pine / JS)  |
+//| TRH_Engine.mqh — Classic SWEEP + Mode B Sweep/Displacement/FVG   |
 //| Used by indicator (draw) and EA (optional autotrade).            |
 //+------------------------------------------------------------------+
 #ifndef TRH_ENGINE_MQH
@@ -7,6 +7,10 @@
 
 #define TRH_MAX_PIVOTS 30
 #define TRH_ATR_LEN    14
+
+#define TRH_MODE_CLASSIC 0   // Mode A — classic room SWEEP
+#define TRH_MODE_FVG     1   // Mode B — sweep + displacement + FVG
+#define TRH_MODE_BOTH    2   // Merge A + B (cooldown shared)
 
 struct TrhPivot
 {
@@ -24,6 +28,7 @@ struct TrhSetup
    double   proximal;
    datetime barTime;
    int      barIndex;
+   int      mode;      // TRH_MODE_CLASSIC or TRH_MODE_FVG
 };
 
 struct TrhConfig
@@ -39,6 +44,11 @@ struct TrhConfig
    double slPadAtr;
    double riskReward;
    bool   useLiquidityTP;
+   // Mode B — Sweep + displacement + FVG
+   double minDispAtr;      // Min displacement candle body (ATR×)
+   int    maxDispBars;     // Bars after sweep to find displacement
+   int    maxFvgBars;      // Bars after displacement to find FVG
+   double minFvgAtr;       // Min FVG gap size (ATR×)
 };
 
 void TrhDefaultConfig(TrhConfig &cfg)
@@ -54,6 +64,16 @@ void TrhDefaultConfig(TrhConfig &cfg)
    cfg.slPadAtr        = 0.02;
    cfg.riskReward      = 2.4;
    cfg.useLiquidityTP  = true;
+   cfg.minDispAtr      = 0.55;
+   cfg.maxDispBars     = 6;
+   cfg.maxFvgBars      = 10;
+   cfg.minFvgAtr       = 0.12;
+}
+
+string TrhModeLabel(const int mode)
+{
+   if(mode == TRH_MODE_FVG) return "FVG";
+   return "SWEEP";
 }
 
 double TrhCalcATR(const int i, const double &h[], const double &l[], const double &c[])
@@ -302,6 +322,7 @@ int TrhScanSetups(const int rates,
             s.dir = 1; s.entry = entry; s.sl = sl; s.tp = tp;
             s.distal = distal; s.proximal = proximal;
             s.barIndex = i; s.barTime = time[i];
+            s.mode = TRH_MODE_CLASSIC;
             fired = true;
          }
       }
@@ -326,6 +347,7 @@ int TrhScanSetups(const int rates,
             s.dir = -1; s.entry = entry; s.sl = sl; s.tp = tp;
             s.distal = distal; s.proximal = proximal;
             s.barIndex = i; s.barTime = time[i];
+            s.mode = TRH_MODE_CLASSIC;
             fired = true;
          }
       }
@@ -341,6 +363,274 @@ int TrhScanSetups(const int rates,
    }
 
    return nSetups;
+}
+
+// Mode B: liquidity sweep → displacement candle → 3-candle FVG → mid-gap ENTRY
+int TrhScanFvgSetups(const int rates,
+                     const datetime &time[],
+                     const double &open[],
+                     const double &high[],
+                     const double &low[],
+                     const double &close[],
+                     const TrhConfig &cfg,
+                     TrhSetup &outSetups[])
+{
+   ArrayResize(outSetups, 0);
+   if(rates < 120) return 0;
+
+   TrhPivot pivHi[TRH_MAX_PIVOTS];
+   TrhPivot pivLo[TRH_MAX_PIVOTS];
+   int nHi = 0, nLo = 0;
+
+   // phase: 0 idle, 1 wait displacement, 2 wait FVG
+   int    phase = 0;
+   int    pendDir = 0;
+   double pendDistal = 0;
+   double pendHunt = 0;
+   int    sweepBar = -1;
+   int    dispBar = -1;
+   int    lastSetupBar = -9999;
+   int    nSetups = 0;
+   int    p = cfg.pivotPeriod;
+
+   for(int i = 0; i < rates; i++)
+   {
+      double a = TrhCalcATR(i, high, low, close);
+
+      int pivI = i - p;
+      if(pivI >= p && TrhIsPivotLow(pivI, p, low, rates))
+         TrhPushPivot(pivLo, nLo, low[pivI], pivI);
+      if(pivI >= p && TrhIsPivotHigh(pivI, p, high, rates))
+         TrhPushPivot(pivHi, nHi, high[pivI], pivI);
+
+      double huntLo = 0, huntHi = 0;
+      bool hasLo = TrhLastPivot(pivLo, nLo, i, 80, p, true, huntLo);
+      bool hasHi = TrhLastPivot(pivHi, nHi, i, 80, p, false, huntHi);
+
+      double priorHigh = 0, priorLow = 0;
+      bool   hasPrior  = false;
+      int    from = MathMax(0, i - 40);
+      for(int k = from; k < i; k++)
+      {
+         if(!hasPrior)
+         {
+            priorHigh = high[k];
+            priorLow  = low[k];
+            hasPrior  = true;
+         }
+         else
+         {
+            if(high[k] > priorHigh) priorHigh = high[k];
+            if(low[k]  < priorLow)  priorLow  = low[k];
+         }
+      }
+      if(!hasPrior)
+      {
+         priorHigh = high[i];
+         priorLow  = low[i];
+      }
+
+      bool bullSweep = hasLo &&
+         low[i] < huntLo - a * cfg.minSweepAtr &&
+         close[i] > huntLo && close[i] > open[i] &&
+         (priorHigh - low[i]) >= a * cfg.minContextAtr;
+
+      bool bearSweep = hasHi &&
+         high[i] > huntHi + a * cfg.minSweepAtr &&
+         close[i] < huntHi && close[i] < open[i] &&
+         (high[i] - priorLow) >= a * cfg.minContextAtr;
+
+      // Expire pending if windows elapsed
+      if(phase == 1 && (i - sweepBar) > cfg.maxDispBars)
+      {
+         phase = 0; pendDir = 0;
+      }
+      if(phase == 2 && (i - dispBar) > cfg.maxFvgBars)
+      {
+         phase = 0; pendDir = 0;
+      }
+
+      bool canStart = (phase == 0) && (i - lastSetupBar >= cfg.cooldownBars);
+      if(canStart && bullSweep)
+      {
+         phase      = 1;
+         pendDir    = 1;
+         pendDistal = low[i];
+         pendHunt   = huntLo;
+         sweepBar   = i;
+         dispBar    = -1;
+      }
+      else if(canStart && bearSweep)
+      {
+         phase      = 1;
+         pendDir    = -1;
+         pendDistal = high[i];
+         pendHunt   = huntHi;
+         sweepBar   = i;
+         dispBar    = -1;
+      }
+
+      if(phase == 0) continue;
+
+      // Track worst distal during wait
+      if(pendDir == 1 && low[i] < pendDistal) pendDistal = low[i];
+      if(pendDir == -1 && high[i] > pendDistal) pendDistal = high[i];
+
+      double body = MathAbs(close[i] - open[i]);
+
+      // Phase 1 → displacement
+      if(phase == 1 && i > sweepBar)
+      {
+         bool bullDisp = pendDir == 1 && close[i] > open[i] &&
+            body >= a * cfg.minDispAtr && close[i] > pendHunt;
+         bool bearDisp = pendDir == -1 && close[i] < open[i] &&
+            body >= a * cfg.minDispAtr && close[i] < pendHunt;
+         if(bullDisp || bearDisp)
+         {
+            phase = 2;
+            dispBar = i;
+         }
+         continue;
+      }
+
+      // Phase 2 → FVG (need i-2 available and after displacement)
+      if(phase == 2 && i >= 2 && i > dispBar)
+      {
+         TrhSetup s;
+         bool fired = false;
+
+         if(pendDir == 1)
+         {
+            // Bullish FVG: gap between candle[i-2].high and candle[i].low
+            double gapBot = high[i - 2];
+            double gapTop = low[i];
+            double gap = gapTop - gapBot;
+            if(gap >= a * cfg.minFvgAtr)
+            {
+               double entry = (gapTop + gapBot) * 0.5;
+               double sl    = pendDistal - a * cfg.slPadAtr;
+               if(entry <= sl) continue;
+               double risk  = entry - sl;
+               double tp    = entry + risk * cfg.riskReward;
+               double liq;
+               if(cfg.useLiquidityTP && TrhNextLiqHigh(pivHi, nHi, entry, risk * 1.5, liq))
+                  tp = MathMax(tp, liq);
+
+               s.dir = 1; s.entry = entry; s.sl = sl; s.tp = tp;
+               s.distal = gapBot; s.proximal = gapTop; // room = FVG box
+               s.barIndex = i; s.barTime = time[i];
+               s.mode = TRH_MODE_FVG;
+               fired = true;
+            }
+         }
+         else if(pendDir == -1)
+         {
+            // Bearish FVG: gap between candle[i].high and candle[i-2].low
+            double gapTop = low[i - 2];
+            double gapBot = high[i];
+            double gap = gapTop - gapBot;
+            if(gap >= a * cfg.minFvgAtr)
+            {
+               double entry = (gapTop + gapBot) * 0.5;
+               double sl    = pendDistal + a * cfg.slPadAtr;
+               if(sl <= entry) continue;
+               double risk  = sl - entry;
+               double tp    = entry - risk * cfg.riskReward;
+               double liq;
+               if(cfg.useLiquidityTP && TrhNextLiqLow(pivLo, nLo, entry, risk * 1.5, liq))
+                  tp = MathMin(tp, liq);
+
+               s.dir = -1; s.entry = entry; s.sl = sl; s.tp = tp;
+               s.distal = gapTop; s.proximal = gapBot; // room = FVG box
+               s.barIndex = i; s.barTime = time[i];
+               s.mode = TRH_MODE_FVG;
+               fired = true;
+            }
+         }
+
+         if(fired)
+         {
+            ArrayResize(outSetups, nSetups + 1);
+            outSetups[nSetups] = s;
+            nSetups++;
+            lastSetupBar = i;
+            phase = 0;
+            pendDir = 0;
+         }
+      }
+   }
+
+   return nSetups;
+}
+
+void TrhSortSetupsByBar(TrhSetup &arr[], const int n)
+{
+   for(int i = 0; i < n; i++)
+   {
+      for(int j = i + 1; j < n; j++)
+      {
+         if(arr[j].barIndex < arr[i].barIndex ||
+            (arr[j].barIndex == arr[i].barIndex && arr[j].mode < arr[i].mode))
+         {
+            TrhSetup tmp = arr[i];
+            arr[i] = arr[j];
+            arr[j] = tmp;
+         }
+      }
+   }
+}
+
+// Scan by mode: Classic, FVG, or Both (dedupe near-duplicate bars; prefer FVG on same bar)
+int TrhScanByMode(const int rates,
+                  const datetime &time[],
+                  const double &open[],
+                  const double &high[],
+                  const double &low[],
+                  const double &close[],
+                  const TrhConfig &cfg,
+                  const int tradeMode,
+                  TrhSetup &outSetups[])
+{
+   ArrayResize(outSetups, 0);
+   if(tradeMode == TRH_MODE_CLASSIC)
+      return TrhScanSetups(rates, time, open, high, low, close, cfg, outSetups);
+   if(tradeMode == TRH_MODE_FVG)
+      return TrhScanFvgSetups(rates, time, open, high, low, close, cfg, outSetups);
+
+   TrhSetup a[], b[];
+   int na = TrhScanSetups(rates, time, open, high, low, close, cfg, a);
+   int nb = TrhScanFvgSetups(rates, time, open, high, low, close, cfg, b);
+
+   TrhSetup merged[];
+   int nm = 0;
+   ArrayResize(merged, na + nb);
+   for(int i = 0; i < na; i++) merged[nm++] = a[i];
+   for(int i = 0; i < nb; i++) merged[nm++] = b[i];
+   TrhSortSetupsByBar(merged, nm);
+
+   // Apply shared cooldown + same-bar prefer FVG
+   ArrayResize(outSetups, 0);
+   int nOut = 0;
+   int lastBar = -9999;
+   for(int i = 0; i < nm; i++)
+   {
+      if(merged[i].barIndex - lastBar < cfg.cooldownBars && lastBar >= 0)
+      {
+         // Same bar: keep FVG over classic
+         if(merged[i].barIndex == lastBar && nOut > 0 &&
+            outSetups[nOut - 1].mode == TRH_MODE_CLASSIC &&
+            merged[i].mode == TRH_MODE_FVG)
+         {
+            outSetups[nOut - 1] = merged[i];
+         }
+         continue;
+      }
+      ArrayResize(outSetups, nOut + 1);
+      outSetups[nOut] = merged[i];
+      lastBar = merged[i].barIndex;
+      nOut++;
+   }
+   return nOut;
 }
 
 // Copy MT5 series (newest-first or oldest-first) into oldest→newest buffers.

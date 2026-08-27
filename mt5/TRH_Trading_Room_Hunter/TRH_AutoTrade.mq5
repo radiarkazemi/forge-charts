@@ -5,12 +5,19 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.10"
-#property description "TRH SWEEP EA v3.10: risk 1.5%, RR 2.4, daily 4%, BE@1R"
+#property version   "3.20"
+#property description "TRH EA v3.20: Mode A SWEEP + Mode B Sweep/Disp/FVG"
 #property strict
 
 #include <Trade/Trade.mqh>
 #include "TRH_Engine.mqh"
+
+enum ENUM_TRH_TRADE_MODE
+{
+   TRH_TM_CLASSIC = 0, // Mode A — classic SWEEP room
+   TRH_TM_FVG     = 1, // Mode B — sweep + displacement + FVG
+   TRH_TM_BOTH    = 2  // Both (shared cooldown)
+};
 
 input group "Trading"
 input bool   InpAutoTrade         = true;   // Enable AutoTrade (Algo Trading ON)
@@ -19,6 +26,9 @@ input ulong  InpMagic             = 260825; // Magic number
 input int    InpMaxSlippagePts    = 30;     // Max slippage (points)
 input int    InpPendingExpiryBars = 40;     // Cancel unfilled limit after N bars
 input int    InpLookbackBars      = 2000;   // History bars to scan
+
+input group "Strategy mode"
+input ENUM_TRH_TRADE_MODE InpTradeMode = TRH_TM_BOTH; // Detection Mode
 
 input group "1) Spread filter"
 input bool   InpUseSpreadFilter   = true;   // Enable max spread filter
@@ -45,7 +55,7 @@ input double InpMaxChaseAtr       = 0.35;   // Skip market if farther than this 
 input bool   InpAllowLimitAlways  = true;   // Still place LIMIT when too far to market
 input int    InpFreshMaxAgeBars   = 3;      // Only trade setups this fresh (bars)
 
-input group "TRH Detection (= Pine)"
+input group "TRH Detection (= Pine Mode A)"
 input int    InpPivotPeriod     = 5;
 input double InpMinContextAtr   = 1.2;
 input double InpMinSweepAtr     = 0.05;
@@ -54,6 +64,12 @@ input int    InpMaxBaseBars     = 40;
 input double InpMinRoomAtr      = 0.8;
 input double InpMaxRoomAtr      = 3.5;
 input int    InpCooldownBars    = 50;
+
+input group "Mode B — Sweep + Displacement + FVG"
+input double InpMinDispAtr      = 0.55;   // Min Displacement Body (ATR×)
+input int    InpMaxDispBars     = 6;      // Max Bars After Sweep For Displacement
+input int    InpMaxFvgBars      = 10;     // Max Bars After Displacement For FVG
+input double InpMinFvgAtr       = 0.12;   // Min FVG Gap Size (ATR×)
 
 input group "Entry / SL / TP"
 input double InpSlPadAtr        = 0.02;
@@ -90,6 +106,10 @@ void BuildConfig(TrhConfig &cfg)
    cfg.slPadAtr        = InpSlPadAtr;
    cfg.riskReward      = InpRiskReward;
    cfg.useLiquidityTP  = InpUseLiquidityTP;
+   cfg.minDispAtr      = InpMinDispAtr;
+   cfg.maxDispBars     = InpMaxDispBars;
+   cfg.maxFvgBars      = InpMaxFvgBars;
+   cfg.minFvgAtr       = InpMinFvgAtr;
 }
 
 void ResetDayIfNeeded()
@@ -276,7 +296,7 @@ bool PlaceSetupTrade(const TrhSetup &s, const double atrNow)
    g_trade.SetDeviationInPoints(InpMaxSlippagePts);
    g_trade.SetTypeFillingBySymbol(_Symbol);
 
-   string comment = StringFormat("TRH %s", s.dir == 1 ? "LONG" : "SHORT");
+   string comment = StringFormat("TRH %s %s", TrhModeLabel(s.mode), s.dir == 1 ? "LONG" : "SHORT");
    bool ok = false;
    string mode = "";
 
@@ -440,11 +460,12 @@ int OnInit()
    g_trade.SetTypeFillingBySymbol(_Symbol);
    ResetDayIfNeeded();
 
-   PrintFormat("TRH AutoTrade v3 | AutoTrade=%s | %s %s | risk=%.2f%%",
+   PrintFormat("TRH AutoTrade v3.20 | mode=%d | AutoTrade=%s | %s %s | risk=%.2f%%",
+      (int)InpTradeMode,
       InpAutoTrade ? "ON" : "OFF",
       _Symbol, EnumToString(_Period), InpRiskPercent);
 
-   Comment("TRH EA v3\n1 Spread  2 Session  3 Daily limits\n4 Break-even  5 Max chase\nDynamic lots from balance");
+   Comment("TRH EA v3.20\nMode A SWEEP + Mode B FVG\n1 Spread  2 Session  3 Daily\n4 BE  5 Chase | Dyn lots");
    return INIT_SUCCEEDED;
 }
 
@@ -492,11 +513,11 @@ void OnTick()
    TrhConfig cfg;
    BuildConfig(cfg);
    TrhSetup setups[];
-   int n = TrhScanSetups(copied, t, o, h, l, c, cfg, setups);
+   int n = TrhScanByMode(copied, t, o, h, l, c, cfg, (int)InpTradeMode, setups);
 
    if(n <= 0)
    {
-      Comment(StringFormat("TRH EA v3 %s — scanning…\nday trades %d | equity %.2f",
+      Comment(StringFormat("TRH EA v3.20 %s — scanning…\nday trades %d | equity %.2f",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades, AccountInfoDouble(ACCOUNT_EQUITY)));
       return;
    }
@@ -506,8 +527,9 @@ void OnTick()
    double previewLots = CalcLots(last.entry, last.sl);
 
    Comment(StringFormat(
-      "TRH %s · SWEEP\nENTRY %s  SL %s  TP %s\nBar %s (age %d)\nAutoTrade %s | orders %d | day %d\nDyn lots ≈ %s (risk %.2f%% bal)",
+      "TRH %s · %s\nENTRY %s  SL %s  TP %s\nBar %s (age %d)\nAutoTrade %s | orders %d | day %d\nDyn lots ≈ %s (risk %.2f%% bal)",
       last.dir == 1 ? "LONG" : "SHORT",
+      TrhModeLabel(last.mode),
       DoubleToString(last.entry, _Digits),
       DoubleToString(last.sl, _Digits),
       DoubleToString(last.tp, _Digits),
@@ -527,7 +549,8 @@ void OnTick()
 
    g_lastSetupTime = last.barTime;
 
-   PrintFormat("TRH SETUP %s E=%s SL=%s TP=%s @ %s age=%d lots≈%s",
+   PrintFormat("TRH SETUP %s %s E=%s SL=%s TP=%s @ %s age=%d lots≈%s",
+      TrhModeLabel(last.mode),
       last.dir == 1 ? "LONG" : "SHORT",
       DoubleToString(last.entry, _Digits),
       DoubleToString(last.sl, _Digits),
@@ -538,8 +561,9 @@ void OnTick()
 
    if(InpAlertOnSetup)
    {
-      Alert(StringFormat("TRH %s SETUP\nENTRY %s\nSL %s\nTP %s\nlots≈%s",
+      Alert(StringFormat("TRH %s %s SETUP\nENTRY %s\nSL %s\nTP %s\nlots≈%s",
          last.dir == 1 ? "LONG" : "SHORT",
+         TrhModeLabel(last.mode),
          DoubleToString(last.entry, _Digits),
          DoubleToString(last.sl, _Digits),
          DoubleToString(last.tp, _Digits),
