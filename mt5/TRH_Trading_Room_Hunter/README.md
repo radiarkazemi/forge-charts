@@ -1,69 +1,68 @@
-# TRH on MetaTrader 5 — detect first, trade later
+# TRH for MetaTrader 5 — exact classic SWEEP (same as Pine)
 
-Same classic **SWEEP** model as the TradingView Pine script and the Node alert engine.
-Goal: prove MT5 finds the same ENTRY / SL / TP, then turn on autotrade.
+This is the **MetaTrader 5 version** of `indicators/TRH_Trading_Room_Hunter.pine`.  
+Same math → same **ENTRY / SL / TP** (on the same symbol feed + timeframe).
+
+Pine cannot place broker orders. MT5 can (optional EA, off by default).
+
+## Where are the files?
+
+On GitHub in this repo:
 
 ```
-mt5/TRH_Trading_Room_Hunter/
-  TRH_Engine.mqh                 shared detector (Pine parity)
-  TRH_Trading_Room_Hunter.mq5    indicator — draw + alert only
-  TRH_AutoTrade.mq5              EA — AutoTrade OFF by default
-  README.md
+forge-charts/
+  mt5/
+    TRH_Trading_Room_Hunter/          ← this folder
+      TRH_Engine.mqh                  shared detector (= Pine logic)
+      TRH_Trading_Room_Hunter.mq5     indicator (draw + alert)
+      TRH_AutoTrade.mq5               EA (trading OFF until you enable it)
+      README.md
 ```
 
-## Why MT5 (not TradingView)
+Download: open the repo → folder `mt5/TRH_Trading_Room_Hunter/` → download those 3 files  
+(or download the whole repo ZIP and open that folder).
 
-TradingView does not allow real order automation on your broker.
-MT5 can detect the setup on the bar it confirms and place the order immediately.
+## Install the indicator (recommended first)
 
-## Phase 1 — Install & validate (required)
+1. Open **MetaTrader 5**
+2. Menu: **File → Open Data Folder**
+3. Go to: `MQL5` → `Indicators`
+4. Create a folder named `TRH_Trading_Room_Hunter`
+5. Copy **both** of these into that folder:
+   - `TRH_Trading_Room_Hunter.mq5`
+   - `TRH_Engine.mqh`  
+   (they must stay **next to each other**)
+6. In MT5: open **MetaEditor** (F4) → open `TRH_Trading_Room_Hunter.mq5` → press **Compile (F7)**  
+   You want `0 error(s)`
+7. Back in MT5: **Navigator → Indicators → TRH_Trading_Room_Hunter** → drag onto chart
+8. Chart: **XAUUSD**, timeframe **M1** (same as TradingView)
+9. Leave all inputs at defaults (they match Pine)
 
-1. Copy this folder into MT5:
-   `File → Open Data Folder → MQL5 → Indicators →`  
-   put `TRH_Trading_Room_Hunter.mq5` + `TRH_Engine.mqh` here  
-   (or keep them in one subfolder and compile from there).
-2. In MetaEditor: open `TRH_Trading_Room_Hunter.mq5` → **Compile** (F7). Fix path if `#include "TRH_Engine.mqh"` fails (engine must sit next to the `.mq5`).
-3. Chart: same symbol/TF as TradingView, e.g. **FxPro XAUUSD M1**.
-4. Attach indicator. Defaults match Pine (Pivot 5, base 8, RR 2.4, …).
-5. Compare the last setup on MT5 vs TradingView:
+You should see room boxes + **ENTRY / SL / TP** lines and a comment panel with the numbers.
 
-| Field | Must match closely |
-|-------|--------------------|
-| Direction | LONG / SHORT |
-| ENTRY | mid-room |
-| SL | past distal (+ pad) |
-| TP | ~2.4R or opposing liquidity |
-| Bar time | same confirmation minute |
+## Match TradingView exactly
 
-Broker price feed offsets (e.g. Yahoo vs FxPro ~tens of points) will shift absolute numbers; **geometry and bar time** should still align on the **same broker chart** as TV if TV is on that broker feed. Prefer TradingView symbol that matches your MT5 broker.
+| Must be the same | Why |
+|------------------|-----|
+| Symbol feed | FOREXCOM on TV ≠ your broker’s XAUUSD → prices shift |
+| Timeframe | M1 |
+| Inputs | defaults already match Pine |
 
-6. When a new setup prints, MT5 shows Comment + optional Alert with ENTRY/SL/TP. Log those and screenshot both platforms.
+Best check: open **FOREXCOM:XAUUSD** on TradingView and the **same broker symbol** on MT5 only if they are the same feed.  
+Morning FOREXCOM sample: LONG ENTRY **4602.87** / SL **4599.63** / TP **4610.64** @ **06:13 UTC**.
 
-**Do not enable autotrade until several setups match.**
+## Optional: AutoTrade EA (after levels match)
 
-## Phase 2 — EA (still safe by default)
+1. Copy `TRH_AutoTrade.mq5` + `TRH_Engine.mqh` into `MQL5/Experts/TRH_Trading_Room_Hunter/`
+2. Compile `TRH_AutoTrade.mq5`
+3. Attach to the same chart
+4. Keep **`Enable live trading = false`** until several setups match TV
+5. Then enable Algo Trading + set `InpAutoTrade = true` on demo first
 
-1. Copy `TRH_AutoTrade.mq5` + `TRH_Engine.mqh` to `MQL5/Experts/` (same folder together).
-2. Compile `TRH_AutoTrade.mq5`.
-3. Attach to the same chart. Leave **`Enable live trading = false`**.
-4. On each new setup the EA alerts and prints what it *would* have traded.
-5. After Phase 1 matches look good:
-   - Enable **Algo Trading** in MT5 toolbar
-   - Allow live trading in EA inputs: **`InpAutoTrade = true`**
-   - Start with small **`InpRiskPercent`** (default 0.5%) or fixed micro lots
+## Defaults (= Pine)
 
-### How the EA enters
-
-On the bar the room confirms (same moment as Pine):
-
-- Price within `InpMarketTolAtr` of ENTRY → market order with SL/TP  
-- Otherwise → pending limit/stop at ENTRY with SL/TP  
-- Pending cancelled after `InpPendingExpiryBars` (default 40)
-
-## Inputs (keep identical on Pine / indicator / EA)
-
-| Input | Default |
-|-------|---------|
+| Input | Value |
+|-------|-------|
 | Pivot Period | 5 |
 | Min Context ATR | 1.2 |
 | Min Sweep ATR | 0.05 |
@@ -73,18 +72,10 @@ On the bar the room confirms (same moment as Pine):
 | Cooldown | 50 |
 | SL Pad ATR | 0.02 |
 | Risk Reward | 2.4 |
-| Prefer Liquidity TP | true |
 
 ## Troubleshooting
 
-- **No setups**: need ≥ ~120 bars; use M1/M5 with enough history.
-- **Levels differ from TV**: same broker symbol, same TF, same inputs; avoid mixing Yahoo/GC=F with FxPro.
-- **Compile error on Trade.mqh**: EA needs a normal MT5 build with standard library.
-- **Orders rejected**: check AutoTrading, symbol trade mode, stops level, and filling mode.
-
-## Roadmap after validation
-
-1. Keep AutoTrade off until 5+ matched setups.  
-2. Enable on demo.  
-3. Then live with tiny risk.  
-4. Optional later: sync Android/ntfy alerts from the same MT5 detection instead of Yahoo.
+- **Compile error / missing include**: `TRH_Engine.mqh` must be in the **same folder** as the `.mq5`
+- **No setups**: load more history (right‑click chart → Refresh); need ~120+ M1 bars
+- **Numbers differ from TV**: different broker feed — geometry should still look the same on *that* feed
+- **Chrome / phone alerts**: those use VPS FOREXCOM Mongo; MT5 uses your broker chart

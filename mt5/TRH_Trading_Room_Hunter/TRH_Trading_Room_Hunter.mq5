@@ -4,7 +4,9 @@
 //| Phase 1: DETECT + DRAW only (validate vs TV before autotrade)    |
 //+------------------------------------------------------------------+
 #property copyright "TRH"
-#property version   "1.10"
+#property link      "https://github.com/radiarkazemi/forge-charts"
+#property version   "1.20"
+#property description "Classic TRH SWEEP — same ENTRY/SL/TP model as TradingView Pine"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -106,29 +108,62 @@ void DrawSetup(const TrhSetup &s, const datetime &time[])
       ObjectSetInteger(0, slN, OBJPROP_BACK, true);
    }
 
+   // Horizontal levels (same labels as Pine: ENTRY / SL / TP)
    string eN = OBJ_PREFIX + "E_" + tag;
    ObjectCreate(0, eN, OBJ_HLINE, 0, 0, s.entry);
    ObjectSetInteger(0, eN, OBJPROP_COLOR, clrSilver);
    ObjectSetInteger(0, eN, OBJPROP_STYLE, STYLE_SOLID);
    ObjectSetInteger(0, eN, OBJPROP_WIDTH, 2);
 
+   string slH = OBJ_PREFIX + "SLH_" + tag;
+   ObjectCreate(0, slH, OBJ_HLINE, 0, 0, s.sl);
+   ObjectSetInteger(0, slH, OBJPROP_COLOR, clrFireBrick);
+   ObjectSetInteger(0, slH, OBJPROP_STYLE, STYLE_DOT);
+   ObjectSetInteger(0, slH, OBJPROP_WIDTH, 1);
+
+   string tpH = OBJ_PREFIX + "TPH_" + tag;
+   ObjectCreate(0, tpH, OBJ_HLINE, 0, 0, s.tp);
+   ObjectSetInteger(0, tpH, OBJPROP_COLOR, clrTeal);
+   ObjectSetInteger(0, tpH, OBJPROP_STYLE, STYLE_DOT);
+   ObjectSetInteger(0, tpH, OBJPROP_WIDTH, 1);
+
+   string le = OBJ_PREFIX + "LE_" + tag;
+   ObjectCreate(0, le, OBJ_TEXT, 0, t2, s.entry);
+   ObjectSetString(0, le, OBJPROP_TEXT, "ENTRY " + DoubleToString(s.entry, _Digits));
+   ObjectSetInteger(0, le, OBJPROP_COLOR, clrSilver);
+   ObjectSetInteger(0, le, OBJPROP_FONTSIZE, 9);
+   ObjectSetInteger(0, le, OBJPROP_ANCHOR, ANCHOR_LEFT);
+
+   string ls = OBJ_PREFIX + "LS_" + tag;
+   ObjectCreate(0, ls, OBJ_TEXT, 0, t2, s.sl);
+   ObjectSetString(0, ls, OBJPROP_TEXT, "SL " + DoubleToString(s.sl, _Digits));
+   ObjectSetInteger(0, ls, OBJPROP_COLOR, clrFireBrick);
+   ObjectSetInteger(0, ls, OBJPROP_FONTSIZE, 9);
+   ObjectSetInteger(0, ls, OBJPROP_ANCHOR, ANCHOR_LEFT);
+
+   string lt = OBJ_PREFIX + "LT_" + tag;
+   ObjectCreate(0, lt, OBJ_TEXT, 0, t2, s.tp);
+   ObjectSetString(0, lt, OBJPROP_TEXT, "TP " + DoubleToString(s.tp, _Digits));
+   ObjectSetInteger(0, lt, OBJPROP_COLOR, clrTeal);
+   ObjectSetInteger(0, lt, OBJPROP_FONTSIZE, 9);
+   ObjectSetInteger(0, lt, OBJPROP_ANCHOR, ANCHOR_LEFT);
+
    string lab = OBJ_PREFIX + "L_" + tag;
-   ObjectCreate(0, lab, OBJ_TEXT, 0, t1, (s.dir == 1 ? s.proximal : s.distal));
+   ObjectCreate(0, lab, OBJ_TEXT, 0, t1, (s.dir == 1 ? MathMax(s.proximal, s.distal) : MathMin(s.proximal, s.distal)));
    ObjectSetString(0, lab, OBJPROP_TEXT,
-      "TRH " + (s.dir == 1 ? "LONG" : "SHORT") + " · SWEEP  E " +
-      DoubleToString(s.entry, _Digits) + "  SL " + DoubleToString(s.sl, _Digits) +
-      "  TP " + DoubleToString(s.tp, _Digits));
+      "TRH " + (s.dir == 1 ? "LONG" : "SHORT") + " · SWEEP");
    ObjectSetInteger(0, lab, OBJPROP_COLOR, (s.dir == 1 ? clrAqua : clrOrangeRed));
-   ObjectSetInteger(0, lab, OBJPROP_FONTSIZE, 9);
+   ObjectSetInteger(0, lab, OBJPROP_FONTSIZE, 10);
 
    Comment(
-      "TRH ", (s.dir == 1 ? "LONG" : "SHORT"), " · SWEEP\n",
+      "TRH | Trading Room Hunter\n",
+      (s.dir == 1 ? "LONG" : "SHORT"), " · SWEEP (same as Pine)\n",
       "ENTRY ", DoubleToString(s.entry, _Digits), "\n",
-      "SL ", DoubleToString(s.sl, _Digits), "\n",
-      "TP ", DoubleToString(s.tp, _Digits), "\n",
-      "Risk ", DoubleToString(MathAbs(s.entry - s.sl), _Digits),
+      "SL    ", DoubleToString(s.sl, _Digits), "\n",
+      "TP    ", DoubleToString(s.tp, _Digits), "\n",
+      "Risk  ", DoubleToString(MathAbs(s.entry - s.sl), _Digits),
       "  (", DoubleToString(InpRiskReward, 1), "R)\n",
-      "Bar ", TimeToString(s.barTime, TIME_DATE|TIME_MINUTES)
+      "Bar   ", TimeToString(s.barTime, TIME_DATE|TIME_MINUTES)
    );
 }
 
