@@ -12,11 +12,9 @@
 
 #include "TRH_Engine.mqh"
 
+// MQL5 has no #error — version is checked in OnInit (need Engine v221+ in SAME folder).
 #ifndef TRH_ENGINE_VERSION
-#error TRH_Engine.mqh is outdated. Copy the NEW TRH_Engine.mqh into the SAME folder as this .mq5 and recompile.
-#endif
-#if TRH_ENGINE_VERSION < 221
-#error TRH_Engine.mqh is outdated (need v221 FVG retest/hold). Replace TRH_Engine.mqh next to this file.
+#define TRH_ENGINE_VERSION 0
 #endif
 
 enum ENUM_TRH_PANEL_CORNER
@@ -111,6 +109,12 @@ bool     g_holdValid = false;
 //+------------------------------------------------------------------+
 int OnInit()
 {
+   if(TRH_ENGINE_VERSION < 221)
+   {
+      Alert("TRH: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
+            "). Put NEW TRH_Engine.mqh in the SAME folder as this .mq5 and recompile.");
+      return INIT_FAILED;
+   }
    IndicatorSetString(INDICATOR_SHORTNAME, "TRH Sweep+FVG Pro");
    return INIT_SUCCEEDED;
 }
