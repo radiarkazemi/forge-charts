@@ -183,6 +183,15 @@ export default function App() {
     else setWidget("ideas");
   };
 
+  useEffect(() => {
+    // Keep right dock locked to the toolbar data switcher.
+    if (dataMode === "technicals" && widget !== "data" && widget !== "object") setWidget("data");
+    if (dataMode === "seasonals" && widget !== "calendar") setWidget("calendar");
+    if (dataMode === "news" && widget !== "news") setWidget("news");
+    if (dataMode === "ideas" && widget !== "ideas") setWidget("ideas");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataMode]);
+
   return (
     <div className="shell" data-theme={snap?.theme ?? "dark"}>
       <ProductHeader

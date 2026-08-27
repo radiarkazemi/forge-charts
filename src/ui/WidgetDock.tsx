@@ -86,7 +86,8 @@ export function WidgetDock({ engine, active, onActive, quotes, onPick, alerts }:
               ))}
             </ul>
           ) : null}
-          {active === "data" && bar ? (
+          {active === "data" ? (
+            bar ? (
             <dl className="data-win">
               <div>
                 <dt>Open</dt>
@@ -113,6 +114,11 @@ export function WidgetDock({ engine, active, onActive, quotes, onPick, alerts }:
                 <dd>{new Date(bar.time * 1000).toUTCString()}</dd>
               </div>
             </dl>
+            ) : (
+              <ul className="objects">
+                <li className="muted">Hover a bar for OHLC, or open Indicators from the toolbar.</li>
+              </ul>
+            )
           ) : null}
           {active === "alerts" ? (
             <ul className="objects">
