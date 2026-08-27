@@ -87,7 +87,9 @@ if barstate.isconfirmed
             break
 
     if foundNow
-        bool dup = array.size(crtBars) > 0 and (bar_index - array.get(crtBars, array.size(crtBars) - 1) < 2)
+        bool dup = false
+        if array.size(crtBars) > 0
+            dup := bar_index - array.get(crtBars, array.size(crtBars) - 1) < 2
         if not dup
             array.push(crtBars, bar_index)
             array.push(crtDirs, dirNow)
