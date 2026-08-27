@@ -14,6 +14,11 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
@@ -21,9 +26,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var lastAlertText: TextView
     private lateinit var sideBadge: TextView
     private lateinit var levelsRow: View
+    private lateinit var timesRow: View
     private lateinit var entryValue: TextView
     private lateinit var slValue: TextView
     private lateinit var tpValue: TextView
+    private lateinit var entryTimeValue: TextView
+    private lateinit var expiryTimeValue: TextView
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -34,7 +42,8 @@ class MainActivity : AppCompatActivity() {
                 }
                 TrhAlertService.ACTION_ALERT -> {
                     val body = intent.getStringExtra(TrhAlertService.EXTRA_TEXT) ?: ""
-                    applyAlert(body)
+                    val json = intent.getStringExtra(TrhAlertService.EXTRA_JSON)
+                    applyAlert(body, json)
                 }
             }
         }
@@ -49,9 +58,12 @@ class MainActivity : AppCompatActivity() {
         lastAlertText = findViewById(R.id.lastAlertText)
         sideBadge = findViewById(R.id.sideBadge)
         levelsRow = findViewById(R.id.levelsRow)
+        timesRow = findViewById(R.id.timesRow)
         entryValue = findViewById(R.id.entryValue)
         slValue = findViewById(R.id.slValue)
         tpValue = findViewById(R.id.tpValue)
+        entryTimeValue = findViewById(R.id.entryTimeValue)
+        expiryTimeValue = findViewById(R.id.expiryTimeValue)
 
         findViewById<Button>(R.id.testSoundBtn).setOnClickListener {
             Notify.playTestSound(this)
@@ -62,15 +74,19 @@ class MainActivity : AppCompatActivity() {
 
         applyStatus(TrhAlertService.lastStatus.ifEmpty { getString(R.string.status_connecting) })
         if (TrhAlertService.lastAlert.isNotEmpty()) {
-            applyAlert(TrhAlertService.lastAlert)
+            applyAlert(TrhAlertService.lastAlert, TrhAlertService.lastAlertJson)
         }
 
-        intent?.getStringExtra("alert_body")?.let { applyAlert(it) }
+        intent?.getStringExtra("alert_body")?.let {
+            applyAlert(it, intent.getStringExtra("alert_json"))
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        intent.getStringExtra("alert_body")?.let { applyAlert(it) }
+        intent.getStringExtra("alert_body")?.let {
+            applyAlert(it, intent.getStringExtra("alert_json"))
+        }
     }
 
     override fun onStart() {
@@ -109,7 +125,7 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun applyAlert(body: String) {
+    private fun applyAlert(body: String, json: String? = null) {
         lastAlertText.text = body
         val upper = body.uppercase()
         when {
@@ -130,15 +146,65 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        val entry = Regex("""ENTRY\s+([0-9.]+)""", RegexOption.IGNORE_CASE).find(body)?.groupValues?.get(1)
-        val sl = Regex("""SL\s+([0-9.]+)""", RegexOption.IGNORE_CASE).find(body)?.groupValues?.get(1)
-        val tp = Regex("""TP\s+([0-9.]+)""", RegexOption.IGNORE_CASE).find(body)?.groupValues?.get(1)
+        var entry = Regex("""ENTRY\s+([0-9.]+)""", RegexOption.IGNORE_CASE).find(body)?.groupValues?.get(1)
+        var sl = Regex("""SL\s+([0-9.]+)""", RegexOption.IGNORE_CASE).find(body)?.groupValues?.get(1)
+        var tp = Regex("""TP\s+([0-9.]+)""", RegexOption.IGNORE_CASE).find(body)?.groupValues?.get(1)
+        var entryTime = Regex("""ENTRY TIME\s+(.+)""", RegexOption.IGNORE_CASE).find(body)?.groupValues?.get(1)?.trim()
+        var expiryTime = Regex("""EXPIRY\s+(.+)""", RegexOption.IGNORE_CASE).find(body)?.groupValues?.get(1)?.trim()
+
+        // Prefer structured encrypted payload fields when present
+        if (!json.isNullOrBlank()) {
+            try {
+                val p = JSONObject(json)
+                if (p.has("entry")) entry = formatPrice(p.getDouble("entry"))
+                if (p.has("sl")) sl = formatPrice(p.getDouble("sl"))
+                if (p.has("tp")) tp = formatPrice(p.getDouble("tp"))
+                val et = p.optString("entryTimeIso").ifBlank {
+                    if (p.has("entryTime")) fmtUtc(p.getLong("entryTime")) else ""
+                }
+                val xt = p.optString("expiryTimeIso").ifBlank {
+                    if (p.has("expiryTime")) fmtUtc(p.getLong("expiryTime")) else ""
+                }
+                if (et.isNotBlank()) entryTime = et
+                if (xt.isNotBlank()) {
+                    val bars = p.optInt("expiryBars", 0)
+                    expiryTime = if (bars > 0) "$xt (${bars}m window)" else xt
+                }
+                val side = p.optString("side")
+                if (side.equals("LONG", true) || side.equals("SHORT", true)) {
+                    sideBadge.text = side.uppercase(Locale.US)
+                    if (side.equals("LONG", true)) {
+                        sideBadge.setTextColor(ContextCompat.getColor(this, R.color.long_green))
+                        sideBadge.setBackgroundResource(R.drawable.bg_badge_long)
+                    } else {
+                        sideBadge.setTextColor(ContextCompat.getColor(this, R.color.short_red))
+                        sideBadge.setBackgroundResource(R.drawable.bg_badge_short)
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+
         if (entry != null || sl != null || tp != null) {
             levelsRow.visibility = View.VISIBLE
             entryValue.text = entry ?: "—"
             slValue.text = sl ?: "—"
             tpValue.text = tp ?: "—"
         }
+
+        if (!entryTime.isNullOrBlank() || !expiryTime.isNullOrBlank()) {
+            timesRow.visibility = View.VISIBLE
+            entryTimeValue.text = entryTime ?: "—"
+            expiryTimeValue.text = expiryTime ?: "—"
+        }
+    }
+
+    private fun formatPrice(v: Double): String = String.format(Locale.US, "%.2f", v)
+
+    private fun fmtUtc(epochSec: Long): String {
+        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss 'UTC'", Locale.US)
+        sdf.timeZone = TimeZone.getTimeZone("UTC")
+        return sdf.format(Date(epochSec * 1000L))
     }
 
     private fun requestNotificationPermission() {

@@ -22,8 +22,10 @@ class TrhAlertService : Service() {
         const val ACTION_STATUS = "com.forge.trhalert.STATUS"
         const val ACTION_ALERT = "com.forge.trhalert.ALERT"
         const val EXTRA_TEXT = "text"
+        const val EXTRA_JSON = "json"
         var lastStatus: String = ""
         var lastAlert: String = ""
+        var lastAlertJson: String = ""
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -127,10 +129,41 @@ class TrhAlertService : Service() {
 
     private fun onAlert(payload: JSONObject) {
         val title = payload.optString("title", "TRH Setup")
-        val message = payload.optString("message", payload.toString())
+        var message = payload.optString("message", "")
+        if (message.isBlank()) {
+            // Build from structured fields if message missing
+            val side = payload.optString("side", "SETUP")
+            val entry = payload.optDouble("entry", Double.NaN)
+            val sl = payload.optDouble("sl", Double.NaN)
+            val tp = payload.optDouble("tp", Double.NaN)
+            val entryIso = payload.optString("entryTimeIso")
+            val expiryIso = payload.optString("expiryTimeIso")
+            message = buildString {
+                append("TRH $side\n")
+                if (!entry.isNaN()) append("ENTRY ${"%.2f".format(entry)}\n")
+                if (!sl.isNaN()) append("SL ${"%.2f".format(sl)}\n")
+                if (!tp.isNaN()) append("TP ${"%.2f".format(tp)}\n")
+                if (entryIso.isNotBlank()) append("ENTRY TIME $entryIso\n")
+                if (expiryIso.isNotBlank()) append("EXPIRY $expiryIso")
+            }.trim()
+        }
+        // Ensure times appear in notification even on older plaintext path
+        if (!message.contains("ENTRY TIME", ignoreCase = true)) {
+            val entryIso = payload.optString("entryTimeIso")
+            val expiryIso = payload.optString("expiryTimeIso")
+            if (entryIso.isNotBlank()) message += "\nENTRY TIME $entryIso"
+            if (expiryIso.isNotBlank()) message += "\nEXPIRY $expiryIso"
+        }
+
         lastAlert = message
+        lastAlertJson = payload.toString()
         Notify.showTradeAlert(this, title, message)
-        sendBroadcast(Intent(ACTION_ALERT).putExtra(EXTRA_TEXT, message).setPackage(packageName))
+        sendBroadcast(
+            Intent(ACTION_ALERT)
+                .putExtra(EXTRA_TEXT, message)
+                .putExtra(EXTRA_JSON, lastAlertJson)
+                .setPackage(packageName),
+        )
         updateForeground(getString(R.string.status_connected))
     }
 

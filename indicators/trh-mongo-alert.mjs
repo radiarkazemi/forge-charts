@@ -8,8 +8,9 @@
  *   MONGO_DB=historical_data
  *   MONGO_COLL=xauusd_1m
  *   NTFY_TOPIC=...
- *   TRH_POLL_SEC=30
+ *   TRH_POLL_SEC=10
  *   TRH_MAX_AGE_BARS=5
+ *   TRH_ENTRY_EXPIRY_BARS=5
  *   TRH_MIN_RISK=2.0
  *   TRH_LOOKBACK=1500
  */
@@ -27,10 +28,11 @@ const SECRETS_FILE = join(__dir, ".trh-secrets.json");
 const MONGO_URI = process.env.MONGO_URI || "mongodb://127.0.0.1:27017";
 const MONGO_DB = process.env.MONGO_DB || "historical_data";
 const MONGO_COLL = process.env.MONGO_COLL || "xauusd_1m";
-const POLL_SEC = Number(process.env.TRH_POLL_SEC || 30);
+const POLL_SEC = Number(process.env.TRH_POLL_SEC || 10);
 const NTFY_TOPIC = process.env.NTFY_TOPIC || "trh-forge-radiarkazemi-bc13";
 const NTFY_SERVER = process.env.NTFY_SERVER || "https://ntfy.sh";
 const MAX_AGE = Number(process.env.TRH_MAX_AGE_BARS || 5);
+const EXPIRY_BARS = Number(process.env.TRH_ENTRY_EXPIRY_BARS || MAX_AGE);
 const MIN_RISK = Number(process.env.TRH_MIN_RISK || 2.0);
 const LOOKBACK = Number(process.env.TRH_LOOKBACK || 1500);
 const SYMBOL_LABEL = process.env.TRH_SYMBOL || "XAUUSD FOREXCOM";
@@ -77,6 +79,16 @@ function saveState(state) {
 
 function fmt(n) {
   return Number(n).toFixed(2);
+}
+
+/** UTC clock for phone display: 2026-08-27 10:29:00 UTC */
+function fmtUtc(sec) {
+  const d = new Date(Number(sec) * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return (
+    `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ` +
+    `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} UTC`
+  );
 }
 
 async function fetchBars(client) {
@@ -207,35 +219,46 @@ async function tick(client) {
   }
 
   const side = chosen.dir === 1 ? "LONG" : "SHORT";
+  const entryTime = chosen.barTime;
+  const expiryTime = entryTime + EXPIRY_BARS * 60;
+  const alertedAt = Math.floor(Date.now() / 1000);
+  const lagSec = Math.max(0, alertedAt - entryTime);
+
   const msg =
     `${SYMBOL_LABEL} 1m | TRH ${side} SETUP\n` +
     `ENTRY ${fmt(chosen.entry)}\n` +
     `SL ${fmt(chosen.sl)}\n` +
     `TP ${fmt(chosen.tp)}\n` +
-    `Risk ${fmt(chosen.risk)} · ${new Date(chosen.barTime * 1000).toISOString()}`;
+    `ENTRY TIME ${fmtUtc(entryTime)}\n` +
+    `EXPIRY ${fmtUtc(expiryTime)} (${EXPIRY_BARS}m window)\n` +
+    `Risk ${fmt(chosen.risk)} · age ${chosen.age}m · alert lag ${lagSec}s`;
   const title = `TRH ${side} SETUP`;
 
-  console.log(`[trh-mongo] NEW (age ${chosen.age}m)\n${msg}`);
-  const sent = await notifyNtfy(title, msg, {
+  console.log(`[trh-mongo] NEW (age ${chosen.age}m lag ${lagSec}s)\n${msg}`);
+  const payload = {
     side,
     symbol: SYMBOL_LABEL,
     entry: chosen.entry,
     sl: chosen.sl,
     tp: chosen.tp,
-    barTime: chosen.barTime,
+    risk: chosen.risk,
+    barTime: entryTime,
+    entryTime,
+    entryTimeIso: fmtUtc(entryTime),
+    expiryTime,
+    expiryTimeIso: fmtUtc(expiryTime),
+    expiryBars: EXPIRY_BARS,
+    alertedAt,
+    alertedAtIso: fmtUtc(alertedAt),
+    ageBars: chosen.age,
+    lagSec,
     source: "mongo-forexcom",
-  });
+  };
+  const sent = await notifyNtfy(title, msg, payload);
   console.log(`[trh-mongo] ntfy → ${sent ? "ok" : "fail"}`);
 
   state.lastAlertTime = chosen.barTime;
-  state.latest = {
-    side,
-    entry: chosen.entry,
-    sl: chosen.sl,
-    tp: chosen.tp,
-    barTime: chosen.barTime,
-    at: Date.now(),
-  };
+  state.latest = { ...payload, at: Date.now() };
   saveState(state);
 }
 
