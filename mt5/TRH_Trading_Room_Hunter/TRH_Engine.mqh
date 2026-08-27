@@ -1,15 +1,16 @@
 //+------------------------------------------------------------------+
-//| TRH_Engine.mqh — Classic SWEEP + Mode B Sweep/Displacement/FVG   |
+//| TRH_Engine.mqh - Classic SWEEP + Mode B Sweep/Displacement/FVG   |
 //| Used by indicator (draw) and EA (optional autotrade).            |
 //+------------------------------------------------------------------+
 #ifndef TRH_ENGINE_MQH
 #define TRH_ENGINE_MQH
 
+#define TRH_ENGINE_VERSION 220
 #define TRH_MAX_PIVOTS 30
 #define TRH_ATR_LEN    14
 
-#define TRH_MODE_CLASSIC 0   // Mode A — classic room SWEEP
-#define TRH_MODE_FVG     1   // Mode B — sweep + displacement + FVG
+#define TRH_MODE_CLASSIC 0   // Mode A - classic room SWEEP
+#define TRH_MODE_FVG     1   // Mode B - sweep + displacement + FVG
 #define TRH_MODE_BOTH    2   // Merge A + B (cooldown shared)
 
 struct TrhPivot
@@ -28,7 +29,7 @@ struct TrhSetup
    double   proximal;
    datetime barTime;
    int      barIndex;
-   int      mode;      // TRH_MODE_CLASSIC or TRH_MODE_FVG
+   int      setupMode; // TRH_MODE_CLASSIC or TRH_MODE_FVG
 };
 
 struct TrhConfig
@@ -44,11 +45,11 @@ struct TrhConfig
    double slPadAtr;
    double riskReward;
    bool   useLiquidityTP;
-   // Mode B — Sweep + displacement + FVG
-   double minDispAtr;      // Min displacement candle body (ATR×)
+   // Mode B - Sweep + displacement + FVG
+   double minDispAtr;      // Min displacement candle body (ATRx)
    int    maxDispBars;     // Bars after sweep to find displacement
    int    maxFvgBars;      // Bars after displacement to find FVG
-   double minFvgAtr;       // Min FVG gap size (ATR×)
+   double minFvgAtr;       // Min FVG gap size (ATRx)
 };
 
 void TrhDefaultConfig(TrhConfig &cfg)
@@ -186,7 +187,7 @@ bool TrhNextLiqLow(const TrhPivot &arr[], const int n, const double from,
    return found;
 }
 
-// Bars must be oldest→newest (index 0 = oldest).
+// Bars must be oldest->newest (index 0 = oldest).
 int TrhScanSetups(const int rates,
                   const datetime &time[],
                   const double &open[],
@@ -224,7 +225,7 @@ int TrhScanSetups(const int rates,
       bool hasLo = TrhLastPivot(pivLo, nLo, i, 80, p, true, huntLo);
       bool hasHi = TrhLastPivot(pivHi, nHi, i, 80, p, false, huntHi);
 
-      // Pine: ta.highest(high[1], 40) / ta.lowest(low[1], 40) — exclude current bar
+      // Pine: ta.highest(high[1], 40) / ta.lowest(low[1], 40) - exclude current bar
       double priorHigh = 0, priorLow = 0;
       bool   hasPrior  = false;
       int    from = MathMax(0, i - 40);
@@ -281,7 +282,7 @@ int TrhScanSetups(const int rates,
 
       if(pendDir == 0) continue;
 
-      // Pine uses pendBaseHigh[1] after update — save pre-bar base before extending
+      // Pine uses pendBaseHigh[1] after update - save pre-bar base before extending
       double prevBaseHigh = pendBaseHigh;
       double prevBaseLow  = pendBaseLow;
 
@@ -322,7 +323,7 @@ int TrhScanSetups(const int rates,
             s.dir = 1; s.entry = entry; s.sl = sl; s.tp = tp;
             s.distal = distal; s.proximal = proximal;
             s.barIndex = i; s.barTime = time[i];
-            s.mode = TRH_MODE_CLASSIC;
+            s.setupMode = TRH_MODE_CLASSIC;
             fired = true;
          }
       }
@@ -347,7 +348,7 @@ int TrhScanSetups(const int rates,
             s.dir = -1; s.entry = entry; s.sl = sl; s.tp = tp;
             s.distal = distal; s.proximal = proximal;
             s.barIndex = i; s.barTime = time[i];
-            s.mode = TRH_MODE_CLASSIC;
+            s.setupMode = TRH_MODE_CLASSIC;
             fired = true;
          }
       }
@@ -365,7 +366,7 @@ int TrhScanSetups(const int rates,
    return nSetups;
 }
 
-// Mode B: liquidity sweep → displacement candle → 3-candle FVG → mid-gap ENTRY
+// Mode B: liquidity sweep -> displacement candle -> 3-candle FVG -> mid-gap ENTRY
 int TrhScanFvgSetups(const int rates,
                      const datetime &time[],
                      const double &open[],
@@ -478,7 +479,7 @@ int TrhScanFvgSetups(const int rates,
 
       double body = MathAbs(close[i] - open[i]);
 
-      // Phase 1 → displacement
+      // Phase 1 -> displacement
       if(phase == 1 && i > sweepBar)
       {
          bool bullDisp = pendDir == 1 && close[i] > open[i] &&
@@ -493,7 +494,7 @@ int TrhScanFvgSetups(const int rates,
          continue;
       }
 
-      // Phase 2 → FVG (need i-2 available and after displacement)
+      // Phase 2 -> FVG (need i-2 available and after displacement)
       if(phase == 2 && i >= 2 && i > dispBar)
       {
          TrhSetup s;
@@ -519,7 +520,7 @@ int TrhScanFvgSetups(const int rates,
                s.dir = 1; s.entry = entry; s.sl = sl; s.tp = tp;
                s.distal = gapBot; s.proximal = gapTop; // room = FVG box
                s.barIndex = i; s.barTime = time[i];
-               s.mode = TRH_MODE_FVG;
+               s.setupMode = TRH_MODE_FVG;
                fired = true;
             }
          }
@@ -543,7 +544,7 @@ int TrhScanFvgSetups(const int rates,
                s.dir = -1; s.entry = entry; s.sl = sl; s.tp = tp;
                s.distal = gapTop; s.proximal = gapBot; // room = FVG box
                s.barIndex = i; s.barTime = time[i];
-               s.mode = TRH_MODE_FVG;
+               s.setupMode = TRH_MODE_FVG;
                fired = true;
             }
          }
@@ -570,7 +571,7 @@ void TrhSortSetupsByBar(TrhSetup &arr[], const int n)
       for(int j = i + 1; j < n; j++)
       {
          if(arr[j].barIndex < arr[i].barIndex ||
-            (arr[j].barIndex == arr[i].barIndex && arr[j].mode < arr[i].mode))
+            (arr[j].barIndex == arr[i].barIndex && arr[j].setupMode < arr[i].setupMode))
          {
             TrhSetup tmp = arr[i];
             arr[i] = arr[j];
@@ -618,8 +619,8 @@ int TrhScanByMode(const int rates,
       {
          // Same bar: keep FVG over classic
          if(merged[i].barIndex == lastBar && nOut > 0 &&
-            outSetups[nOut - 1].mode == TRH_MODE_CLASSIC &&
-            merged[i].mode == TRH_MODE_FVG)
+            outSetups[nOut - 1].setupMode == TRH_MODE_CLASSIC &&
+            merged[i].setupMode == TRH_MODE_FVG)
          {
             outSetups[nOut - 1] = merged[i];
          }
@@ -633,7 +634,7 @@ int TrhScanByMode(const int rates,
    return nOut;
 }
 
-// Copy MT5 series (newest-first or oldest-first) into oldest→newest buffers.
+// Copy MT5 series (newest-first or oldest-first) into oldest->newest buffers.
 void TrhNormalizeBars(const int rates,
                       const datetime &time[],
                       const double &open[],

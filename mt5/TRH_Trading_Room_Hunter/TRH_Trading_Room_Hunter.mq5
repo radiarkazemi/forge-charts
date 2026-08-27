@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //| TRH_Trading_Room_Hunter.mq5                                      |
-//| Classic SWEEP — Pine parity + advanced graphics / options        |
+//| Classic SWEEP - Pine parity + advanced graphics / options        |
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
@@ -12,6 +12,13 @@
 
 #include "TRH_Engine.mqh"
 
+#ifndef TRH_ENGINE_VERSION
+#error TRH_Engine.mqh is outdated. Copy the NEW TRH_Engine.mqh into the SAME folder as this .mq5 and recompile.
+#endif
+#if TRH_ENGINE_VERSION < 220
+#error TRH_Engine.mqh is outdated (need v220 Mode B). Replace TRH_Engine.mqh next to this file.
+#endif
+
 enum ENUM_TRH_PANEL_CORNER
 {
    TRH_PANEL_LEFT  = 0,  // Top-left
@@ -20,8 +27,8 @@ enum ENUM_TRH_PANEL_CORNER
 
 enum ENUM_TRH_TRADE_MODE
 {
-   TRH_TM_CLASSIC = 0, // Mode A — classic SWEEP room
-   TRH_TM_FVG     = 1, // Mode B — sweep + displacement + FVG
+   TRH_TM_CLASSIC = 0, // Mode A - classic SWEEP room
+   TRH_TM_FVG     = 1, // Mode B - sweep + displacement + FVG
    TRH_TM_BOTH    = 2  // Both (shared cooldown; FVG wins same bar)
 };
 
@@ -30,26 +37,26 @@ input ENUM_TRH_TRADE_MODE InpTradeMode = TRH_TM_BOTH; // Detection Mode
 
 input group "TRH Detection"
 input int    InpPivotPeriod     = 5;      // Pivot Period
-input double InpMinContextAtr   = 1.2;    // Min Selloff/Rally Into Sweep (ATR×)
-input double InpMinSweepAtr     = 0.05;   // Min Sweep Beyond Pivot (ATR×)
+input double InpMinContextAtr   = 1.2;    // Min Selloff/Rally Into Sweep (ATRx)
+input double InpMinSweepAtr     = 0.05;   // Min Sweep Beyond Pivot (ATRx)
 input int    InpBaseConfirmBars = 8;      // Min Base Bars After Sweep (Mode A)
 input int    InpMaxBaseBars     = 40;     // Max Bars To Confirm Room (Mode A)
-input double InpMinRoomAtr      = 0.8;    // Min Room Width (ATR×) Mode A
-input double InpMaxRoomAtr      = 3.5;    // Max Room Width (ATR×) Mode A
+input double InpMinRoomAtr      = 0.8;    // Min Room Width (ATRx) Mode A
+input double InpMaxRoomAtr      = 3.5;    // Max Room Width (ATRx) Mode A
 input int    InpCooldownBars    = 50;     // Cooldown Between Setups
 
-input group "Mode B — Sweep + Displacement + FVG"
-input double InpMinDispAtr      = 0.55;   // Min Displacement Body (ATR×)
+input group "Mode B - Sweep + Displacement + FVG"
+input double InpMinDispAtr      = 0.55;   // Min Displacement Body (ATRx)
 input int    InpMaxDispBars     = 6;      // Max Bars After Sweep For Displacement
 input int    InpMaxFvgBars      = 10;     // Max Bars After Displacement For FVG
-input double InpMinFvgAtr       = 0.12;   // Min FVG Gap Size (ATR×)
+input double InpMinFvgAtr       = 0.12;   // Min FVG Gap Size (ATRx)
 
 input group "Entry / SL / TP"
-input double InpSlPadAtr        = 0.02;   // SL Pad (ATR×)
+input double InpSlPadAtr        = 0.02;   // SL Pad (ATRx)
 input double InpRiskReward      = 2.4;    // Risk-Reward Ratio
 input bool   InpUseLiquidityTP  = true;   // Prefer Opposing Pivot As TP
 
-input group "Display — layout"
+input group "Display - layout"
 input int    InpSetupWidth      = 80;     // Box Width (bars)
 input bool   InpOnlyLast        = true;   // Only Last Setup
 input int    InpHistoryCount    = 5;      // History Setups (if Only Last = false)
@@ -60,8 +67,8 @@ input bool   InpShowPanel       = true;   // Show Info Panel
 input bool   InpShowComment     = false;  // Also Use Chart Comment
 input int    InpFontSize        = 9;      // Label Font Size
 
-input group "Display — objects"
-input bool   InpShowRoomZone    = true;   // Show Room (proximal–distal) Zone
+input group "Display - objects"
+input bool   InpShowRoomZone    = true;   // Show Room (proximal-distal) Zone
 input bool   InpShowTpSlZones   = true;   // Show TP / SL Shade Boxes
 input bool   InpShowHLines      = true;   // Show Full-Width HLines
 input bool   InpShowTrendLevels = true;   // Show Levels Inside Setup Window
@@ -71,7 +78,7 @@ input bool   InpShowArrow       = true;   // Show Confirm Arrow
 input bool   InpShowMidRoom     = true;   // Mark Mid-Room ENTRY Dot
 input bool   InpShowDistalProx  = false;  // Label Distal / Proximal
 
-input group "Display — colors"
+input group "Display - colors"
 input color  InpBullZoneCol     = C'38,166,154';   // Long Room
 input color  InpBearZoneCol     = C'239,83,80';    // Short Room
 input color  InpTpZoneCol       = C'38,166,154';   // TP Zone
@@ -327,7 +334,7 @@ void DrawInfoPanel(const TrhSetup &s, const string stTxt, const int stCode,
    int dy = 16;
    SetPanelLabel(OBJ_PREFIX + "P0", x0 + 10, y, "TRH | Trading Room Hunter", clrWhite, 10, corner); y += dy + 2;
    SetPanelLabel(OBJ_PREFIX + "P1", x0 + 10, y,
-      (s.dir == 1 ? "LONG" : "SHORT") + " · " + TrhModeLabel(s.mode) + " · " + stTxt, sideCol, 9, corner); y += dy;
+      (s.dir == 1 ? "LONG" : "SHORT") + " | " + TrhModeLabel(s.setupMode) + " | " + stTxt, sideCol, 9, corner); y += dy;
    SetPanelLabel(OBJ_PREFIX + "P2", x0 + 10, y, "ENTRY  " + DoubleToString(s.entry, _Digits), InpEntryCol, 9, corner); y += dy;
    SetPanelLabel(OBJ_PREFIX + "P3", x0 + 10, y, "SL     " + DoubleToString(s.sl, _Digits), InpSlCol, 9, corner); y += dy;
    SetPanelLabel(OBJ_PREFIX + "P4", x0 + 10, y, "TP     " + DoubleToString(s.tp, _Digits), InpTpCol, 9, corner); y += dy;
@@ -421,9 +428,9 @@ void DrawOneSetup(const TrhSetup &s, const datetime &time[],
 
    if(InpShowTag)
    {
-      string tagTxt = "TRH " + (s.dir == 1 ? "LONG" : "SHORT") + " · " + TrhModeLabel(s.mode);
-      if(stCode == 2) tagTxt += " · TP";
-      if(stCode == 3) tagTxt += " · SL";
+      string tagTxt = "TRH " + (s.dir == 1 ? "LONG" : "SHORT") + " | " + TrhModeLabel(s.setupMode);
+      if(stCode == 2) tagTxt += " | TP";
+      if(stCode == 3) tagTxt += " | SL";
       SetText(OBJ_PREFIX + "TAG_" + tag, t1, (s.dir == 1 ? zTop : zBot),
          tagTxt,
          (s.dir == 1 ? InpBullZoneCol : InpBearZoneCol),
@@ -453,7 +460,7 @@ void NotifyNewSetup(const TrhSetup &s)
 {
    string msg = StringFormat("TRH %s %s SETUP\nENTRY %s\nSL %s\nTP %s",
       s.dir == 1 ? "LONG" : "SHORT",
-      TrhModeLabel(s.mode),
+      TrhModeLabel(s.setupMode),
       DoubleToString(s.entry, _Digits),
       DoubleToString(s.sl, _Digits),
       DoubleToString(s.tp, _Digits));
@@ -525,10 +532,10 @@ int OnCalculate(const int rates_total,
             int corner = (InpPanelCorner == TRH_PANEL_RIGHT) ? CORNER_RIGHT_UPPER : CORNER_LEFT_UPPER;
             int y0 = (InpPanelCorner == TRH_PANEL_LEFT) ? 70 : 28;
             SetPanelBg(OBJ_PREFIX + "PBG", 12, y0, 248, 56, corner);
-            SetPanelLabel(OBJ_PREFIX + "P0", 22, y0 + 10, "TRH | scanning…", clrSilver, 10, corner);
+            SetPanelLabel(OBJ_PREFIX + "P0", 22, y0 + 10, "TRH | scanning...", clrSilver, 10, corner);
             SetPanelLabel(OBJ_PREFIX + "P1", 22, y0 + 30, "No SWEEP / FVG yet", clrDimGray, 9, corner);
          }
-         if(InpShowComment) Comment("TRH scanning… (no setup yet)");
+         if(InpShowComment) Comment("TRH scanning... (no setup yet)");
          return rates_total;
       }
 
@@ -586,7 +593,7 @@ int OnCalculate(const int rates_total,
       {
          Comment(
             "TRH | Trading Room Hunter\n",
-            (last.dir == 1 ? "LONG" : "SHORT"), " · ", TrhModeLabel(last.mode), " · ", stTxt, "\n",
+            (last.dir == 1 ? "LONG" : "SHORT"), " | ", TrhModeLabel(last.setupMode), " | ", stTxt, "\n",
             "ENTRY ", DoubleToString(last.entry, _Digits), "\n",
             "SL    ", DoubleToString(last.sl, _Digits), "\n",
             "TP    ", DoubleToString(last.tp, _Digits), "\n",

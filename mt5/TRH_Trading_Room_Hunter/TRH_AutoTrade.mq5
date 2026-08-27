@@ -12,10 +12,17 @@
 #include <Trade/Trade.mqh>
 #include "TRH_Engine.mqh"
 
+#ifndef TRH_ENGINE_VERSION
+#error TRH_Engine.mqh is outdated. Copy the NEW TRH_Engine.mqh into the SAME folder as this .mq5 and recompile.
+#endif
+#if TRH_ENGINE_VERSION < 220
+#error TRH_Engine.mqh is outdated (need v220 Mode B). Replace TRH_Engine.mqh next to this file.
+#endif
+
 enum ENUM_TRH_TRADE_MODE
 {
-   TRH_TM_CLASSIC = 0, // Mode A — classic SWEEP room
-   TRH_TM_FVG     = 1, // Mode B — sweep + displacement + FVG
+   TRH_TM_CLASSIC = 0, // Mode A - classic SWEEP room
+   TRH_TM_FVG     = 1, // Mode B - sweep + displacement + FVG
    TRH_TM_BOTH    = 2  // Both (shared cooldown)
 };
 
@@ -65,11 +72,11 @@ input double InpMinRoomAtr      = 0.8;
 input double InpMaxRoomAtr      = 3.5;
 input int    InpCooldownBars    = 50;
 
-input group "Mode B — Sweep + Displacement + FVG"
-input double InpMinDispAtr      = 0.55;   // Min Displacement Body (ATR×)
+input group "Mode B - Sweep + Displacement + FVG"
+input double InpMinDispAtr      = 0.55;   // Min Displacement Body (ATRx)
 input int    InpMaxDispBars     = 6;      // Max Bars After Sweep For Displacement
 input int    InpMaxFvgBars      = 10;     // Max Bars After Displacement For FVG
-input double InpMinFvgAtr       = 0.12;   // Min FVG Gap Size (ATR×)
+input double InpMinFvgAtr       = 0.12;   // Min FVG Gap Size (ATRx)
 
 input group "Entry / SL / TP"
 input double InpSlPadAtr        = 0.02;
@@ -153,7 +160,7 @@ bool SpreadOk()
    long spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
    if(spread > InpMaxSpreadPoints)
    {
-      PrintFormat("TRH: skip — spread %d > max %d", (int)spread, InpMaxSpreadPoints);
+      PrintFormat("TRH: skip - spread %d > max %d", (int)spread, InpMaxSpreadPoints);
       return false;
    }
    return true;
@@ -172,7 +179,7 @@ bool SessionOk()
    else
       ok = (h >= InpSessionStartHour || h < InpSessionEndHour);
    if(!ok)
-      PrintFormat("TRH: skip — outside session %d-%d (hour=%d)",
+      PrintFormat("TRH: skip - outside session %d-%d (hour=%d)",
          InpSessionStartHour, InpSessionEndHour, h);
    return ok;
 }
@@ -183,7 +190,7 @@ bool DailyLimitsOk()
    ResetDayIfNeeded();
    if(InpMaxDailyTrades > 0 && g_dayTrades >= InpMaxDailyTrades)
    {
-      PrintFormat("TRH: skip — daily trade cap %d reached", InpMaxDailyTrades);
+      PrintFormat("TRH: skip - daily trade cap %d reached", InpMaxDailyTrades);
       return false;
    }
    if(InpMaxDailyLossPct > 0.0 && g_dayStartEquity > 0.0)
@@ -192,7 +199,7 @@ bool DailyLimitsOk()
       double lossPct = 100.0 * (g_dayStartEquity - eq) / g_dayStartEquity;
       if(lossPct >= InpMaxDailyLossPct)
       {
-         PrintFormat("TRH: skip — daily loss %.2f%% >= max %.2f%%", lossPct, InpMaxDailyLossPct);
+         PrintFormat("TRH: skip - daily loss %.2f%% >= max %.2f%%", lossPct, InpMaxDailyLossPct);
          return false;
       }
    }
@@ -276,7 +283,7 @@ bool PlaceSetupTrade(const TrhSetup &s, const double atrNow)
    if(!SpreadOk() || !SessionOk() || !DailyLimitsOk()) return false;
    if(CountOurOrders() >= InpMaxOpenTrades)
    {
-      Print("TRH: skip — already at MaxOpenTrades");
+      Print("TRH: skip - already at MaxOpenTrades");
       return false;
    }
 
@@ -296,7 +303,7 @@ bool PlaceSetupTrade(const TrhSetup &s, const double atrNow)
    g_trade.SetDeviationInPoints(InpMaxSlippagePts);
    g_trade.SetTypeFillingBySymbol(_Symbol);
 
-   string comment = StringFormat("TRH %s %s", TrhModeLabel(s.mode), s.dir == 1 ? "LONG" : "SHORT");
+   string comment = StringFormat("TRH %s %s", TrhModeLabel(s.setupMode), s.dir == 1 ? "LONG" : "SHORT");
    bool ok = false;
    string mode = "";
 
@@ -307,7 +314,7 @@ bool PlaceSetupTrade(const TrhSetup &s, const double atrNow)
       {
          if(past > maxChase && maxChase > 0)
          {
-            PrintFormat("TRH: skip market LONG — chase %.2f > max %.2f ATR", past, maxChase);
+            PrintFormat("TRH: skip market LONG - chase %.2f > max %.2f ATR", past, maxChase);
             if(!InpAllowLimitAlways) return false;
             mode = "BUY LIMIT (no chase)";
             ok = g_trade.BuyLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
@@ -331,7 +338,7 @@ bool PlaceSetupTrade(const TrhSetup &s, const double atrNow)
       {
          if(past > maxChase && maxChase > 0)
          {
-            PrintFormat("TRH: skip market SHORT — chase %.2f > max %.2f ATR", past, maxChase);
+            PrintFormat("TRH: skip market SHORT - chase %.2f > max %.2f ATR", past, maxChase);
             if(!InpAllowLimitAlways) return false;
             mode = "SELL LIMIT (no chase)";
             ok = g_trade.SellLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
@@ -411,7 +418,7 @@ void ManageBreakEven()
       double vol   = PositionGetDouble(POSITION_VOLUME);
       if(entry <= 0) continue;
 
-      // Recover original risk from comment distance if SL already moved — use entry vs current SL only if SL still adverse
+      // Recover original risk from comment distance if SL already moved - use entry vs current SL only if SL still adverse
       double risk = 0;
       if(type == POSITION_TYPE_BUY)
          risk = (sl > 0 && sl < entry) ? (entry - sl) : 0;
@@ -517,7 +524,7 @@ void OnTick()
 
    if(n <= 0)
    {
-      Comment(StringFormat("TRH EA v3.20 %s — scanning…\nday trades %d | equity %.2f",
+      Comment(StringFormat("TRH EA v3.20 %s - scanning...\nday trades %d | equity %.2f",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades, AccountInfoDouble(ACCOUNT_EQUITY)));
       return;
    }
@@ -527,9 +534,9 @@ void OnTick()
    double previewLots = CalcLots(last.entry, last.sl);
 
    Comment(StringFormat(
-      "TRH %s · %s\nENTRY %s  SL %s  TP %s\nBar %s (age %d)\nAutoTrade %s | orders %d | day %d\nDyn lots ≈ %s (risk %.2f%% bal)",
+      "TRH %s | %s\nENTRY %s  SL %s  TP %s\nBar %s (age %d)\nAutoTrade %s | orders %d | day %d\nDyn lots ? %s (risk %.2f%% bal)",
       last.dir == 1 ? "LONG" : "SHORT",
-      TrhModeLabel(last.mode),
+      TrhModeLabel(last.setupMode),
       DoubleToString(last.entry, _Digits),
       DoubleToString(last.sl, _Digits),
       DoubleToString(last.tp, _Digits),
@@ -549,8 +556,8 @@ void OnTick()
 
    g_lastSetupTime = last.barTime;
 
-   PrintFormat("TRH SETUP %s %s E=%s SL=%s TP=%s @ %s age=%d lots≈%s",
-      TrhModeLabel(last.mode),
+   PrintFormat("TRH SETUP %s %s E=%s SL=%s TP=%s @ %s age=%d lots?%s",
+      TrhModeLabel(last.setupMode),
       last.dir == 1 ? "LONG" : "SHORT",
       DoubleToString(last.entry, _Digits),
       DoubleToString(last.sl, _Digits),
@@ -561,9 +568,9 @@ void OnTick()
 
    if(InpAlertOnSetup)
    {
-      Alert(StringFormat("TRH %s %s SETUP\nENTRY %s\nSL %s\nTP %s\nlots≈%s",
+      Alert(StringFormat("TRH %s %s SETUP\nENTRY %s\nSL %s\nTP %s\nlots?%s",
          last.dir == 1 ? "LONG" : "SHORT",
-         TrhModeLabel(last.mode),
+         TrhModeLabel(last.setupMode),
          DoubleToString(last.entry, _Digits),
          DoubleToString(last.sl, _Digits),
          DoubleToString(last.tp, _Digits),
