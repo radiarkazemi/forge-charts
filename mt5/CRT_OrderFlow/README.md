@@ -19,7 +19,8 @@ mt5/CRT_OrderFlow/
 ```
 
 Install Engine beside each `.mq5`, Compile, attach to chart.  
-Default HTF FVG = **M15** while trading LTF (M1/M5).
+Pine Auto HTF: **M1→M5**, M5→M15, M15→H1. AOI mitigated on **close only** so 1m wicks do not wipe the blue HTF box.
+MT5 default HTF FVG = **M15** (set to M5 when trading M1).
 
 Zip: https://goldanil.ir/crt-mt5/CRT_OrderFlow_MT5.zip
 

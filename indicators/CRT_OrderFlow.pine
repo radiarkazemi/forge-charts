@@ -18,12 +18,15 @@ biasLookback     = input.int(40, "Bias Lookback Bars", group=grpCrt)
 minCrtGapBars    = input.int(5, "Min Bars Between CRT Marks", minval=1, group=grpCrt)
 cooldownBars     = input.int(10, "Cooldown Bars Between Setups", group=grpCrt)
 
-grpHtf = "HTF FVG AOI"
-htfTf            = input.timeframe("15", "HTF for FVG", group=grpHtf)
+grpHtf = "HTF FVG AOI (for 1m entries)"
+autoHtf          = input.bool(true, "Auto HTF (1m→5m, 5m→15m, 15m→1H)", group=grpHtf)
+htfTfManual      = input.timeframe("15", "HTF for FVG (if Auto off)", group=grpHtf)
 minHtfFvgAtr     = input.float(0.05, "Min HTF FVG ATR", step=0.01, group=grpHtf)
 requireHtfFvg    = input.bool(true, "Require HTF FVG", group=grpHtf)
 entryInsideFvg   = input.bool(true, "CRT Must Touch HTF FVG", group=grpHtf)
 maxAoiKeep       = input.int(12, "Max Live AOI FVGs", minval=1, maxval=40, group=grpHtf)
+mitigateOnClose  = input.bool(true, "Mitigate AOI on Close Only (keep visible on 1m)", group=grpHtf,
+     tooltip="If false, any LTF wick kills the HTF FVG — that is why the blue box vanished on 1m.")
 
 grpRisk = "Entry / SL / TP"
 slPadAtr         = input.float(0.06, "SL Pad ATR", step=0.01, group=grpRisk)
@@ -172,8 +175,11 @@ f_bias_count(int dir) =>
 plotshape(showCrtMarks and crtFound and crtDirNow == 1, title="CRT Long", style=shape.circle, location=location.belowbar, color=color.new(#26A69A, 20), size=size.tiny)
 plotshape(showCrtMarks and crtFound and crtDirNow == -1, title="CRT Short", style=shape.circle, location=location.abovebar, color=color.new(#EF5350, 20), size=size.tiny)
 
+// Resolve HTF so 1m chart uses 5m AOI (the blue rectangle timeframe)
+htfTf = autoHtf ? (timeframe.period == "1" ? "5" : timeframe.period == "5" ? "15" : timeframe.period == "15" ? "60" : timeframe.period == "60" ? "240" : htfTfManual) : htfTfManual
+
 // ═══════════════════════════════════════════════════════════════════════════
-// HTF FVG — MUST evaluate gap on HTF bars inside security()
+// HTF FVG — evaluate on HTF bars; keep zones alive on 1m (close-only mitigate)
 // ═══════════════════════════════════════════════════════════════════════════
 f_htf_fvg() =>
     float a = ta.atr(14)
@@ -190,8 +196,8 @@ var float[] aoiTops = array.new_float()
 var float[] aoiBots = array.new_float()
 var int[]   aoiDirs = array.new_int()
 var int[]   aoiBars = array.new_int()
+var box[]   aoiBoxes = array.new<box>()
 
-// Detect HTF bar change then push new FVG
 var int lastHtfBar = na
 htfBarIdx = request.security(syminfo.tickerid, htfTf, bar_index, barmerge.gaps_off, barmerge.lookahead_off)
 htfBarChanged = na(lastHtfBar) or htfBarIdx != lastHtfBar
@@ -199,28 +205,43 @@ htfBarChanged = na(lastHtfBar) or htfBarIdx != lastHtfBar
 if barstate.isconfirmed and htfBarChanged
     lastHtfBar := htfBarIdx
     if htfNew and not na(htfTop) and not na(htfBot)
-        array.push(aoiTops, htfTop)
-        array.push(aoiBots, htfBot)
-        array.push(aoiDirs, htfDir)
-        array.push(aoiBars, bar_index)
-        while array.size(aoiTops) > maxAoiKeep
-            array.shift(aoiTops)
-            array.shift(aoiBots)
-            array.shift(aoiDirs)
-            array.shift(aoiBars)
+        // skip exact duplicate zone
+        bool dupAoi = false
+        if array.size(aoiTops) > 0
+            int li = array.size(aoiTops) - 1
+            dupAoi := array.get(aoiDirs, li) == htfDir and math.abs(array.get(aoiTops, li) - htfTop) < syminfo.mintick * 2 and math.abs(array.get(aoiBots, li) - htfBot) < syminfo.mintick * 2
+        if not dupAoi
+            array.push(aoiTops, htfTop)
+            array.push(aoiBots, htfBot)
+            array.push(aoiDirs, htfDir)
+            array.push(aoiBars, bar_index)
+            while array.size(aoiTops) > maxAoiKeep
+                array.shift(aoiTops)
+                array.shift(aoiBots)
+                array.shift(aoiDirs)
+                array.shift(aoiBars)
+                if array.size(aoiBoxes) > 0
+                    box.delete(array.shift(aoiBoxes))
 
-// Mitigate AOIs on LTF
-if array.size(aoiTops) > 0
+// Mitigate: on 1m, wick-through used to delete the blue HTF box — use close-only by default
+if barstate.isconfirmed and array.size(aoiTops) > 0
     for i = array.size(aoiTops) - 1 to 0
         int d = array.get(aoiDirs, i)
         float t = array.get(aoiTops, i)
         float b = array.get(aoiBots, i)
-        bool dead = (d == 1 and low < b) or (d == -1 and high > t)
+        bool dead = false
+        if mitigateOnClose
+            dead := (d == 1 and close < b) or (d == -1 and close > t)
+        else
+            dead := (d == 1 and low < b) or (d == -1 and high > t)
         if dead
             array.remove(aoiTops, i)
             array.remove(aoiBots, i)
             array.remove(aoiDirs, i)
             array.remove(aoiBars, i)
+            if i < array.size(aoiBoxes)
+                box.delete(array.get(aoiBoxes, i))
+                array.remove(aoiBoxes, i)
 
 f_find_aoi(int dir, float px1, float px2, float px3) =>
     float bestTop = na
@@ -244,20 +265,20 @@ f_find_aoi(int dir, float px1, float px2, float px3) =>
                 break
     [found, bestTop, bestBot]
 
-// Draw latest AOI outline
-var box aoiBox = na
+// Redraw ALL live AOI boxes every last bar (1m keeps HTF blue zones; Auto HTF = 1m→5m)
 if showAoiBox and barstate.islast
-    if not na(aoiBox)
-        box.delete(aoiBox)
-        aoiBox := na
+    if array.size(aoiBoxes) > 0
+        for i = 0 to array.size(aoiBoxes) - 1
+            box.delete(array.get(aoiBoxes, i))
+        array.clear(aoiBoxes)
     if array.size(aoiTops) > 0
-        int li = array.size(aoiTops) - 1
-        float t = array.get(aoiTops, li)
-        float b = array.get(aoiBots, li)
-        int d = array.get(aoiDirs, li)
-        int sb = array.get(aoiBars, li)
-        col = d == 1 ? color.new(#42A5F5, 85) : color.new(#AB47BC, 85)
-        aoiBox := box.new(sb, t, bar_index + 5, b, bgcolor=col, border_color=color.new(color.blue, 50), border_width=1, extend=extend.none)
+        for i = 0 to array.size(aoiTops) - 1
+            float t = array.get(aoiTops, i)
+            float b = array.get(aoiBots, i)
+            int d = array.get(aoiDirs, i)
+            int sb = array.get(aoiBars, i)
+            col = d == 1 ? color.new(#42A5F5, 82) : color.new(#AB47BC, 82)
+            array.push(aoiBoxes, box.new(sb, t, bar_index + 30, b, bgcolor=col, border_color=color.new(#42A5F5, 35), border_width=1, extend=extend.right))
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Setup signal
@@ -287,11 +308,12 @@ if barstate.isconfirmed and array.size(crtBars) > 0
         float fTop = na
         float fBot = na
         if requireHtfFvg
-            [ok, t, b] = f_find_aoi(dir, close, eHint, (rH + rL) * 0.5)
+            [ok, t, b] = f_find_aoi(dir, close, eHint, sw)
             fvgOk := ok
             fTop := t
             fBot := b
-        bool coolOk = na(lastSetupBar) or (bar_index - lastSetupBar >= cooldownBars)
+        bool lastExited = array.size(sStat) > 0 and array.get(sStat, array.size(sStat) - 1) >= 2
+        bool coolOk = lastExited or na(lastSetupBar) or (bar_index - lastSetupBar >= cooldownBars)
         if biasOk and fvgOk and coolOk
             float entry = requireHtfFvg and not na(fTop) ? (fTop + fBot) * 0.5 : eHint
             float pad = atr * slPadAtr
