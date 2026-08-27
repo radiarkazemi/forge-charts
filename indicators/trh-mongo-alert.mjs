@@ -80,8 +80,8 @@ function fmt(n) {
 }
 
 async function fetchBars(client) {
-  const col = client.db(MONGO_DB).collection(MONGO_COLL);
-  const docs = await col
+  const hist = client.db(MONGO_DB).collection(MONGO_COLL);
+  const docs = await hist
     .find({})
     .sort({ _id: -1 })
     .limit(LOOKBACK)
@@ -102,6 +102,30 @@ async function fetchBars(client) {
       low: d.low,
       close: d.close,
     });
+  }
+
+  // Live forming candle from `last.1` (updated every tick by cp_fetcher live 1m)
+  const live = await client.db("last").collection("1").findOne({ _id: "xauusd" });
+  if (live && live.po != null && live.bct) {
+    const t = Number(live.bct);
+    const tip = {
+      time: t,
+      open: live.po,
+      high: live.pmax,
+      low: live.pmin,
+      close: live.pl,
+    };
+    if (bars.length === 0) {
+      bars.push(tip);
+    } else {
+      const last = bars[bars.length - 1];
+      if (tip.time > last.time) {
+        bars.push(tip);
+      } else if (tip.time === last.time) {
+        bars[bars.length - 1] = tip; // refresh OHLC of current minute
+      }
+      // if tip.time < last.time, historical is ahead — ignore
+    }
   }
   return bars;
 }
@@ -217,7 +241,7 @@ async function tick(client) {
 
 async function main() {
   console.log(
-    `[trh-mongo] FOREXCOM XAUUSD alert — ${RUN_ONCE ? "once" : `poll ${POLL_SEC}s`} mongo=${MONGO_URI}/${MONGO_DB}.${MONGO_COLL}`,
+    `[trh-mongo] FOREXCOM XAUUSD alert — ${RUN_ONCE ? "once" : `poll ${POLL_SEC}s`} hist=${MONGO_DB}.${MONGO_COLL} + live last.1`,
   );
   const client = new MongoClient(MONGO_URI, { maxPoolSize: 4 });
   await client.connect();
