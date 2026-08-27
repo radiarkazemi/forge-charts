@@ -8,7 +8,7 @@
  *   MONGO_DB=historical_data
  *   MONGO_COLL=xauusd_1m
  *   NTFY_TOPIC=...
- *   TRH_POLL_SEC=10
+ *   TRH_POLL_SEC=3
  *   TRH_MAX_AGE_BARS=5
  *   TRH_ENTRY_EXPIRY_BARS=5
  *   TRH_MIN_RISK=2.0
@@ -28,7 +28,7 @@ const SECRETS_FILE = join(__dir, ".trh-secrets.json");
 const MONGO_URI = process.env.MONGO_URI || "mongodb://127.0.0.1:27017";
 const MONGO_DB = process.env.MONGO_DB || "historical_data";
 const MONGO_COLL = process.env.MONGO_COLL || "xauusd_1m";
-const POLL_SEC = Number(process.env.TRH_POLL_SEC || 10);
+const POLL_SEC = Number(process.env.TRH_POLL_SEC || 3);
 const NTFY_TOPIC = process.env.NTFY_TOPIC || "trh-forge-radiarkazemi-bc13";
 const NTFY_SERVER = process.env.NTFY_SERVER || "https://ntfy.sh";
 const MAX_AGE = Number(process.env.TRH_MAX_AGE_BARS || 5);
@@ -271,9 +271,16 @@ async function main() {
   try {
     await tick(client);
     if (!RUN_ONCE) {
-      setInterval(() => {
-        tick(client).catch((e) => console.error("[trh-mongo] tick error", e));
-      }, POLL_SEC * 1000);
+      // Chain polls after each tick finishes so scans never stack / lag behind.
+      const loop = async () => {
+        try {
+          await tick(client);
+        } catch (e) {
+          console.error("[trh-mongo] tick error", e);
+        }
+        setTimeout(loop, POLL_SEC * 1000);
+      };
+      setTimeout(loop, POLL_SEC * 1000);
     } else {
       await client.close();
     }

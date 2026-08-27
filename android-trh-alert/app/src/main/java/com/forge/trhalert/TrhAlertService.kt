@@ -157,7 +157,7 @@ class TrhAlertService : Service() {
 
         lastAlert = message
         lastAlertJson = payload.toString()
-        Notify.showTradeAlert(this, title, message)
+        Notify.showTradeAlert(this, title, message, lastAlertJson)
         sendBroadcast(
             Intent(ACTION_ALERT)
                 .putExtra(EXTRA_TEXT, message)

@@ -4,7 +4,7 @@
 
 ## Why
 
-GitHub Actions / local PC miss setups when the machine is asleep. This service polls Mongo every 30s on the VPS and pushes ntfy (+ encrypted payload for the Android app).
+GitHub Actions / local PC miss setups when the machine is asleep. This service polls Mongo every **3s** on the VPS and pushes ntfy (+ encrypted payload for the Android app) with exact ENTRY TIME + EXPIRY.
 
 ## Data
 

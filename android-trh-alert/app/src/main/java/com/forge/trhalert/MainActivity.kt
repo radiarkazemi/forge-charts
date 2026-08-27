@@ -152,6 +152,10 @@ class MainActivity : AppCompatActivity() {
         var entryTime = Regex("""ENTRY TIME\s+(.+)""", RegexOption.IGNORE_CASE).find(body)?.groupValues?.get(1)?.trim()
         var expiryTime = Regex("""EXPIRY\s+(.+)""", RegexOption.IGNORE_CASE).find(body)?.groupValues?.get(1)?.trim()
 
+        var entryEpoch = 0L
+        var expiryEpoch = 0L
+        var expiryBars = 0
+
         // Prefer structured encrypted payload fields when present
         if (!json.isNullOrBlank()) {
             try {
@@ -159,17 +163,17 @@ class MainActivity : AppCompatActivity() {
                 if (p.has("entry")) entry = formatPrice(p.getDouble("entry"))
                 if (p.has("sl")) sl = formatPrice(p.getDouble("sl"))
                 if (p.has("tp")) tp = formatPrice(p.getDouble("tp"))
+                if (p.has("entryTime")) entryEpoch = p.getLong("entryTime")
+                if (p.has("expiryTime")) expiryEpoch = p.getLong("expiryTime")
+                expiryBars = p.optInt("expiryBars", 0)
                 val et = p.optString("entryTimeIso").ifBlank {
-                    if (p.has("entryTime")) fmtUtc(p.getLong("entryTime")) else ""
+                    if (entryEpoch > 0) fmtUtc(entryEpoch) else ""
                 }
                 val xt = p.optString("expiryTimeIso").ifBlank {
-                    if (p.has("expiryTime")) fmtUtc(p.getLong("expiryTime")) else ""
+                    if (expiryEpoch > 0) fmtUtc(expiryEpoch) else ""
                 }
                 if (et.isNotBlank()) entryTime = et
-                if (xt.isNotBlank()) {
-                    val bars = p.optInt("expiryBars", 0)
-                    expiryTime = if (bars > 0) "$xt (${bars}m window)" else xt
-                }
+                if (xt.isNotBlank()) expiryTime = xt
                 val side = p.optString("side")
                 if (side.equals("LONG", true) || side.equals("SHORT", true)) {
                     sideBadge.text = side.uppercase(Locale.US)
@@ -185,6 +189,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        if (entryEpoch <= 0) entryEpoch = parseUtcEpoch(entryTime)
+        if (expiryEpoch <= 0) expiryEpoch = parseUtcEpoch(expiryTime)
+
         if (entry != null || sl != null || tp != null) {
             levelsRow.visibility = View.VISIBLE
             entryValue.text = entry ?: "—"
@@ -192,19 +199,47 @@ class MainActivity : AppCompatActivity() {
             tpValue.text = tp ?: "—"
         }
 
-        if (!entryTime.isNullOrBlank() || !expiryTime.isNullOrBlank()) {
+        if (!entryTime.isNullOrBlank() || !expiryTime.isNullOrBlank() || entryEpoch > 0 || expiryEpoch > 0) {
             timesRow.visibility = View.VISIBLE
-            entryTimeValue.text = entryTime ?: "—"
-            expiryTimeValue.text = expiryTime ?: "—"
+            entryTimeValue.text = formatExactTime(entryEpoch, entryTime)
+            val expiryLabel = formatExactTime(expiryEpoch, expiryTime)
+            expiryTimeValue.text = if (expiryBars > 0) "$expiryLabel  ·  ${expiryBars}m window" else expiryLabel
         }
     }
 
     private fun formatPrice(v: Double): String = String.format(Locale.US, "%.2f", v)
 
+    /** Exact clock: UTC + device local so you can compare to chart / phone time. */
+    private fun formatExactTime(epochSec: Long, fallbackIso: String?): String {
+        if (epochSec > 0) {
+            return "${fmtUtc(epochSec)}\n${fmtLocal(epochSec)}"
+        }
+        return fallbackIso?.ifBlank { "—" } ?: "—"
+    }
+
     private fun fmtUtc(epochSec: Long): String {
         val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss 'UTC'", Locale.US)
         sdf.timeZone = TimeZone.getTimeZone("UTC")
         return sdf.format(Date(epochSec * 1000L))
+    }
+
+    private fun fmtLocal(epochSec: Long): String {
+        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss z", Locale.getDefault())
+        sdf.timeZone = TimeZone.getDefault()
+        return sdf.format(Date(epochSec * 1000L))
+    }
+
+    /** Parse "yyyy-MM-dd HH:mm:ss UTC" from alert text when JSON epoch is missing. */
+    private fun parseUtcEpoch(text: String?): Long {
+        if (text.isNullOrBlank()) return 0L
+        val cleaned = text.replace(Regex("""\s*\(\d+m window\).*""", RegexOption.IGNORE_CASE), "").trim()
+        return try {
+            val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss 'UTC'", Locale.US)
+            sdf.timeZone = TimeZone.getTimeZone("UTC")
+            (sdf.parse(cleaned)?.time ?: 0L) / 1000L
+        } catch (_: Exception) {
+            0L
+        }
     }
 
     private fun requestNotificationPermission() {

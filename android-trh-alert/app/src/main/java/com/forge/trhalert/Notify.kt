@@ -83,7 +83,7 @@ object Notify {
             .build()
     }
 
-    fun showTradeAlert(ctx: Context, title: String, body: String) {
+    fun showTradeAlert(ctx: Context, title: String, body: String, json: String? = null) {
         ensureChannels(ctx)
         wakeScreen(ctx)
 
@@ -92,6 +92,7 @@ object Notify {
             putExtra("from_alert", true)
             putExtra("alert_body", body)
             putExtra("alert_title", title)
+            if (!json.isNullOrBlank()) putExtra("alert_json", json)
         }
         val open = PendingIntent.getActivity(
             ctx,
@@ -140,11 +141,31 @@ object Notify {
     }
 
     fun playTestSound(ctx: Context) {
-        showTradeAlert(
-            ctx,
-            "TRH Test Alarm",
-            "XAUUSD 1m | TRH TEST\nIf you hear this, hunt alarms work.\nENTRY 0.00\nSL 0.00\nTP 0.00",
-        )
+        val now = System.currentTimeMillis() / 1000L
+        val entry = now
+        val expiry = now + 5 * 60
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss 'UTC'", java.util.Locale.US)
+        sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+        val entryIso = sdf.format(java.util.Date(entry * 1000L))
+        val expiryIso = sdf.format(java.util.Date(expiry * 1000L))
+        val body =
+            "XAUUSD 1m | TRH TEST\n" +
+                "If you hear this, hunt alarms work.\n" +
+                "ENTRY 0.00\nSL 0.00\nTP 0.00\n" +
+                "ENTRY TIME $entryIso\n" +
+                "EXPIRY $expiryIso (5m window)"
+        val json = org.json.JSONObject()
+            .put("side", "TEST")
+            .put("entry", 0.0)
+            .put("sl", 0.0)
+            .put("tp", 0.0)
+            .put("entryTime", entry)
+            .put("expiryTime", expiry)
+            .put("entryTimeIso", entryIso)
+            .put("expiryTimeIso", expiryIso)
+            .put("expiryBars", 5)
+            .toString()
+        showTradeAlert(ctx, "TRH Test Alarm", body, json)
     }
 
     private fun wakeScreen(ctx: Context) {

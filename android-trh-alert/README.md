@@ -43,6 +43,6 @@ Regenerate config after tunnel restart:
 node scripts/embed-android-config.mjs
 ```
 
-## v1.3.0
+## v1.3.1
 
-Alerts show **ENTRY TIME** (setup bar UTC) and **EXPIRY** (entry + 5m window). VPS poll is 10s for lower lag.
+Alerts show exact **ENTRY TIME** and **EXPIRY TIME** (UTC + your phone local clock). VPS poll is **3s** to cut late alarms.
