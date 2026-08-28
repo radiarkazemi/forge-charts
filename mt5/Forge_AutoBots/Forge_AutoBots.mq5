@@ -259,6 +259,7 @@ void BuildTrhCfg(TrhConfig &cfg)
 {
    TrhDefaultConfig(cfg);
    cfg.riskReward = InpTrhRR;
+   cfg.slPadAtr = InpTrhSlPadAtr;
    cfg.fvgSlExtraAtr = InpTrhSlPadAtr;
 }
 
