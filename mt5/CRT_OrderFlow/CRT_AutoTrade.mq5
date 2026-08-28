@@ -10,6 +10,7 @@
 
 #include <Trade/Trade.mqh>
 #include "CRT_Engine.mqh"
+#include "WatchBridge.mqh"
 
 #ifndef CRT_ENGINE_VERSION
 #define CRT_ENGINE_VERSION 0
@@ -312,7 +313,8 @@ int OnInit()
    }
    g_trade.SetExpertMagicNumber(InpMagic);
    ResetDayIfNeeded();
-   Comment("CRT OrderFlow EA v1.00\n2+ CRT bias + HTF FVG AOI");
+   Comment("CRT OrderFlow EA v1.00\nHTF FVG AOI + MT5 Watch");
+   WatchEmit("CRT", "info", "", "INIT", 0, 0, 0, "", "CRT EA attached + watch bridge on", 0);
    return INIT_SUCCEEDED;
 }
 
@@ -323,6 +325,7 @@ void OnTick()
    ResetDayIfNeeded();
    ExpirePendings();
    ManageBE();
+   WatchHeartbeat("CRT", "alive", "OnTick");
 
    datetime barTime = iTime(_Symbol, _Period, 0);
    if(barTime == 0 || barTime == g_lastBarTime) return;
@@ -354,6 +357,7 @@ void OnTick()
    if(n <= 0)
    {
       Comment(StringFormat("CRT EA %s scanning... day %d", InpAutoTrade ? "ON" : "OFF", g_dayTrades));
+      WatchStatus("CRT", 0, 0, 0, 0, "", "SCANNING", 0);
       return;
    }
 
@@ -367,6 +371,9 @@ void OnTick()
       DoubleToString(last.tp, _Digits),
       age, CountOurOrders()));
 
+   WatchStatus("CRT", last.dir, last.entry, last.sl, last.tp, StringFormat("bias x%d", last.biasCount),
+               StringFormat("LIVE age=%d", age), last.barTime);
+
    datetime closedBar = (copied >= 2) ? t[copied - 2] : 0;
    if(closedBar == 0 || last.barTime != closedBar) return;
    if(age > InpFreshMaxAgeBars) return;
@@ -374,6 +381,8 @@ void OnTick()
    if(CountOurOrders() > 0) return;
 
    g_lastSetupTime = last.barTime;
+   WatchSetup("CRT", last.dir, last.entry, last.sl, last.tp, StringFormat("bias x%d", last.biasCount),
+              last.barTime, StringFormat("age=%d", age));
    if(InpAlertOnSetup)
       Alert(StringFormat("CRT %s SETUP\nENTRY %s\nSL %s\nTP %s",
          last.dir == 1 ? "LONG" : "SHORT",
