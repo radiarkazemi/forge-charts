@@ -37,17 +37,27 @@ npm run mt5:watch
 
 ## 2) MT5 setup (once)
 
-1. Copy updated EA folders (include `WatchBridge.mqh` beside each AutoTrade):
+### Recommended: one chart, all 3 bots
+
+MT5 only allows **one EA per chart**. Use:
+
+`mt5/Forge_AutoBots/` → compile `Forge_AutoBots.mq5` → attach to gold  
+(enable TRH + ICT + CRT in inputs)
+
+### Or: three chart windows
+
+Attach each AutoTrade on its **own** XAUUSD chart (duplicate chart ×3):
    - `mt5/TRH_Trading_Room_Hunter/`
    - `mt5/ICT_Liquidity_Expansion/`
    - `mt5/CRT_OrderFlow/`
-2. MetaEditor → Compile each `*_AutoTrade.mq5`
-3. **Tools → Options → Expert Advisors**
+
+Then:
+1. MetaEditor → Compile  
+2. **Tools → Options → Expert Advisors**
    - ☑ Allow algorithmic trading
    - ☑ Allow WebRequest for listed URL  
    - Add: `http://127.0.0.1:8787`
-4. Attach all 3 EAs on **XAUUSD** (same charts you already use)
-5. Inputs group **MT5 Watch**: leave Enable + File on
+3. Inputs group **MT5 Watch**: leave Enable + File on
 
 ## 3) What you will see
 
