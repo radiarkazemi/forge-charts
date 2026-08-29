@@ -554,7 +554,7 @@ if newDir != 0
     array.push(labE, label.new(right, newEntry, "ENTRY " + str.tostring(newEntry, format.mintick), style=label.style_label_left, color=entryCol, textcolor=color.white, size=size.small))
     array.push(labS, label.new(right, newSl, "SL " + str.tostring(newSl, format.mintick), style=label.style_label_left, color=slCol, textcolor=color.white, size=size.small))
     array.push(labT, label.new(right, newTp, "TP " + str.tostring(newTp, format.mintick), style=label.style_label_left, color=tpCol, textcolor=color.white, size=size.small))
-    array.push(labTag, label.new(bar_index, newDir == 1 ? zTop : zBot, "TRH " + (newDir == 1 ? "LONG" : "SHORT") + " · SWEEP\nR:R " + str.tostring(riskReward, "#.#"), style=newDir == 1 ? label.style_label_down : label.style_label_up, color=newDir == 1 ? #00897B : #C62828, textcolor=color.white, size=size.small))
+    array.push(labTag, label.new(bar_index, newDir == 1 ? zTop : zBot, "TRH " + (newDir == 1 ? "LONG" : "SHORT") + " · " + newMode + "\nR:R " + str.tostring(newMode == "BTB" ? btbRiskReward : riskReward, "#.#"), style=newDir == 1 ? label.style_label_down : label.style_label_up, color=newDir == 1 ? #00897B : #C62828, textcolor=color.white, size=size.small))
 
     array.push(sDir, newDir)
     array.push(sEntry, newEntry)
@@ -642,8 +642,12 @@ plot(activeE, "ENTRY", color=entryCol, display=display.data_window)
 plot(activeS, "SL", color=slCol, display=display.data_window)
 plot(activeT, "TP", color=tpCol, display=display.data_window)
 
+var string lastModeShown = "SWEEP"
+if newDir != 0
+    lastModeShown := newMode
+
 var table info = table.new(position.top_right, 2, 7, bgcolor=color.new(#111111, 5), border_width=1, border_color=color.new(color.white, 70))
-if barstate.islast
+if showPanel and barstate.islast
     if array.size(sDir) > 0
         idx = array.size(sDir) - 1
         dir = array.get(sDir, idx)
@@ -654,8 +658,8 @@ if barstate.islast
         t = array.get(sTp, idx)
         table.cell(info, 0, 0, "TRH", text_color=color.white, text_size=size.small)
         table.cell(info, 1, 0, (dir == 1 ? "LONG" : "SHORT") + " · " + stTxt, text_color=dir == 1 ? #69F0AE : #FF8A80, text_size=size.small)
-        table.cell(info, 0, 1, "Type", text_color=color.gray, text_size=size.small)
-        table.cell(info, 1, 1, "SWEEP (real model)", text_color=color.white, text_size=size.small)
+        table.cell(info, 0, 1, "Mode", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 1, lastModeShown + " · " + tradeMode, text_color=color.white, text_size=size.small)
         table.cell(info, 0, 2, "ENTRY", text_color=color.gray, text_size=size.small)
         table.cell(info, 1, 2, str.tostring(e, format.mintick), text_color=color.white, text_size=size.small)
         table.cell(info, 0, 3, "SL", text_color=color.gray, text_size=size.small)
@@ -665,10 +669,23 @@ if barstate.islast
         table.cell(info, 0, 5, "Risk", text_color=color.gray, text_size=size.small)
         table.cell(info, 1, 5, str.tostring(math.abs(e - s), format.mintick), text_color=color.white, text_size=size.small)
         table.cell(info, 0, 6, "Reward", text_color=color.gray, text_size=size.small)
-        table.cell(info, 1, 6, str.tostring(math.abs(t - e), format.mintick) + " (" + str.tostring(riskReward, "#.#") + "R)", text_color=color.white, text_size=size.small)
+        table.cell(info, 1, 6, str.tostring(math.abs(t - e), format.mintick), text_color=color.white, text_size=size.small)
     else
+        scanTxt = pendDir != 0 ? "A building…" : bPhase != 0 ? "B phase " + str.tostring(bPhase) : cPhase != 0 ? "C wait retest" : "scanning…"
         table.cell(info, 0, 0, "TRH", text_color=color.white, text_size=size.small)
-        table.cell(info, 1, 0, pendDir != 0 ? "building sweep room…" : "scanning…", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 0, scanTxt + " · " + tradeMode, text_color=color.gray, text_size=size.small)
+        table.cell(info, 0, 1, "", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 1, "", text_color=color.gray, text_size=size.small)
+        table.cell(info, 0, 2, "", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 2, "", text_color=color.gray, text_size=size.small)
+        table.cell(info, 0, 3, "", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 3, "", text_color=color.gray, text_size=size.small)
+        table.cell(info, 0, 4, "", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 4, "", text_color=color.gray, text_size=size.small)
+        table.cell(info, 0, 5, "", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 5, "", text_color=color.gray, text_size=size.small)
+        table.cell(info, 0, 6, "", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 6, "", text_color=color.gray, text_size=size.small)
 
 alertcondition(newDir == 1, title="TRH Long Room", message="TRH LONG sweep room confirmed")
 alertcondition(newDir == -1, title="TRH Short Room", message="TRH SHORT sweep room confirmed")

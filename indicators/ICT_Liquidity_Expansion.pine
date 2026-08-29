@@ -1,6 +1,7 @@
 //@version=5
 indicator("ICT Liquidity Expansion", shorttitle="ICT", overlay=true, max_boxes_count=60, max_lines_count=100, max_labels_count=100, max_bars_back=5000)
 
+// PARKED — side #2 on hold for now (focus: CRT OrderFlow exact source model).
 // ICT: Raid SSL/BSL → MSS (displacement) → FVG → ENTRY (retest optional)
 // Standalone — not TRH / not CRT
 

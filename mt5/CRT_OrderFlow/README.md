@@ -1,13 +1,15 @@
 # CRT OrderFlow (standalone)
 
-Candle Range Theory entry model extracted from the strategy breakdown:
+Exact source model (STRATEGY / Instagram Jul 29):
 
-1. **≥ 2 CRT models** in the same direction → **bias**
-2. **HTF FVG** forms → **Area of Interest**
-3. **New CRT** confirms **inside** that FVG → **entry**
+1. **Structure** (swing high/low)
+2. **BOS** (break of structure)
+3. **FVG** = Area of Interest after the break
+4. **CRT Bias** = ≥N CRT models same direction into that FVG
+5. **Entry** on CRT confirm inside FVG → delivery
 
-> RunRox indicators were only tools that visualize parts of this model.  
-> This package is **not** a RunRox product and is separate from TRH / ICT Liquidity Expansion.
+> **RunRox** on the source images = visualization only (MTF FVG via Advanced SMC, Entry Model dots/zones).  
+> This package is **not** a RunRox product. ICT Liquidity Expansion is parked.
 
 ## MT5
 
@@ -19,7 +21,7 @@ mt5/CRT_OrderFlow/
 ```
 
 Install Engine beside each `.mq5`, Compile, attach to chart.  
-Pine Auto HTF: **M1→M5**, M5→M15, M15→H1. AOI mitigated on **close only** so 1m wicks do not wipe the blue HTF box.
+Pine matches exact sequence with MTF FVG (15/30/60). AOI mitigated on **close only** so 1m wicks do not wipe HTF boxes.
 MT5 default HTF FVG = **M15** (set to M5 when trading M1).
 
 Zip: https://goldanil.ir/crt-mt5/CRT_OrderFlow_MT5.zip
@@ -28,12 +30,15 @@ Zip: https://goldanil.ir/crt-mt5/CRT_OrderFlow_MT5.zip
 
 `indicators/CRT_OrderFlow.pine` — paste into Pine Editor → Add to chart.
 
+Raw (after push): see PR / `indicators/README.md`.
+
 ## Defaults
 
 | Rule | Default |
 |------|---------|
 | Min CRT bias | 2 |
-| HTF FVG | M15 |
-| CRT must touch HTF FVG | yes |
+| FVG AOI | MTF 15m+30m+1H (Pine) / M15 (MT5) |
+| CRT must touch FVG | yes |
+| BOS before FVG (Pine) | yes |
 | RR | 2.5 |
 | Closed-bar only | yes |
