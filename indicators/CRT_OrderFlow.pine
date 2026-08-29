@@ -1,0 +1,631 @@
+//@version=5
+indicator("CRT OrderFlow", shorttitle="CRT", overlay=true, max_boxes_count=100, max_lines_count=120, max_labels_count=120, max_bars_back=5000)
+
+// CRT OrderFlow — Candle Range Theory
+// Rule 1: >= N CRT same direction (bias)
+// Rule 2: HTF FVG = AOI  (computed INSIDE request.security — critical)
+// Rule 3: new CRT inside HTF FVG → setup
+// Drawings = TRH style
+
+grpCrt = "CRT Model"
+rcLookback       = input.int(3, "RC Lookback", minval=1, maxval=8, group=grpCrt)
+minSweepAtr      = input.float(0.08, "Min Sweep ATR", step=0.01, group=grpCrt)
+minRcRangeAtr    = input.float(0.25, "Min RC Range ATR", step=0.05, group=grpCrt)
+requireCloseBack = input.bool(true, "Confirm Close Back Into RC", group=grpCrt)
+requireCloseMid  = input.bool(true, "Confirm Close Beyond RC Mid", group=grpCrt)
+minBiasModels    = input.int(2, "Min CRT Same Direction (bias)", minval=1, group=grpCrt)
+biasLookback     = input.int(40, "Bias Lookback Bars", group=grpCrt)
+minCrtGapBars    = input.int(5, "Min Bars Between CRT Marks", minval=1, group=grpCrt)
+cooldownBars     = input.int(10, "Cooldown Bars Between Setups", group=grpCrt)
+
+grpHtf = "HTF FVG AOI (for 1m entries)"
+autoHtf          = input.bool(true, "Auto HTF (1m→5m, 5m→15m, 15m→1H)", group=grpHtf)
+htfTfManual      = input.timeframe("15", "HTF for FVG (if Auto off)", group=grpHtf)
+minHtfFvgAtr     = input.float(0.05, "Min HTF FVG ATR", step=0.01, group=grpHtf)
+requireHtfFvg    = input.bool(true, "Require HTF FVG", group=grpHtf)
+entryInsideFvg   = input.bool(true, "CRT Must Touch HTF FVG", group=grpHtf)
+maxAoiKeep       = input.int(12, "Max Live AOI FVGs", minval=1, maxval=40, group=grpHtf)
+mitigateOnClose  = input.bool(true, "Mitigate AOI on Close Only (keep visible on 1m)", group=grpHtf,
+     tooltip="If false, any LTF wick kills the HTF FVG — that is why the blue box vanished on 1m.")
+
+grpRisk = "Entry / SL / TP"
+slPadAtr         = input.float(0.06, "SL Pad ATR", step=0.01, group=grpRisk)
+riskReward       = input.float(2.5, "Risk Reward", step=0.1, group=grpRisk)
+
+grpDisp = "Display"
+onlyLast         = input.bool(true, "Only Last Setup", group=grpDisp)
+clearExpired     = input.bool(false, "Hide Old Setups After TP/SL", group=grpDisp,
+     tooltip="OFF = keep last setup boxes/lines + EXIT mark (recommended). ON = wipe drawings after exit (chart can look empty).")
+setupWidth       = input.int(80, "Box Width (bars)", minval=20, maxval=400, group=grpDisp)
+extendLive       = input.bool(true, "Extend Until TP/SL", group=grpDisp)
+showFillMark     = input.bool(true, "Show ENTRY / TP / SL Markers", group=grpDisp)
+showCrtMarks     = input.bool(true, "Show CRT Confirm Dots", group=grpDisp)
+showAoiBox       = input.bool(true, "Show Live AOI FVG", group=grpDisp)
+maxAoiDraw       = input.int(4, "Max AOI Boxes Drawn", minval=1, maxval=12, group=grpDisp,
+     tooltip="Blue/purple HTF FVG zones. 4 keeps the chart readable.")
+showPanel        = input.bool(true, "Info Panel", group=grpDisp)
+
+grpCol = "Colors"
+bullZoneCol = input.color(color.new(#26A69A, 82), "Long Zone", group=grpCol)
+bearZoneCol = input.color(color.new(#EF5350, 82), "Short Zone", group=grpCol)
+entryCol    = input.color(#787B86, "Entry", group=grpCol)
+slCol       = input.color(#EF5350, "SL", group=grpCol)
+tpCol       = input.color(#26A69A, "TP", group=grpCol)
+
+grpAlert = "Alerts"
+alertOnSetup = input.bool(true, "Alert: setup confirmed", group=grpAlert)
+alertEntry   = input.bool(true, "Alert: entry fill", group=grpAlert)
+alertExit    = input.bool(true, "Alert: SL/TP", group=grpAlert)
+
+atr = ta.atr(14)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CRT detect on confirmed bar
+// ═══════════════════════════════════════════════════════════════════════════
+var int[]   crtBars  = array.new_int()
+var int[]   crtDirs  = array.new_int()
+var float[] crtSweep = array.new_float()
+var float[] crtEntry = array.new_float()
+var float[] crtRcH   = array.new_float()
+var float[] crtRcL   = array.new_float()
+
+crtFound = false
+crtDirNow = 0
+
+if barstate.isconfirmed
+    float minPierce = math.max(atr * minSweepAtr, syminfo.mintick)
+    float minRc = math.max(atr * minRcRangeAtr, syminfo.mintick * 5)
+    bool foundNow = false
+    int dirNow = 0
+    float rcHnow = na
+    float rcLnow = na
+    float sweepNow = na
+    float entryNow = na
+
+    // Quality CRT: RC candle has real range; a PRIOR bar sweeps the extreme;
+    // confirm closes back into/through RC toward delivery (not every wick).
+    for rc = 1 to rcLookback
+        float rcH = high[rc]
+        float rcL = low[rc]
+        float rcMid = (rcH + rcL) * 0.5
+        if rcH - rcL < minRc
+            continue
+
+        float bullExt = rcL
+        int bullSw = -1
+        for s = 1 to rc - 1
+            if low[s] < rcL - minPierce
+                if bullSw < 0 or low[s] < bullExt
+                    bullSw := s
+                    bullExt := low[s]
+        // also allow confirm bar wick as sweep if a prior bar started the raid OR rc==1
+        if rc == 1 and low < rcL - minPierce
+            bullSw := 0
+            bullExt := math.min(low, bullExt)
+
+        bool bullOk = bullSw >= 0 and close > rcL
+        if requireCloseBack
+            bullOk := bullOk and close > open
+        if requireCloseMid
+            bullOk := bullOk and close >= rcMid
+
+        float bearExt = rcH
+        int bearSw = -1
+        for s = 1 to rc - 1
+            if high[s] > rcH + minPierce
+                if bearSw < 0 or high[s] > bearExt
+                    bearSw := s
+                    bearExt := high[s]
+        if rc == 1 and high > rcH + minPierce
+            bearSw := 0
+            bearExt := math.max(high, bearExt)
+
+        bool bearOk = bearSw >= 0 and close < rcH
+        if requireCloseBack
+            bearOk := bearOk and close < open
+        if requireCloseMid
+            bearOk := bearOk and close <= rcMid
+
+        if bullOk and (not bearOk or close > open)
+            foundNow := true
+            dirNow := 1
+            rcHnow := rcH
+            rcLnow := rcL
+            sweepNow := bullExt
+            entryNow := rcMid
+            break
+        if bearOk
+            foundNow := true
+            dirNow := -1
+            rcHnow := rcH
+            rcLnow := rcL
+            sweepNow := bearExt
+            entryNow := rcMid
+            break
+
+    if foundNow
+        bool dup = false
+        if array.size(crtBars) > 0
+            dup := bar_index - array.get(crtBars, array.size(crtBars) - 1) < minCrtGapBars
+        if not dup
+            array.push(crtBars, bar_index)
+            array.push(crtDirs, dirNow)
+            array.push(crtSweep, sweepNow)
+            array.push(crtEntry, entryNow)
+            array.push(crtRcH, rcHnow)
+            array.push(crtRcL, rcLnow)
+            crtFound := true
+            crtDirNow := dirNow
+            while array.size(crtBars) > 80
+                array.shift(crtBars)
+                array.shift(crtDirs)
+                array.shift(crtSweep)
+                array.shift(crtEntry)
+                array.shift(crtRcH)
+                array.shift(crtRcL)
+
+f_bias_count(int dir) =>
+    int count = 0
+    int sz = array.size(crtBars)
+    if sz > 0
+        for i = sz - 1 to 0
+            int b = array.get(crtBars, i)
+            if bar_index - b > biasLookback
+                break
+            if array.get(crtDirs, i) == dir
+                count += 1
+    count
+
+plotshape(showCrtMarks and crtFound and crtDirNow == 1, title="CRT Long", style=shape.circle, location=location.belowbar, color=color.new(#26A69A, 20), size=size.tiny)
+plotshape(showCrtMarks and crtFound and crtDirNow == -1, title="CRT Short", style=shape.circle, location=location.abovebar, color=color.new(#EF5350, 20), size=size.tiny)
+
+// Resolve HTF so 1m chart uses 5m AOI (the blue rectangle timeframe)
+htfTf = autoHtf ? (timeframe.period == "1" ? "5" : timeframe.period == "5" ? "15" : timeframe.period == "15" ? "60" : timeframe.period == "60" ? "240" : htfTfManual) : htfTfManual
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HTF FVG — evaluate on HTF bars; keep zones alive on 1m (close-only mitigate)
+// ═══════════════════════════════════════════════════════════════════════════
+f_htf_fvg() =>
+    float a = ta.atr(14)
+    bool bull = low > high[2] and (low - high[2]) >= a * minHtfFvgAtr
+    bool bear = high < low[2] and (low[2] - high) >= a * minHtfFvgAtr
+    float top = bull ? low : bear ? low[2] : na
+    float bot = bull ? high[2] : bear ? high : na
+    int dir = bull ? 1 : bear ? -1 : 0
+    [bull or bear, dir, top, bot]
+
+[htfNew, htfDir, htfTop, htfBot] = request.security(syminfo.tickerid, htfTf, f_htf_fvg(), barmerge.gaps_off, barmerge.lookahead_off)
+
+var float[] aoiTops = array.new_float()
+var float[] aoiBots = array.new_float()
+var int[]   aoiDirs = array.new_int()
+var int[]   aoiBars = array.new_int()
+var box[]   aoiBoxes = array.new<box>()
+
+var int lastHtfBar = na
+htfBarIdx = request.security(syminfo.tickerid, htfTf, bar_index, barmerge.gaps_off, barmerge.lookahead_off)
+htfBarChanged = na(lastHtfBar) or htfBarIdx != lastHtfBar
+
+if barstate.isconfirmed and htfBarChanged
+    lastHtfBar := htfBarIdx
+    if htfNew and not na(htfTop) and not na(htfBot)
+        // skip exact duplicate zone
+        bool dupAoi = false
+        if array.size(aoiTops) > 0
+            int li = array.size(aoiTops) - 1
+            dupAoi := array.get(aoiDirs, li) == htfDir and math.abs(array.get(aoiTops, li) - htfTop) < syminfo.mintick * 2 and math.abs(array.get(aoiBots, li) - htfBot) < syminfo.mintick * 2
+        if not dupAoi
+            array.push(aoiTops, htfTop)
+            array.push(aoiBots, htfBot)
+            array.push(aoiDirs, htfDir)
+            array.push(aoiBars, bar_index)
+            while array.size(aoiTops) > maxAoiKeep
+                array.shift(aoiTops)
+                array.shift(aoiBots)
+                array.shift(aoiDirs)
+                array.shift(aoiBars)
+                if array.size(aoiBoxes) > 0
+                    box.delete(array.shift(aoiBoxes))
+
+// Mitigate: on 1m, wick-through used to delete the blue HTF box — use close-only by default
+if barstate.isconfirmed and array.size(aoiTops) > 0
+    for i = array.size(aoiTops) - 1 to 0
+        int d = array.get(aoiDirs, i)
+        float t = array.get(aoiTops, i)
+        float b = array.get(aoiBots, i)
+        bool dead = false
+        if mitigateOnClose
+            dead := (d == 1 and close < b) or (d == -1 and close > t)
+        else
+            dead := (d == 1 and low < b) or (d == -1 and high > t)
+        if dead
+            array.remove(aoiTops, i)
+            array.remove(aoiBots, i)
+            array.remove(aoiDirs, i)
+            array.remove(aoiBars, i)
+            if i < array.size(aoiBoxes)
+                box.delete(array.get(aoiBoxes, i))
+                array.remove(aoiBoxes, i)
+
+f_find_aoi(int dir, float px1, float px2, float px3) =>
+    float bestTop = na
+    float bestBot = na
+    bool found = false
+    if array.size(aoiTops) > 0
+        for i = array.size(aoiTops) - 1 to 0
+            if array.get(aoiDirs, i) != dir
+                continue
+            float t = array.get(aoiTops, i)
+            float b = array.get(aoiBots, i)
+            bool touch = false
+            if not entryInsideFvg
+                touch := true
+            else
+                touch := (px1 <= t and px1 >= b) or (px2 <= t and px2 >= b) or (px3 <= t and px3 >= b) or (math.max(math.max(px1, px2), px3) >= b and math.min(math.min(px1, px2), px3) <= t)
+            if touch
+                bestTop := t
+                bestBot := b
+                found := true
+                break
+    [found, bestTop, bestBot]
+
+// Redraw newest live AOI boxes only (cap count to cut purple-stack noise)
+if showAoiBox and barstate.islast
+    if array.size(aoiBoxes) > 0
+        for i = 0 to array.size(aoiBoxes) - 1
+            box.delete(array.get(aoiBoxes, i))
+        array.clear(aoiBoxes)
+    if array.size(aoiTops) > 0
+        int aoiN = array.size(aoiTops)
+        int drawFrom = math.max(0, aoiN - maxAoiDraw)
+        for i = drawFrom to aoiN - 1
+            float t = array.get(aoiTops, i)
+            float b = array.get(aoiBots, i)
+            int d = array.get(aoiDirs, i)
+            int sb = array.get(aoiBars, i)
+            col = d == 1 ? color.new(#42A5F5, 82) : color.new(#AB47BC, 82)
+            array.push(aoiBoxes, box.new(sb, t, bar_index + 30, b, bgcolor=col, border_color=color.new(#42A5F5, 35), border_width=1, extend=extend.right))
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Setup signal + state (declare before use — Pine requires this)
+// ═══════════════════════════════════════════════════════════════════════════
+var int   newDir = 0
+var float newEntry = na
+var float newSl = na
+var float newTp = na
+var float newProximal = na
+var float newDistal = na
+var int   newBias = 0
+var int   lastSetupBar = na
+
+var int[]   sDir = array.new<int>()
+var float[] sEntry = array.new<float>()
+var float[] sSl = array.new<float>()
+var float[] sTp = array.new<float>()
+var int[]   sBar = array.new<int>()
+var int[]   sStat = array.new<int>()
+var int[]   sBias = array.new<int>()
+
+var float activeE = na
+var float activeS = na
+var float activeT = na
+
+newDir := 0
+
+if barstate.isconfirmed and array.size(crtBars) > 0
+    int lastIdx = array.size(crtBars) - 1
+    if array.get(crtBars, lastIdx) == bar_index
+        int dir = array.get(crtDirs, lastIdx)
+        int bias = f_bias_count(dir)
+        bool biasOk = bias >= minBiasModels
+        float eHint = array.get(crtEntry, lastIdx)
+        float sw = array.get(crtSweep, lastIdx)
+        float rH = array.get(crtRcH, lastIdx)
+        float rL = array.get(crtRcL, lastIdx)
+        bool fvgOk = true
+        float fTop = na
+        float fBot = na
+        if requireHtfFvg
+            [ok, t, b] = f_find_aoi(dir, close, eHint, sw)
+            fvgOk := ok
+            fTop := t
+            fBot := b
+        bool lastExited = false
+        if array.size(sStat) > 0
+            lastExited := array.get(sStat, array.size(sStat) - 1) >= 2
+        bool coolOk = lastExited or na(lastSetupBar) or (bar_index - lastSetupBar >= cooldownBars)
+        if biasOk and fvgOk and coolOk
+            float entry = requireHtfFvg and not na(fTop) ? (fTop + fBot) * 0.5 : eHint
+            float pad = atr * slPadAtr
+            float sl = dir == 1 ? sw - pad : sw + pad
+            float risk = math.abs(entry - sl)
+            if risk > syminfo.mintick
+                newDir := dir
+                newEntry := entry
+                newSl := sl
+                newTp := dir == 1 ? entry + risk * riskReward : entry - risk * riskReward
+                newBias := bias
+                newProximal := not na(fTop) ? fTop : rH
+                newDistal := not na(fBot) ? fBot : rL
+                lastSetupBar := bar_index
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TRH-style drawings (clear expired to reduce noise)
+// ═══════════════════════════════════════════════════════════════════════════
+var box[]   bZone = array.new<box>()
+var box[]   bTp = array.new<box>()
+var box[]   bSl = array.new<box>()
+var line[]  lEntry = array.new<line>()
+var line[]  lSl = array.new<line>()
+var line[]  lTp = array.new<line>()
+var label[] labE = array.new<label>()
+var label[] labS = array.new<label>()
+var label[] labT = array.new<label>()
+var label[] labTag = array.new<label>()
+var label[] labEvt = array.new<label>()  // ENTRY / TP EXIT / SL EXIT markers
+
+f_del_setup_draw(int i) =>
+    if i >= 0 and i < array.size(bZone)
+        box bx = array.get(bZone, i)
+        box bt = array.get(bTp, i)
+        box bs = array.get(bSl, i)
+        line le = array.get(lEntry, i)
+        line ls = array.get(lSl, i)
+        line lt = array.get(lTp, i)
+        label a = array.get(labE, i)
+        label b = array.get(labS, i)
+        label c = array.get(labT, i)
+        label d = array.get(labTag, i)
+        if not na(bx)
+            box.delete(bx)
+        if not na(bt)
+            box.delete(bt)
+        if not na(bs)
+            box.delete(bs)
+        if not na(le)
+            line.delete(le)
+        if not na(ls)
+            line.delete(ls)
+        if not na(lt)
+            line.delete(lt)
+        if not na(a)
+            label.delete(a)
+        if not na(b)
+            label.delete(b)
+        if not na(c)
+            label.delete(c)
+        if not na(d)
+            label.delete(d)
+        if i < array.size(labEvt)
+            label ev = array.get(labEvt, i)
+            if not na(ev)
+                label.delete(ev)
+
+f_clear_all_draws() =>
+    if array.size(bZone) > 0
+        for i = 0 to array.size(bZone) - 1
+            f_del_setup_draw(i)
+    array.clear(bZone)
+    array.clear(bTp)
+    array.clear(bSl)
+    array.clear(lEntry)
+    array.clear(lSl)
+    array.clear(lTp)
+    array.clear(labE)
+    array.clear(labS)
+    array.clear(labT)
+    array.clear(labTag)
+    array.clear(labEvt)
+
+if newDir != 0
+    if onlyLast and array.size(sDir) > 0
+        f_clear_all_draws()
+        array.clear(sDir)
+        array.clear(sEntry)
+        array.clear(sSl)
+        array.clear(sTp)
+        array.clear(sBar)
+        array.clear(sStat)
+        array.clear(sBias)
+
+    zTop = math.max(newProximal, newDistal)
+    zBot = math.min(newProximal, newDistal)
+    right = bar_index + setupWidth
+    zcol = newDir == 1 ? bullZoneCol : bearZoneCol
+
+    array.push(bZone, box.new(bar_index, zTop, right, zBot, bgcolor=zcol, border_color=color.new(zcol, 40), border_width=1))
+    if newDir == 1
+        array.push(bTp, box.new(bar_index, newTp, right, newEntry, bgcolor=color.new(#26A69A, 85), border_color=color.new(#26A69A, 60), border_width=1))
+        array.push(bSl, box.new(bar_index, newEntry, right, newSl, bgcolor=color.new(#EF5350, 85), border_color=color.new(#EF5350, 60), border_width=1))
+    else
+        array.push(bTp, box.new(bar_index, newEntry, right, newTp, bgcolor=color.new(#26A69A, 85), border_color=color.new(#26A69A, 60), border_width=1))
+        array.push(bSl, box.new(bar_index, newSl, right, newEntry, bgcolor=color.new(#EF5350, 85), border_color=color.new(#EF5350, 60), border_width=1))
+
+    array.push(lEntry, line.new(bar_index, newEntry, right, newEntry, color=entryCol, width=2, style=line.style_dashed))
+    array.push(lSl, line.new(bar_index, newSl, right, newSl, color=slCol, width=1, style=line.style_dashed))
+    array.push(lTp, line.new(bar_index, newTp, right, newTp, color=tpCol, width=1, style=line.style_dashed))
+    array.push(labE, label.new(right, newEntry, "ENTRY " + str.tostring(newEntry, format.mintick), style=label.style_label_left, color=entryCol, textcolor=color.white, size=size.small))
+    array.push(labS, label.new(right, newSl, "SL " + str.tostring(newSl, format.mintick), style=label.style_label_left, color=slCol, textcolor=color.white, size=size.small))
+    array.push(labT, label.new(right, newTp, "TP " + str.tostring(newTp, format.mintick), style=label.style_label_left, color=tpCol, textcolor=color.white, size=size.small))
+    array.push(labTag, label.new(bar_index, newDir == 1 ? zTop : zBot, "CRT " + (newDir == 1 ? "LONG" : "SHORT") + " · OrderFlow\nbias x" + str.tostring(newBias) + " · R:R " + str.tostring(riskReward, "#.#"), style=newDir == 1 ? label.style_label_down : label.style_label_up, color=newDir == 1 ? #00897B : #C62828, textcolor=color.white, size=size.small))
+    array.push(labEvt, na)
+
+    array.push(sDir, newDir)
+    array.push(sEntry, newEntry)
+    array.push(sSl, newSl)
+    array.push(sTp, newTp)
+    array.push(sBar, bar_index)
+    array.push(sStat, 0)
+    array.push(sBias, newBias)
+
+    alreadyFilled = newDir == 1 ? (low <= newEntry or close >= newEntry) : (high >= newEntry or close <= newEntry)
+    if alreadyFilled
+        array.set(sStat, array.size(sStat) - 1, 1)
+        activeE := newEntry
+        activeS := newSl
+        activeT := newTp
+        if showFillMark
+            int ei = array.size(labEvt) - 1
+            if ei >= 0
+                label oldE = array.get(labEvt, ei)
+                if not na(oldE)
+                    label.delete(oldE)
+                array.set(labEvt, ei, label.new(bar_index, newEntry, "▶ ENTRY", style=label.style_label_center, color=newDir == 1 ? #00897B : #C62828, textcolor=color.white, size=size.normal))
+        if alertEntry
+            alert("CRT ENTRY " + (newDir == 1 ? "LONG" : "SHORT") + " @ " + str.tostring(newEntry, format.mintick), alert.freq_once_per_bar_close)
+
+    if alertOnSetup
+        alert("CRT " + (newDir == 1 ? "LONG" : "SHORT") + " bias x" + str.tostring(newBias) + " | ENTRY " + str.tostring(newEntry, format.mintick) + " | SL " + str.tostring(newSl, format.mintick) + " | TP " + str.tostring(newTp, format.mintick), alert.freq_once_per_bar_close)
+
+n = array.size(sDir)
+if n > 0
+    for i = 0 to n - 1
+        st = array.get(sStat, i)
+        if i < array.size(bZone) and not na(array.get(bZone, i))
+            dir = array.get(sDir, i)
+            e = array.get(sEntry, i)
+            s = array.get(sSl, i)
+            t = array.get(sTp, i)
+            startB = array.get(sBar, i)
+
+            // Live setups keep extending; finished setups freeze in place (still visible)
+            if st <= 1
+                right = extendLive ? math.max(bar_index, startB + setupWidth) : startB + setupWidth
+                box.set_right(array.get(bZone, i), right)
+                box.set_right(array.get(bTp, i), right)
+                box.set_right(array.get(bSl, i), right)
+                line.set_x2(array.get(lEntry, i), right)
+                line.set_x2(array.get(lSl, i), right)
+                line.set_x2(array.get(lTp, i), right)
+                label.set_x(array.get(labE, i), right)
+                label.set_x(array.get(labS, i), right)
+                label.set_x(array.get(labT, i), right)
+
+                if st == 0
+                    hitE = dir == 1 ? low <= e : high >= e
+                    if hitE or (dir == 1 and close >= e) or (dir == -1 and close <= e)
+                        array.set(sStat, i, 1)
+                        activeE := e
+                        activeS := s
+                        activeT := t
+                        if showFillMark and i < array.size(labEvt)
+                            label oldF = array.get(labEvt, i)
+                            if not na(oldF)
+                                label.delete(oldF)
+                            array.set(labEvt, i, label.new(bar_index, e, "▶ ENTRY", style=label.style_label_center, color=dir == 1 ? #00897B : #C62828, textcolor=color.white, size=size.normal))
+                        if alertEntry
+                            alert("CRT ENTRY @ " + str.tostring(e, format.mintick), alert.freq_once_per_bar_close)
+
+                if array.get(sStat, i) == 1
+                    hitT = dir == 1 ? high >= t : low <= t
+                    hitS = dir == 1 ? low <= s : high >= s
+                    if hitT or hitS
+                        array.set(sStat, i, hitT ? 2 : 3)
+                        if showFillMark and i < array.size(labEvt)
+                            label oldX = array.get(labEvt, i)
+                            if not na(oldX)
+                                label.delete(oldX)
+                            array.set(labEvt, i, label.new(bar_index, hitT ? t : s, hitT ? "✓ TP EXIT" : "✗ SL EXIT", style=label.style_label_center, color=hitT ? #26A69A : #EF5350, textcolor=color.white, size=size.normal))
+                        if alertExit
+                            alert((hitT ? "CRT TP EXIT @ " : "CRT SL EXIT @ ") + str.tostring(hitT ? t : s, format.mintick), alert.freq_once_per_bar_close)
+                        // Optional soft wipe (OFF by default — keeps last result on chart)
+                        if clearExpired
+                            box bx = array.get(bZone, i)
+                            box bt = array.get(bTp, i)
+                            box bs = array.get(bSl, i)
+                            label tg = array.get(labTag, i)
+                            if not na(bx)
+                                box.delete(bx)
+                            if not na(bt)
+                                box.delete(bt)
+                            if not na(bs)
+                                box.delete(bs)
+                            if not na(tg)
+                                label.delete(tg)
+                            array.set(bZone, i, na)
+                            array.set(bTp, i, na)
+                            array.set(bSl, i, na)
+                            array.set(labTag, i, na)
+                            // ENTRY/SL/TP lines + EXIT mark stay
+        else if st <= 1 and i < array.size(lEntry) and not na(array.get(lEntry, i))
+            // Soft-wipe left lines only — still manage fills via lines present
+            dir = array.get(sDir, i)
+            e = array.get(sEntry, i)
+            s = array.get(sSl, i)
+            t = array.get(sTp, i)
+            if st == 0
+                hitE = dir == 1 ? low <= e : high >= e
+                if hitE or (dir == 1 and close >= e) or (dir == -1 and close <= e)
+                    array.set(sStat, i, 1)
+            if array.get(sStat, i) == 1
+                hitT = dir == 1 ? high >= t : low <= t
+                hitS = dir == 1 ? low <= s : high >= s
+                if hitT or hitS
+                    array.set(sStat, i, hitT ? 2 : 3)
+                    if showFillMark and i < array.size(labEvt)
+                        label oldX2 = array.get(labEvt, i)
+                        if not na(oldX2)
+                            label.delete(oldX2)
+                        array.set(labEvt, i, label.new(bar_index, hitT ? t : s, hitT ? "✓ TP EXIT" : "✗ SL EXIT", style=label.style_label_center, color=hitT ? #26A69A : #EF5350, textcolor=color.white, size=size.normal))
+
+plot(activeE, "ENTRY", color=entryCol, display=display.data_window)
+plot(activeS, "SL", color=slCol, display=display.data_window)
+plot(activeT, "TP", color=tpCol, display=display.data_window)
+
+// Panel with live scanner status (never empty "stuck")
+var table info = table.new(position.top_right, 2, 8, bgcolor=color.new(#111111, 5), border_width=1, border_color=color.new(color.white, 70))
+if showPanel and barstate.islast
+    longBias = f_bias_count(1)
+    shortBias = f_bias_count(-1)
+    crtN = array.size(crtBars)
+    aoiN = array.size(aoiTops)
+    if array.size(sDir) > 0
+        idx = array.size(sDir) - 1
+        dir = array.get(sDir, idx)
+        st = array.get(sStat, idx)
+        stTxt = st == 0 ? "WAIT FILL" : st == 1 ? "IN TRADE" : st == 2 ? "TP HIT" : st == 3 ? "SL HIT" : "EXPIRED"
+        e = array.get(sEntry, idx)
+        s = array.get(sSl, idx)
+        t = array.get(sTp, idx)
+        bias = array.get(sBias, idx)
+        risk = math.abs(e - s)
+        rew = math.abs(t - e)
+        liveR = risk > 0 ? ((dir == 1 ? close - e : e - close) / risk) : 0.0
+        if st == 2
+            liveR := riskReward
+        if st == 3
+            liveR := -1.0
+        table.cell(info, 0, 0, "CRT", text_color=color.white, text_size=size.small)
+        table.cell(info, 1, 0, (dir == 1 ? "LONG" : "SHORT") + " · " + stTxt, text_color=dir == 1 ? #69F0AE : #FF8A80, text_size=size.small)
+        table.cell(info, 0, 1, "Type", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 1, "OrderFlow · bias x" + str.tostring(bias), text_color=color.white, text_size=size.small)
+        table.cell(info, 0, 2, "ENTRY", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 2, str.tostring(e, format.mintick), text_color=color.white, text_size=size.small)
+        table.cell(info, 0, 3, "SL", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 3, str.tostring(s, format.mintick), text_color=#FF8A80, text_size=size.small)
+        table.cell(info, 0, 4, "TP", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 4, str.tostring(t, format.mintick), text_color=#69F0AE, text_size=size.small)
+        table.cell(info, 0, 5, "Risk", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 5, str.tostring(risk, format.mintick), text_color=color.white, text_size=size.small)
+        table.cell(info, 0, 6, "Reward", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 6, str.tostring(rew, format.mintick) + " (" + str.tostring(riskReward, "#.#") + "R)", text_color=color.white, text_size=size.small)
+        table.cell(info, 0, 7, st <= 1 ? "Live" : "Final", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 7, str.tostring(liveR, "#.##") + "R", text_color=st == 3 ? #FF8A80 : #69F0AE, text_size=size.small)
+    else
+        status = aoiN > 0 ? ("AOI x" + str.tostring(aoiN) + " · need CRT") : (crtN > 0 ? "CRT found · need AOI/bias" : "scanning…")
+        table.cell(info, 0, 0, "CRT", text_color=color.white, text_size=size.small)
+        table.cell(info, 1, 0, status, text_color=color.gray, text_size=size.small)
+        table.cell(info, 0, 1, "CRTs", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 1, str.tostring(crtN), text_color=color.white, text_size=size.small)
+        table.cell(info, 0, 2, "Bias L/S", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 2, str.tostring(longBias) + " / " + str.tostring(shortBias) + " (need " + str.tostring(minBiasModels) + ")", text_color=color.white, text_size=size.small)
+        table.cell(info, 0, 3, "AOI FVG", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 3, str.tostring(aoiN) + " live · HTF " + htfTf, text_color=aoiN > 0 ? #69F0AE : color.white, text_size=size.small)
+        table.cell(info, 0, 4, "Need", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 4, "bias≥" + str.tostring(minBiasModels) + " + CRT in HTF FVG", text_color=color.white, text_size=size.small)
+        table.cell(info, 0, 5, "", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 5, "", text_color=color.gray, text_size=size.small)
+        table.cell(info, 0, 6, "", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 6, "", text_color=color.gray, text_size=size.small)
+        table.cell(info, 0, 7, "", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 7, "", text_color=color.gray, text_size=size.small)
