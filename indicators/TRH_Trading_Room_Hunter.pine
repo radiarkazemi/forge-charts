@@ -9,31 +9,45 @@ indicator("TRH | Trading Room Hunter", shorttitle="TRH", overlay=true, max_boxes
 // INPUTS
 // ═══════════════════════════════════════════════════════════════════════════
 
-grp = "TRH Detection (real-data model)"
-pivotPeriod    = input.int(5, "Pivot Period", minval=2, maxval=30, group=grp,
-     tooltip="Major green/red liquidity pivots.")
-minContextAtr  = input.float(1.2, "Min Selloff/Rally Into Sweep (ATR×)", minval=0.5, maxval=8.0, step=0.1, group=grp,
-     tooltip="Require a real run into the hunted pivot (sample had a multi-ATR selloff).")
+grp = "TRH Detection"
+tradeMode      = input.string("All", "Detection Mode", options=["Classic", "FVG", "BTB", "Classic+FVG", "All"], group=grp,
+     tooltip="Classic=A SWEEP room · FVG=B sweep+disp+FVG · BTB=C Pro breakout retest · All=A+B+C")
+pivotPeriod    = input.int(5, "Pivot Period", minval=2, maxval=30, group=grp)
+minContextAtr  = input.float(1.2, "Min Selloff/Rally Into Sweep (ATR×)", minval=0.5, maxval=8.0, step=0.1, group=grp)
 minSweepAtr    = input.float(0.05, "Min Sweep Beyond Pivot (ATR×)", minval=0.0, maxval=1.0, step=0.05, group=grp)
-baseConfirmBars= input.int(8, "Min Base Bars After Sweep", minval=2, maxval=40, group=grp,
-     tooltip="Sample: sweep 04:09 → confirm ~04:21–04:22 (~12 bars).")
-maxBaseBars    = input.int(40, "Max Bars To Confirm Room", minval=5, maxval=100, group=grp)
-minRoomAtr     = input.float(0.8, "Min Room Width (ATR×)", minval=0.3, maxval=5.0, step=0.1, group=grp)
-maxRoomAtr     = input.float(3.5, "Max Room Width (ATR×)", minval=1.0, maxval=10.0, step=0.1, group=grp)
+baseConfirmBars= input.int(8, "Min Base Bars After Sweep (Mode A)", minval=2, maxval=40, group=grp)
+maxBaseBars    = input.int(40, "Max Bars To Confirm Room (Mode A)", minval=5, maxval=100, group=grp)
+minRoomAtr     = input.float(0.8, "Min Room Width (ATR×) Mode A", minval=0.3, maxval=5.0, step=0.1, group=grp)
+maxRoomAtr     = input.float(3.5, "Max Room Width (ATR×) Mode A", minval=1.0, maxval=10.0, step=0.1, group=grp)
 cooldownBars   = input.int(50, "Cooldown Between Setups", minval=10, maxval=300, group=grp)
 
-grpPos = "Entry / SL / TP (sample-matched)"
-slPadAtr       = input.float(0.02, "SL Pad (ATR×)", minval=0.0, maxval=1.0, step=0.01, group=grpPos,
-     tooltip="Sample SL sat ~0.03 under the sweep low.")
-riskReward     = input.float(2.4, "Risk-Reward Ratio", minval=1.0, maxval=6.0, step=0.1, group=grpPos,
-     tooltip="Sample was ~2.39R to 4645.99.")
-useLiquidityTP = input.bool(true, "Prefer Opposing Pivot As TP", group=grpPos,
-     tooltip="If a red/green liquidity pivot sits beyond min R:R, use it as TP.")
+grpB = "Mode B — Sweep + Disp + FVG"
+minDispAtr     = input.float(0.55, "Min Displacement Body (ATR×)", step=0.05, group=grpB)
+maxDispBars    = input.int(6, "Max Bars Sweep → Disp", group=grpB)
+maxFvgBars     = input.int(10, "Max Bars Disp → FVG", group=grpB)
+minFvgAtr      = input.float(0.12, "Min FVG Size (ATR×)", step=0.01, group=grpB)
+requireFvgRetest = input.bool(true, "Require FVG Retest", group=grpB)
+maxRetestBars  = input.int(8, "Max Bars For Retest", group=grpB)
+fvgSlExtraAtr  = input.float(0.20, "Extra SL Pad (ATR×)", step=0.01, group=grpB)
+
+grpC = "Mode C — Pro BTB"
+minBreakAtr    = input.float(0.15, "Min Break Beyond Pivot (ATR×)", step=0.01, group=grpC)
+minBreakBodyAtr= input.float(0.35, "Min Breakout Body (ATR×)", step=0.05, group=grpC)
+maxBtbRetestBars = input.int(12, "Max BTB Retest Bars", group=grpC)
+btbRiskReward  = input.float(2.0, "BTB Risk-Reward (min 2)", minval=2.0, step=0.1, group=grpC)
+btbSlExtraAtr  = input.float(0.10, "BTB Extra SL (ATR×)", step=0.01, group=grpC)
+btbRequireConfirm = input.bool(true, "Require Confirm Candle On Retest", group=grpC)
+
+grpPos = "Entry / SL / TP"
+slPadAtr       = input.float(0.02, "SL Pad (ATR×)", minval=0.0, maxval=1.0, step=0.01, group=grpPos)
+riskReward     = input.float(2.4, "Risk-Reward (Mode A/B)", minval=1.0, maxval=6.0, step=0.1, group=grpPos)
+useLiquidityTP = input.bool(true, "Prefer Opposing Pivot As TP", group=grpPos)
 
 grpDisp = "Display"
 onlyLast       = input.bool(true, "Only Last Setup", group=grpDisp)
 setupWidth     = input.int(80, "Box Width (bars)", minval=20, maxval=400, group=grpDisp)
-showFillMark   = input.bool(false, "Show ENTRY/TP/SL Markers", group=grpDisp)
+showFillMark   = input.bool(true, "Show ENTRY/TP/SL Markers", group=grpDisp)
+showPanel      = input.bool(true, "Info Panel", group=grpDisp)
 
 grpCol = "Colors"
 bullZoneCol = input.color(color.new(#26A69A, 82), "Long Room", group=grpCol)
@@ -128,6 +142,10 @@ f_nextLiquidityLow(fromPrice, minDist) =>
 // Short: mirror
 // ═══════════════════════════════════════════════════════════════════════════
 
+useClassic = tradeMode == "Classic" or tradeMode == "Classic+FVG" or tradeMode == "All"
+useFvgMode = tradeMode == "FVG" or tradeMode == "Classic+FVG" or tradeMode == "All"
+useBtbMode = tradeMode == "BTB" or tradeMode == "All"
+
 [huntLo, huntLoBar] = f_lastPivotLow(80)
 [huntHi, huntHiBar] = f_lastPivotHigh(80)
 
@@ -139,117 +157,328 @@ rallyInto   = high - priorLow
 bullSweepNow = not na(huntLo) and low < huntLo - atr * minSweepAtr and close > huntLo and close > open and selloffInto >= atr * minContextAtr
 bearSweepNow = not na(huntHi) and high > huntHi + atr * minSweepAtr and close < huntHi and close < open and rallyInto >= atr * minContextAtr
 
-var int   pendDir = 0          // 1 long, -1 short, 0 none
-var float pendDistal = na      // sweep extreme
-var float pendHunt = na        // hunted pivot
+var int   pendDir = 0
+var float pendDistal = na
+var float pendHunt = na
 var int   pendBar = na
 var float pendBaseHigh = na
 var float pendBaseLow = na
 
+// Mode B state
+var int   bPhase = 0
+var int   bDir = 0
+var float bDistal = na
+var float bHunt = na
+var float bGapTop = na
+var float bGapBot = na
+var int   bSweepBar = na
+var int   bDispBar = na
+var int   bFvgBar = na
+
+// Mode C state
+var int   cPhase = 0
+var int   cDir = 0
+var float cBreakLevel = na
+var float cBeLevel = na
+var float cBreakExt = na
+var int   cBreakBar = na
+
 var int lastSetupBar = na
+var string newMode = "SWEEP"
 
-if barstate.isconfirmed
-    // Start new pending sweep (only if flat / cooled down)
-    canStart = pendDir == 0 and (na(lastSetupBar) or bar_index - lastSetupBar >= cooldownBars)
-    if canStart and bullSweepNow
-        pendDir := 1
-        pendDistal := low
-        pendHunt := huntLo
-        pendBar := bar_index
-        pendBaseHigh := high
-        pendBaseLow := low
-    else if canStart and bearSweepNow
-        pendDir := -1
-        pendDistal := high
-        pendHunt := huntHi
-        pendBar := bar_index
-        pendBaseHigh := high
-        pendBaseLow := low
-
-    // Update pending base
-    if pendDir != 0
-        pendBaseHigh := math.max(nz(pendBaseHigh), high)
-        pendBaseLow := math.min(nz(pendBaseLow), low)
-        // If a deeper sweep happens same direction, deepen distal
-        if pendDir == 1 and low < pendDistal
-            pendDistal := low
-        if pendDir == -1 and high > pendDistal
-            pendDistal := high
-
-        int agePend = bar_index - pendBar
-        // Cancel if base takes too long without confirmation
-        if agePend > maxBaseBars
-            pendDir := 0
-            pendDistal := na
-            pendHunt := na
-            pendBar := na
-            pendBaseHigh := na
-            pendBaseLow := na
-
-// Confirm room: enough base bars + room width in ATR band + bullish/bearish break of micro structure
 int newDir = 0
 float newDistal = na
 float newProximal = na
 float newEntry = na
 float newSl = na
 float newTp = na
+newMode := "SWEEP"
 
-if barstate.isconfirmed and pendDir != 0 and not na(pendBar)
-    int age = bar_index - pendBar
-    if age >= baseConfirmBars
-        if pendDir == 1
-            // Room: distal=sweep low, proximal=base high since sweep (sample ~4634 → mid ~4627.2)
-            float distal = pendDistal
-            float proximal = pendBaseHigh
-            float width = proximal - distal
-            float prevBaseHigh = nz(pendBaseHigh[1], proximal)
-            // Confirm when base is wide enough and price presses the top (impulse starting)
-            bool microBreak = close > open and (high >= prevBaseHigh or close >= distal + width * 0.7)
-            if width >= atr * minRoomAtr and width <= atr * maxRoomAtr and microBreak
-                float entry = (distal + proximal) * 0.5
-                float sl = distal - atr * slPadAtr
-                float risk = entry - sl
-                float tpRR = entry + risk * riskReward
-                float liq = f_nextLiquidityHigh(entry, risk * 1.5)
-                float tp = useLiquidityTP and not na(liq) ? math.max(tpRR, liq) : tpRR
-                newDir := 1
-                newDistal := distal
-                newProximal := proximal
-                newEntry := entry
-                newSl := sl
-                newTp := tp
-        else if pendDir == -1
-            float distal = pendDistal
-            float proximal = pendBaseLow
-            float width = distal - proximal
-            float prevBaseLow = nz(pendBaseLow[1], proximal)
-            bool microBreak = close < open and (low <= prevBaseLow or close <= distal - width * 0.7)
-            if width >= atr * minRoomAtr and width <= atr * maxRoomAtr and microBreak
-                float entry = (distal + proximal) * 0.5
-                float sl = distal + atr * slPadAtr
-                float risk = sl - entry
-                float tpRR = entry - risk * riskReward
-                float liq = f_nextLiquidityLow(entry, risk * 1.5)
-                float tp = useLiquidityTP and not na(liq) ? math.min(tpRR, liq) : tpRR
-                newDir := -1
-                newDistal := distal
-                newProximal := proximal
-                newEntry := entry
-                newSl := sl
-                newTp := tp
+if barstate.isconfirmed
+    bool coolOk = na(lastSetupBar) or bar_index - lastSetupBar >= cooldownBars
 
-    // Clear pending once we fire
-    if newDir != 0
-        pendDir := 0
-        pendDistal := na
-        pendHunt := na
-        pendBar := na
-        pendBaseHigh := na
-        pendBaseLow := na
+    // ── Mode A classic ────────────────────────────────────────────
+    if useClassic
+        canStart = pendDir == 0 and coolOk and newDir == 0
+        if canStart and bullSweepNow
+            pendDir := 1
+            pendDistal := low
+            pendHunt := huntLo
+            pendBar := bar_index
+            pendBaseHigh := high
+            pendBaseLow := low
+        else if canStart and bearSweepNow
+            pendDir := -1
+            pendDistal := high
+            pendHunt := huntHi
+            pendBar := bar_index
+            pendBaseHigh := high
+            pendBaseLow := low
+
+        if pendDir != 0
+            pendBaseHigh := math.max(nz(pendBaseHigh), high)
+            pendBaseLow := math.min(nz(pendBaseLow), low)
+            if pendDir == 1 and low < pendDistal
+                pendDistal := low
+            if pendDir == -1 and high > pendDistal
+                pendDistal := high
+            if bar_index - pendBar > maxBaseBars
+                pendDir := 0
+                pendDistal := na
+                pendHunt := na
+                pendBar := na
+                pendBaseHigh := na
+                pendBaseLow := na
+
+        if pendDir != 0 and not na(pendBar) and bar_index - pendBar >= baseConfirmBars and newDir == 0
+            int age = bar_index - pendBar
+            if pendDir == 1
+                float distal = pendDistal
+                float proximal = pendBaseHigh
+                float width = proximal - distal
+                float prevBaseHigh = nz(pendBaseHigh[1], proximal)
+                bool microBreak = close > open and (high >= prevBaseHigh or close >= distal + width * 0.7)
+                if width >= atr * minRoomAtr and width <= atr * maxRoomAtr and microBreak
+                    float entry = (distal + proximal) * 0.5
+                    float sl = distal - atr * slPadAtr
+                    float risk = entry - sl
+                    float tpRR = entry + risk * riskReward
+                    float liq = f_nextLiquidityHigh(entry, risk * 1.5)
+                    float tp = useLiquidityTP and not na(liq) ? math.max(tpRR, liq) : tpRR
+                    newDir := 1
+                    newDistal := distal
+                    newProximal := proximal
+                    newEntry := entry
+                    newSl := sl
+                    newTp := tp
+                    newMode := "SWEEP"
+            else if pendDir == -1
+                float distal = pendDistal
+                float proximal = pendBaseLow
+                float width = distal - proximal
+                float prevBaseLow = nz(pendBaseLow[1], proximal)
+                bool microBreak = close < open and (low <= prevBaseLow or close <= distal - width * 0.7)
+                if width >= atr * minRoomAtr and width <= atr * maxRoomAtr and microBreak
+                    float entry = (distal + proximal) * 0.5
+                    float sl = distal + atr * slPadAtr
+                    float risk = sl - entry
+                    float tpRR = entry - risk * riskReward
+                    float liq = f_nextLiquidityLow(entry, risk * 1.5)
+                    float tp = useLiquidityTP and not na(liq) ? math.min(tpRR, liq) : tpRR
+                    newDir := -1
+                    newDistal := distal
+                    newProximal := proximal
+                    newEntry := entry
+                    newSl := sl
+                    newTp := tp
+                    newMode := "SWEEP"
+            if newDir != 0
+                pendDir := 0
+                pendDistal := na
+                pendHunt := na
+                pendBar := na
+                pendBaseHigh := na
+                pendBaseLow := na
+
+    // ── Mode B FVG ────────────────────────────────────────────────
+    if useFvgMode
+        if bPhase == 1 and not na(bSweepBar) and bar_index - bSweepBar > maxDispBars
+            bPhase := 0
+            bDir := 0
+        if bPhase == 2 and not na(bDispBar) and bar_index - bDispBar > maxFvgBars
+            bPhase := 0
+            bDir := 0
+        if bPhase == 3 and not na(bFvgBar) and bar_index - bFvgBar > maxRetestBars
+            bPhase := 0
+            bDir := 0
+
+        bool bStart = bPhase == 0 and coolOk and newDir == 0
+        if bStart and bullSweepNow
+            bPhase := 1
+            bDir := 1
+            bDistal := low
+            bHunt := huntLo
+            bSweepBar := bar_index
+            bDispBar := na
+            bFvgBar := na
+        else if bStart and bearSweepNow
+            bPhase := 1
+            bDir := -1
+            bDistal := high
+            bHunt := huntHi
+            bSweepBar := bar_index
+            bDispBar := na
+            bFvgBar := na
+
+        if bPhase != 0
+            if bDir == 1 and low < bDistal
+                bDistal := low
+            if bDir == -1 and high > bDistal
+                bDistal := high
+            float body = math.abs(close - open)
+
+            if bPhase == 1 and bar_index > bSweepBar
+                bool bullDisp = bDir == 1 and close > open and body >= atr * minDispAtr and close > bHunt
+                bool bearDisp = bDir == -1 and close < open and body >= atr * minDispAtr and close < bHunt
+                if bullDisp or bearDisp
+                    bPhase := 2
+                    bDispBar := bar_index
+
+            if bPhase == 2 and bar_index >= 2 and bar_index > bDispBar
+                bool found = false
+                if bDir == 1
+                    float bot = high[2]
+                    float top = low
+                    if top - bot >= atr * minFvgAtr
+                        bGapBot := bot
+                        bGapTop := top
+                        found := true
+                else
+                    float top2 = low[2]
+                    float bot2 = high
+                    if top2 - bot2 >= atr * minFvgAtr
+                        bGapBot := bot2
+                        bGapTop := top2
+                        found := true
+                if found
+                    bFvgBar := bar_index
+                    if requireFvgRetest
+                        bPhase := 3
+                    else if newDir == 0
+                        float entry = (bGapTop + bGapBot) * 0.5
+                        float pad = atr * (slPadAtr + fvgSlExtraAtr)
+                        float sl = bDir == 1 ? bDistal - pad : bDistal + pad
+                        float risk = math.abs(entry - sl)
+                        if risk > syminfo.mintick
+                            float tp = bDir == 1 ? entry + risk * riskReward : entry - risk * riskReward
+                            if useLiquidityTP
+                                if bDir == 1
+                                    float liq = f_nextLiquidityHigh(entry, risk * 1.5)
+                                    if not na(liq)
+                                        tp := math.max(tp, liq)
+                                else
+                                    float liq2 = f_nextLiquidityLow(entry, risk * 1.5)
+                                    if not na(liq2)
+                                        tp := math.min(tp, liq2)
+                            newDir := bDir
+                            newEntry := entry
+                            newSl := sl
+                            newTp := tp
+                            newProximal := bGapTop
+                            newDistal := bGapBot
+                            newMode := "FVG"
+                        bPhase := 0
+                        bDir := 0
+
+            if bPhase == 3 and bar_index > bFvgBar and newDir == 0
+                bool confirmed = false
+                if bDir == 1
+                    bool retested = low <= bGapTop and low >= bGapBot - atr * 0.05
+                    confirmed := retested and close > open and close >= (bGapBot + bGapTop) * 0.5
+                else
+                    bool retested2 = high >= bGapBot and high <= bGapTop + atr * 0.05
+                    confirmed := retested2 and close < open and close <= (bGapBot + bGapTop) * 0.5
+                if confirmed
+                    float entry = (bGapTop + bGapBot) * 0.5
+                    float pad = atr * (slPadAtr + fvgSlExtraAtr)
+                    float sl = bDir == 1 ? bDistal - pad : bDistal + pad
+                    float risk = math.abs(entry - sl)
+                    if risk > syminfo.mintick
+                        float tp = bDir == 1 ? entry + risk * riskReward : entry - risk * riskReward
+                        if useLiquidityTP
+                            if bDir == 1
+                                float liq = f_nextLiquidityHigh(entry, risk * 1.5)
+                                if not na(liq)
+                                    tp := math.max(tp, liq)
+                            else
+                                float liq2 = f_nextLiquidityLow(entry, risk * 1.5)
+                                if not na(liq2)
+                                    tp := math.min(tp, liq2)
+                        newDir := bDir
+                        newEntry := entry
+                        newSl := sl
+                        newTp := tp
+                        newProximal := bGapTop
+                        newDistal := bGapBot
+                        newMode := "FVG"
+                    bPhase := 0
+                    bDir := 0
+
+    // ── Mode C Pro BTB ────────────────────────────────────────────
+    if useBtbMode
+        float btbRR = math.max(btbRiskReward, 2.0)
+        if cPhase == 1 and not na(cBreakBar) and bar_index - cBreakBar > maxBtbRetestBars
+            cPhase := 0
+            cDir := 0
+
+        bool cStart = cPhase == 0 and coolOk and newDir == 0
+        float bodyC = math.abs(close - open)
+        if cStart and not na(huntHi)
+            bool brokeHi = close > huntHi + atr * minBreakAtr and close > open and bodyC >= atr * minBreakBodyAtr
+            if brokeHi
+                cPhase := 1
+                cDir := 1
+                cBreakLevel := huntHi
+                cBeLevel := close
+                cBreakExt := low
+                cBreakBar := bar_index
+        if cStart and cPhase == 0 and not na(huntLo)
+            bool brokeLo = close < huntLo - atr * minBreakAtr and close < open and bodyC >= atr * minBreakBodyAtr
+            if brokeLo
+                cPhase := 1
+                cDir := -1
+                cBreakLevel := huntLo
+                cBeLevel := close
+                cBreakExt := high
+                cBreakBar := bar_index
+
+        if cPhase == 1 and bar_index > cBreakBar and newDir == 0
+            if cDir == 1 and low < cBreakExt
+                cBreakExt := low
+            if cDir == -1 and high > cBreakExt
+                cBreakExt := high
+            float touchHi = math.max(cBeLevel, cBreakLevel) + atr * 0.05
+            float touchLo = math.min(cBeLevel, cBreakLevel) - atr * 0.05
+            bool touched = low <= touchHi and high >= touchLo
+            if touched
+                bool confirmed = true
+                if btbRequireConfirm
+                    if cDir == 1
+                        confirmed := close > open and close >= math.min(cBeLevel, cBreakLevel)
+                    else
+                        confirmed := close < open and close <= math.max(cBeLevel, cBreakLevel)
+                if confirmed
+                    if (cDir == 1 and close < cBreakExt) or (cDir == -1 and close > cBreakExt)
+                        cPhase := 0
+                        cDir := 0
+                    else
+                        float entry = cBeLevel
+                        float pad = atr * (slPadAtr + btbSlExtraAtr)
+                        float sl = cDir == 1 ? cBreakExt - pad : cBreakExt + pad
+                        float risk = math.abs(entry - sl)
+                        if risk > syminfo.mintick
+                            float tp = cDir == 1 ? entry + risk * btbRR : entry - risk * btbRR
+                            if useLiquidityTP
+                                if cDir == 1
+                                    float liq = f_nextLiquidityHigh(entry, risk * 1.5)
+                                    if not na(liq)
+                                        tp := math.max(tp, liq)
+                                else
+                                    float liq2 = f_nextLiquidityLow(entry, risk * 1.5)
+                                    if not na(liq2)
+                                        tp := math.min(tp, liq2)
+                            newDir := cDir
+                            newEntry := entry
+                            newSl := sl
+                            newTp := tp
+                            newProximal := cBreakLevel
+                            newDistal := sl
+                            newMode := "BTB"
+                        cPhase := 0
+                        cDir := 0
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DRAWINGS + TRADE STATE
-// 0 armed/wait fill · 1 in trade · 2 TP · 3 SL · 4 expired
 // ═══════════════════════════════════════════════════════════════════════════
 
 var box[]   bZone = array.new<box>()
