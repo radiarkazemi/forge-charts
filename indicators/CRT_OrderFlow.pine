@@ -34,14 +34,15 @@ riskReward       = input.float(2.5, "Risk Reward", step=0.1, group=grpRisk)
 
 grpDisp = "Display"
 onlyLast         = input.bool(true, "Only Last Setup", group=grpDisp)
-clearExpired     = input.bool(true, "Clear Drawings After TP/SL (less noise)", group=grpDisp)
+clearExpired     = input.bool(false, "Hide Old Setups After TP/SL", group=grpDisp,
+     tooltip="OFF = keep last setup boxes/lines + EXIT mark (recommended). ON = wipe drawings after exit (chart can look empty).")
 setupWidth       = input.int(80, "Box Width (bars)", minval=20, maxval=400, group=grpDisp)
 extendLive       = input.bool(true, "Extend Until TP/SL", group=grpDisp)
-showFillMark     = input.bool(true, "Show ENTRY/TP/SL Markers", group=grpDisp)
-showCrtMarks     = input.bool(false, "Show CRT Confirm Dots", group=grpDisp)
+showFillMark     = input.bool(true, "Show ENTRY / TP / SL Markers", group=grpDisp)
+showCrtMarks     = input.bool(true, "Show CRT Confirm Dots", group=grpDisp)
 showAoiBox       = input.bool(true, "Show Live AOI FVG", group=grpDisp)
-maxAoiDraw       = input.int(2, "Max AOI Boxes Drawn", minval=1, maxval=12, group=grpDisp,
-     tooltip="Older mitigated/far AOIs stay in logic but only the newest N are drawn.")
+maxAoiDraw       = input.int(4, "Max AOI Boxes Drawn", minval=1, maxval=12, group=grpDisp,
+     tooltip="Blue/purple HTF FVG zones. 4 keeps the chart readable.")
 showPanel        = input.bool(true, "Info Panel", group=grpDisp)
 
 grpCol = "Colors"
@@ -480,66 +481,92 @@ n = array.size(sDir)
 if n > 0
     for i = 0 to n - 1
         st = array.get(sStat, i)
-        // Live setups only; expired drawings already removed
-        if st <= 1 and i < array.size(bZone) and not na(array.get(bZone, i))
+        if i < array.size(bZone) and not na(array.get(bZone, i))
             dir = array.get(sDir, i)
             e = array.get(sEntry, i)
             s = array.get(sSl, i)
             t = array.get(sTp, i)
             startB = array.get(sBar, i)
-            right = extendLive ? math.max(bar_index, startB + setupWidth) : startB + setupWidth
-            box.set_right(array.get(bZone, i), right)
-            box.set_right(array.get(bTp, i), right)
-            box.set_right(array.get(bSl, i), right)
-            line.set_x2(array.get(lEntry, i), right)
-            line.set_x2(array.get(lSl, i), right)
-            line.set_x2(array.get(lTp, i), right)
-            label.set_x(array.get(labE, i), right)
-            label.set_x(array.get(labS, i), right)
-            label.set_x(array.get(labT, i), right)
 
+            // Live setups keep extending; finished setups freeze in place (still visible)
+            if st <= 1
+                right = extendLive ? math.max(bar_index, startB + setupWidth) : startB + setupWidth
+                box.set_right(array.get(bZone, i), right)
+                box.set_right(array.get(bTp, i), right)
+                box.set_right(array.get(bSl, i), right)
+                line.set_x2(array.get(lEntry, i), right)
+                line.set_x2(array.get(lSl, i), right)
+                line.set_x2(array.get(lTp, i), right)
+                label.set_x(array.get(labE, i), right)
+                label.set_x(array.get(labS, i), right)
+                label.set_x(array.get(labT, i), right)
+
+                if st == 0
+                    hitE = dir == 1 ? low <= e : high >= e
+                    if hitE or (dir == 1 and close >= e) or (dir == -1 and close <= e)
+                        array.set(sStat, i, 1)
+                        activeE := e
+                        activeS := s
+                        activeT := t
+                        if showFillMark and i < array.size(labEvt)
+                            label oldF = array.get(labEvt, i)
+                            if not na(oldF)
+                                label.delete(oldF)
+                            array.set(labEvt, i, label.new(bar_index, e, "▶ ENTRY", style=label.style_label_center, color=dir == 1 ? #00897B : #C62828, textcolor=color.white, size=size.normal))
+                        if alertEntry
+                            alert("CRT ENTRY @ " + str.tostring(e, format.mintick), alert.freq_once_per_bar_close)
+
+                if array.get(sStat, i) == 1
+                    hitT = dir == 1 ? high >= t : low <= t
+                    hitS = dir == 1 ? low <= s : high >= s
+                    if hitT or hitS
+                        array.set(sStat, i, hitT ? 2 : 3)
+                        if showFillMark and i < array.size(labEvt)
+                            label oldX = array.get(labEvt, i)
+                            if not na(oldX)
+                                label.delete(oldX)
+                            array.set(labEvt, i, label.new(bar_index, hitT ? t : s, hitT ? "✓ TP EXIT" : "✗ SL EXIT", style=label.style_label_center, color=hitT ? #26A69A : #EF5350, textcolor=color.white, size=size.normal))
+                        if alertExit
+                            alert((hitT ? "CRT TP EXIT @ " : "CRT SL EXIT @ ") + str.tostring(hitT ? t : s, format.mintick), alert.freq_once_per_bar_close)
+                        // Optional soft wipe (OFF by default — keeps last result on chart)
+                        if clearExpired
+                            box bx = array.get(bZone, i)
+                            box bt = array.get(bTp, i)
+                            box bs = array.get(bSl, i)
+                            label tg = array.get(labTag, i)
+                            if not na(bx)
+                                box.delete(bx)
+                            if not na(bt)
+                                box.delete(bt)
+                            if not na(bs)
+                                box.delete(bs)
+                            if not na(tg)
+                                label.delete(tg)
+                            array.set(bZone, i, na)
+                            array.set(bTp, i, na)
+                            array.set(bSl, i, na)
+                            array.set(labTag, i, na)
+                            // ENTRY/SL/TP lines + EXIT mark stay
+        else if st <= 1 and i < array.size(lEntry) and not na(array.get(lEntry, i))
+            // Soft-wipe left lines only — still manage fills via lines present
+            dir = array.get(sDir, i)
+            e = array.get(sEntry, i)
+            s = array.get(sSl, i)
+            t = array.get(sTp, i)
             if st == 0
                 hitE = dir == 1 ? low <= e : high >= e
                 if hitE or (dir == 1 and close >= e) or (dir == -1 and close <= e)
                     array.set(sStat, i, 1)
-                    activeE := e
-                    activeS := s
-                    activeT := t
-                    if showFillMark and i < array.size(labEvt)
-                        label oldF = array.get(labEvt, i)
-                        if not na(oldF)
-                            label.delete(oldF)
-                        array.set(labEvt, i, label.new(bar_index, e, "▶ ENTRY", style=label.style_label_center, color=dir == 1 ? #00897B : #C62828, textcolor=color.white, size=size.normal))
-                    if alertEntry
-                        alert("CRT ENTRY @ " + str.tostring(e, format.mintick), alert.freq_once_per_bar_close)
-
             if array.get(sStat, i) == 1
                 hitT = dir == 1 ? high >= t : low <= t
                 hitS = dir == 1 ? low <= s : high >= s
                 if hitT or hitS
                     array.set(sStat, i, hitT ? 2 : 3)
                     if showFillMark and i < array.size(labEvt)
-                        label oldX = array.get(labEvt, i)
-                        if not na(oldX)
-                            label.delete(oldX)
+                        label oldX2 = array.get(labEvt, i)
+                        if not na(oldX2)
+                            label.delete(oldX2)
                         array.set(labEvt, i, label.new(bar_index, hitT ? t : s, hitT ? "✓ TP EXIT" : "✗ SL EXIT", style=label.style_label_center, color=hitT ? #26A69A : #EF5350, textcolor=color.white, size=size.normal))
-                    if alertExit
-                        alert((hitT ? "CRT TP EXIT @ " : "CRT SL EXIT @ ") + str.tostring(hitT ? t : s, format.mintick), alert.freq_once_per_bar_close)
-                    // Wipe expired zone + markers; panel still shows last result
-                    if clearExpired
-                        f_del_setup_draw(i)
-                        array.set(bZone, i, na)
-                        array.set(bTp, i, na)
-                        array.set(bSl, i, na)
-                        array.set(lEntry, i, na)
-                        array.set(lSl, i, na)
-                        array.set(lTp, i, na)
-                        array.set(labE, i, na)
-                        array.set(labS, i, na)
-                        array.set(labT, i, na)
-                        array.set(labTag, i, na)
-                        if i < array.size(labEvt)
-                            array.set(labEvt, i, na)
 
 plot(activeE, "ENTRY", color=entryCol, display=display.data_window)
 plot(activeS, "SL", color=slCol, display=display.data_window)
