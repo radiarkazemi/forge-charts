@@ -1,7 +1,9 @@
 //+------------------------------------------------------------------+
 //| CRT_Engine.mqh                                                   |
-//| Standalone CRT OrderFlow (Candle Range Theory + HTF FVG)         |
-//| NOT TRH / NOT RunRox — strategy model only                       |
+//| CRT OrderFlow — STRATEGY source model (3 rules)                  |
+//| 1) ≥2 CRT same dir  2) HTF FVG AOI  3) CRT inside FVG            |
+//| RunRox on source charts = finder tools only (not this strategy)  |
+//| ICT Liquidity Expansion is parked.                               |
 //+------------------------------------------------------------------+
 #ifndef CRT_ENGINE_MQH
 #define CRT_ENGINE_MQH

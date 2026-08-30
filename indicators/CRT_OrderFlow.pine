@@ -2,68 +2,78 @@
 indicator("CRT OrderFlow", shorttitle="CRT OF", overlay=true, max_boxes_count=120, max_lines_count=150, max_labels_count=150, max_bars_back=5000)
 
 // ═══════════════════════════════════════════════════════════════════════════
-// CRT OrderFlow — EXACT source model (STRATEGY / Instagram Jul 29)
-// Sequence from the graphics:
-//   1) Structure (swing high/low)
-//   2) Break of Structure (BOS)
-//   3) FVG = Area of Interest (AOI) after the break
-//   4) CRT Bias = ≥N CRT models same direction into that FVG
-//   5) Entry on CRT confirm inside FVG → delivery
+// CRT OrderFlow — EXACT STRATEGY Instagram Jul 29 model
 //
-// RunRox tools on the source images were VISUALIZATION ONLY:
-//   • MTF FVG [RunRox]  — multi-TF FVG boxes (15m / 30m / 1H)
-//   • RunRox Entry Model — M1 dots / entry areas (not this strategy)
-// This script is NOT a RunRox product.
-// ICT Liquidity Expansion is parked for now.
+// Diagrams: CRT Bias (HH/HL | LH/LL) → Structure BOS (blue dashed) →
+//           CRT Model (green HL/LH levels numbered 1,2,3) → HTF FVG AOI →
+//           ENTRY on CRT inside FVG
+//
+// 3 Rules (source slide):
+//   1) ≥2 CRT Models same direction
+//   2) FVG on higher timeframe
+//   3) New CRT Model forms inside AOI (FVG)
+//
+// RunRox on source charts = finder tools ONLY (not strategy logic):
+//   • MTF FVG [RunRox / Advanced SMC] — we rebuild MTF FVG AOI ourselves
+//   • RunRox Entry Model — M1 dots on images; we use CRT Bias numbers instead
+// ICT (#2) is parked.
 // ═══════════════════════════════════════════════════════════════════════════
 
 grpSeq = "1) Structure → BOS"
 pivotLen     = input.int(5, "Structure Pivot Length", minval=2, maxval=20, group=grpSeq)
 bosBufferAtr = input.float(0.02, "BOS Beyond Structure (ATR×)", step=0.01, group=grpSeq)
 bosLookback  = input.int(80, "Max Bars Structure → BOS", group=grpSeq)
+bosToCrtMax  = input.int(25, "Max Bars BOS → CRT Model", minval=3, group=grpSeq)
 
 grpCrt = "2) CRT Model + Bias"
-rcLookback       = input.int(3, "RC Lookback", minval=1, maxval=8, group=grpCrt)
-minSweepAtr      = input.float(0.08, "Min CRT Sweep ATR", step=0.01, group=grpCrt)
-minRcRangeAtr    = input.float(0.25, "Min RC Range ATR", step=0.05, group=grpCrt)
-requireCloseBack = input.bool(true, "CRT Close Back Into RC", group=grpCrt)
-requireCloseMid  = input.bool(true, "CRT Close Beyond RC Mid", group=grpCrt)
+crtMode = input.string("Diagram HL/LH after BOS", "CRT Model Detection",
+     options=["Diagram HL/LH after BOS", "Classic candle CRT", "Both"], group=grpCrt,
+     tooltip="Source diagrams mark green HL after Structure BOS as CRT Model.")
+rcLookback       = input.int(3, "RC Lookback (classic)", minval=1, maxval=8, group=grpCrt)
+minSweepAtr      = input.float(0.08, "Min CRT Sweep ATR (classic)", step=0.01, group=grpCrt)
+minRcRangeAtr    = input.float(0.25, "Min RC Range ATR (classic)", step=0.05, group=grpCrt)
+requireCloseBack = input.bool(true, "Classic: Close Back Into RC", group=grpCrt)
+requireCloseMid  = input.bool(true, "Classic: Close Beyond RC Mid", group=grpCrt)
 minBiasModels    = input.int(2, "Min CRT Same Dir (CRT Bias)", minval=1, maxval=5, group=grpCrt,
-     tooltip="Source shows stacked CRT Bias (1,2,3). Default ≥2.")
+     tooltip="Rule 1 — source: at least two CRT models same direction.")
 biasLookback     = input.int(40, "Bias Lookback Bars", group=grpCrt)
 minCrtGapBars    = input.int(5, "Min Bars Between CRT Marks", minval=1, group=grpCrt)
 cooldownBars     = input.int(10, "Cooldown Between Setups", group=grpCrt)
 
-grpFvg = "3) FVG AOI (like MTF FVG on source chart)"
+grpFvg = "3) FVG AOI (replaces RunRox MTF FVG tool)"
 useMtfFvg   = input.bool(true, "Use Multi-TF FVG AOI (15m+30m+1H)", group=grpFvg,
-     tooltip="Matches RunRox MTF FVG look on the source: AOI from higher TFs on LTF chart.")
+     tooltip="Rule 2 — HTF FVG. Same job as RunRox MTF FVG on the source charts.")
 autoSingleHtf = input.bool(true, "If Multi off: Auto HTF (1m→5m…)", group=grpFvg)
 htfManual   = input.timeframe("15", "Single HTF (if Multi+Auto off)", group=grpFvg)
 minFvgAtr   = input.float(0.05, "Min FVG ATR", step=0.01, group=grpFvg)
 mitigateCloseOnly = input.bool(true, "Mitigate FVG on Close Only", group=grpFvg)
 maxAoiKeep  = input.int(12, "Max Live AOI", minval=1, maxval=40, group=grpFvg)
 requireBosBeforeFvg = input.bool(true, "FVG Must Follow BOS Same Dir", group=grpFvg)
-crtMustTouchFvg = input.bool(true, "CRT Must Touch FVG AOI", group=grpFvg)
+crtMustTouchFvg = input.bool(true, "Rule 3: CRT Must Form Inside FVG AOI", group=grpFvg)
 
 grpRisk = "4) Entry / SL / TP"
 slPadAtr   = input.float(0.06, "SL Pad ATR", step=0.01, group=grpRisk)
 riskReward = input.float(2.5, "Risk Reward", step=0.1, group=grpRisk)
 tpToStructure = input.bool(true, "Prefer Next Structure As TP", group=grpRisk)
+entryAtFvgMid = input.bool(true, "ENTRY = FVG Mid (else CRT level)", group=grpRisk)
 
 grpDisp = "Display"
 onlyLast       = input.bool(true, "Only Last Setup", group=grpDisp)
 setupWidth     = input.int(80, "Box Width (bars)", minval=20, group=grpDisp)
 extendLive     = input.bool(true, "Extend Until TP/SL", group=grpDisp)
-showStructure  = input.bool(true, "Show Structure Lines", group=grpDisp)
+showStructure  = input.bool(true, "Show Structure (blue dashed)", group=grpDisp)
 showBosMark    = input.bool(true, "Show BOS Marks", group=grpDisp)
+showCrtLevels  = input.bool(true, "Show CRT Model Levels (green)", group=grpDisp)
 showCrtMarks   = input.bool(true, "Show CRT Bias Dots + Numbers", group=grpDisp)
 showAoiBox     = input.bool(true, "Show FVG AOI Boxes", group=grpDisp)
 maxAoiDraw     = input.int(4, "Max AOI Boxes Drawn", minval=1, maxval=12, group=grpDisp)
 showFillMark   = input.bool(true, "Show ENTRY/TP/SL Markers", group=grpDisp)
 showPanel      = input.bool(true, "Info Panel", group=grpDisp)
+maxCrtKeep     = input.int(12, "Max CRT Levels Kept", minval=2, maxval=40, group=grpDisp)
 
 grpCol = "Colors"
-structCol   = input.color(color.new(#42A5F5, 0), "Structure", group=grpCol)
+structCol   = input.color(color.new(#42A5F5, 0), "Structure (blue dashed)", group=grpCol)
+crtLvlCol   = input.color(#26A69A, "CRT Model Level (green)", group=grpCol)
 bullZoneCol = input.color(color.new(#26A69A, 82), "Long Zone", group=grpCol)
 bearZoneCol = input.color(color.new(#EF5350, 82), "Short Zone", group=grpCol)
 fvgBullCol  = input.color(color.new(#42A5F5, 82), "Bull FVG AOI", group=grpCol)
@@ -79,7 +89,7 @@ alertExit    = input.bool(true, "Alert: SL/TP", group=grpAlert)
 
 atr = ta.atr(14)
 
-// ── Structure pivots ──────────────────────────────────────────────────────
+// ── Structure pivots (levels drawn on BOS — blue dashed like source) ──────
 ph = ta.pivothigh(high, pivotLen, pivotLen)
 pl = ta.pivotlow(low, pivotLen, pivotLen)
 var float[] shPx = array.new_float()
@@ -94,20 +104,12 @@ if not na(ph)
     while array.size(shPx) > 20
         array.shift(shPx)
         array.shift(shBar)
-    if showStructure
-        array.push(structLines, line.new(bar_index - pivotLen, ph, bar_index + 8, ph, color=structCol, style=line.style_dashed, width=1))
-        while array.size(structLines) > 30
-            line.delete(array.shift(structLines))
 if not na(pl)
     array.push(slPx, pl)
     array.push(slBar, bar_index - pivotLen)
     while array.size(slPx) > 20
         array.shift(slPx)
         array.shift(slBar)
-    if showStructure
-        array.push(structLines, line.new(bar_index - pivotLen, pl, bar_index + 8, pl, color=color.new(#26A69A, 30), style=line.style_dashed, width=1))
-        while array.size(structLines) > 30
-            line.delete(array.shift(structLines))
 
 f_lastStructHigh() =>
     float px = na
@@ -145,10 +147,11 @@ f_nextStructLow(fromPx) =>
                     best := p
     best
 
-// ── BOS state ─────────────────────────────────────────────────────────────
+// ── BOS state → Structure blue dashed (source diagram) ────────────────────
 var int   lastBosDir = 0
 var int   lastBosBar = na
 var float lastBosLevel = na
+var int   lastBosStructBar = na
 bosNow = false
 bosDirNow = 0
 
@@ -160,27 +163,42 @@ if barstate.isconfirmed
         lastBosDir := 1
         lastBosBar := bar_index
         lastBosLevel := shi
+        lastBosStructBar := shiB
         bosNow := true
         bosDirNow := 1
+        if showStructure
+            array.push(structLines, line.new(shiB, shi, bar_index + 12, shi, color=structCol, style=line.style_dashed, width=1))
+            while array.size(structLines) > 30
+                line.delete(array.shift(structLines))
     if not na(slo) and not na(sloB) and bar_index - sloB <= bosLookback and close < slo - buf and close < open
         lastBosDir := -1
         lastBosBar := bar_index
         lastBosLevel := slo
+        lastBosStructBar := sloB
         bosNow := true
         bosDirNow := -1
+        if showStructure
+            array.push(structLines, line.new(sloB, slo, bar_index + 12, slo, color=structCol, style=line.style_dashed, width=1))
+            while array.size(structLines) > 30
+                line.delete(array.shift(structLines))
 
 plotshape(showBosMark and bosNow and bosDirNow == 1, title="BOS Up", style=shape.xcross, location=location.belowbar, color=color.new(#42A5F5, 10), size=size.tiny)
 plotshape(showBosMark and bosNow and bosDirNow == -1, title="BOS Dn", style=shape.xcross, location=location.abovebar, color=color.new(#AB47BC, 10), size=size.tiny)
 
-// ── CRT detect ────────────────────────────────────────────────────────────
+// ── CRT Model (green levels + numbered bias like source) ──────────────────
 var int[]   crtBars  = array.new_int()
 var int[]   crtDirs  = array.new_int()
 var float[] crtSweep = array.new_float()
 var float[] crtMid   = array.new_float()
+var float[] crtLvl   = array.new_float()
 var label[] crtLabs  = array.new_label()
+var line[]  crtLines = array.new_line()
+var int lastCrtFromBos = na
 
 crtFound = false
 crtDirNow = 0
+useDiagram = crtMode == "Diagram HL/LH after BOS" or crtMode == "Both"
+useClassic = crtMode == "Classic candle CRT" or crtMode == "Both"
 
 f_bias(int dir) =>
     int n = 0
@@ -190,84 +208,140 @@ f_bias(int dir) =>
                 n += 1
     n
 
+f_push_crt(int dirNow, float sweepNow, float midNow, float lvlNow) =>
+    bool dup = false
+    if array.size(crtBars) > 0
+        dup := bar_index - array.get(crtBars, array.size(crtBars) - 1) < minCrtGapBars
+    bool ok = not dup
+    if ok
+        array.push(crtBars, bar_index)
+        array.push(crtDirs, dirNow)
+        array.push(crtSweep, sweepNow)
+        array.push(crtMid, midNow)
+        array.push(crtLvl, lvlNow)
+        int biasN = 0
+        for i = 0 to array.size(crtBars) - 1
+            if bar_index - array.get(crtBars, i) <= biasLookback and array.get(crtDirs, i) == dirNow
+                biasN += 1
+        if showCrtLevels
+            array.push(crtLines, line.new(bar_index - pivotLen, lvlNow, bar_index + 14, lvlNow, color=crtLvlCol, width=2))
+            while array.size(crtLines) > maxCrtKeep
+                line.delete(array.shift(crtLines))
+        if showCrtMarks
+            array.push(crtLabs, label.new(bar_index, dirNow == 1 ? low : high, str.tostring(biasN), style=dirNow == 1 ? label.style_label_up : label.style_label_down, color=dirNow == 1 ? #26A69A : #EF5350, textcolor=color.white, size=size.tiny))
+            while array.size(crtLabs) > 40
+                label.delete(array.shift(crtLabs))
+        while array.size(crtBars) > 80
+            array.shift(crtBars)
+            array.shift(crtDirs)
+            array.shift(crtSweep)
+            array.shift(crtMid)
+            array.shift(crtLvl)
+    ok
+
 if barstate.isconfirmed
-    float minPierce = math.max(atr * minSweepAtr, syminfo.mintick)
-    float minRc = math.max(atr * minRcRangeAtr, syminfo.mintick * 5)
     bool foundNow = false
     int dirNow = 0
     float sweepNow = na
     float midNow = na
+    float lvlNow = na
+    bool fromDiagram = false
 
-    for rc = 1 to rcLookback
-        float rcH = high[rc]
-        float rcL = low[rc]
-        float rcMid = (rcH + rcL) * 0.5
-        if rcH - rcL >= minRc
-            // Classic CRT: RC at [rc], sweep on bars [0..rc-1] (incl. current), close back on [0]
-            float bullExt = rcL
-            int bullSw = -1
-            for s = 0 to rc - 1
-                if low[s] < rcL - minPierce
-                    if bullSw < 0 or low[s] < bullExt
-                        bullSw := s
-                        bullExt := low[s]
-            bool bullOk = bullSw >= 0
-            if bullOk and requireCloseBack
-                bullOk := close > rcL
-            if bullOk and requireCloseMid
-                bullOk := close >= rcMid
-            if bullOk and close <= open
-                bullOk := false
-
-            float bearExt = rcH
-            int bearSw = -1
-            for s = 0 to rc - 1
-                if high[s] > rcH + minPierce
-                    if bearSw < 0 or high[s] > bearExt
-                        bearSw := s
-                        bearExt := high[s]
-            bool bearOk = bearSw >= 0
-            if bearOk and requireCloseBack
-                bearOk := close < rcH
-            if bearOk and requireCloseMid
-                bearOk := close <= rcMid
-            if bearOk and close >= open
-                bearOk := false
-
-            if bullOk and (not bearOk or close > open)
+    // Diagram CRT Model: after BOS, first pullback HL (bull) / LH (bear) = green CRT
+    // One CRT Model per BOS (source: Structure break → green level 1/2/3)
+    int pivotBar = bar_index - pivotLen
+    if useDiagram and not na(lastBosBar) and pivotBar > lastBosBar and bar_index - lastBosBar <= bosToCrtMax and (na(lastCrtFromBos) or lastCrtFromBos != lastBosBar)
+        if lastBosDir == 1 and not na(pl)
+            float lvl = pl
+            bool hlOk = true
+            if array.size(crtLvl) > 0
+                for i = array.size(crtLvl) - 1 to 0
+                    if array.get(crtDirs, i) == 1
+                        hlOk := lvl >= array.get(crtLvl, i) - atr * 0.15
+                        break
+            if hlOk
                 foundNow := true
+                fromDiagram := true
                 dirNow := 1
-                sweepNow := bullExt
-                midNow := rcMid
-                break
-            if bearOk
+                lvlNow := lvl
+                sweepNow := math.min(low, low[1], low[2], lvl)
+                midNow := lvl
+        if lastBosDir == -1 and not na(ph) and not foundNow
+            float lvl = ph
+            bool lhOk = true
+            if array.size(crtLvl) > 0
+                for i = array.size(crtLvl) - 1 to 0
+                    if array.get(crtDirs, i) == -1
+                        lhOk := lvl <= array.get(crtLvl, i) + atr * 0.15
+                        break
+            if lhOk
                 foundNow := true
+                fromDiagram := true
                 dirNow := -1
-                sweepNow := bearExt
-                midNow := rcMid
-                break
+                lvlNow := lvl
+                sweepNow := math.max(high, high[1], high[2], lvl)
+                midNow := lvl
+
+    // Classic candle CRT (optional / Both)
+    if useClassic and not foundNow
+        float minPierce = math.max(atr * minSweepAtr, syminfo.mintick)
+        float minRc = math.max(atr * minRcRangeAtr, syminfo.mintick * 5)
+        for rc = 1 to rcLookback
+            float rcH = high[rc]
+            float rcL = low[rc]
+            float rcMid = (rcH + rcL) * 0.5
+            if rcH - rcL >= minRc
+                float bullExt = rcL
+                int bullSw = -1
+                for s = 0 to rc - 1
+                    if low[s] < rcL - minPierce
+                        if bullSw < 0 or low[s] < bullExt
+                            bullSw := s
+                            bullExt := low[s]
+                bool bullOk = bullSw >= 0
+                if bullOk and requireCloseBack
+                    bullOk := close > rcL
+                if bullOk and requireCloseMid
+                    bullOk := close >= rcMid
+                if bullOk and close <= open
+                    bullOk := false
+
+                float bearExt = rcH
+                int bearSw = -1
+                for s = 0 to rc - 1
+                    if high[s] > rcH + minPierce
+                        if bearSw < 0 or high[s] > bearExt
+                            bearSw := s
+                            bearExt := high[s]
+                bool bearOk = bearSw >= 0
+                if bearOk and requireCloseBack
+                    bearOk := close < rcH
+                if bearOk and requireCloseMid
+                    bearOk := close <= rcMid
+                if bearOk and close >= open
+                    bearOk := false
+
+                if bullOk and (not bearOk or close > open)
+                    foundNow := true
+                    dirNow := 1
+                    sweepNow := bullExt
+                    midNow := rcMid
+                    lvlNow := rcL
+                    break
+                if bearOk
+                    foundNow := true
+                    dirNow := -1
+                    sweepNow := bearExt
+                    midNow := rcMid
+                    lvlNow := rcH
+                    break
 
     if foundNow
-        bool dup = false
-        if array.size(crtBars) > 0
-            dup := bar_index - array.get(crtBars, array.size(crtBars) - 1) < minCrtGapBars
-        if not dup
-            array.push(crtBars, bar_index)
-            array.push(crtDirs, dirNow)
-            array.push(crtSweep, sweepNow)
-            array.push(crtMid, midNow)
+        if f_push_crt(dirNow, sweepNow, midNow, lvlNow)
             crtFound := true
             crtDirNow := dirNow
-            int biasN = f_bias(dirNow)
-            if showCrtMarks
-                array.push(crtLabs, label.new(bar_index, dirNow == 1 ? low : high, str.tostring(biasN), style=dirNow == 1 ? label.style_label_up : label.style_label_down, color=dirNow == 1 ? #26A69A : #EF5350, textcolor=color.white, size=size.tiny))
-                while array.size(crtLabs) > 40
-                    label.delete(array.shift(crtLabs))
-            while array.size(crtBars) > 80
-                array.shift(crtBars)
-                array.shift(crtDirs)
-                array.shift(crtSweep)
-                array.shift(crtMid)
+            if fromDiagram
+                lastCrtFromBos := lastBosBar
 
 plotshape(showCrtMarks and crtFound and crtDirNow == 1, title="CRT Bias Long", style=shape.circle, location=location.belowbar, color=color.new(#26A69A, 15), size=size.tiny)
 plotshape(showCrtMarks and crtFound and crtDirNow == -1, title="CRT Bias Short", style=shape.circle, location=location.abovebar, color=color.new(#EF5350, 15), size=size.tiny)
@@ -445,9 +519,10 @@ if barstate.isconfirmed and crtFound and array.size(crtBars) > 0
     bool coolOk = lastExited or na(lastSetupBar) or (bar_index - lastSetupBar >= cooldownBars)
 
     if biasOk and bosOk and fvgOk and coolOk
-        float entry = not na(fTop) ? (fTop + fBot) * 0.5 : mid
+        float crtLevel = array.size(crtLvl) > 0 ? array.get(crtLvl, array.size(crtLvl) - 1) : mid
+        float entry = entryAtFvgMid and not na(fTop) ? (fTop + fBot) * 0.5 : crtLevel
         float pad = atr * slPadAtr
-        float sl = dir == 1 ? sw - pad : sw + pad
+        float sl = dir == 1 ? math.min(sw, nz(fBot, sw)) - pad : math.max(sw, nz(fTop, sw)) + pad
         float risk = math.abs(entry - sl)
         if risk > syminfo.mintick
             float tp = dir == 1 ? entry + risk * riskReward : entry - risk * riskReward
@@ -465,8 +540,8 @@ if barstate.isconfirmed and crtFound and array.size(crtBars) > 0
             newSl := sl
             newTp := tp
             newBias := bias
-            newProx := not na(fTop) ? fTop : entry + risk
-            newDist := not na(fBot) ? fBot : entry - risk
+            newProx := not na(fTop) ? fTop : crtLevel
+            newDist := not na(fBot) ? fBot : crtLevel
             newAoiTf := fTf
             lastSetupBar := bar_index
 
@@ -645,19 +720,20 @@ if showPanel and barstate.islast
         table.cell(info, 1, 7, str.tostring(liveR, "#.##") + "R", text_color=st == 3 ? #FF8A80 : #69F0AE, text_size=size.small)
     else
         bosTxt = lastBosDir == 0 ? "need BOS" : (lastBosDir == 1 ? "BOS↑" : "BOS↓")
-        status = aoiN > 0 ? (bosTxt + " · AOI x" + str.tostring(aoiN) + " · bias L/S " + str.tostring(longBias) + "/" + str.tostring(shortBias)) : (bosTxt + " · need FVG AOI")
+        biasTxt = longBias >= minBiasModels ? "BULL" : shortBias >= minBiasModels ? "BEAR" : "building"
+        status = bosTxt + " · AOI " + str.tostring(aoiN) + " · bias " + biasTxt
         table.cell(info, 0, 0, "CRT OF", text_color=color.white, text_size=size.small)
         table.cell(info, 1, 0, status, text_color=color.gray, text_size=size.small)
         table.cell(info, 0, 1, "Model", text_color=color.gray, text_size=size.small)
-        table.cell(info, 1, 1, "Structure→BOS→FVG→CRT Bias", text_color=color.white, text_size=size.small)
-        table.cell(info, 0, 2, "Bias need", text_color=color.gray, text_size=size.small)
-        table.cell(info, 1, 2, "≥" + str.tostring(minBiasModels) + " CRT same dir", text_color=color.white, text_size=size.small)
+        table.cell(info, 1, 1, "Bias→Structure→CRT→FVG", text_color=color.white, text_size=size.small)
+        table.cell(info, 0, 2, "Rules", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 2, "≥" + str.tostring(minBiasModels) + " CRT · HTF FVG · CRT in AOI", text_color=color.white, text_size=size.small)
         table.cell(info, 0, 3, "AOI", text_color=color.gray, text_size=size.small)
-        table.cell(info, 1, 3, useMtfFvg ? ("MTF FVG live " + str.tostring(aoiN)) : ("HTF " + htfSingle + " · " + str.tostring(aoiN)), text_color=aoiN > 0 ? #69F0AE : color.white, text_size=size.small)
-        table.cell(info, 0, 4, "", text_color=color.gray, text_size=size.small)
-        table.cell(info, 1, 4, "", text_color=color.gray, text_size=size.small)
-        table.cell(info, 0, 5, "", text_color=color.gray, text_size=size.small)
-        table.cell(info, 1, 5, "", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 3, useMtfFvg ? ("MTF 15/30/1H · " + str.tostring(aoiN)) : ("HTF " + htfSingle + " · " + str.tostring(aoiN)), text_color=aoiN > 0 ? #69F0AE : color.white, text_size=size.small)
+        table.cell(info, 0, 4, "Bias L/S", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 4, str.tostring(longBias) + " / " + str.tostring(shortBias), text_color=color.white, text_size=size.small)
+        table.cell(info, 0, 5, "Tools", text_color=color.gray, text_size=size.small)
+        table.cell(info, 1, 5, "RunRox = CRT/FVG finder only", text_color=color.gray, text_size=size.small)
         table.cell(info, 0, 6, "", text_color=color.gray, text_size=size.small)
         table.cell(info, 1, 6, "", text_color=color.gray, text_size=size.small)
         table.cell(info, 0, 7, "", text_color=color.gray, text_size=size.small)

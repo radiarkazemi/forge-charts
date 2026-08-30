@@ -1,14 +1,15 @@
 # CRT OrderFlow (standalone)
 
-Exact source model (STRATEGY / Instagram Jul 29):
+Exact STRATEGY Instagram Jul 29 model:
 
-1. **Structure** (swing high/low)
-2. **BOS** (break of structure)
-3. **FVG** = Area of Interest after the break
-4. **CRT Bias** = ≥N CRT models same direction into that FVG
-5. **Entry** on CRT confirm inside FVG → delivery
+1. **CRT Bias** — HH/HL (bull) or LH/LL (bear)
+2. **Structure** — swing broken (blue dashed BOS)
+3. **CRT Model** — green HL/LH after BOS, stacked ≥2 for bias
+4. **FVG AOI** — higher-TF FVG (rule 2)
+5. **Entry** — new CRT inside FVG AOI (rule 3)
 
-> **RunRox** on the source images = visualization only (MTF FVG via Advanced SMC, Entry Model dots/zones).  
+> **RunRox** on the source images = visualization / finder only  
+> (MTF FVG via Advanced SMC, Entry Model M1 dots).  
 > This package is **not** a RunRox product. ICT Liquidity Expansion is parked.
 
 ## MT5
@@ -21,7 +22,9 @@ mt5/CRT_OrderFlow/
 ```
 
 Install Engine beside each `.mq5`, Compile, attach to chart.  
-Pine matches exact sequence with MTF FVG (15/30/60). AOI mitigated on **close only** so 1m wicks do not wipe HTF boxes.
+Pine default CRT detection = **Diagram HL/LH after BOS** (matches source green levels).  
+MT5 engine currently uses classic candle CRT for model marks + HTF FVG AOI + bias ≥2 + CRT-in-FVG (same 3 rules).  
+AOI mitigated on **close only** so 1m wicks do not wipe HTF boxes.  
 MT5 default HTF FVG = **M15** (set to M5 when trading M1).
 
 Zip: https://goldanil.ir/crt-mt5/CRT_OrderFlow_MT5.zip
@@ -30,7 +33,7 @@ Zip: https://goldanil.ir/crt-mt5/CRT_OrderFlow_MT5.zip
 
 `indicators/CRT_OrderFlow.pine` — paste into Pine Editor → Add to chart.
 
-Raw (after push): see PR / `indicators/README.md`.
+Raw: `https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/crt-exact-model-992e/indicators/CRT_OrderFlow.pine`
 
 ## Defaults
 
