@@ -54,6 +54,9 @@ assert(sources["TRH_Engine.mqh"].includes("Wilder RMA"), "Engine ATR is Wilder R
 assert(sources["TRH_Trading_Room_Hunter.mq5"].includes("InpTradeMode = TRH_TM_BOTH"), "Indicator default A+B");
 assert(sources["TRH_AutoTrade.mq5"].includes("InpTradeMode = TRH_TM_BOTH"), "EA default A+B");
 assert(sources["TRH_AutoTrade.mq5"].includes("InpRiskReward      = 2.4"), "EA InpRiskReward=2.4");
+assert(sources["TRH_AutoTrade.mq5"].includes("InpBeStyle     = TRH_BE_SMART"), "EA default BE-SMART (not early 0.5R)");
+assert(sources["TRH_AutoTrade.mq5"].includes("InpBreakEvenAtR           = 1.20"), "EA smart BE trigger 1.20R");
+assert(sources["TRH_AutoTrade.mq5"].includes("|R="), "EA embeds orig risk in order comment");
 assert(sources["TRH_AutoTrade.mq5"].includes('#include "TRH_Engine.mqh"'), "EA includes shared engine");
 assert(sources["TRH_Trading_Room_Hunter.mq5"].includes('#include "TRH_Engine.mqh"'), "Indicator includes shared engine");
 

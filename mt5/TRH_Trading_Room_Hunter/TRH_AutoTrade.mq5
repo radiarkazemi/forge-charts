@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.30"
-#property description "TRH EA v3.30: unified A+B Pine coolOk · catch SWEEPs after FVG"
+#property version   "3.31"
+#property description "TRH EA v3.31: smart late BE · mode-aware · closed-bar · no early 0.5R kills"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -22,6 +22,14 @@ enum ENUM_TRH_TRADE_MODE
    TRH_TM_BOTH    = 2, // A + B (default)
    TRH_TM_BTB     = 3, // legacy off
    TRH_TM_ALL     = 4  // A + B (BTB removed)
+};
+
+enum ENUM_TRH_BE_STYLE
+{
+   TRH_BE_OFF    = 0, // No break-even
+   TRH_BE_EARLY  = 1, // Old: BE at 0.5R (kills pullback-to-TP)
+   TRH_BE_SMART  = 2, // Late BE + closed-bar confirm + mode-aware
+   TRH_BE_STEP   = 3  // Reduce risk first, full BE later
 };
 
 input group "Trading"
@@ -50,10 +58,16 @@ input bool   InpUseDailyLimits    = true;
 input double InpMaxDailyLossPct   = 4.0;
 input int    InpMaxDailyTrades    = 8;
 
-input group "4) Break-even"
-input bool   InpUseBreakEven      = true;
-input double InpBreakEvenAtR      = 0.5;
-input double InpBreakEvenLockR    = 0.05;
+input group "4) Smart break-even (not early risk-free)"
+input ENUM_TRH_BE_STYLE InpBeStyle     = TRH_BE_SMART; // Break-even style
+input double InpBreakEvenAtR           = 1.20;  // Smart/Step: full BE trigger (R) — was 0.5
+input double InpBreakEvenLockR         = 0.10;  // Lock this R past entry after BE
+input double InpBeModeAExtraR          = 0.30;  // Mode A needs more room (+R on trigger)
+input double InpBeModeBAtR             = 1.00;  // Mode B full BE trigger (R)
+input double InpBeStepReduceAtR        = 0.80;  // Step style: first move SL to cut risk at this R
+input double InpBeStepKeepRiskR        = 0.50;  // Step style: keep this fraction of original risk
+input bool   InpBeRequireClosedBar     = true;  // Only BE if last CLOSED bar reached trigger (ignore wicks)
+input int    InpBeMinBarsOpen          = 3;     // Min bars after open before any BE/step
 
 input group "5) Smart ENTRY fill"
 input double InpMarketTolAtr      = 0.25;
@@ -450,7 +464,12 @@ int PlaceSetupTrade(const TrhSetup &s, const double atrNow, const bool forceMark
    g_trade.SetDeviationInPoints(InpMaxSlippagePts);
    g_trade.SetTypeFillingBySymbol(_Symbol);
 
-   string comment = StringFormat("%s %s", TrhModeLabel(s.setupMode), s.dir == 1 ? "LONG" : "SHORT");
+   // Embed original risk so BE stays correct after SL moves (|R= kept short for MT5 comment limit)
+   double origRisk = MathAbs(entry - sl);
+   string comment = StringFormat("%s %s |R=%.2f",
+      TrhModeLabel(s.setupMode),
+      s.dir == 1 ? "LONG" : "SHORT",
+      origRisk);
    bool ok = false;
    string mode = "";
 
@@ -653,9 +672,48 @@ void CancelRunThroughPendings(const double atrNow)
    }
 }
 
+int CommentModeId(const string cmt)
+{
+   if(StringFind(cmt, "B · FVG") >= 0 || StringFind(cmt, "B·FVG") >= 0 || StringFind(cmt, "FVG") >= 0)
+      return TRH_MODE_FVG;
+   if(StringFind(cmt, "C · BTB") >= 0 || StringFind(cmt, "BTB") >= 0)
+      return TRH_MODE_BTB;
+   return TRH_MODE_CLASSIC;
+}
+
+double CommentOrigRisk(const string cmt, const double fallback)
+{
+   int p = StringFind(cmt, "|R=");
+   if(p < 0) return fallback;
+   string tail = StringSubstr(cmt, p + 3);
+   double v = StringToDouble(tail);
+   return (v > 0) ? v : fallback;
+}
+
+double BeTriggerR(const int modeId)
+{
+   if(InpBeStyle == TRH_BE_EARLY) return 0.50;
+   if(modeId == TRH_MODE_FVG) return MathMax(InpBeModeBAtR, 0.8);
+   // Mode A SWEEP — often revisits near SL before TP
+   return MathMax(InpBreakEvenAtR + InpBeModeAExtraR, InpBreakEvenAtR);
+}
+
+bool ClosedBarReachedR(const int dir, const double entry, const double risk, const double needR)
+{
+   if(!InpBeRequireClosedBar) return true;
+   if(risk <= 0) return false;
+   double c1 = iClose(_Symbol, _Period, 1);
+   if(c1 <= 0) return false;
+   double favor = (dir == 1) ? (c1 - entry) : (entry - c1);
+   return (favor / risk) >= needR;
+}
+
 void ManageBreakEven()
 {
-   if(!InpUseBreakEven) return;
+   if(InpBeStyle == TRH_BE_OFF) return;
+
+   int periodSec = PeriodSeconds(_Period);
+   if(periodSec <= 0) periodSec = 60;
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
@@ -665,48 +723,78 @@ void ManageBreakEven()
       if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
 
       long type = PositionGetInteger(POSITION_TYPE);
+      int dir = (type == POSITION_TYPE_BUY) ? 1 : -1;
       double entry = PositionGetDouble(POSITION_PRICE_OPEN);
       double sl    = PositionGetDouble(POSITION_SL);
       double tp    = PositionGetDouble(POSITION_TP);
+      string cmt   = PositionGetString(POSITION_COMMENT);
+      datetime opened = (datetime)PositionGetInteger(POSITION_TIME);
       if(entry <= 0) continue;
 
-      double risk = 0;
-      if(type == POSITION_TYPE_BUY)
-         risk = (sl > 0 && sl < entry) ? (entry - sl) : 0;
-      else
-         risk = (sl > 0 && sl > entry) ? (sl - entry) : 0;
+      int barsOpen = (int)((TimeCurrent() - opened) / periodSec);
+      if(barsOpen < InpBeMinBarsOpen) continue;
 
-      if(risk <= 0)
+      int modeId = CommentModeId(cmt);
+
+      // Original risk from comment (stable after SL moves) or current adverse SL
+      double riskNow = 0;
+      if(dir == 1) riskNow = (sl > 0 && sl < entry) ? (entry - sl) : 0;
+      else         riskNow = (sl > 0 && sl > entry) ? (sl - entry) : 0;
+      double risk0 = CommentOrigRisk(cmt, 0);
+      if(risk0 <= 0)
       {
-         if(tp > 0)
-            risk = MathAbs(tp - entry) / MathMax(InpRiskReward, 0.1);
-         else
-            continue;
+         if(riskNow > 0) risk0 = riskNow;
+         else if(tp > 0) risk0 = MathAbs(tp - entry) / MathMax(InpRiskReward, 0.1);
+         else continue;
       }
 
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      double favor = (type == POSITION_TYPE_BUY) ? (bid - entry) : (entry - ask);
-      double rNow = favor / risk;
-      if(rNow < InpBreakEvenAtR) continue;
+      double favor = (dir == 1) ? (bid - entry) : (entry - ask);
+      double rNow = favor / risk0;
 
-      double lock = risk * InpBreakEvenLockR;
-      double newSL;
-      if(type == POSITION_TYPE_BUY)
+      double fullBeR = BeTriggerR(modeId);
+
+      // Step 1: only cut risk (keep room for near-SL → TP paths)
+      if(InpBeStyle == TRH_BE_STEP && rNow >= InpBeStepReduceAtR && riskNow > risk0 * InpBeStepKeepRiskR + _Point)
       {
-         newSL = NormalizeDouble(entry + lock, _Digits);
+         if(ClosedBarReachedR(dir, entry, risk0, InpBeStepReduceAtR))
+         {
+            double keep = risk0 * MathMax(MathMin(InpBeStepKeepRiskR, 0.9), 0.2);
+            double newSL = (dir == 1)
+               ? NormalizeDouble(entry - keep, _Digits)
+               : NormalizeDouble(entry + keep, _Digits);
+            bool better = (dir == 1) ? (newSL > sl) : (sl == 0 || newSL < sl);
+            bool safe = (dir == 1) ? (bid > newSL) : (ask < newSL);
+            if(better && safe && g_trade.PositionModify(ticket, newSL, tp))
+               PrintFormat("TRH BE-STEP: #%I64u SL→%s keepRisk=%.2fR (live %.2fR, mode=%d)",
+                  ticket, DoubleToString(newSL, _Digits), InpBeStepKeepRiskR, rNow, modeId);
+         }
+      }
+
+      // Full BE — late + closed-bar confirm so wicks near SL can still reach TP
+      if(rNow < fullBeR) continue;
+      if(!ClosedBarReachedR(dir, entry, risk0, fullBeR)) continue;
+
+      double lock = risk0 * InpBreakEvenLockR;
+      double newSL = (dir == 1)
+         ? NormalizeDouble(entry + lock, _Digits)
+         : NormalizeDouble(entry - lock, _Digits);
+
+      if(dir == 1)
+      {
          if(sl >= newSL) continue;
          if(bid <= newSL) continue;
       }
       else
       {
-         newSL = NormalizeDouble(entry - lock, _Digits);
-         if(sl <= newSL && sl > 0) continue;
+         if(sl > 0 && sl <= newSL) continue;
          if(ask >= newSL) continue;
       }
 
       if(g_trade.PositionModify(ticket, newSL, tp))
-         PrintFormat("TRH BE: ticket=%I64u newSL=%s at %.2fR", ticket, DoubleToString(newSL, _Digits), rNow);
+         PrintFormat("TRH BE-SMART: #%I64u newSL=%s at %.2fR (trigger %.2fR, mode=%d, style=%d)",
+            ticket, DoubleToString(newSL, _Digits), rNow, fullBeR, modeId, (int)InpBeStyle);
    }
 }
 
@@ -737,9 +825,15 @@ void UpdateComment(const TrhSetup &last, const int ageBars, const double lots)
            g_workTries, g_workStatus)
       : ("idle: " + g_workStatus);
 
+   string beName = "BE-OFF";
+   if(InpBeStyle == TRH_BE_EARLY) beName = "BE-EARLY";
+   else if(InpBeStyle == TRH_BE_SMART) beName = "BE-SMART";
+   else if(InpBeStyle == TRH_BE_STEP) beName = "BE-STEP";
+
    Comment(StringFormat(
-      "TRH EA v3.30 | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
+      "TRH EA v3.31 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
       InpAutoTrade ? "ON" : "OFF",
+      beName,
       last.dir == 1 ? "LONG" : "SHORT",
       TrhModeFullName(last.setupMode),
       ageBars,
@@ -767,14 +861,15 @@ int OnInit()
    g_workActive = false;
    g_workStatus = "boot";
 
-   PrintFormat("TRH AutoTrade v3.30 | mode=A+B | pullback=%s | touchMarket=%s | adoptAge<=%d | workBars=%d | %s %s",
+   PrintFormat("TRH AutoTrade v3.31 | mode=A+B | BE=%d | pullback=%s | touchMarket=%s | adoptAge<=%d | workBars=%d | %s %s",
+      (int)InpBeStyle,
       InpUsePullbackLimit ? "Y" : "N",
       InpMarketOnTouch ? "Y" : "N",
       InpAdoptMaxAgeBars,
       InpPendingExpiryBars,
       _Symbol, EnumToString(_Period));
 
-   Comment("TRH EA v3.30\nA·SWEEP + B·FVG autotrade both\nBTB removed · pullback LIMIT");
+   Comment("TRH EA v3.31\nA·SWEEP + B·FVG · smart late BE\nno early 0.5R · pullback LIMIT");
    return INIT_SUCCEEDED;
 }
 
@@ -838,7 +933,7 @@ void OnTick()
    int n = TrhScanByMode(copied, t, o, h, l, c, cfg, (int)InpTradeMode, setups);
    if(n <= 0)
    {
-      Comment(StringFormat("TRH EA v3.30 %s — scanning...\nday %d | %s",
+      Comment(StringFormat("TRH EA v3.31 %s — scanning...\nday %d | %s",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades, g_workStatus));
       return;
    }

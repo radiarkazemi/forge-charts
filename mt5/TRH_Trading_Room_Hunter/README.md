@@ -3,7 +3,7 @@
 | File | Role |
 |------|------|
 | `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.29 |
-| `TRH_AutoTrade.mq5` | **EA** v3.30 |
+| `TRH_AutoTrade.mq5` | **EA** v3.31 |
 | `TRH_Engine.mqh` | Shared Engine v228 |
 
 | Mode | Chart name | Live? |
@@ -36,6 +36,17 @@ Same-account multi-PC: panel shows `LIVE LONG/SHORT` from the open broker positi
 ## Smart EA fill (v3.27+)
 
 Active setup manager · BuyStop/SellStop before ENTRY · Limit pullback · market on touch.
+
+## Smart break-even (v3.31+)
+
+Early “risk-free @ 0.5R” is **off by default** — it killed setups that dip near SL then run to TP.
+
+Default **BE-SMART**:
+- Mode A·SWEEP → full BE ~**1.5R** (1.20 + 0.30 extra)
+- Mode B·FVG → full BE ~**1.0R**
+- Needs a **closed bar** at the trigger (wicks alone do not move SL)
+- Min **3 bars** open before any BE
+- Styles: `OFF` / `EARLY` (old 0.5R) / `SMART` / `STEP` (cut risk first, full BE later)
 
 ## Links
 
