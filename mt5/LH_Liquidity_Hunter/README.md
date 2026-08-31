@@ -17,33 +17,24 @@ Our own liquidity-first strategy (standalone — **not TRH**).
 
 | File | Role |
 |------|------|
-| `LH_Engine.mqh` | Detector v100 |
-| `LH_Liquidity_Hunter.mq5` | Indicator v1.00 |
-| `LH_AutoTrade.mq5` | EA v1.00 |
-| `../../indicators/LH_Liquidity_Hunter.pine` | TradingView |
+| **`LH_Liquidity_Hunter.pine`** | **TradingView — start here** |
+| `LH_Engine.mqh` | MT5 detector v100 |
+| `LH_Liquidity_Hunter.mq5` | MT5 Indicator v1.00 |
+| `LH_AutoTrade.mq5` | MT5 EA v1.00 |
 
-## Why these tools
+## Pine (TradingView) — install first
 
-| Tool | Role in LH |
-|------|------------|
-| **Liquidity** | Where the stop clusters are — the target the market is hunting |
-| **CISD** | Confirms delivery flipped after the raid |
-| **MSS** | Confirms market structure shifted (reversal after hunt) |
-| **BOS** | Optional internal structure break toward the new direction |
-| **FVG** | Imbalance left by displacement — clean ENTRY zone |
-| **Opposing liq** | Best TP — next pool of stops the market is likely to hunt next |
+1. Open this zip → open **`LH_Liquidity_Hunter.pine`**
+2. TradingView → Pine Editor → paste all → **Add to chart**
+3. Use on XAUUSD M1 / M5 / M15
+4. Raw link (always latest on this branch):  
+   https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/liquidity-hunter-992e/indicators/LH_Liquidity_Hunter.pine
 
-## Install (MT5)
+## Install (MT5) — later
 
-1. Unzip `LH_Liquidity_Hunter_MT5.zip`
-2. `Indicators/LH_Liquidity_Hunter/` ← Engine + Indicator → Compile
-3. `Experts/LH_Liquidity_Hunter/` ← Engine + EA → Compile
-4. Attach to XAUUSD M1 / M5 / M15 (demo first)
-5. EA: AutoTrade ON · Break-even **OFF** · far→market / near→pending
-
-## Pine
-
-Import `indicators/LH_Liquidity_Hunter.pine` on TradingView.
+1. `Indicators/LH_Liquidity_Hunter/` ← Engine + Indicator → Compile  
+2. `Experts/LH_Liquidity_Hunter/` ← Engine + EA → Compile  
+3. EA: AutoTrade ON · Break-even **OFF** · far→market / near→pending  
 
 ## Defaults
 
