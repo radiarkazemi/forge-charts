@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.32"
-#property description "TRH EA v3.32: break-even OFF by default · SL stays at setup until TP/SL"
+#property version   "3.33"
+#property description "TRH EA v3.33: far from ENTRY → market now · near → pending @ ENTRY"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -70,13 +70,14 @@ input double InpBeStepKeepRiskR           = 0.50;  // Step style: keep this frac
 input bool   InpBeRequireClosedBar        = true;  // Only BE if last CLOSED bar reached trigger
 input int    InpBeMinBarsOpen             = 3;     // Min bars after open before any BE/step
 
-input group "5) Smart ENTRY fill"
-input double InpMarketTolAtr      = 0.25;
-input double InpMaxChaseAtr       = 0.40;
-input double InpExpireAtR         = 0.90;
-input bool   InpUsePullbackLimit  = true;
-input bool   InpLimitBeforeEntry  = true;
-input bool   InpMarketOnTouch     = true;
+input group "5) ENTRY fill (far = market now · near = pending)"
+input double InpMarketTolAtr      = 0.25; // Near band (ATR): within this → pending @ ENTRY
+input double InpMaxChaseAtr       = 0.40; // legacy (unused when far-market-now is on)
+input double InpExpireAtR         = 0.90; // Abort if already this far toward TP (R)
+input bool   InpFarOpenMarket     = true; // Far from ENTRY → open market immediately
+input bool   InpUsePullbackLimit  = true; // Near + past ENTRY → Limit back to ENTRY
+input bool   InpLimitBeforeEntry  = true; // Near + before ENTRY → Stop into ENTRY
+input bool   InpMarketOnTouch     = true; // If pending sits, market when bar touches ENTRY
 input bool   InpCancelRunThrough  = true;
 input int    InpAdoptMaxAgeBars   = 8;
 input int    InpRetryEveryTicks   = 1;
@@ -456,46 +457,109 @@ int PlaceSetupTrade(const TrhSetup &s, const double atrNow, const bool forceMark
       return -1;
    }
 
-   double lots = CalcLots(entry, sl);
-   double marketTol = atrNow * InpMarketTolAtr;
-   double maxChase  = atrNow * InpMaxChaseAtr;
+   double fillPx    = (s.dir == 1) ? ask : bid;
    double pastEntry = (s.dir == 1) ? (ask - entry) : (entry - bid);
+   double distEntry = MathAbs(fillPx - entry);
+   double nearTol   = MathMax(atrNow * InpMarketTolAtr, _Point);
+   bool   nearEntry = (distEntry <= nearTol);
+
+   // Far from ENTRY → market NOW. Near ENTRY → pending at exact ENTRY.
+   // forceMarket (bar touch) always markets.
+   bool openMarketNow = forceMarket || (InpFarOpenMarket && !nearEntry);
 
    g_trade.SetExpertMagicNumber(InpMagic);
    g_trade.SetDeviationInPoints(InpMaxSlippagePts);
    g_trade.SetTypeFillingBySymbol(_Symbol);
 
-   // Embed original risk so BE stays correct after SL moves (|R= kept short for MT5 comment limit)
+   bool ok = false;
+   string mode = "";
+   double lots = 0;
+
+   if(openMarketNow)
+   {
+      // MARKET at current price (far from setup ENTRY, or forced)
+      double useEntry = NormalizeDouble(fillPx, _Digits);
+      double useSL = sl;
+      double useTP = tp;
+      if(!AdjustStops(s.dir, useEntry, useSL, useTP))
+      {
+         g_workStatus = "bad stops @ market";
+         return -1;
+      }
+      // SL must still be on the adverse side of live price
+      if(s.dir == 1 && useSL >= bid)
+      {
+         g_workStatus = "SL invalid vs bid — abort";
+         return -1;
+      }
+      if(s.dir == -1 && useSL <= ask)
+      {
+         g_workStatus = "SL invalid vs ask — abort";
+         return -1;
+      }
+
+      lots = CalcLots(useEntry, useSL);
+      double origRisk = MathAbs(useEntry - useSL);
+      string comment = StringFormat("%s %s |R=%.2f",
+         TrhModeLabel(s.setupMode),
+         s.dir == 1 ? "LONG" : "SHORT",
+         origRisk);
+
+      mode = StringFormat("MARKET %s (far %.2fATR)",
+         s.dir == 1 ? "BUY" : "SELL",
+         (atrNow > 0 ? distEntry / atrNow : 0));
+      if(forceMarket)
+         mode = (s.dir == 1) ? "MARKET BUY (touch)" : "MARKET SELL (touch)";
+
+      ok = (s.dir == 1)
+         ? g_trade.Buy(lots, _Symbol, 0, useSL, useTP, comment)
+         : g_trade.Sell(lots, _Symbol, 0, useSL, useTP, comment);
+
+      g_workTries++;
+      if(ok)
+      {
+         if(CountOurOrders() > 0)
+            g_dayTrades++;
+         g_workStatus = mode + " OK";
+         PrintFormat("TRH %s %s lots=%s fill=%s Esetup=%s SL=%s TP=%s dist=%.2f try=%d",
+            mode, s.dir == 1 ? "LONG" : "SHORT",
+            DoubleToString(lots, 2),
+            DoubleToString(useEntry, _Digits),
+            DoubleToString(entry, _Digits),
+            DoubleToString(useSL, _Digits),
+            DoubleToString(useTP, _Digits),
+            distEntry, g_workTries);
+         return 1;
+      }
+
+      uint ret = g_trade.ResultRetcode();
+      g_workStatus = StringFormat("order fail %d %s", ret, g_trade.ResultRetcodeDescription());
+      PrintFormat("TRH ORDER FAIL %s %s ret=%d %s try=%d",
+         mode, s.dir == 1 ? "LONG" : "SHORT", ret, g_trade.ResultRetcodeDescription(), g_workTries);
+      return 0;
+   }
+
+   // NEAR ENTRY → pending order at exact setup ENTRY
+   lots = CalcLots(entry, sl);
    double origRisk = MathAbs(entry - sl);
    string comment = StringFormat("%s %s |R=%.2f",
       TrhModeLabel(s.setupMode),
       s.dir == 1 ? "LONG" : "SHORT",
       origRisk);
-   bool ok = false;
-   string mode = "";
 
-   bool nearEntry = (MathAbs(pastEntry) <= marketTol);
-   bool smallChase = (pastEntry > 0 && pastEntry <= maxChase);
-   bool touched = InpMarketOnTouch && BarTouchedEntry(s);
-
-   if(forceMarket || nearEntry || smallChase || touched)
+   if(pastEntry > nearTol * 0.15)
    {
-      mode = (s.dir == 1) ? "MARKET BUY" : "MARKET SELL";
-      ok = (s.dir == 1)
-         ? g_trade.Buy(lots, _Symbol, 0, sl, tp, comment)
-         : g_trade.Sell(lots, _Symbol, 0, sl, tp, comment);
-   }
-   else if(pastEntry > maxChase)
-   {
-      // Already past ENTRY toward TP → LIMIT for pullback back to ENTRY
+      // Slightly past ENTRY toward TP → Limit for pullback to ENTRY
       if(!InpUsePullbackLimit)
       {
-         g_workStatus = "past ENTRY, pullback OFF";
-         return -1;
+         // No limit → market at current
+         mode = (s.dir == 1) ? "MARKET BUY (near-past)" : "MARKET SELL (near-past)";
+         ok = (s.dir == 1)
+            ? g_trade.Buy(lots, _Symbol, 0, sl, tp, comment)
+            : g_trade.Sell(lots, _Symbol, 0, sl, tp, comment);
       }
-      if(s.dir == 1)
+      else if(s.dir == 1)
       {
-         // Long pullback: need BuyLimit below ask
          if(entry >= ask)
          {
             mode = "MARKET BUY (no room for BuyLimit)";
@@ -503,13 +567,12 @@ int PlaceSetupTrade(const TrhSetup &s, const double atrNow, const bool forceMark
          }
          else
          {
-            mode = "BUY LIMIT (pullback)";
+            mode = "BUY LIMIT @ ENTRY";
             ok = g_trade.BuyLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
          }
       }
       else
       {
-         // Short pullback: need SellLimit above bid
          if(entry <= bid)
          {
             mode = "MARKET SELL (no room for SellLimit)";
@@ -517,50 +580,46 @@ int PlaceSetupTrade(const TrhSetup &s, const double atrNow, const bool forceMark
          }
          else
          {
-            mode = "SELL LIMIT (pullback)";
+            mode = "SELL LIMIT @ ENTRY";
             ok = g_trade.SellLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
          }
       }
    }
    else
    {
-      // Still BEFORE ENTRY (price has not reached mid/BE yet) → STOP into ENTRY
-      // Long below entry → BuyStop; Short above entry → SellStop
-      if(InpLimitBeforeEntry)
+      // At / before ENTRY → Stop into ENTRY (or market if already through)
+      if(!InpLimitBeforeEntry)
       {
-         if(s.dir == 1)
+         mode = (s.dir == 1) ? "MARKET BUY (near)" : "MARKET SELL (near)";
+         ok = (s.dir == 1)
+            ? g_trade.Buy(lots, _Symbol, 0, sl, tp, comment)
+            : g_trade.Sell(lots, _Symbol, 0, sl, tp, comment);
+      }
+      else if(s.dir == 1)
+      {
+         if(entry <= ask)
          {
-            if(entry <= ask)
-            {
-               mode = "MARKET BUY (at/through ENTRY)";
-               ok = g_trade.Buy(lots, _Symbol, 0, sl, tp, comment);
-            }
-            else
-            {
-               mode = "BUY STOP (wait ENTRY)";
-               ok = g_trade.BuyStop(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
-            }
+            mode = "MARKET BUY (at ENTRY)";
+            ok = g_trade.Buy(lots, _Symbol, 0, sl, tp, comment);
          }
          else
          {
-            if(entry >= bid)
-            {
-               mode = "MARKET SELL (at/through ENTRY)";
-               ok = g_trade.Sell(lots, _Symbol, 0, sl, tp, comment);
-            }
-            else
-            {
-               mode = "SELL STOP (wait ENTRY)";
-               ok = g_trade.SellStop(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
-            }
+            mode = "BUY STOP @ ENTRY";
+            ok = g_trade.BuyStop(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
          }
       }
       else
       {
-         mode = (s.dir == 1) ? "MARKET BUY" : "MARKET SELL";
-         ok = (s.dir == 1)
-            ? g_trade.Buy(lots, _Symbol, 0, sl, tp, comment)
-            : g_trade.Sell(lots, _Symbol, 0, sl, tp, comment);
+         if(entry >= bid)
+         {
+            mode = "MARKET SELL (at ENTRY)";
+            ok = g_trade.Sell(lots, _Symbol, 0, sl, tp, comment);
+         }
+         else
+         {
+            mode = "SELL STOP @ ENTRY";
+            ok = g_trade.SellStop(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
+         }
       }
    }
 
@@ -571,13 +630,13 @@ int PlaceSetupTrade(const TrhSetup &s, const double atrNow, const bool forceMark
       if(CountOurOrders() > 0)
          g_dayTrades++;
       g_workStatus = mode + " OK";
-      PrintFormat("TRH %s %s lots=%s E=%s SL=%s TP=%s pastE=%.2f try=%d",
+      PrintFormat("TRH %s %s lots=%s E=%s SL=%s TP=%s dist=%.2f try=%d",
          mode, s.dir == 1 ? "LONG" : "SHORT",
          DoubleToString(lots, 2),
          DoubleToString(entry, _Digits),
          DoubleToString(sl, _Digits),
          DoubleToString(tp, _Digits),
-         pastEntry, g_workTries);
+         distEntry, g_workTries);
       return 1;
    }
 
@@ -597,7 +656,7 @@ int PlaceSetupTrade(const TrhSetup &s, const double atrNow, const bool forceMark
          {
             g_dayTrades++;
             g_workStatus = "MARKET fallback OK";
-            PrintFormat("TRH MARKET FALLBACK OK after limit reject");
+            PrintFormat("TRH MARKET FALLBACK OK after pending reject");
             return 1;
          }
       }
@@ -832,7 +891,7 @@ void UpdateComment(const TrhSetup &last, const int ageBars, const double lots)
    else if(InpSLProtectStyle == TRH_BE_STEP) beName = "BE-STEP";
 
    Comment(StringFormat(
-      "TRH EA v3.32 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
+      "TRH EA v3.33 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
       InpAutoTrade ? "ON" : "OFF",
       beName,
       last.dir == 1 ? "LONG" : "SHORT",
@@ -862,15 +921,15 @@ int OnInit()
    g_workActive = false;
    g_workStatus = "boot";
 
-   PrintFormat("TRH AutoTrade v3.32 | mode=A+B | BE=%d | pullback=%s | touchMarket=%s | adoptAge<=%d | workBars=%d | %s %s",
+   PrintFormat("TRH AutoTrade v3.33 | mode=A+B | BE=%d | farMarket=%s | touchMarket=%s | adoptAge<=%d | workBars=%d | %s %s",
       (int)InpSLProtectStyle,
-      InpUsePullbackLimit ? "Y" : "N",
+      InpFarOpenMarket ? "Y" : "N",
       InpMarketOnTouch ? "Y" : "N",
       InpAdoptMaxAgeBars,
       InpPendingExpiryBars,
       _Symbol, EnumToString(_Period));
 
-   Comment("TRH EA v3.32\nA·SWEEP + B·FVG · BE OFF\nSL stays at setup until TP");
+   Comment("TRH EA v3.33\nA·SWEEP + B·FVG · BE OFF\nfar→market · near→pending @ ENTRY");
    return INIT_SUCCEEDED;
 }
 
@@ -934,7 +993,7 @@ void OnTick()
    int n = TrhScanByMode(copied, t, o, h, l, c, cfg, (int)InpTradeMode, setups);
    if(n <= 0)
    {
-      Comment(StringFormat("TRH EA v3.32 %s — scanning...\nday %d | %s",
+      Comment(StringFormat("TRH EA v3.33 %s — scanning...\nday %d | %s",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades, g_workStatus));
       return;
    }

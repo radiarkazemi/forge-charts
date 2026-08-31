@@ -55,6 +55,7 @@ assert(sources["TRH_Trading_Room_Hunter.mq5"].includes("InpTradeMode = TRH_TM_BO
 assert(sources["TRH_AutoTrade.mq5"].includes("InpTradeMode = TRH_TM_BOTH"), "EA default A+B");
 assert(sources["TRH_AutoTrade.mq5"].includes("InpRiskReward      = 2.4"), "EA InpRiskReward=2.4");
 assert(sources["TRH_AutoTrade.mq5"].includes("InpSLProtectStyle = TRH_BE_OFF"), "EA default BE OFF (no risk-free)");
+assert(sources["TRH_AutoTrade.mq5"].includes("InpFarOpenMarket     = true"), "EA far-from-ENTRY opens market now");
 assert(sources["TRH_AutoTrade.mq5"].includes("|R="), "EA embeds orig risk in order comment");
 assert(sources["TRH_AutoTrade.mq5"].includes('#include "TRH_Engine.mqh"'), "EA includes shared engine");
 assert(sources["TRH_Trading_Room_Hunter.mq5"].includes('#include "TRH_Engine.mqh"'), "Indicator includes shared engine");
