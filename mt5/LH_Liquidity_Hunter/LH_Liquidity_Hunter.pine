@@ -373,10 +373,48 @@ if barstate.islast and nHist > 0
     setupFvgBot := lastS.fvgBot
     setupTag := lastS.tag
 
-// Persistent ENTRY / SL / TP plots for the last setup
-plot(showLevels and not na(setupEntry) ? setupEntry : na, "ENTRY", color=entryCol, linewidth=2, style=plot.style_linebr)
-plot(showLevels and not na(setupSl) ? setupSl : na, "SL", color=shortCol, linewidth=2, style=plot.style_linebr)
-plot(showLevels and not na(setupTp) ? setupTp : na, "TP", color=longCol, linewidth=2, style=plot.style_linebr)
+// Status of last setup vs price since signal bar
+// 0 wait fill · 1 in trade · 2 TP hit · 3 SL hit
+f_setupStatus(int dir, float entry, float sl, float tp, int fromBar) =>
+    int st = 0
+    int filledBar = -1
+    int barsBack = bar_index - fromBar
+    if barsBack >= 0 and not na(entry)
+        // scan oldest→newest within window (cap 500)
+        int maxBack = math.min(barsBack, 500)
+        for k = maxBack to 0
+            int bi = bar_index - k
+            if bi >= fromBar
+                bool touchE = dir == 1 ? (low[k] <= entry) : (high[k] >= entry)
+                bool thruE = dir == 1 ? (close[k] >= entry) : (close[k] <= entry)
+                if filledBar < 0 and (touchE or thruE)
+                    filledBar := bi
+                    st := 1
+                if filledBar >= 0 and bi >= filledBar
+                    bool hitT = dir == 1 ? (high[k] >= tp) : (low[k] <= tp)
+                    bool hitS = dir == 1 ? (low[k] <= sl) : (high[k] >= sl)
+                    // same bar: adverse SL first if both (conservative)
+                    if hitS
+                        st := 3
+                        break
+                    if hitT
+                        st := 2
+                        break
+    [st, filledBar]
+
+int setupStatus = 0
+int setupFillBar = -1
+if not na(setupEntry) and not na(setupBar) and setupDir != 0
+    [setupStatus, setupFillBar] := f_setupStatus(setupDir, setupEntry, setupSl, setupTp, setupBar)
+
+bool setupAlive = setupStatus == 0 or setupStatus == 1
+string statusTxt = setupStatus == 0 ? "WAIT FILL" : setupStatus == 1 ? "IN TRADE" : setupStatus == 2 ? "TP HIT" : setupStatus == 3 ? "SL HIT" : "-"
+color statusCol = setupStatus == 0 ? color.gray : setupStatus == 1 ? color.orange : setupStatus == 2 ? longCol : shortCol
+
+// Persistent ENTRY / SL / TP plots — hide after exit so dead setups don't look live
+plot(showLevels and setupAlive and not na(setupEntry) ? setupEntry : na, "ENTRY", color=entryCol, linewidth=2, style=plot.style_linebr)
+plot(showLevels and setupAlive and not na(setupSl) ? setupSl : na, "SL", color=shortCol, linewidth=2, style=plot.style_linebr)
+plot(showLevels and setupAlive and not na(setupTp) ? setupTp : na, "TP", color=longCol, linewidth=2, style=plot.style_linebr)
 
 var box[] drawBoxes = array.new_box()
 var line[] drawLines = array.new_line()
@@ -401,17 +439,20 @@ if barstate.islast and nHist > 0
     Setup last = array.get(history, nHist - 1)
     sideCol = last.dir == 1 ? longCol : shortCol
     sideTxt = last.dir == 1 ? "LONG" : "SHORT"
+    int endBar = bar_index + (setupAlive ? 8 : 0)
     if showFvg
-        array.push(drawBoxes, box.new(last.bar, last.fvgTop, bar_index + 8, last.fvgBot, bgcolor=color.new(sideCol, 82), border_color=color.new(sideCol, 40), border_width=1))
+        array.push(drawBoxes, box.new(last.bar, last.fvgTop, endBar, last.fvgBot, bgcolor=color.new(sideCol, setupAlive ? 82 : 92), border_color=color.new(sideCol, 40), border_width=1))
 
     // Side banner at setup bar
     array.push(drawLabels, label.new(last.bar, last.dir == 1 ? last.fvgTop : last.fvgBot, "LH " + sideTxt + " · " + last.tag, style=last.dir == 1 ? label.style_label_down : label.style_label_up, color=sideCol, textcolor=color.white, size=size.normal))
 
-    // Right-edge price labels: ENTRY / SL / TP
+    // Right-edge price labels: ENTRY / SL / TP (+ status)
     if showLevelLabels
         array.push(drawLabels, label.new(bar_index + 2, last.entry, "ENTRY  " + str.tostring(last.entry, format.mintick), style=label.style_label_left, color=color.new(entryCol, 10), textcolor=color.black, size=size.normal))
         array.push(drawLabels, label.new(bar_index + 2, last.sl, "SL  " + str.tostring(last.sl, format.mintick), style=label.style_label_left, color=color.new(shortCol, 10), textcolor=color.white, size=size.normal))
         array.push(drawLabels, label.new(bar_index + 2, last.tp, "TP  " + str.tostring(last.tp, format.mintick), style=label.style_label_left, color=color.new(longCol, 10), textcolor=color.white, size=size.normal))
+        float midLbl = (last.entry + last.sl) * 0.5
+        array.push(drawLabels, label.new(bar_index + 2, midLbl, statusTxt, style=label.style_label_left, color=color.new(statusCol, 0), textcolor=color.white, size=size.normal))
 
     // Optional older history (fainter)
     if not onlyLast and nHist > 1
@@ -425,7 +466,7 @@ if barstate.islast and nHist > 0
                     array.push(drawBoxes, box.new(s.bar, s.fvgTop, s.bar + 12, s.fvgBot, bgcolor=color.new(col, 92), border_color=color.new(col, 70)))
                 array.push(drawLabels, label.new(s.bar, s.dir == 1 ? s.fvgTop : s.fvgBot, (s.dir == 1 ? "L" : "S") + " · " + s.tag, style=label.style_label_down, color=color.new(col, 50), textcolor=color.white, size=size.tiny))
 
-var table panel = table.new(position.top_left, 2, 8, bgcolor=color.new(#0D1117, 5), border_width=1, border_color=color.new(#30363D, 0), frame_color=color.new(#30363D, 0), frame_width=1)
+var table panel = table.new(position.top_left, 2, 9, bgcolor=color.new(#0D1117, 5), border_width=1, border_color=color.new(#30363D, 0), frame_color=color.new(#30363D, 0), frame_width=1)
 if barstate.islast
     if na(setupEntry) or setupDir == 0
         table.cell(panel, 0, 0, "LH · Liquidity Hunter", text_color=color.white, text_size=size.normal)
@@ -435,9 +476,17 @@ if barstate.islast
     else
         risk = math.abs(setupEntry - setupSl)
         rr = risk > 0 ? math.abs(setupTp - setupEntry) / risk : 0
-        liveR = risk > 0 ? (setupDir == 1 ? (close - setupEntry) / risk : (setupEntry - close) / risk) : 0
+        float liveR = 0.0
+        if risk > 0
+            if setupStatus == 2
+                liveR := rr
+            else if setupStatus == 3
+                liveR := -1.0
+            else
+                liveR := setupDir == 1 ? (close - setupEntry) / risk : (setupEntry - close) / risk
         sideCol = setupDir == 1 ? longCol : shortCol
         sideTxt = setupDir == 1 ? "LONG" : "SHORT"
+        string resultLbl = setupStatus == 2 or setupStatus == 3 ? "RESULT" : "LIVE"
 
         table.cell(panel, 0, 0, "LH · Liquidity Hunter", text_color=color.white, text_size=size.normal)
         table.merge_cells(panel, 0, 0, 1, 0)
@@ -445,22 +494,25 @@ if barstate.islast
         table.cell(panel, 0, 1, "POSITION", text_color=color.gray, text_size=size.tiny)
         table.cell(panel, 1, 1, sideTxt, text_color=sideCol, text_size=size.large)
 
-        table.cell(panel, 0, 2, "SETUP", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 2, "RAID→CISD→" + setupTag + "→FVG", text_color=sideCol, text_size=size.small)
+        table.cell(panel, 0, 2, "STATUS", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 2, statusTxt, text_color=statusCol, text_size=size.normal)
 
-        table.cell(panel, 0, 3, "ENTRY", text_color=color.gray, text_size=size.small)
-        table.cell(panel, 1, 3, str.tostring(setupEntry, format.mintick), text_color=color.white, text_size=size.normal)
+        table.cell(panel, 0, 3, "SETUP", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 3, "RAID→CISD→" + setupTag + "→FVG", text_color=sideCol, text_size=size.small)
 
-        table.cell(panel, 0, 4, "SL", text_color=color.gray, text_size=size.small)
-        table.cell(panel, 1, 4, str.tostring(setupSl, format.mintick), text_color=shortCol, text_size=size.normal)
+        table.cell(panel, 0, 4, "ENTRY", text_color=color.gray, text_size=size.small)
+        table.cell(panel, 1, 4, str.tostring(setupEntry, format.mintick), text_color=color.white, text_size=size.normal)
 
-        table.cell(panel, 0, 5, "TP", text_color=color.gray, text_size=size.small)
-        table.cell(panel, 1, 5, str.tostring(setupTp, format.mintick) + "  (" + str.tostring(rr, "#.0") + "R)", text_color=longCol, text_size=size.normal)
+        table.cell(panel, 0, 5, "SL", text_color=color.gray, text_size=size.small)
+        table.cell(panel, 1, 5, str.tostring(setupSl, format.mintick), text_color=shortCol, text_size=size.normal)
 
-        table.cell(panel, 0, 6, "LIVE", text_color=color.gray, text_size=size.small)
-        table.cell(panel, 1, 6, str.tostring(liveR, "#.00") + "R", text_color=liveR >= 0 ? longCol : shortCol, text_size=size.normal)
+        table.cell(panel, 0, 6, "TP", text_color=color.gray, text_size=size.small)
+        table.cell(panel, 1, 6, str.tostring(setupTp, format.mintick) + "  (" + str.tostring(rr, "#.0") + "R)", text_color=longCol, text_size=size.normal)
 
-        table.cell(panel, 0, 7, "Liquidity first — don't become liquidity", text_color=color.new(color.gray, 20), text_size=size.tiny)
-        table.merge_cells(panel, 0, 7, 1, 7)
+        table.cell(panel, 0, 7, resultLbl, text_color=color.gray, text_size=size.small)
+        table.cell(panel, 1, 7, str.tostring(liveR, "#.00") + "R", text_color=liveR >= 0 ? longCol : shortCol, text_size=size.normal)
+
+        table.cell(panel, 0, 8, "Liquidity first — don't become liquidity", text_color=color.new(color.gray, 20), text_size=size.tiny)
+        table.merge_cells(panel, 0, 8, 1, 8)
 
 alertcondition(not na(setupEntry) and setupBar == bar_index, "LH New Setup", "Liquidity Hunter setup")
