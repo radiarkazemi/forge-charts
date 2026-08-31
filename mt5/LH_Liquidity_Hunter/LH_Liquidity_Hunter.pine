@@ -111,11 +111,44 @@ type Setup
     int mssBar
     int bar
     string tag
+    int status
+    int fillBar
 
 f_emit(Setup[] hist, int dir, float entry, float sl, float tp, float ft, float fb, float raidPx, float raidExt, float cisdPx, float mssPx, int raidBar, int cisdBar, int mssBar, int bar, string tag) =>
-    array.push(hist, Setup.new(dir, entry, sl, tp, ft, fb, raidPx, raidExt, cisdPx, mssPx, raidBar, cisdBar, mssBar, bar, tag))
+    array.push(hist, Setup.new(dir, entry, sl, tp, ft, fb, raidPx, raidExt, cisdPx, mssPx, raidBar, cisdBar, mssBar, bar, tag, 0, -1))
     if array.size(hist) > 20
         array.shift(hist)
+    true
+
+// Update last setup's fill/TP/SL using only the current bar (no deep []).
+// Never resolve TP/SL on the fill bar — same-bar highs/lows include price BEFORE entry
+// and caused false "TP HIT" while price later smoked the SL.
+f_updateStatus(Setup[] hist) =>
+    int n = array.size(hist)
+    if n > 0
+        Setup s = array.get(hist, n - 1)
+        if s.status < 2 and bar_index >= s.bar
+            if s.status == 0
+                bool tradedAt = s.dir == 1 ? low <= s.entry and high >= s.entry : high >= s.entry and low <= s.entry
+                bool closedThru = s.dir == 1 ? close >= s.entry and open < s.entry : close <= s.entry and open > s.entry
+                if tradedAt or closedThru or bar_index == s.bar
+                    s.fillBar := bar_index
+                    s.status := 1
+                    array.set(hist, n - 1, s)
+            if s.status == 1 and bar_index > s.fillBar
+                bool hitT = s.dir == 1 ? high >= s.tp : low <= s.tp
+                bool hitS = s.dir == 1 ? low <= s.sl : high >= s.sl
+                if hitS and hitT
+                    // Both wicked — decide by close (which side settled)
+                    bool slWins = s.dir == 1 ? close <= s.entry : close >= s.entry
+                    s.status := slWins ? 3 : 2
+                    array.set(hist, n - 1, s)
+                else if hitS
+                    s.status := 3
+                    array.set(hist, n - 1, s)
+                else if hitT
+                    s.status := 2
+                    array.set(hist, n - 1, s)
     true
 
 atr = ta.atr(14)
@@ -158,10 +191,6 @@ var float setupMssPx = na
 var int setupRaidBar = na
 var int setupCisdBar = na
 var int setupMssBar = na
-
-var int setupStatus = 0
-var int setupFillBar = -1
-var int statusTrackBar = na
 
 var box[] drawBoxes = array.new_box()
 var line[] drawLines = array.new_line()
@@ -398,6 +427,8 @@ plot(showLiqPivots ? huntHi : na, "BSL", color=color.new(shortCol, 55), style=pl
 plot(showLiqPivots ? huntLo : na, "SSL", color=color.new(longCol, 55), style=plot.style_linebr, linewidth=1)
 
 int nHist = array.size(history)
+f_updateStatus(history)
+
 if barstate.islast and nHist > 0
     Setup lastS = array.get(history, nHist - 1)
     setupEntry := lastS.entry
@@ -416,30 +447,12 @@ if barstate.islast and nHist > 0
     setupCisdBar := lastS.cisdBar
     setupMssBar := lastS.mssBar
 
-// Incremental fill/TP/SL status — only current bar (avoids deep historical [] offsets)
-if na(setupEntry) or setupDir == 0 or na(setupBar)
-    setupStatus := 0
-    setupFillBar := -1
-    statusTrackBar := na
-else
-    if na(statusTrackBar) or statusTrackBar != setupBar
-        setupStatus := 0
-        setupFillBar := -1
-        statusTrackBar := setupBar
-    if setupStatus < 2 and bar_index >= setupBar
-        if setupStatus == 0
-            bool touchE = setupDir == 1 ? low <= setupEntry : high >= setupEntry
-            bool thruE = setupDir == 1 ? close >= setupEntry : close <= setupEntry
-            if touchE or thruE
-                setupFillBar := bar_index
-                setupStatus := 1
-        if setupStatus == 1
-            bool hitT = setupDir == 1 ? high >= setupTp : low <= setupTp
-            bool hitS = setupDir == 1 ? low <= setupSl : high >= setupSl
-            if hitS
-                setupStatus := 3
-            else if hitT
-                setupStatus := 2
+int setupStatus = 0
+int setupFillBar = -1
+if nHist > 0
+    Setup stS = array.get(history, nHist - 1)
+    setupStatus := stS.status
+    setupFillBar := stS.fillBar
 
 string statusTxt = na(setupEntry) or setupDir == 0 ? "-" : setupStatus == 0 ? "WAIT FILL" : setupStatus == 1 ? "IN TRADE" : setupStatus == 2 ? "TP HIT" : "SL HIT"
 color statusCol = setupStatus == 0 ? color.gray : setupStatus == 1 ? color.orange : setupStatus == 2 ? longCol : shortCol
