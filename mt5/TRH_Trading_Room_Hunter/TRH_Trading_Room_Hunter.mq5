@@ -4,15 +4,15 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "2.24"
-#property description "TRH A/B/C named setups · stronger Mode C BTB"
+#property version   "2.25"
+#property description "TRH A/B/C · priority A>B>C · latest setup wins"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
 
 #include "TRH_Engine.mqh"
 
-// MQL5 has no #error — version is checked in OnInit (need Engine v224+ in SAME folder).
+// MQL5 has no #error — version is checked in OnInit (need Engine v225+ in SAME folder).
 #ifndef TRH_ENGINE_VERSION
 #define TRH_ENGINE_VERSION 0
 #endif
@@ -124,7 +124,7 @@ bool     g_holdValid = false;
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   if(TRH_ENGINE_VERSION < 224)
+   if(TRH_ENGINE_VERSION < 225)
    {
       Alert("TRH: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
             "). Put NEW TRH_Engine.mqh in the SAME folder as this .mq5 and recompile.");

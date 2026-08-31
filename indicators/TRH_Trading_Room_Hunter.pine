@@ -11,7 +11,7 @@ indicator("TRH | Trading Room Hunter", shorttitle="TRH", overlay=true, max_boxes
 
 grp = "TRH Detection"
 tradeMode      = input.string("All", "Detection Mode", options=["Classic", "FVG", "BTB", "Classic+FVG", "All"], group=grp,
-     tooltip="Classic=A SWEEP room · FVG=B sweep+disp+FVG · BTB=C Pro breakout retest · All=A+B+C")
+     tooltip="Priority A>B>C. Classic=A SWEEP · FVG=B · BTB=C · All=A then B then C (A wins conflicts)")
 pivotPeriod    = input.int(5, "Pivot Period", minval=2, maxval=30, group=grp)
 minContextAtr  = input.float(1.2, "Min Selloff/Rally Into Sweep (ATR×)", minval=0.5, maxval=8.0, step=0.1, group=grp)
 minSweepAtr    = input.float(0.05, "Min Sweep Beyond Pivot (ATR×)", minval=0.0, maxval=1.0, step=0.05, group=grp)
@@ -194,8 +194,13 @@ var float cBreakExt = na
 var int   cBreakBar = na
 
 var int lastSetupBar = na
+var int lastModeId = 99
 var string newMode = "A · SWEEP"
 var int newModeId = 0
+
+// Priority A(0) > B(1) > C(2): stronger mode may fire inside cooldown of a weaker one
+f_coolOk(int modeId) =>
+    na(lastSetupBar) or bar_index - lastSetupBar >= cooldownBars or modeId < lastModeId
 
 int newDir = 0
 float newDistal = na
@@ -207,11 +212,9 @@ newMode := "A · SWEEP"
 newModeId := 0
 
 if barstate.isconfirmed
-    bool coolOk = na(lastSetupBar) or bar_index - lastSetupBar >= cooldownBars
-
-    // ── Mode A classic ────────────────────────────────────────────
+    // ── Mode A classic (main) ─────────────────────────────────────
     if useClassic
-        canStart = pendDir == 0 and coolOk and newDir == 0
+        canStart = pendDir == 0 and f_coolOk(0) and newDir == 0
         if canStart and bullSweepNow
             pendDir := 1
             pendDistal := low
@@ -306,7 +309,7 @@ if barstate.isconfirmed
             bPhase := 0
             bDir := 0
 
-        bool bStart = bPhase == 0 and coolOk and newDir == 0
+        bool bStart = bPhase == 0 and f_coolOk(1) and newDir == 0
         if bStart and bullSweepNow
             bPhase := 1
             bDir := 1
@@ -427,7 +430,7 @@ if barstate.isconfirmed
             cPhase := 0
             cDir := 0
 
-        bool cStart = cPhase == 0 and coolOk and newDir == 0
+        bool cStart = cPhase == 0 and f_coolOk(2) and newDir == 0
         float bodyC = math.abs(close - open)
         if cStart and not na(huntHi)
             bool brokeHi = close > huntHi + atr * minBreakAtr and close > open and bodyC >= atr * minBreakBodyAtr
@@ -598,6 +601,7 @@ if newDir != 0
     array.push(sStat, 0)
     array.push(sFilled, false)
     lastSetupBar := bar_index
+    lastModeId := newModeId
 
     // If price already traded through entry during the base, count as filled (Set & Forget)
     alreadyFilled = newDir == 1 ? low <= newEntry : high >= newEntry

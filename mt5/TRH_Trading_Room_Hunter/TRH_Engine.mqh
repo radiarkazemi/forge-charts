@@ -5,7 +5,7 @@
 #ifndef TRH_ENGINE_MQH
 #define TRH_ENGINE_MQH
 
-#define TRH_ENGINE_VERSION 224
+#define TRH_ENGINE_VERSION 225
 #define TRH_MAX_PIVOTS 30
 #define TRH_ATR_LEN    14
 
@@ -887,15 +887,22 @@ int TrhScanBtbSetups(const int rates,
    return nSetups;
 }
 
+// Priority: Mode A (0) > Mode B (1) > Mode C (2). Lower id = preferred.
+bool TrhModePreferred(const int modeA, const int modeB)
+{
+   return modeA < modeB;
+}
+
 void TrhSortSetupsByBar(TrhSetup &arr[], const int n)
 {
    for(int i = 0; i < n; i++)
    {
       for(int j = i + 1; j < n; j++)
       {
-         // Prefer BTB > FVG > classic on same bar
+         // Chronological, then A > B > C on the same bar
          if(arr[j].barIndex < arr[i].barIndex ||
-            (arr[j].barIndex == arr[i].barIndex && arr[j].setupMode > arr[i].setupMode))
+            (arr[j].barIndex == arr[i].barIndex &&
+             TrhModePreferred(arr[j].setupMode, arr[i].setupMode)))
          {
             TrhSetup tmp = arr[i];
             arr[i] = arr[j];
@@ -924,10 +931,12 @@ int TrhMergeScans(TrhSetup &a[], const int na,
    {
       if(merged[i].barIndex - lastBar < cfg.cooldownBars && lastBar >= 0)
       {
-         if(merged[i].barIndex == lastBar && nOut > 0 &&
-            merged[i].setupMode > outSetups[nOut - 1].setupMode)
+         // Inside cooldown: keep / upgrade to higher priority (A > B > C).
+         // Lets a later Mode A replace an earlier Mode C (BTB confirms faster).
+         if(nOut > 0 && TrhModePreferred(merged[i].setupMode, outSetups[nOut - 1].setupMode))
          {
             outSetups[nOut - 1] = merged[i];
+            lastBar = merged[i].barIndex;
          }
          continue;
       }

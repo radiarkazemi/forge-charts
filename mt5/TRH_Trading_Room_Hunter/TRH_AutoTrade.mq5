@@ -5,14 +5,14 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.24"
-#property description "TRH EA v3.24: named A/B/C · stronger Mode C BTB"
+#property version   "3.25"
+#property description "TRH EA v3.25: priority A>B>C · trade latest preferred setup"
 #property strict
 
 #include <Trade/Trade.mqh>
 #include "TRH_Engine.mqh"
 
-// MQL5 has no #error — version is checked in OnInit (need Engine v224+ in SAME folder).
+// MQL5 has no #error — version is checked in OnInit (need Engine v225+ in SAME folder).
 #ifndef TRH_ENGINE_VERSION
 #define TRH_ENGINE_VERSION 0
 #endif
@@ -517,7 +517,7 @@ void ManageBreakEven()
 
 int OnInit()
 {
-   if(TRH_ENGINE_VERSION < 224)
+   if(TRH_ENGINE_VERSION < 225)
    {
       Alert("TRH EA: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
             "). Put NEW TRH_Engine.mqh in the SAME folder as this .mq5 and recompile.");
@@ -529,7 +529,7 @@ int OnInit()
    g_trade.SetTypeFillingBySymbol(_Symbol);
    ResetDayIfNeeded();
 
-   PrintFormat("TRH AutoTrade v3.24 | mode=%d | AutoTrade=%s | skipExpired=%s | BE@%.2fR | BTB RR=%.1f | %s %s | risk=%.2f%% | maxSpread=%d",
+   PrintFormat("TRH AutoTrade v3.25 | mode=%d | AutoTrade=%s | skipExpired=%s | BE@%.2fR | BTB RR=%.1f | priority A>B>C | %s %s | risk=%.2f%% | maxSpread=%d",
       (int)InpTradeMode,
       InpAutoTrade ? "ON" : "OFF",
       InpSkipExpiredEntry ? "YES" : "NO",
@@ -537,7 +537,7 @@ int OnInit()
       InpBtbRiskReward,
       _Symbol, EnumToString(_Period), InpRiskPercent, InpMaxSpreadPoints);
 
-   Comment("TRH EA v3.24\nA·SWEEP | B·FVG | C·BTB\nstronger BTB | BE@0.5R");
+   Comment("TRH EA v3.25\nA·SWEEP > B·FVG > C·BTB\nlatest preferred setup | BE@0.5R");
    return INIT_SUCCEEDED;
 }
 
@@ -606,7 +606,7 @@ void OnTick()
 
    if(n <= 0)
    {
-      Comment(StringFormat("TRH EA v3.24 %s - scanning...\nday trades %d | equity %.2f",
+      Comment(StringFormat("TRH EA v3.25 %s - scanning...\nday trades %d | equity %.2f",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades, AccountInfoDouble(ACCOUNT_EQUITY)));
       return;
    }

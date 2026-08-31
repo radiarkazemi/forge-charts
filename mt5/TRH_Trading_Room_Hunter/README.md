@@ -2,16 +2,25 @@
 
 | File | Role |
 |------|------|
-| `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.24 |
-| `TRH_AutoTrade.mq5` | **EA** v3.24 |
-| `TRH_Engine.mqh` | Shared Engine v224 |
+| `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.25 |
+| `TRH_AutoTrade.mq5` | **EA** v3.25 |
+| `TRH_Engine.mqh` | Shared Engine v225 |
 
 | Mode | Chart name | Logic |
 |------|------------|--------|
-| **A** | `A · SWEEP` | Classic room mid ENTRY (unchanged) |
-| **B** | `B · FVG` | Sweep → disp → FVG → retest (unchanged) |
-| **C** | `C · BTB` | Breakout → BE retest — **quality tightened** |
-| **All** | default | A + B + C |
+| **A** | `A · SWEEP` | Classic room mid ENTRY — **main model** |
+| **B** | `B · FVG` | Sweep → disp → FVG → retest |
+| **C** | `C · BTB` | Breakout → BE retest — quality tightened |
+| **All** | default | A + B + C with priority **A > B > C** |
+
+## Priority (v225) — why Pine showed A but MT5 took BTB
+
+BTB confirms faster than Mode A (A needs base bars). Old merge kept the earlier C and **dropped** the later A inside cooldown — and on the same bar preferred C > A.
+
+**Fixed:**
+- Same bar → keep **A over B over C**
+- Inside cooldown → a later **higher-priority** mode **replaces** a weaker one (A replaces C)
+- Chart / EA always use the **latest preferred** setup in the merged list
 
 ## Mode C BTB quality (v224)
 
@@ -24,7 +33,7 @@ Filters the weak M1 shorts (tiny SL / fake confirm):
 - Skip if already past BE toward TP
 - Wait ≥2 bars after breakout before entry
 
-Mode **A** and **B** detection are unchanged.
+Mode **A** and **B** detection geometry unchanged — only merge priority changed.
 
 ## Graphics
 
