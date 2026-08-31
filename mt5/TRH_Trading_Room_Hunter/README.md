@@ -2,7 +2,7 @@
 
 | File | Role |
 |------|------|
-| `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.25 |
+| `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.26 |
 | `TRH_AutoTrade.mq5` | **EA** v3.27 |
 | `TRH_Engine.mqh` | Shared Engine v225 |
 
@@ -21,6 +21,16 @@ BTB confirms faster than Mode A (A needs base bars). Old merge kept the earlier 
 - Same bar → keep **A over B over C**
 - Inside cooldown → a later **higher-priority** mode **replaces** a weaker one (A replaces C)
 - Chart / EA always use the **latest preferred** setup in the merged list
+
+## Live position sync (Indicator v2.26)
+
+Other PC opened a trade but this chart still showed old **SHORT · SL HIT**.
+
+**Fixed:**
+- Release hold after SL/TP (no more stuck dead setups)
+- Prefer newest **WAIT / IN TRADE** setup over closed ones
+- Sync **open broker position** (same account) → panel + LIVE ENTRY/SL/TP lines
+- Magic default `260825` (match EA); set `0` to show any symbol position
 
 ## Smart EA fill (v3.27)
 

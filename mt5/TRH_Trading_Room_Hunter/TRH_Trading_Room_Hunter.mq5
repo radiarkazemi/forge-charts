@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "2.25"
-#property description "TRH A/B/C · priority A>B>C · latest setup wins"
+#property version   "2.26"
+#property description "TRH v2.26: sync live EA position · release dead holds"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -112,6 +112,11 @@ input bool   InpAlertSound      = true;   // Play Sound On New Setup
 input string InpAlertSoundFile  = "alert.wav"; // Sound File
 input bool   InpAlertOnTpSl     = true;   // Alert When TP / SL Hit
 
+input group "Live position sync (multi-PC)"
+input bool   InpSyncLivePosition = true;  // Show open broker position on this chart
+input ulong  InpSyncMagic        = 260825;// EA magic (0 = any position on symbol)
+input bool   InpPreferLivePanel  = true;  // Panel follows live position over old SL/TP hold
+
 string   OBJ_PREFIX = "TRH2_";
 TrhSetup g_setups[];
 int      g_nSetups = 0;
@@ -120,6 +125,12 @@ datetime g_lastTpAlert = 0;
 datetime g_lastSlAlert = 0;
 TrhSetup g_holdSetup;          // keep visible while WAIT/IN TRADE
 bool     g_holdValid = false;
+bool     g_livePosValid = false;
+int      g_liveDir = 0;
+double   g_liveEntry = 0, g_liveSL = 0, g_liveTP = 0;
+datetime g_liveOpenTime = 0;
+double   g_liveLots = 0;
+ulong    g_liveTicket = 0;
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -130,7 +141,7 @@ int OnInit()
             "). Put NEW TRH_Engine.mqh in the SAME folder as this .mq5 and recompile.");
       return INIT_FAILED;
    }
-   IndicatorSetString(INDICATOR_SHORTNAME, "TRH A·SWEEP | B·FVG | C·BTB");
+   IndicatorSetString(INDICATOR_SHORTNAME, "TRH live-sync A/B/C");
    return INIT_SUCCEEDED;
 }
 
@@ -274,6 +285,152 @@ void SetPanelBg(const string name, const int x, const int y,
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
 }
 
+
+// Find open position on this symbol (same account = visible on every PC)
+bool RefreshLivePosition()
+{
+   g_livePosValid = false;
+   g_liveDir = 0;
+   g_liveEntry = g_liveSL = g_liveTP = 0;
+   g_liveOpenTime = 0;
+   g_liveLots = 0;
+   g_liveTicket = 0;
+   if(!InpSyncLivePosition) return false;
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || !PositionSelectByTicket(ticket)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      if(InpSyncMagic > 0 && PositionGetInteger(POSITION_MAGIC) != (long)InpSyncMagic) continue;
+
+      long type = PositionGetInteger(POSITION_TYPE);
+      g_liveDir = (type == POSITION_TYPE_BUY) ? 1 : -1;
+      g_liveEntry = PositionGetDouble(POSITION_PRICE_OPEN);
+      g_liveSL = PositionGetDouble(POSITION_SL);
+      g_liveTP = PositionGetDouble(POSITION_TP);
+      g_liveOpenTime = (datetime)PositionGetInteger(POSITION_TIME);
+      g_liveLots = PositionGetDouble(POSITION_VOLUME);
+      g_liveTicket = ticket;
+      g_livePosValid = true;
+      return true;
+   }
+   return false;
+}
+
+// Best scanned setup matching live position (same dir, closest ENTRY)
+bool FindSetupNearLive(TrhSetup &out)
+{
+   if(!g_livePosValid || g_nSetups <= 0) return false;
+   int best = -1;
+   double bestDist = 1e100;
+   for(int i = 0; i < g_nSetups; i++)
+   {
+      if(g_setups[i].dir != g_liveDir) continue;
+      double d = MathAbs(g_setups[i].entry - g_liveEntry);
+      if(d < bestDist)
+      {
+         bestDist = d;
+         best = i;
+      }
+   }
+   // accept within ~5.0 price units on gold (or very close)
+   if(best < 0 || bestDist > 5.0) return false;
+   out = g_setups[best];
+   return true;
+}
+
+void DrawLivePositionOverlay()
+{
+   if(!g_livePosValid) return;
+   datetime t2 = TimeCurrent();
+   datetime t1 = g_liveOpenTime;
+   if(t1 <= 0) t1 = t2 - PeriodSeconds(_Period) * 30;
+
+   string tag = "LIVE";
+   color accent = (g_liveDir == 1) ? InpBullZoneCol : InpBearZoneCol;
+
+   if(InpShowTrendLevels)
+   {
+      SetTrend(OBJ_PREFIX + "TE_" + tag, t1, g_liveEntry, t2, g_liveEntry, InpEntryCol, STYLE_SOLID, 2);
+      if(g_liveSL > 0)
+         SetTrend(OBJ_PREFIX + "TS_" + tag, t1, g_liveSL, t2, g_liveSL, InpSlCol, STYLE_DOT, 1);
+      if(g_liveTP > 0)
+         SetTrend(OBJ_PREFIX + "TT_" + tag, t1, g_liveTP, t2, g_liveTP, InpTpCol, STYLE_DOT, 1);
+   }
+   if(InpShowHLines)
+   {
+      SetHLine(OBJ_PREFIX + "HE_" + tag, g_liveEntry, InpEntryCol, STYLE_SOLID, 1);
+      if(g_liveSL > 0) SetHLine(OBJ_PREFIX + "HS_" + tag, g_liveSL, InpSlCol, STYLE_DOT, 1);
+      if(g_liveTP > 0) SetHLine(OBJ_PREFIX + "HT_" + tag, g_liveTP, InpTpCol, STYLE_DOT, 1);
+   }
+   if(InpShowPriceLabels)
+   {
+      SetText(OBJ_PREFIX + "LE_" + tag, t2, g_liveEntry,
+         "LIVE ENTRY " + DoubleToString(g_liveEntry, _Digits), InpEntryCol, ANCHOR_LEFT);
+      if(g_liveSL > 0)
+         SetText(OBJ_PREFIX + "LS_" + tag, t2, g_liveSL,
+            "LIVE SL " + DoubleToString(g_liveSL, _Digits), InpSlCol, ANCHOR_LEFT);
+      if(g_liveTP > 0)
+         SetText(OBJ_PREFIX + "LT_" + tag, t2, g_liveTP,
+            "LIVE TP " + DoubleToString(g_liveTP, _Digits), InpTpCol, ANCHOR_LEFT);
+   }
+   if(InpShowTag)
+   {
+      SetText(OBJ_PREFIX + "TAG_" + tag, t1, g_liveEntry,
+         "TRH LIVE " + (g_liveDir == 1 ? "LONG" : "SHORT") + " · pos",
+         accent, (g_liveDir == 1 ? ANCHOR_LEFT_UPPER : ANCHOR_LEFT_LOWER));
+   }
+   if(InpShowArrow)
+      SetArrow(OBJ_PREFIX + "AR_" + tag, t1, g_liveEntry,
+         (g_liveDir == 1 ? 233 : 234), accent);
+}
+
+void DrawLiveInfoPanel(const double bid)
+{
+   if(!InpShowPanel || !g_livePosValid) return;
+
+   int corner = (InpPanelCorner == TRH_PANEL_RIGHT) ? CORNER_RIGHT_UPPER : CORNER_LEFT_UPPER;
+   int x0 = 12;
+   int y0 = 28;
+   if(InpPanelCorner == TRH_PANEL_LEFT) y0 = 70;
+
+   SetPanelBg(OBJ_PREFIX + "PBG", x0, y0, 260, 168, corner);
+
+   color sideCol = (g_liveDir == 1) ? InpBullZoneCol : InpBearZoneCol;
+   double risk = MathAbs(g_liveEntry - g_liveSL);
+   double reward = MathAbs(g_liveTP - g_liveEntry);
+   double rr = (risk > 0) ? reward / risk : 0;
+   double liveR = 0;
+   if(risk > 0)
+      liveR = (g_liveDir == 1) ? (bid - g_liveEntry) / risk : (g_liveEntry - bid) / risk;
+
+   // Try attach mode name from matching setup
+   string modeTxt = "LIVE POSITION";
+   TrhSetup match;
+   if(FindSetupNearLive(match))
+      modeTxt = TrhModeFullName(match.setupMode) + " · LIVE";
+
+   int y = y0 + 8;
+   int dy = 16;
+   SetPanelLabel(OBJ_PREFIX + "P0", x0 + 10, y, "TRH | Trading Room Hunter", clrWhite, 10, corner); y += dy + 2;
+   SetPanelLabel(OBJ_PREFIX + "P1", x0 + 10, y,
+      (g_liveDir == 1 ? "LONG" : "SHORT") + " · LIVE · IN TRADE", sideCol, 9, corner); y += dy;
+   SetPanelLabel(OBJ_PREFIX + "P1b", x0 + 10, y, modeTxt, sideCol, 8, corner); y += dy;
+   SetPanelLabel(OBJ_PREFIX + "P2", x0 + 10, y, "ENTRY  " + DoubleToString(g_liveEntry, _Digits), InpEntryCol, 9, corner); y += dy;
+   SetPanelLabel(OBJ_PREFIX + "P3", x0 + 10, y,
+      "SL     " + (g_liveSL > 0 ? DoubleToString(g_liveSL, _Digits) : "-"), InpSlCol, 9, corner); y += dy;
+   SetPanelLabel(OBJ_PREFIX + "P4", x0 + 10, y,
+      "TP     " + (g_liveTP > 0 ? DoubleToString(g_liveTP, _Digits) : "-"), InpTpCol, 9, corner); y += dy;
+   SetPanelLabel(OBJ_PREFIX + "P5", x0 + 10, y,
+      "Lots   " + DoubleToString(g_liveLots, 2) + "   (" + DoubleToString(rr, 1) + "R)", clrSilver, 9, corner); y += dy;
+   SetPanelLabel(OBJ_PREFIX + "P6", x0 + 10, y,
+      "Live   " + DoubleToString(liveR, 2) + "R   @ " + DoubleToString(bid, _Digits), clrGold, 9, corner); y += dy;
+   SetPanelLabel(OBJ_PREFIX + "P7", x0 + 10, y,
+      "Opened " + TimeToString(g_liveOpenTime, TIME_DATE|TIME_MINUTES) + "  #" + IntegerToString((int)g_liveTicket),
+      clrDimGray, 8, corner);
+}
+
 string StatusText(const TrhSetup &s, const double &high[], const double &low[],
                   const double &close[], const int rates, int &statusOut, int &exitBar)
 {
@@ -321,6 +478,23 @@ string StatusText(const TrhSetup &s, const double &high[], const double &low[],
    }
    statusOut = 1;
    return "IN TRADE";
+}
+
+bool PickNewestActiveSetup(const double &high[], const double &low[], const double &close[],
+                           const int rates, TrhSetup &out)
+{
+   // Prefer newest WAIT FILL / IN TRADE over closed SL/TP
+   for(int i = g_nSetups - 1; i >= 0; i--)
+   {
+      int st = 0, eb = -1;
+      StatusText(g_setups[i], high, low, close, rates, st, eb);
+      if(st == 0 || st == 1)
+      {
+         out = g_setups[i];
+         return true;
+      }
+   }
+   return false;
 }
 
 void DrawInfoPanel(const TrhSetup &s, const string stTxt, const int stCode,
@@ -570,30 +744,49 @@ int OnCalculate(const int rates_total,
       int nNew = TrhScanByMode(rates_total, t, o, h, l, c, cfg, (int)InpTradeMode, g_setups);
       g_nSetups = nNew;
 
-      // If an active setup is WAIT FILL / IN TRADE, keep it locked so a newer
-      // scan cannot wipe the chart while the EA position is still open.
+      // Hold only while WAIT/IN TRADE. Dead SL/TP must release so multi-PC
+      // / newer setups become visible (was stuck on old SHORT SL HIT).
       bool holdActive = false;
       if(g_holdValid)
       {
          int hs = 0, heb = -1;
          StatusText(g_holdSetup, h, l, c, rates_total, hs, heb);
-         holdActive = (hs == 0 || hs == 1);
+         if(hs == 2 || hs == 3)
+            g_holdValid = false; // release dead hold
+         else
+            holdActive = (hs == 0 || hs == 1);
       }
 
       if(g_nSetups > 0)
       {
          TrhSetup newest = g_setups[g_nSetups - 1];
-         if(!holdActive)
+         TrhSetup activePick;
+         bool haveActive = PickNewestActiveSetup(h, l, c, rates_total, activePick);
+         TrhSetup choose = haveActive ? activePick : newest;
+
+         // Break hold if a NEWER active setup appeared (other PC / later signal)
+         if(holdActive && haveActive && activePick.barTime > g_holdSetup.barTime)
          {
-            g_holdSetup = newest;
+            g_holdSetup = activePick;
+            holdActive = true;
+         }
+         else if(!holdActive)
+         {
+            g_holdSetup = choose;
             g_holdValid = true;
-            if(newest.barTime != prevTime && newest.barTime != g_lastAlertTime)
+         }
+
+         if(g_holdValid && g_holdSetup.barTime != prevTime && g_holdSetup.barTime != g_lastAlertTime)
+         {
+            // alert only for fresh non-closed setups
+            int ast = 0, aeb = -1;
+            StatusText(g_holdSetup, h, l, c, rates_total, ast, aeb);
+            if(ast <= 1)
             {
-               g_lastAlertTime = newest.barTime;
-               NotifyNewSetup(newest);
+               g_lastAlertTime = g_holdSetup.barTime;
+               NotifyNewSetup(g_holdSetup);
             }
          }
-         // else: ignore newer signals/alerts until hold exits TP/SL
       }
       else if(!holdActive)
       {
@@ -642,58 +835,92 @@ int OnCalculate(const int rates_total,
          DrawOneSetup(g_setups[i], t, h, l, c, rates_total);
    }
 
-   TrhSetup panelSetup;
-   bool havePanel = false;
-   if(g_holdValid) { panelSetup = g_holdSetup; havePanel = true; }
-   else if(g_nSetups > 0) { panelSetup = g_setups[g_nSetups - 1]; havePanel = true; }
+   // Always refresh live broker position (same account on other PCs)
+   RefreshLivePosition();
+   if(newBar || g_livePosValid)
+      DrawLivePositionOverlay();
 
-   if(havePanel)
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+
+   // Panel priority: LIVE open position > active hold > newest setup
+   if(InpPreferLivePanel && g_livePosValid)
    {
-      int stCode = 0;
-      int exitBar = -1;
-      string stTxt = StatusText(panelSetup, h, l, c, rates_total, stCode, exitBar);
-      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      DrawInfoPanel(panelSetup, stTxt, stCode, bid);
-
-      // Release hold after TP/SL so next setup can take over
-      if(g_holdValid && (stCode == 2 || stCode == 3))
+      DrawLiveInfoPanel(bid);
+      // Also promote matching scanned setup into hold so boxes align
+      TrhSetup match;
+      if(FindSetupNearLive(match))
       {
-         // keep showing until next new setup replaces hold
+         g_holdSetup = match;
+         g_holdValid = true;
       }
-
-      if(InpAlertOnTpSl)
-      {
-         if(stCode == 2 && panelSetup.barTime != g_lastTpAlert)
-         {
-            g_lastTpAlert = panelSetup.barTime;
-            string m = "TRH TP HIT @ " + DoubleToString(panelSetup.tp, _Digits);
-            if(InpAlertPopup) Alert(m);
-            if(InpAlertPush) SendNotification(m);
-            if(InpAlertSound) PlaySound(InpAlertSoundFile);
-         }
-         if(stCode == 3 && panelSetup.barTime != g_lastSlAlert)
-         {
-            g_lastSlAlert = panelSetup.barTime;
-            string m = "TRH SL HIT @ " + DoubleToString(panelSetup.sl, _Digits);
-            if(InpAlertPopup) Alert(m);
-            if(InpAlertPush) SendNotification(m);
-            if(InpAlertSound) PlaySound(InpAlertSoundFile);
-         }
-      }
-
       if(InpShowComment)
       {
          Comment(
-            "TRH | Trading Room Hunter\n",
-            (panelSetup.dir == 1 ? "LONG" : "SHORT"), " | ", TrhModeLabel(panelSetup.setupMode), " | ", stTxt, "\n",
-            "ENTRY ", DoubleToString(panelSetup.entry, _Digits), "\n",
-            "SL    ", DoubleToString(panelSetup.sl, _Digits), "\n",
-            "TP    ", DoubleToString(panelSetup.tp, _Digits), "\n",
-            "Bar   ", TimeToString(panelSetup.barTime, TIME_DATE|TIME_MINUTES)
+            "TRH LIVE ", (g_liveDir == 1 ? "LONG" : "SHORT"), " IN TRADE\n",
+            "ENTRY ", DoubleToString(g_liveEntry, _Digits), "\n",
+            "SL    ", DoubleToString(g_liveSL, _Digits), "\n",
+            "TP    ", DoubleToString(g_liveTP, _Digits), "\n",
+            "Opened ", TimeToString(g_liveOpenTime, TIME_DATE|TIME_MINUTES)
          );
       }
-      else Comment("");
+      else if(!InpShowComment) Comment("");
    }
+   else
+   {
+      TrhSetup panelSetup;
+      bool havePanel = false;
+      if(g_holdValid) { panelSetup = g_holdSetup; havePanel = true; }
+      else if(g_nSetups > 0) { panelSetup = g_setups[g_nSetups - 1]; havePanel = true; }
+
+      if(havePanel)
+      {
+         int stCode = 0;
+         int exitBar = -1;
+         string stTxt = StatusText(panelSetup, h, l, c, rates_total, stCode, exitBar);
+         DrawInfoPanel(panelSetup, stTxt, stCode, bid);
+
+         // Release dead holds immediately
+         if(g_holdValid && (stCode == 2 || stCode == 3))
+            g_holdValid = false;
+
+         if(InpAlertOnTpSl)
+         {
+            if(stCode == 2 && panelSetup.barTime != g_lastTpAlert)
+            {
+               g_lastTpAlert = panelSetup.barTime;
+               string m = "TRH TP HIT @ " + DoubleToString(panelSetup.tp, _Digits);
+               if(InpAlertPopup) Alert(m);
+               if(InpAlertPush) SendNotification(m);
+               if(InpAlertSound) PlaySound(InpAlertSoundFile);
+            }
+            if(stCode == 3 && panelSetup.barTime != g_lastSlAlert)
+            {
+               g_lastSlAlert = panelSetup.barTime;
+               string m = "TRH SL HIT @ " + DoubleToString(panelSetup.sl, _Digits);
+               if(InpAlertPopup) Alert(m);
+               if(InpAlertPush) SendNotification(m);
+               if(InpAlertSound) PlaySound(InpAlertSoundFile);
+            }
+         }
+
+         if(InpShowComment)
+         {
+            Comment(
+               "TRH | Trading Room Hunter\n",
+               (panelSetup.dir == 1 ? "LONG" : "SHORT"), " | ", TrhModeLabel(panelSetup.setupMode), " | ", stTxt, "\n",
+               "ENTRY ", DoubleToString(panelSetup.entry, _Digits), "\n",
+               "SL    ", DoubleToString(panelSetup.sl, _Digits), "\n",
+               "TP    ", DoubleToString(panelSetup.tp, _Digits), "\n",
+               "Bar   ", TimeToString(panelSetup.barTime, TIME_DATE|TIME_MINUTES)
+            );
+         }
+         else Comment("");
+      }
+   }
+
+   // Keep live overlay visible even on non-new bars
+   if(!newBar && g_livePosValid)
+      DrawLivePositionOverlay();
 
    return rates_total;
 }
