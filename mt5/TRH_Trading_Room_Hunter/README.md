@@ -3,7 +3,7 @@
 | File | Role |
 |------|------|
 | `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.25 |
-| `TRH_AutoTrade.mq5` | **EA** v3.26 |
+| `TRH_AutoTrade.mq5` | **EA** v3.27 |
 | `TRH_Engine.mqh` | Shared Engine v225 |
 
 | Mode | Chart name | Logic |
@@ -21,6 +21,18 @@ BTB confirms faster than Mode A (A needs base bars). Old merge kept the earlier 
 - Same bar → keep **A over B over C**
 - Inside cooldown → a later **higher-priority** mode **replaces** a weaker one (A replaces C)
 - Chart / EA always use the **latest preferred** setup in the merged list
+
+## Smart EA fill (v3.27)
+
+Indicator **SL/TP drawings ≠ broker orders**. v3.27 keeps an **active setup** until filled:
+
+- Adopts latest preferred setup (A>B>C) up to 8 bars age
+- Retries **every tick** (spread/session no longer permanently lock)
+- Before ENTRY → **BuyStop / SellStop**
+- Past ENTRY → **BuyLimit / SellLimit** pullback
+- Bar touches ENTRY → **market fill** (deletes pending if needed)
+- Aborts only if SL hit first, too deep to TP (≥0.9R), or work age expires
+- Chart comment shows `WORKING…` / `pending parked` / fail reason
 
 ## Pullback LIMIT (EA v3.26)
 
