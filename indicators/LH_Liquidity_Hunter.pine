@@ -1,5 +1,5 @@
 //@version=5
-indicator("LH · Liquidity Hunter", overlay=true, max_boxes_count=60, max_lines_count=120, max_labels_count=80)
+indicator("LH · Liquidity Hunter", overlay=true, max_boxes_count=60, max_lines_count=120, max_labels_count=80, max_bars_back=5000)
 
 // Complete setup: 1 RAID → 2 CISD → 3 MSS → 4 FVG → ENTRY / SL / TP
 
@@ -81,31 +81,6 @@ f_nextLo(float[] px, float from, float minDist) =>
                 out := na(out) ? p : math.max(out, p)
     out
 
-f_setupStatus(int dir, float entry, float sl, float tp, int fromBar) =>
-    int st = 0
-    int filledBar = -1
-    bool done = false
-    int barsBack = bar_index - fromBar
-    if barsBack >= 0 and not na(entry) and dir != 0 and not na(fromBar)
-        int maxBack = math.min(barsBack, 500)
-        for k = maxBack to 0
-            if not done
-                bool touchE = dir == 1 ? low[k] <= entry : high[k] >= entry
-                bool thruE = dir == 1 ? close[k] >= entry : close[k] <= entry
-                if filledBar < 0 and (touchE or thruE)
-                    filledBar := bar_index - k
-                    st := 1
-                if filledBar >= 0
-                    bool hitT = dir == 1 ? high[k] >= tp : low[k] <= tp
-                    bool hitS = dir == 1 ? low[k] <= sl : high[k] >= sl
-                    if hitS
-                        st := 3
-                        done := true
-                    else if hitT
-                        st := 2
-                        done := true
-    [st, filledBar]
-
 f_validRisk(float entry, float sl, float a) =>
     math.abs(entry - sl) >= a * minRiskAtr
 
@@ -184,9 +159,16 @@ var int setupRaidBar = na
 var int setupCisdBar = na
 var int setupMssBar = na
 
+var int setupStatus = 0
+var int setupFillBar = -1
+var int statusTrackBar = na
+
 var box[] drawBoxes = array.new_box()
 var line[] drawLines = array.new_line()
 var label[] drawLabels = array.new_label()
+
+// Safe window for drawings — Pine rejects x-coords whose offset exceeds the historical buffer
+SAFE_DRAW = 480
 
 if not na(ph)
     f_push(pivHiPx, pivHiBar, ph, bar_index - pivotPeriod)
@@ -434,7 +416,31 @@ if barstate.islast and nHist > 0
     setupCisdBar := lastS.cisdBar
     setupMssBar := lastS.mssBar
 
-[setupStatus, setupFillBar] = f_setupStatus(setupDir, setupEntry, setupSl, setupTp, nz(setupBar, bar_index))
+// Incremental fill/TP/SL status — only current bar (avoids deep historical [] offsets)
+if na(setupEntry) or setupDir == 0 or na(setupBar)
+    setupStatus := 0
+    setupFillBar := -1
+    statusTrackBar := na
+else
+    if na(statusTrackBar) or statusTrackBar != setupBar
+        setupStatus := 0
+        setupFillBar := -1
+        statusTrackBar := setupBar
+    if setupStatus < 2 and bar_index >= setupBar
+        if setupStatus == 0
+            bool touchE = setupDir == 1 ? low <= setupEntry : high >= setupEntry
+            bool thruE = setupDir == 1 ? close >= setupEntry : close <= setupEntry
+            if touchE or thruE
+                setupFillBar := bar_index
+                setupStatus := 1
+        if setupStatus == 1
+            bool hitT = setupDir == 1 ? high >= setupTp : low <= setupTp
+            bool hitS = setupDir == 1 ? low <= setupSl : high >= setupSl
+            if hitS
+                setupStatus := 3
+            else if hitT
+                setupStatus := 2
+
 string statusTxt = na(setupEntry) or setupDir == 0 ? "-" : setupStatus == 0 ? "WAIT FILL" : setupStatus == 1 ? "IN TRADE" : setupStatus == 2 ? "TP HIT" : "SL HIT"
 color statusCol = setupStatus == 0 ? color.gray : setupStatus == 1 ? color.orange : setupStatus == 2 ? longCol : shortCol
 
@@ -462,51 +468,59 @@ if barstate.islast
         color sideCol = s.dir == 1 ? longCol : shortCol
         string sideTxt = s.dir == 1 ? "LONG" : "SHORT"
         int endBar = bar_index + 8
+        // Clamp object x into SAFE_DRAW — Pine errors if offset > historical buffer (e.g. 766 > 765)
+        int minX = math.max(0, bar_index - SAFE_DRAW)
+        int xRaid = math.max(nz(s.raidBar, minX), minX)
+        int xCisd = math.max(nz(s.cisdBar, xRaid), minX)
+        int xMss = math.max(nz(s.mssBar, xCisd), minX)
+        int xSetup = math.max(nz(s.bar, xMss), minX)
         float risk = math.abs(s.entry - s.sl)
         float rr = risk > 0 ? math.abs(s.tp - s.entry) / risk : 0.0
 
         if showFvg
-            array.push(drawBoxes, box.new(math.max(s.mssBar, s.bar - 2), s.fvgTop, endBar, s.fvgBot, xloc=xloc.bar_index, bgcolor=color.new(sideCol, 78), border_color=color.new(sideCol, 35), border_width=1))
-            array.push(drawLabels, label.new(math.max(s.mssBar, s.bar - 2), (s.fvgTop + s.fvgBot) * 0.5, "4 FVG", style=label.style_label_right, color=color.new(sideCol, 20), textcolor=color.white, size=size.small))
+            array.push(drawBoxes, box.new(math.max(xMss, xSetup - 2), s.fvgTop, endBar, s.fvgBot, xloc=xloc.bar_index, bgcolor=color.new(sideCol, 78), border_color=color.new(sideCol, 35), border_width=1))
+            array.push(drawLabels, label.new(math.max(xMss, xSetup - 2), (s.fvgTop + s.fvgBot) * 0.5, "4 FVG", xloc=xloc.bar_index, style=label.style_label_right, color=color.new(sideCol, 20), textcolor=color.white, size=size.small))
 
         if showAnatomy
-            array.push(drawLines, line.new(s.raidBar, s.raidPx, endBar, s.raidPx, color=color.new(raidCol, 15), style=line.style_dotted, width=2))
-            array.push(drawLabels, label.new(s.raidBar, s.raidPx, "1 RAID " + (s.dir == 1 ? "SSL" : "BSL") + "\n" + str.tostring(s.raidPx, format.mintick), style=label.style_label_right, color=raidCol, textcolor=color.black, size=size.small))
-            array.push(drawLines, line.new(s.raidBar, s.raidExt, math.min(nz(s.cisdBar, s.raidBar + 3), s.raidBar + 10), s.raidExt, color=color.new(raidCol, 35), style=line.style_dashed, width=1))
-            array.push(drawLabels, label.new(s.raidBar, s.raidExt, "SWEEP\n" + str.tostring(s.raidExt, format.mintick), style=s.dir == 1 ? label.style_label_up : label.style_label_down, color=color.new(raidCol, 10), textcolor=color.black, size=size.tiny))
+            array.push(drawLines, line.new(xRaid, s.raidPx, endBar, s.raidPx, xloc=xloc.bar_index, color=color.new(raidCol, 15), style=line.style_dotted, width=2))
+            array.push(drawLabels, label.new(xRaid, s.raidPx, "1 RAID " + (s.dir == 1 ? "SSL" : "BSL") + "\n" + str.tostring(s.raidPx, format.mintick), xloc=xloc.bar_index, style=label.style_label_right, color=raidCol, textcolor=color.black, size=size.small))
+            array.push(drawLines, line.new(xRaid, s.raidExt, math.min(math.max(xCisd, xRaid + 1), xRaid + 10), s.raidExt, xloc=xloc.bar_index, color=color.new(raidCol, 35), style=line.style_dashed, width=1))
+            array.push(drawLabels, label.new(xRaid, s.raidExt, "SWEEP\n" + str.tostring(s.raidExt, format.mintick), xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_up : label.style_label_down, color=color.new(raidCol, 10), textcolor=color.black, size=size.tiny))
 
-            if not na(s.cisdBar) and not na(s.cisdPx)
-                array.push(drawLines, line.new(s.cisdBar, s.cisdPx, endBar, s.cisdPx, color=color.new(cisdCol, 20), style=line.style_dotted, width=2))
-                array.push(drawLabels, label.new(s.cisdBar, s.cisdPx, "2 CISD\n" + str.tostring(s.cisdPx, format.mintick), style=label.style_label_right, color=cisdCol, textcolor=color.white, size=size.small))
+            if not na(s.cisdPx)
+                array.push(drawLines, line.new(xCisd, s.cisdPx, endBar, s.cisdPx, xloc=xloc.bar_index, color=color.new(cisdCol, 20), style=line.style_dotted, width=2))
+                array.push(drawLabels, label.new(xCisd, s.cisdPx, "2 CISD\n" + str.tostring(s.cisdPx, format.mintick), xloc=xloc.bar_index, style=label.style_label_right, color=cisdCol, textcolor=color.white, size=size.small))
 
-            if not na(s.mssBar) and not na(s.mssPx)
-                array.push(drawLines, line.new(s.mssBar, s.mssPx, endBar, s.mssPx, color=color.new(mssCol, 15), style=line.style_dotted, width=2))
-                array.push(drawLabels, label.new(s.mssBar, s.mssPx, "3 " + s.tag + "\n" + str.tostring(s.mssPx, format.mintick), style=label.style_label_right, color=mssCol, textcolor=color.white, size=size.small))
+            if not na(s.mssPx)
+                array.push(drawLines, line.new(xMss, s.mssPx, endBar, s.mssPx, xloc=xloc.bar_index, color=color.new(mssCol, 15), style=line.style_dotted, width=2))
+                array.push(drawLabels, label.new(xMss, s.mssPx, "3 " + s.tag + "\n" + str.tostring(s.mssPx, format.mintick), xloc=xloc.bar_index, style=label.style_label_right, color=mssCol, textcolor=color.white, size=size.small))
 
-            array.push(drawBoxes, box.new(s.bar, math.max(s.entry, s.sl), endBar, math.min(s.entry, s.sl), bgcolor=color.new(shortCol, 88), border_color=color.new(shortCol, 55), border_width=1))
-            array.push(drawLabels, label.new(s.bar, (s.entry + s.sl) * 0.5, "RISK", style=label.style_label_right, color=color.new(shortCol, 40), textcolor=color.white, size=size.tiny))
-            array.push(drawBoxes, box.new(s.bar, math.max(s.entry, s.tp), endBar, math.min(s.entry, s.tp), bgcolor=color.new(longCol, 90), border_color=color.new(longCol, 55), border_width=1))
-            array.push(drawLabels, label.new(s.bar, (s.entry + s.tp) * 0.5, "REWARD", style=label.style_label_right, color=color.new(longCol, 40), textcolor=color.white, size=size.tiny))
+            array.push(drawBoxes, box.new(xSetup, math.max(s.entry, s.sl), endBar, math.min(s.entry, s.sl), xloc=xloc.bar_index, bgcolor=color.new(shortCol, 88), border_color=color.new(shortCol, 55), border_width=1))
+            array.push(drawLabels, label.new(xSetup, (s.entry + s.sl) * 0.5, "RISK", xloc=xloc.bar_index, style=label.style_label_right, color=color.new(shortCol, 40), textcolor=color.white, size=size.tiny))
+            array.push(drawBoxes, box.new(xSetup, math.max(s.entry, s.tp), endBar, math.min(s.entry, s.tp), xloc=xloc.bar_index, bgcolor=color.new(longCol, 90), border_color=color.new(longCol, 55), border_width=1))
+            array.push(drawLabels, label.new(xSetup, (s.entry + s.tp) * 0.5, "REWARD", xloc=xloc.bar_index, style=label.style_label_right, color=color.new(longCol, 40), textcolor=color.white, size=size.tiny))
 
-        array.push(drawLabels, label.new(s.bar, s.dir == 1 ? s.fvgTop : s.fvgBot, "LH " + sideTxt + " · " + s.tag, style=s.dir == 1 ? label.style_label_down : label.style_label_up, color=sideCol, textcolor=color.white, size=size.normal))
+        array.push(drawLabels, label.new(xSetup, s.dir == 1 ? s.fvgTop : s.fvgBot, "LH " + sideTxt + " · " + s.tag, xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_down : label.style_label_up, color=sideCol, textcolor=color.white, size=size.normal))
 
         if showLevelLabels
-            array.push(drawLabels, label.new(bar_index + 2, s.entry, "ENTRY  " + str.tostring(s.entry, format.mintick), style=label.style_label_left, color=color.new(entryCol, 5), textcolor=color.black, size=size.normal))
-            array.push(drawLabels, label.new(bar_index + 2, s.sl, "SL  " + str.tostring(s.sl, format.mintick), style=label.style_label_left, color=color.new(shortCol, 5), textcolor=color.white, size=size.normal))
-            array.push(drawLabels, label.new(bar_index + 2, s.tp, "TP  " + str.tostring(s.tp, format.mintick) + " (" + str.tostring(rr, "#.0") + "R)", style=label.style_label_left, color=color.new(longCol, 5), textcolor=color.white, size=size.normal))
-            array.push(drawLabels, label.new(bar_index + 2, (s.entry + s.sl) * 0.5, statusTxt, style=label.style_label_left, color=color.new(statusCol, 0), textcolor=color.white, size=size.normal))
+            array.push(drawLabels, label.new(bar_index + 2, s.entry, "ENTRY  " + str.tostring(s.entry, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(entryCol, 5), textcolor=color.black, size=size.normal))
+            array.push(drawLabels, label.new(bar_index + 2, s.sl, "SL  " + str.tostring(s.sl, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(shortCol, 5), textcolor=color.white, size=size.normal))
+            array.push(drawLabels, label.new(bar_index + 2, s.tp, "TP  " + str.tostring(s.tp, format.mintick) + " (" + str.tostring(rr, "#.0") + "R)", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(longCol, 5), textcolor=color.white, size=size.normal))
+            array.push(drawLabels, label.new(bar_index + 2, (s.entry + s.sl) * 0.5, statusTxt, xloc=xloc.bar_index, style=label.style_label_left, color=color.new(statusCol, 0), textcolor=color.white, size=size.normal))
 
+        // Older history: only markers still inside SAFE_DRAW
         if not onlyLast and nHist > 1
             int start = math.max(0, nHist - historyCount)
             int endHist = nHist - 2
             if endHist >= start
                 for j = start to endHist
                     Setup h = array.get(history, j)
-                    color hCol = h.dir == 1 ? longCol : shortCol
-                    if showFvg
-                        array.push(drawBoxes, box.new(h.bar, h.fvgTop, h.bar + 10, h.fvgBot, bgcolor=color.new(hCol, 92), border_color=color.new(hCol, 70)))
-                    array.push(drawLabels, label.new(h.bar, h.dir == 1 ? h.fvgTop : h.fvgBot, (h.dir == 1 ? "L" : "S") + " · " + h.tag, style=label.style_label_down, color=color.new(hCol, 45), textcolor=color.white, size=size.tiny))
-
+                    int xh = math.max(nz(h.bar, minX), minX)
+                    if bar_index - xh <= SAFE_DRAW
+                        color hCol = h.dir == 1 ? longCol : shortCol
+                        if showFvg
+                            array.push(drawBoxes, box.new(xh, h.fvgTop, xh + 10, h.fvgBot, xloc=xloc.bar_index, bgcolor=color.new(hCol, 92), border_color=color.new(hCol, 70)))
+                        array.push(drawLabels, label.new(xh, h.dir == 1 ? h.fvgTop : h.fvgBot, (h.dir == 1 ? "L" : "S") + " · " + h.tag, xloc=xloc.bar_index, style=label.style_label_down, color=color.new(hCol, 45), textcolor=color.white, size=size.tiny))
 var table panel = table.new(position.top_left, 2, 12, bgcolor=color.new(#0D1117, 5), border_width=1, border_color=#30363D)
 if barstate.islast
     if na(setupEntry) or setupDir == 0
