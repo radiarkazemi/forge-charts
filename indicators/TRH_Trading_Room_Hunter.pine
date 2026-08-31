@@ -10,8 +10,8 @@ indicator("TRH | Trading Room Hunter", shorttitle="TRH", overlay=true, max_boxes
 // ═══════════════════════════════════════════════════════════════════════════
 
 grp = "TRH Detection"
-tradeMode      = input.string("All", "Detection Mode", options=["Classic", "FVG", "BTB", "Classic+FVG", "All"], group=grp,
-     tooltip="Priority A>B>C. Classic=A SWEEP · FVG=B · BTB=C · All=A then B then C (A wins conflicts)")
+tradeMode      = input.string("Classic+FVG", "Detection Mode", options=["Classic", "FVG", "Classic+FVG"], group=grp,
+     tooltip="Live model: A SWEEP + B FVG. Classic=A only · FVG=B only · Classic+FVG=both (default). BTB removed.")
 pivotPeriod    = input.int(5, "Pivot Period", minval=2, maxval=30, group=grp)
 minContextAtr  = input.float(1.2, "Min Selloff/Rally Into Sweep (ATR×)", minval=0.5, maxval=8.0, step=0.1, group=grp)
 minSweepAtr    = input.float(0.05, "Min Sweep Beyond Pivot (ATR×)", minval=0.0, maxval=1.0, step=0.05, group=grp)
@@ -152,9 +152,9 @@ f_nextLiquidityLow(fromPrice, minDist) =>
 // Short: mirror
 // ═══════════════════════════════════════════════════════════════════════════
 
-useClassic = tradeMode == "Classic" or tradeMode == "Classic+FVG" or tradeMode == "All"
-useFvgMode = tradeMode == "FVG" or tradeMode == "Classic+FVG" or tradeMode == "All"
-useBtbMode = tradeMode == "BTB" or tradeMode == "All"
+useClassic = tradeMode == "Classic" or tradeMode == "Classic+FVG"
+useFvgMode = tradeMode == "FVG" or tradeMode == "Classic+FVG"
+useBtbMode = false // BTB removed from live model
 
 [huntLo, huntLoBar] = f_lastPivotLow(80)
 [huntHi, huntHiBar] = f_lastPivotHigh(80)

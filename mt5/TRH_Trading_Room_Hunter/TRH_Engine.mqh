@@ -5,19 +5,19 @@
 #ifndef TRH_ENGINE_MQH
 #define TRH_ENGINE_MQH
 
-#define TRH_ENGINE_VERSION 225
+#define TRH_ENGINE_VERSION 226
 #define TRH_MAX_PIVOTS 30
 #define TRH_ATR_LEN    14
 
 #define TRH_MODE_CLASSIC 0   // Mode A - classic room SWEEP (setup tag)
 #define TRH_MODE_FVG     1   // Mode B - sweep + displacement + FVG
 #define TRH_MODE_BTB     2   // Mode C - Pro BTB breakout + retest
-// Scan modes (InpTradeMode): 0 Classic, 1 FVG, 2 Both A+B, 3 BTB, 4 All
+// Scan modes (InpTradeMode): 0 Classic, 1 FVG, 2 Both A+B, 3 BTB (legacy off), 4 All(=A+B)
 #define TRH_SCAN_CLASSIC 0
 #define TRH_SCAN_FVG     1
 #define TRH_SCAN_BOTH_AB 2
-#define TRH_SCAN_BTB     3
-#define TRH_SCAN_ALL     4
+#define TRH_SCAN_BTB     3   // legacy — not used in default trading
+#define TRH_SCAN_ALL     4   // A + B only (BTB removed from live model)
 
 struct TrhPivot
 {
@@ -967,23 +967,18 @@ int TrhScanByMode(const int rates,
    if(tradeMode == TRH_SCAN_BTB)
       return TrhScanBtbSetups(rates, time, open, high, low, close, cfg, outSetups);
 
-   TrhSetup a[], b[], c[];
-   int na = 0, nb = 0, nc = 0;
+   TrhSetup a[], b[];
+   int na = 0, nb = 0;
+   // BOTH and ALL = Mode A + Mode B only (BTB removed from live model)
    if(tradeMode == TRH_SCAN_BOTH_AB || tradeMode == TRH_SCAN_ALL)
    {
       na = TrhScanSetups(rates, time, open, high, low, close, cfg, a);
       nb = TrhScanFvgSetups(rates, time, open, high, low, close, cfg, b);
-   }
-   if(tradeMode == TRH_SCAN_ALL)
-      nc = TrhScanBtbSetups(rates, time, open, high, low, close, cfg, c);
-
-   if(tradeMode == TRH_SCAN_BOTH_AB)
       return TrhMergeScans(a, na, b, nb, cfg, outSetups);
+   }
 
-   // ALL: merge A+B first, then with C
-   TrhSetup ab[];
-   int nab = TrhMergeScans(a, na, b, nb, cfg, ab);
-   return TrhMergeScans(ab, nab, c, nc, cfg, outSetups);
+   ArrayResize(outSetups, 0);
+   return 0;
 }
 
 // Copy MT5 series (newest-first or oldest-first) into oldest->newest buffers.

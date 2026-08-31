@@ -4,15 +4,15 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "2.26"
-#property description "TRH v2.26: sync live EA position · release dead holds"
+#property version   "2.27"
+#property description "TRH v2.27: A·SWEEP + B·FVG only (BTB removed)"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
 
 #include "TRH_Engine.mqh"
 
-// MQL5 has no #error — version is checked in OnInit (need Engine v225+ in SAME folder).
+// MQL5 has no #error — version is checked in OnInit (need Engine v226+ in SAME folder).
 #ifndef TRH_ENGINE_VERSION
 #define TRH_ENGINE_VERSION 0
 #endif
@@ -27,13 +27,13 @@ enum ENUM_TRH_TRADE_MODE
 {
    TRH_TM_CLASSIC = 0, // Mode A - classic SWEEP room
    TRH_TM_FVG     = 1, // Mode B - sweep + displacement + FVG
-   TRH_TM_BOTH    = 2, // A + B (shared cooldown)
-   TRH_TM_BTB     = 3, // Mode C - Pro BTB breakout + retest
-   TRH_TM_ALL     = 4  // A + B + C
+   TRH_TM_BOTH    = 2, // A + B (default live model)
+   TRH_TM_BTB     = 3, // Mode C - legacy BTB (off)
+   TRH_TM_ALL     = 4  // A + B (same as Both; BTB removed)
 };
 
 input group "Strategy mode"
-input ENUM_TRH_TRADE_MODE InpTradeMode = TRH_TM_ALL; // Detection Mode
+input ENUM_TRH_TRADE_MODE InpTradeMode = TRH_TM_BOTH; // Detection Mode (A+B)
 
 input group "TRH Detection"
 input int    InpPivotPeriod     = 5;      // Pivot Period
@@ -135,13 +135,13 @@ ulong    g_liveTicket = 0;
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   if(TRH_ENGINE_VERSION < 225)
+   if(TRH_ENGINE_VERSION < 226)
    {
       Alert("TRH: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
             "). Put NEW TRH_Engine.mqh in the SAME folder as this .mq5 and recompile.");
       return INIT_FAILED;
    }
-   IndicatorSetString(INDICATOR_SHORTNAME, "TRH live-sync A/B/C");
+   IndicatorSetString(INDICATOR_SHORTNAME, "TRH A·SWEEP + B·FVG");
    return INIT_SUCCEEDED;
 }
 
@@ -803,7 +803,7 @@ int OnCalculate(const int rates_total,
             int y0 = (InpPanelCorner == TRH_PANEL_LEFT) ? 70 : 28;
             SetPanelBg(OBJ_PREFIX + "PBG", 12, y0, 248, 56, corner);
             SetPanelLabel(OBJ_PREFIX + "P0", 22, y0 + 10, "TRH | scanning...", clrSilver, 10, corner);
-            SetPanelLabel(OBJ_PREFIX + "P1", 22, y0 + 30, "No SWEEP / FVG / BTB yet", clrDimGray, 9, corner);
+            SetPanelLabel(OBJ_PREFIX + "P1", 22, y0 + 30, "No SWEEP / FVG yet", clrDimGray, 9, corner);
          }
          if(InpShowComment) Comment("TRH scanning... (no setup yet)");
          return rates_total;
