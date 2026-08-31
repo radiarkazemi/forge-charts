@@ -4,15 +4,15 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "2.23"
-#property description "TRH Mode A/B/C: mid-ENTRY confirm, skip late rooms"
+#property version   "2.24"
+#property description "TRH A/B/C named setups · stronger Mode C BTB"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
 
 #include "TRH_Engine.mqh"
 
-// MQL5 has no #error — version is checked in OnInit (need Engine v223+ in SAME folder).
+// MQL5 has no #error — version is checked in OnInit (need Engine v224+ in SAME folder).
 #ifndef TRH_ENGINE_VERSION
 #define TRH_ENGINE_VERSION 0
 #endif
@@ -44,8 +44,6 @@ input int    InpMaxBaseBars     = 40;     // Max Bars To Confirm Room (Mode A)
 input double InpMinRoomAtr      = 0.8;    // Min Room Width (ATRx) Mode A
 input double InpMaxRoomAtr      = 3.5;    // Max Room Width (ATRx) Mode A
 input int    InpCooldownBars    = 50;     // Cooldown Between Setups
-input double InpRoomConfirmFrac = 0.50;   // Confirm at mid ENTRY (0.5); 0.7 was late
-input double InpLatePastMidAtr  = 0.25;   // Skip if close already past mid by this ATR×
 
 input group "Mode B - Sweep + Displacement + FVG"
 input double InpMinDispAtr      = 0.55;   // Min Displacement Body (ATRx)
@@ -57,12 +55,17 @@ input int    InpMaxRetestBars   = 8;      // Max Bars To Wait For Retest
 input double InpFvgSlExtraAtr   = 0.20;   // Extra SL Beyond Sweep (ATRx)
 
 input group "Mode C - Pro BTB (Break + Retest)"
-input double InpMinBreakAtr     = 0.15;   // Min Break Beyond Pivot (ATRx)
-input double InpMinBreakBodyAtr = 0.35;   // Min Breakout Candle Body (ATRx)
-input int    InpMaxBtbRetestBars= 12;     // Max Bars To Wait For BTB Retest
+input double InpMinBreakAtr     = 0.20;   // Min Break Beyond Pivot (ATRx)
+input double InpMinBreakBodyAtr = 0.45;   // Min Breakout Candle Body (ATRx)
+input int    InpMaxBtbRetestBars= 10;     // Max Bars To Wait For BTB Retest
 input double InpBtbRiskReward   = 2.0;    // BTB Risk-Reward (min 2.0)
-input double InpBtbSlExtraAtr   = 0.10;   // Extra SL Beyond Breakout Extreme
+input double InpBtbSlExtraAtr   = 0.15;   // Extra SL Beyond Breakout Extreme
 input bool   InpBtbRequireConfirm = true; // Require Rejection Candle On Retest
+input double InpBtbMinRiskAtr   = 0.50;   // Min Risk Size (ATRx) — reject tiny SL
+input double InpBtbMinConfirmBody= 0.28;  // Min Confirm Candle Body (ATRx)
+input bool   InpBtbWickReject   = true;   // Wick tags BE + close rejects
+input double InpBtbMaxPastEntry = 0.20;   // Skip if close past BE toward TP (ATRx)
+input int    InpBtbMinBarsBreak = 2;      // Min Bars After Breakout Before Entry
 
 input group "Entry / SL / TP"
 input double InpSlPadAtr        = 0.02;   // SL Pad (ATRx)
@@ -121,13 +124,13 @@ bool     g_holdValid = false;
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   if(TRH_ENGINE_VERSION < 223)
+   if(TRH_ENGINE_VERSION < 224)
    {
       Alert("TRH: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
             "). Put NEW TRH_Engine.mqh in the SAME folder as this .mq5 and recompile.");
       return INIT_FAILED;
    }
-   IndicatorSetString(INDICATOR_SHORTNAME, "TRH Sweep+FVG+BTB");
+   IndicatorSetString(INDICATOR_SHORTNAME, "TRH A·SWEEP | B·FVG | C·BTB");
    return INIT_SUCCEEDED;
 }
 
@@ -355,7 +358,8 @@ void DrawInfoPanel(const TrhSetup &s, const string stTxt, const int stCode,
    int dy = 16;
    SetPanelLabel(OBJ_PREFIX + "P0", x0 + 10, y, "TRH | Trading Room Hunter", clrWhite, 10, corner); y += dy + 2;
    SetPanelLabel(OBJ_PREFIX + "P1", x0 + 10, y,
-      (s.dir == 1 ? "LONG" : "SHORT") + " | " + TrhModeLabel(s.setupMode) + " | " + stTxt, sideCol, 9, corner); y += dy;
+      (s.dir == 1 ? "LONG" : "SHORT") + " · " + TrhModeLabel(s.setupMode) + " · " + stTxt, sideCol, 9, corner); y += dy;
+   SetPanelLabel(OBJ_PREFIX + "P1b", x0 + 10, y, TrhModeFullName(s.setupMode), TrhModeAccent(s.setupMode, s.dir), 8, corner); y += dy;
    SetPanelLabel(OBJ_PREFIX + "P2", x0 + 10, y, "ENTRY  " + DoubleToString(s.entry, _Digits), InpEntryCol, 9, corner); y += dy;
    SetPanelLabel(OBJ_PREFIX + "P3", x0 + 10, y, "SL     " + DoubleToString(s.sl, _Digits), InpSlCol, 9, corner); y += dy;
    SetPanelLabel(OBJ_PREFIX + "P4", x0 + 10, y, "TP     " + DoubleToString(s.tp, _Digits), InpTpCol, 9, corner); y += dy;
@@ -391,24 +395,25 @@ void DrawOneSetup(const TrhSetup &s, const datetime &time[],
    if(t2 <= t1 && bi + 1 < rates) t2 = time[bi + 1];
 
    string tag = IntegerToString((int)s.barTime);
-   color zoneCol = (s.dir == 1) ? InpBullZoneCol : InpBearZoneCol;
-   double zTop = MathMax(s.proximal, s.distal);
-   double zBot = MathMin(s.proximal, s.distal);
+   color accent = TrhModeAccent(s.setupMode, s.dir);
+   color zoneCol = accent;
+   double roomTop = MathMax(s.proximal, s.distal);
+   double roomBot = MathMin(s.proximal, s.distal);
 
    if(InpShowRoomZone)
-      SetRect(OBJ_PREFIX + "Z_" + tag, t1, zTop, t2, zBot, DimColor(zoneCol, 55), 1);
+      SetRect(OBJ_PREFIX + "Z_" + tag, t1, roomTop, t2, roomBot, DimColor(zoneCol, 62), 1);
 
    if(InpShowTpSlZones)
    {
       if(s.dir == 1)
       {
-         SetRect(OBJ_PREFIX + "TPZ_" + tag, t1, s.tp, t2, s.entry, DimColor(InpTpZoneCol, 70));
-         SetRect(OBJ_PREFIX + "SLZ_" + tag, t1, s.entry, t2, s.sl, DimColor(InpSlZoneCol, 70));
+         SetRect(OBJ_PREFIX + "TPZ_" + tag, t1, s.tp, t2, s.entry, DimColor(InpTpZoneCol, 72));
+         SetRect(OBJ_PREFIX + "SLZ_" + tag, t1, s.entry, t2, s.sl, DimColor(InpSlZoneCol, 72));
       }
       else
       {
-         SetRect(OBJ_PREFIX + "TPZ_" + tag, t1, s.entry, t2, s.tp, DimColor(InpTpZoneCol, 70));
-         SetRect(OBJ_PREFIX + "SLZ_" + tag, t1, s.sl, t2, s.entry, DimColor(InpSlZoneCol, 70));
+         SetRect(OBJ_PREFIX + "TPZ_" + tag, t1, s.entry, t2, s.tp, DimColor(InpTpZoneCol, 72));
+         SetRect(OBJ_PREFIX + "SLZ_" + tag, t1, s.sl, t2, s.entry, DimColor(InpSlZoneCol, 72));
       }
    }
 
@@ -428,7 +433,6 @@ void DrawOneSetup(const TrhSetup &s, const datetime &time[],
    }
    else
    {
-      // remove old HLines when frozen
       ObjectDelete(0, OBJ_PREFIX + "HE_" + tag);
       ObjectDelete(0, OBJ_PREFIX + "HS_" + tag);
       ObjectDelete(0, OBJ_PREFIX + "HT_" + tag);
@@ -449,29 +453,36 @@ void DrawOneSetup(const TrhSetup &s, const datetime &time[],
 
    if(InpShowTag)
    {
-      string tagTxt = "TRH " + (s.dir == 1 ? "LONG" : "SHORT") + " | " + TrhModeLabel(s.setupMode);
-      if(stCode == 2) tagTxt += " | TP";
-      if(stCode == 3) tagTxt += " | SL";
-      SetText(OBJ_PREFIX + "TAG_" + tag, t1, (s.dir == 1 ? zTop : zBot),
-         tagTxt,
-         (s.dir == 1 ? InpBullZoneCol : InpBearZoneCol),
+      string modeName = TrhModeLabel(s.setupMode);
+      string tagTxt = "TRH " + (s.dir == 1 ? "LONG" : "SHORT") + " · " + modeName;
+      if(stCode == 0) tagTxt += " · WAIT";
+      if(stCode == 1) tagTxt += " · LIVE";
+      if(stCode == 2) tagTxt += " · TP";
+      if(stCode == 3) tagTxt += " · SL";
+      // Mode badge above/below setup
+      SetText(OBJ_PREFIX + "TAG_" + tag, t1, (s.dir == 1 ? roomTop : roomBot),
+         tagTxt, accent,
          (s.dir == 1 ? ANCHOR_LEFT_LOWER : ANCHOR_LEFT_UPPER));
+      SetText(OBJ_PREFIX + "MOD_" + tag, t1, s.entry,
+         TrhModeFullName(s.setupMode),
+         accent,
+         (s.dir == 1 ? ANCHOR_LEFT_UPPER : ANCHOR_LEFT_LOWER));
    }
 
    if(InpShowArrow)
    {
       int code = (s.dir == 1) ? 233 : 234;
-      double ap = (s.dir == 1) ? zBot : zTop;
-      SetArrow(OBJ_PREFIX + "AR_" + tag, t1, ap, code, zoneCol);
+      double ap = (s.dir == 1) ? roomBot : roomTop;
+      SetArrow(OBJ_PREFIX + "AR_" + tag, t1, ap, code, accent);
    }
 
    if(InpShowMidRoom)
-      SetArrow(OBJ_PREFIX + "MD_" + tag, t1, s.entry, 159, InpEntryCol);
+      SetArrow(OBJ_PREFIX + "MD_" + tag, t1, s.entry, 159, accent);
 
    // Mark exit bar
    if((stCode == 2 || stCode == 3) && exitBar >= 0 && exitBar < rates)
    {
-      int xcode = (stCode == 2) ? 252 : 251; // check / X
+      int xcode = (stCode == 2) ? 252 : 251;
       double xp = (stCode == 2) ? s.tp : s.sl;
       SetArrow(OBJ_PREFIX + "EX_" + tag, time[exitBar], xp, xcode, (stCode == 2 ? InpTpCol : InpSlCol));
    }
@@ -479,9 +490,9 @@ void DrawOneSetup(const TrhSetup &s, const datetime &time[],
 
 void NotifyNewSetup(const TrhSetup &s)
 {
-   string msg = StringFormat("TRH %s %s SETUP\nENTRY %s\nSL %s\nTP %s",
+   string msg = StringFormat("TRH %s · %s\nENTRY %s\nSL %s\nTP %s",
       s.dir == 1 ? "LONG" : "SHORT",
-      TrhModeLabel(s.setupMode),
+      TrhModeFullName(s.setupMode),
       DoubleToString(s.entry, _Digits),
       DoubleToString(s.sl, _Digits),
       DoubleToString(s.tp, _Digits));
@@ -505,8 +516,6 @@ void BuildConfig(TrhConfig &cfg)
    cfg.slPadAtr        = InpSlPadAtr;
    cfg.riskReward      = InpRiskReward;
    cfg.useLiquidityTP  = InpUseLiquidityTP;
-   cfg.roomConfirmFrac = InpRoomConfirmFrac;
-   cfg.latePastMidAtr  = InpLatePastMidAtr;
    cfg.minDispAtr      = InpMinDispAtr;
    cfg.maxDispBars     = InpMaxDispBars;
    cfg.maxFvgBars      = InpMaxFvgBars;
@@ -520,6 +529,11 @@ void BuildConfig(TrhConfig &cfg)
    cfg.btbRiskReward   = InpBtbRiskReward;
    cfg.btbSlExtraAtr   = InpBtbSlExtraAtr;
    cfg.btbRequireConfirm = InpBtbRequireConfirm;
+   cfg.btbMinRiskAtr       = InpBtbMinRiskAtr;
+   cfg.btbMinConfirmBodyAtr= InpBtbMinConfirmBody;
+   cfg.btbRequireWickReject= InpBtbWickReject;
+   cfg.btbMaxPastEntryAtr  = InpBtbMaxPastEntry;
+   cfg.btbMinBarsAfterBreak= InpBtbMinBarsBreak;
 }
 
 //+------------------------------------------------------------------+

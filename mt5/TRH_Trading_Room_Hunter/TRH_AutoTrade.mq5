@@ -5,14 +5,14 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.23"
-#property description "TRH EA v3.23: no expired mid-ENTRY pullbacks + spread retry"
+#property version   "3.24"
+#property description "TRH EA v3.24: named A/B/C · stronger Mode C BTB"
 #property strict
 
 #include <Trade/Trade.mqh>
 #include "TRH_Engine.mqh"
 
-// MQL5 has no #error — version is checked in OnInit (need Engine v223+ in SAME folder).
+// MQL5 has no #error — version is checked in OnInit (need Engine v224+ in SAME folder).
 #ifndef TRH_ENGINE_VERSION
 #define TRH_ENGINE_VERSION 0
 #endif
@@ -74,8 +74,6 @@ input int    InpMaxBaseBars     = 40;
 input double InpMinRoomAtr      = 0.8;
 input double InpMaxRoomAtr      = 3.5;
 input int    InpCooldownBars    = 50;
-input double InpRoomConfirmFrac = 0.50;   // Confirm at mid ENTRY (0.5); 0.7 = late/expired
-input double InpLatePastMidAtr  = 0.25;   // Skip Mode A if close already past mid by this ATR×
 
 input group "Mode B - Sweep + Displacement + FVG"
 input double InpMinDispAtr      = 0.55;   // Min Displacement Body (ATRx)
@@ -87,12 +85,17 @@ input int    InpMaxRetestBars   = 8;      // Max Bars To Wait For Retest
 input double InpFvgSlExtraAtr   = 0.20;   // Extra SL Beyond Sweep (ATRx)
 
 input group "Mode C - Pro BTB (Break + Retest)"
-input double InpMinBreakAtr     = 0.15;   // Min Break Beyond Pivot (ATRx)
-input double InpMinBreakBodyAtr = 0.35;   // Min Breakout Candle Body (ATRx)
-input int    InpMaxBtbRetestBars= 12;     // Max Bars To Wait For BTB Retest
+input double InpMinBreakAtr     = 0.20;   // Min Break Beyond Pivot (ATRx)
+input double InpMinBreakBodyAtr = 0.45;   // Min Breakout Candle Body (ATRx)
+input int    InpMaxBtbRetestBars= 10;     // Max Bars To Wait For BTB Retest
 input double InpBtbRiskReward   = 2.0;    // BTB Risk-Reward (min 2.0)
-input double InpBtbSlExtraAtr   = 0.10;   // Extra SL Beyond Breakout Extreme
+input double InpBtbSlExtraAtr   = 0.15;   // Extra SL Beyond Breakout Extreme
 input bool   InpBtbRequireConfirm = true; // Require Rejection Candle On Retest
+input double InpBtbMinRiskAtr   = 0.50;   // Min Risk Size (ATRx) — reject tiny SL
+input double InpBtbMinConfirmBody= 0.28;  // Min Confirm Candle Body (ATRx)
+input bool   InpBtbWickReject   = true;   // Wick tags BE + close rejects
+input double InpBtbMaxPastEntry = 0.20;   // Skip if close past BE toward TP (ATRx)
+input int    InpBtbMinBarsBreak = 2;      // Min Bars After Breakout Before Entry
 
 input group "Entry / SL / TP"
 input double InpSlPadAtr        = 0.02;
@@ -129,8 +132,6 @@ void BuildConfig(TrhConfig &cfg)
    cfg.slPadAtr        = InpSlPadAtr;
    cfg.riskReward      = InpRiskReward;
    cfg.useLiquidityTP  = InpUseLiquidityTP;
-   cfg.roomConfirmFrac = InpRoomConfirmFrac;
-   cfg.latePastMidAtr  = InpLatePastMidAtr;
    cfg.minDispAtr      = InpMinDispAtr;
    cfg.maxDispBars     = InpMaxDispBars;
    cfg.maxFvgBars      = InpMaxFvgBars;
@@ -144,6 +145,11 @@ void BuildConfig(TrhConfig &cfg)
    cfg.btbRiskReward   = InpBtbRiskReward;
    cfg.btbSlExtraAtr   = InpBtbSlExtraAtr;
    cfg.btbRequireConfirm = InpBtbRequireConfirm;
+   cfg.btbMinRiskAtr       = InpBtbMinRiskAtr;
+   cfg.btbMinConfirmBodyAtr= InpBtbMinConfirmBody;
+   cfg.btbRequireWickReject= InpBtbWickReject;
+   cfg.btbMaxPastEntryAtr  = InpBtbMaxPastEntry;
+   cfg.btbMinBarsAfterBreak= InpBtbMinBarsBreak;
 }
 
 void ResetDayIfNeeded()
@@ -339,7 +345,7 @@ int PlaceSetupTrade(const TrhSetup &s, const double atrNow)
    g_trade.SetDeviationInPoints(InpMaxSlippagePts);
    g_trade.SetTypeFillingBySymbol(_Symbol);
 
-   string comment = StringFormat("TRH %s %s", TrhModeLabel(s.setupMode), s.dir == 1 ? "LONG" : "SHORT");
+   string comment = StringFormat("%s %s", TrhModeLabel(s.setupMode), s.dir == 1 ? "LONG" : "SHORT");
    bool ok = false;
    string mode = "";
 
@@ -511,7 +517,7 @@ void ManageBreakEven()
 
 int OnInit()
 {
-   if(TRH_ENGINE_VERSION < 223)
+   if(TRH_ENGINE_VERSION < 224)
    {
       Alert("TRH EA: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
             "). Put NEW TRH_Engine.mqh in the SAME folder as this .mq5 and recompile.");
@@ -523,7 +529,7 @@ int OnInit()
    g_trade.SetTypeFillingBySymbol(_Symbol);
    ResetDayIfNeeded();
 
-   PrintFormat("TRH AutoTrade v3.23 | mode=%d | AutoTrade=%s | skipExpired=%s | BE@%.2fR | BTB RR=%.1f | %s %s | risk=%.2f%% | maxSpread=%d",
+   PrintFormat("TRH AutoTrade v3.24 | mode=%d | AutoTrade=%s | skipExpired=%s | BE@%.2fR | BTB RR=%.1f | %s %s | risk=%.2f%% | maxSpread=%d",
       (int)InpTradeMode,
       InpAutoTrade ? "ON" : "OFF",
       InpSkipExpiredEntry ? "YES" : "NO",
@@ -531,7 +537,7 @@ int OnInit()
       InpBtbRiskReward,
       _Symbol, EnumToString(_Period), InpRiskPercent, InpMaxSpreadPoints);
 
-   Comment("TRH EA v3.23\nSWEEP+FVG+BTB | skip expired ENTRY\nspread retry | BE@0.5R");
+   Comment("TRH EA v3.24\nA·SWEEP | B·FVG | C·BTB\nstronger BTB | BE@0.5R");
    return INIT_SUCCEEDED;
 }
 
@@ -600,7 +606,7 @@ void OnTick()
 
    if(n <= 0)
    {
-      Comment(StringFormat("TRH EA v3.23 %s - scanning...\nday trades %d | equity %.2f",
+      Comment(StringFormat("TRH EA v3.24 %s - scanning...\nday trades %d | equity %.2f",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades, AccountInfoDouble(ACCOUNT_EQUITY)));
       return;
    }
@@ -615,7 +621,7 @@ void OnTick()
    Comment(StringFormat(
       "TRH %s | %s\nENTRY %s  SL %s  TP %s\nBar %s (age %d)\nAutoTrade %s | orders %d | day %d\nDyn lots ? %s (risk %.2f%% bal) skipExpired=%s",
       last.dir == 1 ? "LONG" : "SHORT",
-      TrhModeLabel(last.setupMode),
+      TrhModeFullName(last.setupMode),
       DoubleToString(last.entry, _Digits),
       DoubleToString(last.sl, _Digits),
       DoubleToString(last.tp, _Digits),

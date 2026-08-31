@@ -5,7 +5,7 @@
 #ifndef TRH_ENGINE_MQH
 #define TRH_ENGINE_MQH
 
-#define TRH_ENGINE_VERSION 223
+#define TRH_ENGINE_VERSION 224
 #define TRH_MAX_PIVOTS 30
 #define TRH_ATR_LEN    14
 
@@ -51,24 +51,26 @@ struct TrhConfig
    double slPadAtr;
    double riskReward;
    bool   useLiquidityTP;
-   // Mode A confirm: arm at mid ENTRY (0.5), not 0.7 deep (that makes ENTRY expired)
-   double roomConfirmFrac; // default 0.50 = mid-room
-   double latePastMidAtr;  // skip fire if close already past mid by this ATR×
    // Mode B - Sweep + displacement + FVG
-   double minDispAtr;      // Min displacement candle body (ATRx)
-   int    maxDispBars;     // Bars after sweep to find displacement
-   int    maxFvgBars;      // Bars after displacement to find FVG
-   double minFvgAtr;       // Min FVG gap size (ATRx)
-   bool   requireFvgRetest;// Wait for FVG retest before ENTRY signal
-   int    maxRetestBars;   // Bars allowed to wait for retest
-   double fvgSlExtraAtr;   // Extra SL pad beyond sweep (ATRx) for Mode B
-   // Mode C - Pro BTB (breakout -> back to breakeven)
-   double minBreakAtr;     // Min close beyond key level (ATRx)
-   double minBreakBodyAtr; // Min breakout candle body (ATRx)
-   int    maxBtbRetestBars;// Bars after breakout to wait for retest
-   double btbRiskReward;   // RR for BTB (min 2.0 recommended)
-   double btbSlExtraAtr;   // Extra SL beyond breakout extreme (ATRx)
-   bool   btbRequireConfirm;// Require rejection candle on retest
+   double minDispAtr;
+   int    maxDispBars;
+   int    maxFvgBars;
+   double minFvgAtr;
+   bool   requireFvgRetest;
+   int    maxRetestBars;
+   double fvgSlExtraAtr;
+   // Mode C - Pro BTB (breakout -> back to breakeven) — quality filters
+   double minBreakAtr;
+   double minBreakBodyAtr;
+   int    maxBtbRetestBars;
+   double btbRiskReward;
+   double btbSlExtraAtr;
+   bool   btbRequireConfirm;
+   double btbMinRiskAtr;       // reject tiny SL (GOLD M1 noise)
+   double btbMinConfirmBodyAtr;// confirm candle min body
+   bool   btbRequireWickReject;// wick tags BE, close rejects away
+   double btbMaxPastEntryAtr;  // skip if close already past BE toward TP
+   int    btbMinBarsAfterBreak;// wait at least N bars before first retest entry
 };
 
 void TrhDefaultConfig(TrhConfig &cfg)
@@ -84,8 +86,6 @@ void TrhDefaultConfig(TrhConfig &cfg)
    cfg.slPadAtr        = 0.02;
    cfg.riskReward      = 2.4;
    cfg.useLiquidityTP  = true;
-   cfg.roomConfirmFrac = 0.50;
-   cfg.latePastMidAtr  = 0.25;
    cfg.minDispAtr      = 0.55;
    cfg.maxDispBars     = 6;
    cfg.maxFvgBars      = 10;
@@ -93,19 +93,43 @@ void TrhDefaultConfig(TrhConfig &cfg)
    cfg.requireFvgRetest= true;
    cfg.maxRetestBars   = 8;
    cfg.fvgSlExtraAtr   = 0.20;
-   cfg.minBreakAtr     = 0.15;
-   cfg.minBreakBodyAtr = 0.35;
-   cfg.maxBtbRetestBars= 12;
+   cfg.minBreakAtr     = 0.20;
+   cfg.minBreakBodyAtr = 0.45;
+   cfg.maxBtbRetestBars= 10;
    cfg.btbRiskReward   = 2.0;
-   cfg.btbSlExtraAtr   = 0.10;
+   cfg.btbSlExtraAtr   = 0.15;
    cfg.btbRequireConfirm = true;
+   cfg.btbMinRiskAtr       = 0.50;
+   cfg.btbMinConfirmBodyAtr= 0.28;
+   cfg.btbRequireWickReject= true;
+   cfg.btbMaxPastEntryAtr  = 0.20;
+   cfg.btbMinBarsAfterBreak= 2;
 }
 
+// Short labels on chart tags / panel
 string TrhModeLabel(const int mode)
 {
-   if(mode == TRH_MODE_FVG) return "FVG";
-   if(mode == TRH_MODE_BTB) return "BTB";
-   return "SWEEP";
+   if(mode == TRH_MODE_FVG) return "B · FVG";
+   if(mode == TRH_MODE_BTB) return "C · BTB";
+   return "A · SWEEP";
+}
+
+// Full names for alerts / EA comments
+string TrhModeFullName(const int mode)
+{
+   if(mode == TRH_MODE_FVG) return "Mode B FVG";
+   if(mode == TRH_MODE_BTB) return "Mode C BTB";
+   return "Mode A SWEEP";
+}
+
+color TrhModeAccent(const int mode, const int dir)
+{
+   if(mode == TRH_MODE_FVG)
+      return (dir == 1) ? clrDodgerBlue : clrMediumOrchid;
+   if(mode == TRH_MODE_BTB)
+      return (dir == 1) ? clrDarkOrange : clrOrangeRed;
+   // Mode A SWEEP
+   return (dir == 1) ? clrTeal : clrCrimson;
 }
 
 double TrhCalcATR(const int i, const double &h[], const double &l[], const double &c[])
@@ -340,18 +364,12 @@ int TrhScanSetups(const int rates,
          double distal    = pendDistal;
          double proximal  = pendBaseHigh;
          double width     = proximal - distal;
-         double mid       = (distal + proximal) * 0.5;
-         double frac      = MathMax(0.35, MathMin(0.70, cfg.roomConfirmFrac));
-         double confirmPx = distal + width * frac;
-         bool   taggedMid = high[i] >= mid || close[i] >= confirmPx;
          bool   microBreak = close[i] > open[i] &&
-            (high[i] >= prevBaseHigh || taggedMid);
-         // Skip if already deep past mid toward TP (ENTRY would be expired)
-         bool   tooLate = close[i] > mid + a * cfg.latePastMidAtr;
+            (high[i] >= prevBaseHigh || close[i] >= distal + width * 0.7);
 
-         if(width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak && !tooLate)
+         if(width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak)
          {
-            double entry = mid;
+            double entry = (distal + proximal) * 0.5;
             double sl    = distal - a * cfg.slPadAtr;
             double risk  = entry - sl;
             double tp    = entry + risk * cfg.riskReward;
@@ -371,17 +389,12 @@ int TrhScanSetups(const int rates,
          double distal    = pendDistal;
          double proximal  = pendBaseLow;
          double width     = distal - proximal;
-         double mid       = (distal + proximal) * 0.5;
-         double frac      = MathMax(0.35, MathMin(0.70, cfg.roomConfirmFrac));
-         double confirmPx = distal - width * frac;
-         bool   taggedMid = low[i] <= mid || close[i] <= confirmPx;
          bool   microBreak = close[i] < open[i] &&
-            (low[i] <= prevBaseLow || taggedMid);
-         bool   tooLate = close[i] < mid - a * cfg.latePastMidAtr;
+            (low[i] <= prevBaseLow || close[i] <= distal - width * 0.7);
 
-         if(width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak && !tooLate)
+         if(width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak)
          {
-            double entry = mid;
+            double entry = (distal + proximal) * 0.5;
             double sl    = distal + a * cfg.slPadAtr;
             double risk  = sl - entry;
             double tp    = entry - risk * cfg.riskReward;
@@ -759,6 +772,7 @@ int TrhScanBtbSetups(const int rates,
       }
 
       if(phase != 1 || i <= breakBar) continue;
+      if((i - breakBar) < cfg.btbMinBarsAfterBreak) continue;
 
       // Track worse extreme during retest wait (for SL)
       if(pendDir == 1 && low[i] < breakExt) breakExt = low[i];
@@ -768,9 +782,9 @@ int TrhScanBtbSetups(const int rates,
       double touchHi = MathMax(beLevel, breakLevel) + a * 0.05;
       double touchLo = MathMin(beLevel, breakLevel) - a * 0.05;
       bool touched = (low[i] <= touchHi && high[i] >= touchLo);
-
       if(!touched) continue;
 
+      double confBody = MathAbs(close[i] - open[i]);
       bool confirmed = true;
       if(cfg.btbRequireConfirm)
       {
@@ -778,14 +792,45 @@ int TrhScanBtbSetups(const int rates,
             confirmed = close[i] > open[i] && close[i] >= MathMin(beLevel, breakLevel);
          else
             confirmed = close[i] < open[i] && close[i] <= MathMax(beLevel, breakLevel);
+         // Stronger confirm body (filters tiny M1 noise candles)
+         if(confirmed && confBody < a * cfg.btbMinConfirmBodyAtr)
+            confirmed = false;
       }
       if(!confirmed) continue;
+
+      // Wick must tag the BE zone; close must reject away from it
+      if(cfg.btbRequireWickReject)
+      {
+         double midZone = (touchHi + touchLo) * 0.5;
+         if(pendDir == 1)
+         {
+            // Long: wick down into zone, close in upper half / above mid
+            if(!(low[i] <= midZone && close[i] >= midZone))
+               continue;
+         }
+         else
+         {
+            // Short: wick up into zone, close in lower half / below mid
+            if(!(high[i] >= midZone && close[i] <= midZone))
+               continue;
+         }
+      }
 
       // Invalidate if retest blew through BE too far against us
       if(pendDir == 1 && close[i] < breakExt) { phase = 0; pendDir = 0; continue; }
       if(pendDir == -1 && close[i] > breakExt) { phase = 0; pendDir = 0; continue; }
 
       double entry = beLevel; // Back To Breakeven = breakout candle close
+
+      // Skip if already past ENTRY toward TP (expired BTB — no chase)
+      if(cfg.btbMaxPastEntryAtr > 0)
+      {
+         if(pendDir == 1 && close[i] > entry + a * cfg.btbMaxPastEntryAtr)
+            continue;
+         if(pendDir == -1 && close[i] < entry - a * cfg.btbMaxPastEntryAtr)
+            continue;
+      }
+
       double pad = a * (cfg.slPadAtr + cfg.btbSlExtraAtr);
       TrhSetup s;
       bool ok = false;
@@ -796,6 +841,8 @@ int TrhScanBtbSetups(const int rates,
          if(entry > sl)
          {
             double risk = entry - sl;
+            if(risk < a * cfg.btbMinRiskAtr)
+               continue; // SL too tight for GOLD M1
             double tp = entry + risk * rr;
             double liq;
             if(cfg.useLiquidityTP && TrhNextLiqHigh(pivHi, nHi, entry, risk * 1.5, liq))
@@ -811,6 +858,8 @@ int TrhScanBtbSetups(const int rates,
          if(sl > entry)
          {
             double risk = sl - entry;
+            if(risk < a * cfg.btbMinRiskAtr)
+               continue;
             double tp = entry - risk * rr;
             double liq;
             if(cfg.useLiquidityTP && TrhNextLiqLow(pivLo, nLo, entry, risk * 1.5, liq))

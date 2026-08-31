@@ -1,66 +1,50 @@
-# TRH for MetaTrader 5 — one indicator + one AutoTrade (Modes A/B/C)
+# TRH for MetaTrader 5 — Modes A / B / C (named setups)
 
 | File | Role |
 |------|------|
-| `TRH_Trading_Room_Hunter.mq5` | **Indicator** — draws rooms / ENTRY / SL / TP |
-| `TRH_AutoTrade.mq5` | **EA** — auto trades the same engine |
-| `TRH_Engine.mqh` | Shared logic (copy next to **both** `.mq5` files) |
+| `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.24 |
+| `TRH_AutoTrade.mq5` | **EA** v3.24 |
+| `TRH_Engine.mqh` | Shared Engine v224 |
 
-| Mode | What it does |
-|------|----------------|
-| **A — Classic SWEEP** | Liquidity sweep → room mid ENTRY |
-| **B — Sweep + Disp + FVG** | Sweep → displacement → FVG → retest → mid ENTRY |
-| **C — Pro BTB** | Breakout → return to BE → confirm → ENTRY |
-| **All** (default) | A + B + C together |
+| Mode | Chart name | Logic |
+|------|------------|--------|
+| **A** | `A · SWEEP` | Classic room mid ENTRY (unchanged) |
+| **B** | `B · FVG` | Sweep → disp → FVG → retest (unchanged) |
+| **C** | `C · BTB` | Breakout → BE retest — **quality tightened** |
+| **All** | default | A + B + C |
 
-**Indicator v2.23** · **EA v3.23** · **Engine v223**
+## Mode C BTB quality (v224)
 
-## v3.23 fix — missed ENTRY (spread + expired mid)
+Filters the weak M1 shorts (tiny SL / fake confirm):
 
-Problems on GOLD M1 (like the SHORT | SWEEP that hit SL without a real fill):
+- Stronger breakout body (0.45 ATR)
+- Min confirm body (0.28 ATR)
+- Wick must tag BE + close reject
+- Min risk 0.50 ATR (no 1.85-pt gold SL noise)
+- Skip if already past BE toward TP
+- Wait ≥2 bars after breakout before entry
 
-1. **Spread** — EA locked the setup after one wide-spread tick and never retried  
-2. **Expired ENTRY** — Mode A confirmed at **0.7** room depth so mid-ENTRY was already behind price; EA parked a pullback **limit** that rarely filled
+Mode **A** and **B** detection are unchanged.
 
-Fixes:
+## Graphics
 
-- Mode A confirms at **mid (0.5)**; skips if close already past mid toward TP  
-- If price is already past ENTRY toward TP → **skip** (no dead pullback limit)  
-- Else → **market** now (no hope-pullback waits)  
-- Spread fail → **retry** while setup is still fresh (do not lock)  
-- Cancel pending if price **runs through** ENTRY without fill  
-- Default max spread **100** points + optional ATR spread cap  
+Each setup tag shows its own mode name + accent color:
 
-## Install on MT5
+- A SWEEP → teal / crimson  
+- B FVG → blue / purple  
+- C BTB → orange / red  
+
+## Install
 
 1. Unzip `TRH_Trading_Room_Hunter_MT5.zip`
-2. Copy **Engine + Indicator** into:
-   `MQL5/Indicators/TRH_Trading_Room_Hunter/`
-3. Copy **Engine + EA** into:
-   `MQL5/Experts/TRH_Trading_Room_Hunter/`
-4. MetaEditor → open each `.mq5` → **Compile (F7)**  
-   (`TRH_Engine.mqh` must sit in the **same folder** as that `.mq5`)
-5. Re-attach indicator + EA · Detection Mode = **All** · Algo Trading ON
+2. `Indicators/TRH_Trading_Room_Hunter/` ← Engine + Indicator  
+3. `Experts/TRH_Trading_Room_Hunter/` ← Engine + EA  
+4. Compile both `.mq5` · re-attach · Mode = **All**
 
-## Download
+## Links
 
 - Zip: https://github.com/radiarkazemi/forge-charts/raw/cursor/trh-mt5-abc-992e/mt5/TRH_Trading_Room_Hunter_MT5.zip
-- Engine: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-mt5-abc-992e/mt5/TRH_Trading_Room_Hunter/TRH_Engine.mqh
-- Indicator: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-mt5-abc-992e/mt5/TRH_Trading_Room_Hunter/TRH_Trading_Room_Hunter.mq5
+- Pine: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-mt5-abc-992e/indicators/TRH_Trading_Room_Hunter.pine
 - EA: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-mt5-abc-992e/mt5/TRH_Trading_Room_Hunter/TRH_AutoTrade.mq5
-
-## Defaults (EA)
-
-| Setting | Value |
-|---------|-------|
-| Detection Mode | All (A+B+C) |
-| Room confirm | mid 0.5 |
-| Skip expired ENTRY | yes |
-| Max spread | 100 pts |
-| Pending expiry | 15 bars |
-| Risk | ~1.5% equity |
-| RR Mode A/B | 2.4 |
-| RR Mode C BTB | 2.0 |
-| BE | at 0.5R |
-
-Start on **demo** until you trust fills.
+- Indicator: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-mt5-abc-992e/mt5/TRH_Trading_Room_Hunter/TRH_Trading_Room_Hunter.mq5
+- Engine: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-mt5-abc-992e/mt5/TRH_Trading_Room_Hunter/TRH_Engine.mqh
