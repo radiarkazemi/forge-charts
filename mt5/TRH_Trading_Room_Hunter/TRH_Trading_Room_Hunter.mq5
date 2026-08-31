@@ -4,15 +4,15 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "2.28"
-#property description "TRH v2.28: Wilder ATR = Pine ta.atr (catch missed sweeps)"
+#property version   "2.29"
+#property description "TRH v2.29: unified A+B · always show latest SWEEP"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
 
 #include "TRH_Engine.mqh"
 
-// MQL5 has no #error — version is checked in OnInit (need Engine v227+ in SAME folder).
+// MQL5 has no #error — version is checked in OnInit (need Engine v228+ in SAME folder).
 #ifndef TRH_ENGINE_VERSION
 #define TRH_ENGINE_VERSION 0
 #endif
@@ -74,8 +74,8 @@ input bool   InpUseLiquidityTP  = true;   // Prefer Opposing Pivot As TP
 
 input group "Display - layout"
 input int    InpSetupWidth      = 80;     // Box Width (bars)
-input bool   InpOnlyLast        = true;   // Only Last Setup
-input int    InpHistoryCount    = 5;      // History Setups (if Only Last = false)
+input bool   InpOnlyLast        = false;  // Only Last Setup (false=show history)
+input int    InpHistoryCount    = 8;      // History Setups (if Only Last = false)
 input bool   InpExtendToNow     = true;   // Extend Boxes Until TP/SL (then freeze)
 input bool   InpFreezeOnExit    = true;   // Freeze setup at TP/SL bar (keep until next)
 input ENUM_TRH_PANEL_CORNER InpPanelCorner = TRH_PANEL_LEFT; // Info Panel Corner
@@ -135,7 +135,7 @@ ulong    g_liveTicket = 0;
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   if(TRH_ENGINE_VERSION < 227)
+   if(TRH_ENGINE_VERSION < 228)
    {
       Alert("TRH: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
             "). Put NEW TRH_Engine.mqh in the SAME folder as this .mq5 and recompile.");
@@ -759,15 +759,18 @@ int OnCalculate(const int rates_total,
 
       if(g_nSetups > 0)
       {
-         TrhSetup newest = g_setups[g_nSetups - 1];
+         TrhSetup newest = g_setups[g_nSetups - 1]; // chronological last = latest bar
          TrhSetup activePick;
          bool haveActive = PickNewestActiveSetup(h, l, c, rates_total, activePick);
-         TrhSetup choose = haveActive ? activePick : newest;
+         // Prefer later bar always; among same-time, active WAIT/IN TRADE
+         TrhSetup choose = newest;
+         if(haveActive && activePick.barTime >= newest.barTime)
+            choose = activePick;
 
-         // Break hold if a NEWER active setup appeared (other PC / later signal)
-         if(holdActive && haveActive && activePick.barTime > g_holdSetup.barTime)
+         // Break hold whenever a NEWER setup exists (even if prior TP HIT)
+         if(holdActive && choose.barTime > g_holdSetup.barTime)
          {
-            g_holdSetup = activePick;
+            g_holdSetup = choose;
             holdActive = true;
          }
          else if(!holdActive)

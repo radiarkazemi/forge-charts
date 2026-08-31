@@ -5,7 +5,7 @@
 #ifndef TRH_ENGINE_MQH
 #define TRH_ENGINE_MQH
 
-#define TRH_ENGINE_VERSION 227
+#define TRH_ENGINE_VERSION 228
 #define TRH_MAX_PIVOTS 30
 #define TRH_ATR_LEN    14
 
@@ -1017,6 +1017,317 @@ int TrhMergeScans(TrhSetup &a[], const int na,
    return nOut;
 }
 
+
+// Pine-parity A+B single pass: shared lastSetupBar + f_coolOk (A may fire inside B cooldown)
+int TrhScanABUnified(const int rates,
+                     const datetime &time[],
+                     const double &open[],
+                     const double &high[],
+                     const double &low[],
+                     const double &close[],
+                     const TrhConfig &cfg,
+                     TrhSetup &outSetups[])
+{
+   ArrayResize(outSetups, 0);
+   if(rates < 120) return 0;
+
+   TrhPivot pivHi[TRH_MAX_PIVOTS];
+   TrhPivot pivLo[TRH_MAX_PIVOTS];
+   int nHi = 0, nLo = 0;
+
+   // Mode A pending
+   int    pendDir = 0;
+   double pendDistal = 0, pendHunt = 0, pendBaseHigh = 0, pendBaseLow = 0;
+   int    pendBar = -1;
+
+   // Mode B state
+   int    bPhase = 0, bDir = 0;
+   double bDistal = 0, bHunt = 0, bGapBot = 0, bGapTop = 0;
+   int    bSweepBar = -1, bDispBar = -1, bFvgBar = -1;
+
+   int lastSetupBar = -9999;
+   int lastModeId = 99; // like Pine: A=0 may start inside cooldown of B=1
+   int nSetups = 0;
+   int p = cfg.pivotPeriod;
+   int lastClosed = rates - 2;
+   if(lastClosed < 50) return 0;
+
+   double atrSeries[];
+   TrhBuildAtrSeries(rates, high, low, close, atrSeries);
+
+   for(int i = 0; i <= lastClosed; i++)
+   {
+      double a = atrSeries[i];
+      if(a <= 0) a = TrhCalcATR(i, high, low, close);
+
+      int pivI = i - p;
+      if(pivI >= p && TrhIsPivotLow(pivI, p, low, rates))
+         TrhPushPivot(pivLo, nLo, low[pivI], pivI);
+      if(pivI >= p && TrhIsPivotHigh(pivI, p, high, rates))
+         TrhPushPivot(pivHi, nHi, high[pivI], pivI);
+
+      double huntLo = 0, huntHi = 0;
+      bool hasLo = TrhLastPivot(pivLo, nLo, i, 80, p, true, huntLo);
+      bool hasHi = TrhLastPivot(pivHi, nHi, i, 80, p, false, huntHi);
+
+      double priorHigh = 0, priorLow = 0;
+      bool hasPrior = false;
+      int from = MathMax(0, i - 40);
+      for(int k = from; k < i; k++)
+      {
+         if(!hasPrior) { priorHigh = high[k]; priorLow = low[k]; hasPrior = true; }
+         else
+         {
+            if(high[k] > priorHigh) priorHigh = high[k];
+            if(low[k] < priorLow) priorLow = low[k];
+         }
+      }
+      if(!hasPrior) { priorHigh = high[i]; priorLow = low[i]; }
+
+      bool bullSweep = hasLo &&
+         low[i] < huntLo - a * cfg.minSweepAtr &&
+         close[i] > huntLo && close[i] > open[i] &&
+         (priorHigh - low[i]) >= a * cfg.minContextAtr;
+      bool bearSweep = hasHi &&
+         high[i] > huntHi + a * cfg.minSweepAtr &&
+         close[i] < huntHi && close[i] < open[i] &&
+         (high[i] - priorLow) >= a * cfg.minContextAtr;
+
+      // f_coolOk(modeId): stronger mode may fire inside weaker cooldown
+      bool coolA = (lastSetupBar < 0) || (i - lastSetupBar >= cfg.cooldownBars) || (0 < lastModeId);
+      bool coolB = (lastSetupBar < 0) || (i - lastSetupBar >= cfg.cooldownBars) || (1 < lastModeId);
+
+      int newDir = 0;
+      TrhSetup s;
+
+      // ── Mode A ──
+      if(pendDir == 0 && coolA && newDir == 0)
+      {
+         if(bullSweep)
+         {
+            pendDir = 1; pendDistal = low[i]; pendHunt = huntLo; pendBar = i;
+            pendBaseHigh = high[i]; pendBaseLow = low[i];
+         }
+         else if(bearSweep)
+         {
+            pendDir = -1; pendDistal = high[i]; pendHunt = huntHi; pendBar = i;
+            pendBaseHigh = high[i]; pendBaseLow = low[i];
+         }
+      }
+
+      if(pendDir != 0)
+      {
+         double prevBaseHigh = pendBaseHigh;
+         double prevBaseLow = pendBaseLow;
+         pendBaseHigh = MathMax(pendBaseHigh, high[i]);
+         pendBaseLow = MathMin(pendBaseLow, low[i]);
+         if(pendDir == 1 && low[i] < pendDistal) pendDistal = low[i];
+         if(pendDir == -1 && high[i] > pendDistal) pendDistal = high[i];
+
+         int age = i - pendBar;
+         if(age > cfg.maxBaseBars)
+            pendDir = 0;
+         else if(age >= cfg.baseConfirmBars && newDir == 0)
+         {
+            if(pendDir == 1)
+            {
+               double distal = pendDistal;
+               double proximal = pendBaseHigh;
+               double width = proximal - distal;
+               bool microBreak = close[i] > open[i] &&
+                  (high[i] >= prevBaseHigh || close[i] >= distal + width * 0.7);
+               if(width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak)
+               {
+                  double entry = (distal + proximal) * 0.5;
+                  double sl = distal - a * cfg.slPadAtr;
+                  double risk = entry - sl;
+                  double tp = entry + risk * cfg.riskReward;
+                  double liq;
+                  if(cfg.useLiquidityTP && TrhNextLiqHigh(pivHi, nHi, entry, risk * 1.5, liq))
+                     tp = MathMax(tp, liq);
+                  s.dir = 1; s.entry = entry; s.sl = sl; s.tp = tp;
+                  s.distal = distal; s.proximal = proximal;
+                  s.barIndex = i; s.barTime = time[i];
+                  s.setupMode = TRH_MODE_CLASSIC;
+                  newDir = 1;
+               }
+            }
+            else if(pendDir == -1)
+            {
+               double distal = pendDistal;
+               double proximal = pendBaseLow;
+               double width = distal - proximal;
+               bool microBreak = close[i] < open[i] &&
+                  (low[i] <= prevBaseLow || close[i] <= distal - width * 0.7);
+               if(width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak)
+               {
+                  double entry = (distal + proximal) * 0.5;
+                  double sl = distal + a * cfg.slPadAtr;
+                  double risk = sl - entry;
+                  double tp = entry - risk * cfg.riskReward;
+                  double liq;
+                  if(cfg.useLiquidityTP && TrhNextLiqLow(pivLo, nLo, entry, risk * 1.5, liq))
+                     tp = MathMin(tp, liq);
+                  s.dir = -1; s.entry = entry; s.sl = sl; s.tp = tp;
+                  s.distal = distal; s.proximal = proximal;
+                  s.barIndex = i; s.barTime = time[i];
+                  s.setupMode = TRH_MODE_CLASSIC;
+                  newDir = -1;
+               }
+            }
+            if(newDir != 0)
+               pendDir = 0;
+         }
+      }
+
+      // ── Mode B (only if A did not fire this bar) ──
+      if(bPhase == 1 && bSweepBar >= 0 && (i - bSweepBar) > cfg.maxDispBars) { bPhase = 0; bDir = 0; }
+      if(bPhase == 2 && bDispBar >= 0 && (i - bDispBar) > cfg.maxFvgBars) { bPhase = 0; bDir = 0; }
+      if(bPhase == 3 && bFvgBar >= 0 && (i - bFvgBar) > cfg.maxRetestBars) { bPhase = 0; bDir = 0; }
+
+      if(bPhase == 0 && coolB && newDir == 0)
+      {
+         if(bullSweep)
+         {
+            bPhase = 1; bDir = 1; bDistal = low[i]; bHunt = huntLo;
+            bSweepBar = i; bDispBar = -1; bFvgBar = -1;
+         }
+         else if(bearSweep)
+         {
+            bPhase = 1; bDir = -1; bDistal = high[i]; bHunt = huntHi;
+            bSweepBar = i; bDispBar = -1; bFvgBar = -1;
+         }
+      }
+
+      if(bPhase != 0 && newDir == 0)
+      {
+         if(bDir == 1 && low[i] < bDistal) bDistal = low[i];
+         if(bDir == -1 && high[i] > bDistal) bDistal = high[i];
+         double body = MathAbs(close[i] - open[i]);
+
+         if(bPhase == 1 && i > bSweepBar)
+         {
+            bool bullDisp = bDir == 1 && close[i] > open[i] && body >= a * cfg.minDispAtr && close[i] > bHunt;
+            bool bearDisp = bDir == -1 && close[i] < open[i] && body >= a * cfg.minDispAtr && close[i] < bHunt;
+            if(bullDisp || bearDisp) { bPhase = 2; bDispBar = i; }
+         }
+
+         if(bPhase == 2 && i >= 2 && i > bDispBar)
+         {
+            bool found = false;
+            if(bDir == 1)
+            {
+               double bot = high[i - 2];
+               double top = low[i];
+               if(top - bot >= a * cfg.minFvgAtr) { bGapBot = bot; bGapTop = top; found = true; }
+            }
+            else
+            {
+               double top2 = low[i - 2];
+               double bot2 = high[i];
+               if(top2 - bot2 >= a * cfg.minFvgAtr) { bGapBot = bot2; bGapTop = top2; found = true; }
+            }
+            if(found)
+            {
+               bFvgBar = i;
+               if(cfg.requireFvgRetest) bPhase = 3;
+               else
+               {
+                  double entry = (bGapTop + bGapBot) * 0.5;
+                  double pad = a * (cfg.slPadAtr + cfg.fvgSlExtraAtr);
+                  double sl = bDir == 1 ? bDistal - pad : bDistal + pad;
+                  double risk = MathAbs(entry - sl);
+                  if(risk > 0)
+                  {
+                     double tp = bDir == 1 ? entry + risk * cfg.riskReward : entry - risk * cfg.riskReward;
+                     double liq;
+                     if(cfg.useLiquidityTP)
+                     {
+                        if(bDir == 1 && TrhNextLiqHigh(pivHi, nHi, entry, risk * 1.5, liq)) tp = MathMax(tp, liq);
+                        if(bDir == -1 && TrhNextLiqLow(pivLo, nLo, entry, risk * 1.5, liq)) tp = MathMin(tp, liq);
+                     }
+                     s.dir = bDir; s.entry = entry; s.sl = sl; s.tp = tp;
+                     s.proximal = bGapTop; s.distal = bGapBot;
+                     s.barIndex = i; s.barTime = time[i];
+                     s.setupMode = TRH_MODE_FVG;
+                     newDir = bDir;
+                  }
+                  bPhase = 0; bDir = 0;
+               }
+            }
+         }
+
+         if(bPhase == 3 && i > bFvgBar && newDir == 0)
+         {
+            bool confirmed = false;
+            if(bDir == 1)
+            {
+               bool retested = low[i] <= bGapTop && low[i] >= bGapBot - a * 0.05;
+               confirmed = retested && close[i] > open[i] && close[i] >= (bGapBot + bGapTop) * 0.5;
+            }
+            else
+            {
+               bool retested2 = high[i] >= bGapBot && high[i] <= bGapTop + a * 0.05;
+               confirmed = retested2 && close[i] < open[i] && close[i] <= (bGapBot + bGapTop) * 0.5;
+            }
+            if(confirmed)
+            {
+               double entry = (bGapTop + bGapBot) * 0.5;
+               double pad = a * (cfg.slPadAtr + cfg.fvgSlExtraAtr);
+               double sl = bDir == 1 ? bDistal - pad : bDistal + pad;
+               double risk = MathAbs(entry - sl);
+               if(risk > 0)
+               {
+                  double tp = bDir == 1 ? entry + risk * cfg.riskReward : entry - risk * cfg.riskReward;
+                  double liq;
+                  if(cfg.useLiquidityTP)
+                  {
+                     if(bDir == 1 && TrhNextLiqHigh(pivHi, nHi, entry, risk * 1.5, liq)) tp = MathMax(tp, liq);
+                     if(bDir == -1 && TrhNextLiqLow(pivLo, nLo, entry, risk * 1.5, liq)) tp = MathMin(tp, liq);
+                  }
+                  s.dir = bDir; s.entry = entry; s.sl = sl; s.tp = tp;
+                  s.proximal = bGapTop; s.distal = bGapBot;
+                  s.barIndex = i; s.barTime = time[i];
+                  s.setupMode = TRH_MODE_FVG;
+                  newDir = bDir;
+               }
+               bPhase = 0; bDir = 0;
+            }
+         }
+      }
+
+      if(newDir != 0)
+      {
+         bool kept = false;
+         // If replacing weaker setup inside cooldown window, overwrite last out
+         if(nSetups > 0 && (i - lastSetupBar) < cfg.cooldownBars &&
+            TrhModePreferred(s.setupMode, outSetups[nSetups - 1].setupMode))
+         {
+            outSetups[nSetups - 1] = s;
+            kept = true;
+         }
+         else if(nSetups == 0 || (i - lastSetupBar) >= cfg.cooldownBars)
+         {
+            ArrayResize(outSetups, nSetups + 1);
+            outSetups[nSetups] = s;
+            nSetups++;
+            kept = true;
+         }
+         // else: weaker/equal inside cooldown — drop (Pine keeps stronger/first)
+
+         if(kept)
+         {
+            lastSetupBar = i;
+            lastModeId = s.setupMode;
+            pendDir = 0;
+            if(s.setupMode == TRH_MODE_CLASSIC) { bPhase = 0; bDir = 0; }
+         }
+      }
+   }
+   return nSetups;
+}
+
+
 // Scan by mode: Classic / FVG / Both A+B / BTB / All
 int TrhScanByMode(const int rates,
                   const datetime &time[],
@@ -1036,15 +1347,9 @@ int TrhScanByMode(const int rates,
    if(tradeMode == TRH_SCAN_BTB)
       return TrhScanBtbSetups(rates, time, open, high, low, close, cfg, outSetups);
 
-   TrhSetup a[], b[];
-   int na = 0, nb = 0;
-   // BOTH and ALL = Mode A + Mode B only (BTB removed from live model)
+   // BOTH and ALL = unified Pine-parity A+B (A can fire inside B cooldown)
    if(tradeMode == TRH_SCAN_BOTH_AB || tradeMode == TRH_SCAN_ALL)
-   {
-      na = TrhScanSetups(rates, time, open, high, low, close, cfg, a);
-      nb = TrhScanFvgSetups(rates, time, open, high, low, close, cfg, b);
-      return TrhMergeScans(a, na, b, nb, cfg, outSetups);
-   }
+      return TrhScanABUnified(rates, time, open, high, low, close, cfg, outSetups);
 
    ArrayResize(outSetups, 0);
    return 0;

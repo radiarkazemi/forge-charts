@@ -695,7 +695,7 @@ if showPanel and barstate.islast
         table.cell(info, 0, 0, "TRH", text_color=color.white, text_size=size.small)
         table.cell(info, 1, 0, (dir == 1 ? "LONG" : "SHORT") + " · " + stTxt, text_color=dir == 1 ? #69F0AE : #FF8A80, text_size=size.small)
         table.cell(info, 0, 1, "Mode", text_color=color.gray, text_size=size.small)
-        table.cell(info, 1, 1, lastModeShown + " · " + tradeMode, text_color=color.white, text_size=size.small)
+        table.cell(info, 1, 1, lastModeShown + " · " + tradeMode, text_color=color.white, text_size=size.small) // A·SWEEP or B·FVG
         table.cell(info, 0, 2, "ENTRY", text_color=color.gray, text_size=size.small)
         table.cell(info, 1, 2, str.tostring(e, format.mintick), text_color=color.white, text_size=size.small)
         table.cell(info, 0, 3, "SL", text_color=color.gray, text_size=size.small)
