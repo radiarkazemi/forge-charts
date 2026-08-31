@@ -4,15 +4,15 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "2.22"
-#property description "TRH Mode A/B/C: SWEEP + FVG + Pro BTB"
+#property version   "2.23"
+#property description "TRH Mode A/B/C: mid-ENTRY confirm, skip late rooms"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
 
 #include "TRH_Engine.mqh"
 
-// MQL5 has no #error — version is checked in OnInit (need Engine v222+ in SAME folder).
+// MQL5 has no #error — version is checked in OnInit (need Engine v223+ in SAME folder).
 #ifndef TRH_ENGINE_VERSION
 #define TRH_ENGINE_VERSION 0
 #endif
@@ -44,6 +44,8 @@ input int    InpMaxBaseBars     = 40;     // Max Bars To Confirm Room (Mode A)
 input double InpMinRoomAtr      = 0.8;    // Min Room Width (ATRx) Mode A
 input double InpMaxRoomAtr      = 3.5;    // Max Room Width (ATRx) Mode A
 input int    InpCooldownBars    = 50;     // Cooldown Between Setups
+input double InpRoomConfirmFrac = 0.50;   // Confirm at mid ENTRY (0.5); 0.7 was late
+input double InpLatePastMidAtr  = 0.25;   // Skip if close already past mid by this ATR×
 
 input group "Mode B - Sweep + Displacement + FVG"
 input double InpMinDispAtr      = 0.55;   // Min Displacement Body (ATRx)
@@ -119,7 +121,7 @@ bool     g_holdValid = false;
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   if(TRH_ENGINE_VERSION < 222)
+   if(TRH_ENGINE_VERSION < 223)
    {
       Alert("TRH: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
             "). Put NEW TRH_Engine.mqh in the SAME folder as this .mq5 and recompile.");
@@ -503,6 +505,8 @@ void BuildConfig(TrhConfig &cfg)
    cfg.slPadAtr        = InpSlPadAtr;
    cfg.riskReward      = InpRiskReward;
    cfg.useLiquidityTP  = InpUseLiquidityTP;
+   cfg.roomConfirmFrac = InpRoomConfirmFrac;
+   cfg.latePastMidAtr  = InpLatePastMidAtr;
    cfg.minDispAtr      = InpMinDispAtr;
    cfg.maxDispBars     = InpMaxDispBars;
    cfg.maxFvgBars      = InpMaxFvgBars;

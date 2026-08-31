@@ -13,7 +13,23 @@
 | **C — Pro BTB** | Breakout → return to BE → confirm → ENTRY |
 | **All** (default) | A + B + C together |
 
-**Indicator v2.22** · **EA v3.22** · **Engine v222**
+**Indicator v2.23** · **EA v3.23** · **Engine v223**
+
+## v3.23 fix — missed ENTRY (spread + expired mid)
+
+Problems on GOLD M1 (like the SHORT | SWEEP that hit SL without a real fill):
+
+1. **Spread** — EA locked the setup after one wide-spread tick and never retried  
+2. **Expired ENTRY** — Mode A confirmed at **0.7** room depth so mid-ENTRY was already behind price; EA parked a pullback **limit** that rarely filled
+
+Fixes:
+
+- Mode A confirms at **mid (0.5)**; skips if close already past mid toward TP  
+- If price is already past ENTRY toward TP → **skip** (no dead pullback limit)  
+- Else → **market** now (no hope-pullback waits)  
+- Spread fail → **retry** while setup is still fresh (do not lock)  
+- Cancel pending if price **runs through** ENTRY without fill  
+- Default max spread **100** points + optional ATR spread cap  
 
 ## Install on MT5
 
@@ -24,28 +40,27 @@
    `MQL5/Experts/TRH_Trading_Room_Hunter/`
 4. MetaEditor → open each `.mq5` → **Compile (F7)**  
    (`TRH_Engine.mqh` must sit in the **same folder** as that `.mq5`)
-5. Chart → Insert → Indicators → Custom → `TRH_Trading_Room_Hunter`  
-   Chart → Navigator → Experts → `TRH_AutoTrade`  
-   Enable **Algo Trading**. Detection Mode = **All**.
+5. Re-attach indicator + EA · Detection Mode = **All** · Algo Trading ON
 
 ## Download
 
-- Zip (this branch): build locally from `mt5/TRH_Trading_Room_Hunter_MT5.zip` after packaging
-- Mirror: https://goldanil.ir/trh-mt5/TRH_Trading_Room_Hunter_MT5.zip
-- Raw Engine: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-mt5-abc-992e/mt5/TRH_Trading_Room_Hunter/TRH_Engine.mqh
-- Raw Indicator: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-mt5-abc-992e/mt5/TRH_Trading_Room_Hunter/TRH_Trading_Room_Hunter.mq5
-- Raw EA: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-mt5-abc-992e/mt5/TRH_Trading_Room_Hunter/TRH_AutoTrade.mq5
+- Zip: https://github.com/radiarkazemi/forge-charts/raw/cursor/trh-mt5-abc-992e/mt5/TRH_Trading_Room_Hunter_MT5.zip
+- Engine: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-mt5-abc-992e/mt5/TRH_Trading_Room_Hunter/TRH_Engine.mqh
+- Indicator: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-mt5-abc-992e/mt5/TRH_Trading_Room_Hunter/TRH_Trading_Room_Hunter.mq5
+- EA: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-mt5-abc-992e/mt5/TRH_Trading_Room_Hunter/TRH_AutoTrade.mq5
 
 ## Defaults (EA)
 
 | Setting | Value |
 |---------|-------|
 | Detection Mode | All (A+B+C) |
-| Risk | ~1.5% equity (dynamic lots) |
+| Room confirm | mid 0.5 |
+| Skip expired ENTRY | yes |
+| Max spread | 100 pts |
+| Pending expiry | 15 bars |
+| Risk | ~1.5% equity |
 | RR Mode A/B | 2.4 |
 | RR Mode C BTB | 2.0 |
 | BE | at 0.5R |
-| Max daily loss | 4% |
-| Closed-bar only | yes |
 
 Start on **demo** until you trust fills.

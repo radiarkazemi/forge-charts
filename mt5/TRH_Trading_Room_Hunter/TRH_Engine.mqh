@@ -5,7 +5,7 @@
 #ifndef TRH_ENGINE_MQH
 #define TRH_ENGINE_MQH
 
-#define TRH_ENGINE_VERSION 222
+#define TRH_ENGINE_VERSION 223
 #define TRH_MAX_PIVOTS 30
 #define TRH_ATR_LEN    14
 
@@ -51,6 +51,9 @@ struct TrhConfig
    double slPadAtr;
    double riskReward;
    bool   useLiquidityTP;
+   // Mode A confirm: arm at mid ENTRY (0.5), not 0.7 deep (that makes ENTRY expired)
+   double roomConfirmFrac; // default 0.50 = mid-room
+   double latePastMidAtr;  // skip fire if close already past mid by this ATR×
    // Mode B - Sweep + displacement + FVG
    double minDispAtr;      // Min displacement candle body (ATRx)
    int    maxDispBars;     // Bars after sweep to find displacement
@@ -81,6 +84,8 @@ void TrhDefaultConfig(TrhConfig &cfg)
    cfg.slPadAtr        = 0.02;
    cfg.riskReward      = 2.4;
    cfg.useLiquidityTP  = true;
+   cfg.roomConfirmFrac = 0.50;
+   cfg.latePastMidAtr  = 0.25;
    cfg.minDispAtr      = 0.55;
    cfg.maxDispBars     = 6;
    cfg.maxFvgBars      = 10;
@@ -335,12 +340,18 @@ int TrhScanSetups(const int rates,
          double distal    = pendDistal;
          double proximal  = pendBaseHigh;
          double width     = proximal - distal;
+         double mid       = (distal + proximal) * 0.5;
+         double frac      = MathMax(0.35, MathMin(0.70, cfg.roomConfirmFrac));
+         double confirmPx = distal + width * frac;
+         bool   taggedMid = high[i] >= mid || close[i] >= confirmPx;
          bool   microBreak = close[i] > open[i] &&
-            (high[i] >= prevBaseHigh || close[i] >= distal + width * 0.7);
+            (high[i] >= prevBaseHigh || taggedMid);
+         // Skip if already deep past mid toward TP (ENTRY would be expired)
+         bool   tooLate = close[i] > mid + a * cfg.latePastMidAtr;
 
-         if(width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak)
+         if(width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak && !tooLate)
          {
-            double entry = (distal + proximal) * 0.5;
+            double entry = mid;
             double sl    = distal - a * cfg.slPadAtr;
             double risk  = entry - sl;
             double tp    = entry + risk * cfg.riskReward;
@@ -360,12 +371,17 @@ int TrhScanSetups(const int rates,
          double distal    = pendDistal;
          double proximal  = pendBaseLow;
          double width     = distal - proximal;
+         double mid       = (distal + proximal) * 0.5;
+         double frac      = MathMax(0.35, MathMin(0.70, cfg.roomConfirmFrac));
+         double confirmPx = distal - width * frac;
+         bool   taggedMid = low[i] <= mid || close[i] <= confirmPx;
          bool   microBreak = close[i] < open[i] &&
-            (low[i] <= prevBaseLow || close[i] <= distal - width * 0.7);
+            (low[i] <= prevBaseLow || taggedMid);
+         bool   tooLate = close[i] < mid - a * cfg.latePastMidAtr;
 
-         if(width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak)
+         if(width >= a * cfg.minRoomAtr && width <= a * cfg.maxRoomAtr && microBreak && !tooLate)
          {
-            double entry = (distal + proximal) * 0.5;
+            double entry = mid;
             double sl    = distal + a * cfg.slPadAtr;
             double risk  = sl - entry;
             double tp    = entry - risk * cfg.riskReward;

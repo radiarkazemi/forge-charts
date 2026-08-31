@@ -5,14 +5,14 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.22"
-#property description "TRH EA v3.22: SWEEP + FVG + Pro BTB"
+#property version   "3.23"
+#property description "TRH EA v3.23: no expired mid-ENTRY pullbacks + spread retry"
 #property strict
 
 #include <Trade/Trade.mqh>
 #include "TRH_Engine.mqh"
 
-// MQL5 has no #error — version is checked in OnInit (need Engine v222+ in SAME folder).
+// MQL5 has no #error — version is checked in OnInit (need Engine v223+ in SAME folder).
 #ifndef TRH_ENGINE_VERSION
 #define TRH_ENGINE_VERSION 0
 #endif
@@ -31,7 +31,7 @@ input bool   InpAutoTrade         = true;   // Enable AutoTrade (Algo Trading ON
 input bool   InpAlertOnSetup      = false;  // Alert on new setup (OFF: indicator alerts; avoids double popups)
 input ulong  InpMagic             = 260825; // Magic number
 input int    InpMaxSlippagePts    = 30;     // Max slippage (points)
-input int    InpPendingExpiryBars = 40;     // Cancel unfilled limit after N bars
+input int    InpPendingExpiryBars = 15;     // Cancel unfilled limit after N bars (was 40)
 input int    InpLookbackBars      = 2000;   // History bars to scan
 
 input group "Strategy mode"
@@ -39,7 +39,8 @@ input ENUM_TRH_TRADE_MODE InpTradeMode = TRH_TM_ALL; // Detection Mode
 
 input group "1) Spread filter"
 input bool   InpUseSpreadFilter   = true;   // Enable max spread filter
-input int    InpMaxSpreadPoints   = 50;     // Max spread (points) to allow entry
+input int    InpMaxSpreadPoints   = 100;    // Max spread points (GOLD often 40-80)
+input double InpMaxSpreadAtr      = 0.35;   // Also skip if spread > this ATR× (0=off)
 
 input group "2) Session filter (broker server time)"
 input bool   InpUseSessionFilter  = true;   // Enable session filter
@@ -56,10 +57,12 @@ input bool   InpUseBreakEven      = true;   // Move SL to BE after +XR
 input double InpBreakEvenAtR      = 0.5;    // Trigger at this R multiple (0.5 = earlier protect)
 input double InpBreakEvenLockR    = 0.05;   // Lock +this R past entry (0=exact BE)
 
-input group "5) Max chase (no late market)"
-input double InpMarketTolAtr      = 0.15;   // Market only if within this ATR of ENTRY
-input double InpMaxChaseAtr       = 0.35;   // Skip market if farther than this ATR past ENTRY
-input bool   InpAllowLimitAlways  = true;   // Still place LIMIT when too far to market
+input group "5) Entry fill — no expired pullbacks"
+input double InpMarketTolAtr      = 0.20;   // Market if within this ATR of ENTRY
+input double InpMaxChaseAtr       = 0.30;   // Max past ENTRY for market (else skip)
+input bool   InpSkipExpiredEntry  = true;   // If already past ENTRY toward TP: skip (no limit wait)
+input bool   InpCancelRunThrough  = true;   // Delete pending if price runs through ENTRY without fill
+input bool   InpAllowLimitWhenBehind = true;// Limit only when price has NOT reached ENTRY yet
 input int    InpFreshMaxAgeBars   = 3;      // Only trade setups this fresh (bars)
 
 input group "TRH Detection (= Pine Mode A)"
@@ -71,6 +74,8 @@ input int    InpMaxBaseBars     = 40;
 input double InpMinRoomAtr      = 0.8;
 input double InpMaxRoomAtr      = 3.5;
 input int    InpCooldownBars    = 50;
+input double InpRoomConfirmFrac = 0.50;   // Confirm at mid ENTRY (0.5); 0.7 = late/expired
+input double InpLatePastMidAtr  = 0.25;   // Skip Mode A if close already past mid by this ATR×
 
 input group "Mode B - Sweep + Displacement + FVG"
 input double InpMinDispAtr      = 0.55;   // Min Displacement Body (ATRx)
@@ -124,6 +129,8 @@ void BuildConfig(TrhConfig &cfg)
    cfg.slPadAtr        = InpSlPadAtr;
    cfg.riskReward      = InpRiskReward;
    cfg.useLiquidityTP  = InpUseLiquidityTP;
+   cfg.roomConfirmFrac = InpRoomConfirmFrac;
+   cfg.latePastMidAtr  = InpLatePastMidAtr;
    cfg.minDispAtr      = InpMinDispAtr;
    cfg.maxDispBars     = InpMaxDispBars;
    cfg.maxFvgBars      = InpMaxFvgBars;
@@ -174,14 +181,24 @@ int CountOurOrders()
    return n;
 }
 
-bool SpreadOk()
+bool SpreadOk(const double atrNow)
 {
    if(!InpUseSpreadFilter) return true;
-   long spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-   if(spread > InpMaxSpreadPoints)
+   long spreadPts = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+   if(spreadPts > InpMaxSpreadPoints)
    {
-      PrintFormat("TRH: skip - spread %d > max %d", (int)spread, InpMaxSpreadPoints);
+      PrintFormat("TRH: retry later - spread %d > max %d pts", (int)spreadPts, InpMaxSpreadPoints);
       return false;
+   }
+   if(InpMaxSpreadAtr > 0 && atrNow > 0)
+   {
+      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      double spreadPrice = (double)spreadPts * point;
+      if(spreadPrice > atrNow * InpMaxSpreadAtr)
+      {
+         PrintFormat("TRH: retry later - spread %.2f > %.2f ATR", spreadPrice, atrNow * InpMaxSpreadAtr);
+         return false;
+      }
    }
    return true;
 }
@@ -297,14 +314,15 @@ bool AdjustStops(const int dir, const double entry, double &sl, double &tp)
    return true;
 }
 
-bool PlaceSetupTrade(const TrhSetup &s, const double atrNow)
+// Returns: 1 = placed, 0 = retry later (spread/session), -1 = permanent skip this setup
+int PlaceSetupTrade(const TrhSetup &s, const double atrNow)
 {
-   if(!InpAutoTrade) return false;
-   if(!SpreadOk() || !SessionOk() || !DailyLimitsOk()) return false;
+   if(!InpAutoTrade) return -1;
+   if(!SpreadOk(atrNow) || !SessionOk() || !DailyLimitsOk()) return 0;
    if(CountOurOrders() >= InpMaxOpenTrades)
    {
       Print("TRH: skip - already at MaxOpenTrades");
-      return false;
+      return -1;
    }
 
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
@@ -312,11 +330,9 @@ bool PlaceSetupTrade(const TrhSetup &s, const double atrNow)
    double entry = NormalizeDouble(s.entry, _Digits);
    double sl    = NormalizeDouble(s.sl, _Digits);
    double tp    = NormalizeDouble(s.tp, _Digits);
-   if(!AdjustStops(s.dir, entry, sl, tp)) return false;
+   if(!AdjustStops(s.dir, entry, sl, tp)) return -1;
 
    double lots = CalcLots(entry, sl);
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   double tol   = MathMax(atrNow * InpMarketTolAtr, point * 10.0);
    double maxChase = atrNow * InpMaxChaseAtr;
 
    g_trade.SetExpertMagicNumber(InpMagic);
@@ -327,74 +343,54 @@ bool PlaceSetupTrade(const TrhSetup &s, const double atrNow)
    bool ok = false;
    string mode = "";
 
-   if(s.dir == 1)
+   // pastEntry > 0 means price already moved from ENTRY toward TP (fill is late)
+   double pastEntry = (s.dir == 1) ? (ask - entry) : (entry - bid);
+
+   if(pastEntry > maxChase && maxChase > 0)
    {
-      double past = ask - entry; // >0 means price already above ENTRY
-      if(ask <= entry + tol)
+      // Already deep past mid-ENTRY toward TP — pullback waits usually fail
+      if(InpSkipExpiredEntry)
       {
-         if(past > maxChase && maxChase > 0)
-         {
-            PrintFormat("TRH: skip market LONG - chase %.2f > max %.2f ATR", past, maxChase);
-            if(!InpAllowLimitAlways) return false;
-            mode = "BUY LIMIT (no chase)";
-            ok = g_trade.BuyLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
-         }
-         else
-         {
-            mode = "MARKET BUY";
-            ok = g_trade.Buy(lots, _Symbol, 0, sl, tp, comment);
-         }
+         PrintFormat("TRH: EXPIRED %s - %.2f past ENTRY (max %.2f) — skip, no pullback limit",
+            s.dir == 1 ? "LONG" : "SHORT", pastEntry, maxChase);
+         return -1;
       }
-      else
-      {
-         mode = "BUY LIMIT";
-         ok = g_trade.BuyLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
-      }
+      if(!InpAllowLimitWhenBehind)
+         return -1;
+      mode = (s.dir == 1) ? "BUY LIMIT (hope pullback)" : "SELL LIMIT (hope pullback)";
+      ok = (s.dir == 1)
+         ? g_trade.BuyLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment)
+         : g_trade.SellLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
    }
    else
    {
-      double past = entry - bid; // >0 means price already below ENTRY
-      if(bid >= entry - tol)
-      {
-         if(past > maxChase && maxChase > 0)
-         {
-            PrintFormat("TRH: skip market SHORT - chase %.2f > max %.2f ATR", past, maxChase);
-            if(!InpAllowLimitAlways) return false;
-            mode = "SELL LIMIT (no chase)";
-            ok = g_trade.SellLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
-         }
-         else
-         {
-            mode = "MARKET SELL";
-            ok = g_trade.Sell(lots, _Symbol, 0, sl, tp, comment);
-         }
-      }
-      else
-      {
-         mode = "SELL LIMIT";
-         ok = g_trade.SellLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
-      }
+      // At ENTRY, slightly past (within chase), or still before ENTRY → market now
+      // (Do not park limits that wait for failed pullbacks.)
+      mode = (s.dir == 1) ? "MARKET BUY" : "MARKET SELL";
+      ok = (s.dir == 1)
+         ? g_trade.Buy(lots, _Symbol, 0, sl, tp, comment)
+         : g_trade.Sell(lots, _Symbol, 0, sl, tp, comment);
    }
 
    if(ok)
    {
       g_dayTrades++;
-      PrintFormat("TRH %s %s lots=%s E=%s SL=%s TP=%s balRisk=%.2f%%",
+      PrintFormat("TRH %s %s lots=%s E=%s SL=%s TP=%s pastE=%.2f balRisk=%.2f%%",
          mode, s.dir == 1 ? "LONG" : "SHORT",
          DoubleToString(lots, 2),
          DoubleToString(entry, _Digits),
          DoubleToString(sl, _Digits),
          DoubleToString(tp, _Digits),
+         pastEntry,
          InpRiskPercent);
+      return 1;
    }
-   else
-   {
-      PrintFormat("TRH ORDER FAIL %s %s ret=%d %s",
-         mode, s.dir == 1 ? "LONG" : "SHORT",
-         g_trade.ResultRetcode(),
-         g_trade.ResultRetcodeDescription());
-   }
-   return ok;
+
+   PrintFormat("TRH ORDER FAIL %s %s ret=%d %s",
+      mode, s.dir == 1 ? "LONG" : "SHORT",
+      g_trade.ResultRetcode(),
+      g_trade.ResultRetcodeDescription());
+   return 0;
 }
 
 void ExpireStalePendings()
@@ -415,6 +411,39 @@ void ExpireStalePendings()
       if(ageBars >= InpPendingExpiryBars)
       {
          PrintFormat("TRH: expire pending #%I64u after %d bars", ticket, ageBars);
+         g_trade.OrderDelete(ticket);
+      }
+   }
+}
+
+// If price already ran through ENTRY toward TP without filling the limit, kill it
+void CancelRunThroughPendings(const double atrNow)
+{
+   if(!InpCancelRunThrough) return;
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double maxChase = atrNow * InpMaxChaseAtr;
+   if(maxChase <= 0) return;
+
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = OrderGetTicket(i);
+      if(ticket == 0 || !OrderSelect(ticket)) continue;
+      if(OrderGetInteger(ORDER_MAGIC) != (long)InpMagic) continue;
+      if(OrderGetString(ORDER_SYMBOL) != _Symbol) continue;
+
+      long type = OrderGetInteger(ORDER_TYPE);
+      double px = OrderGetDouble(ORDER_PRICE_OPEN);
+      bool runThrough = false;
+      if(type == ORDER_TYPE_BUY_LIMIT && ask > px + maxChase)
+         runThrough = true;
+      if(type == ORDER_TYPE_SELL_LIMIT && bid < px - maxChase)
+         runThrough = true;
+
+      if(runThrough)
+      {
+         PrintFormat("TRH: cancel run-through pending #%I64u @ %s (no pullback)",
+            ticket, DoubleToString(px, _Digits));
          g_trade.OrderDelete(ticket);
       }
    }
@@ -482,7 +511,7 @@ void ManageBreakEven()
 
 int OnInit()
 {
-   if(TRH_ENGINE_VERSION < 222)
+   if(TRH_ENGINE_VERSION < 223)
    {
       Alert("TRH EA: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
             "). Put NEW TRH_Engine.mqh in the SAME folder as this .mq5 and recompile.");
@@ -494,14 +523,15 @@ int OnInit()
    g_trade.SetTypeFillingBySymbol(_Symbol);
    ResetDayIfNeeded();
 
-   PrintFormat("TRH AutoTrade v3.22 | mode=%d | AutoTrade=%s | BE@%.2fR | BTB RR=%.1f | %s %s | risk=%.2f%%",
+   PrintFormat("TRH AutoTrade v3.23 | mode=%d | AutoTrade=%s | skipExpired=%s | BE@%.2fR | BTB RR=%.1f | %s %s | risk=%.2f%% | maxSpread=%d",
       (int)InpTradeMode,
       InpAutoTrade ? "ON" : "OFF",
+      InpSkipExpiredEntry ? "YES" : "NO",
       InpBreakEvenAtR,
       InpBtbRiskReward,
-      _Symbol, EnumToString(_Period), InpRiskPercent);
+      _Symbol, EnumToString(_Period), InpRiskPercent, InpMaxSpreadPoints);
 
-   Comment("TRH EA v3.22\nSWEEP + FVG + Pro BTB\nBE@0.5R | quiet alerts");
+   Comment("TRH EA v3.23\nSWEEP+FVG+BTB | skip expired ENTRY\nspread retry | BE@0.5R");
    return INIT_SUCCEEDED;
 }
 
@@ -518,6 +548,23 @@ void OnTick()
 
    datetime barTime = iTime(_Symbol, _Period, 0);
    if(barTime == 0) return;
+
+   // Run-through cancel every tick using last closed ATR estimate from rates
+   MqlRates tip[];
+   if(CopyRates(_Symbol, _Period, 1, 20, tip) >= 15)
+   {
+      ArraySetAsSeries(tip, true);
+      double sum = 0;
+      for(int k = 1; k <= 14; k++)
+      {
+         double tr = MathMax(tip[k].high - tip[k].low,
+                      MathMax(MathAbs(tip[k].high - tip[k + 1].close),
+                              MathAbs(tip[k].low - tip[k + 1].close)));
+         sum += tr;
+      }
+      CancelRunThroughPendings(sum / 14.0);
+   }
+
    if(barTime == g_lastBarTime) return;
    g_lastBarTime = barTime;
 
@@ -553,7 +600,7 @@ void OnTick()
 
    if(n <= 0)
    {
-      Comment(StringFormat("TRH EA v3.22 %s - scanning...\nday trades %d | equity %.2f",
+      Comment(StringFormat("TRH EA v3.23 %s - scanning...\nday trades %d | equity %.2f",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades, AccountInfoDouble(ACCOUNT_EQUITY)));
       return;
    }
@@ -566,7 +613,7 @@ void OnTick()
    int openNow = CountOurOrders();
 
    Comment(StringFormat(
-      "TRH %s | %s\nENTRY %s  SL %s  TP %s\nBar %s (age %d)\nAutoTrade %s | orders %d | day %d\nDyn lots ? %s (risk %.2f%% bal) BE@%.1fR",
+      "TRH %s | %s\nENTRY %s  SL %s  TP %s\nBar %s (age %d)\nAutoTrade %s | orders %d | day %d\nDyn lots ? %s (risk %.2f%% bal) skipExpired=%s",
       last.dir == 1 ? "LONG" : "SHORT",
       TrhModeLabel(last.setupMode),
       DoubleToString(last.entry, _Digits),
@@ -579,16 +626,13 @@ void OnTick()
       g_dayTrades,
       DoubleToString(previewLots, 2),
       InpRiskPercent,
-      InpBreakEvenAtR));
+      InpSkipExpiredEntry ? "Y" : "N"));
 
-   // Closed-bar only: never trade/alert on the forming tip candle
-   datetime closedBar = (copied >= 2) ? t[copied - 2] : 0;
-   if(closedBar == 0 || last.barTime != closedBar) return;
+   // Setup must be fresh; allow age 0..FreshMax so spread can retry next bars
    if(ageBars > InpFreshMaxAgeBars) return;
    if(last.barTime == g_lastSetupTime) return;
 
    // While a TRH position/pending is already open, do not fire a second alarm
-   // or try to open another setup (prevents wipe-then-realert while in trade).
    if(openNow > 0)
    {
       PrintFormat("TRH: hold - already %d open order(s); ignore new setup %s",
@@ -596,9 +640,26 @@ void OnTick()
       return;
    }
 
+   if(!InpAutoTrade)
+   {
+      g_lastSetupTime = last.barTime;
+      return;
+   }
+
+   double atrNow = TrhCalcATR(copied - 2, h, l, c);
+   int rc = PlaceSetupTrade(last, atrNow);
+   if(rc == 0)
+   {
+      // Spread/session/requote — do NOT lock setup; retry next bar while fresh
+      PrintFormat("TRH: defer setup %s (retry while age<=%d)",
+         TimeToString(last.barTime, TIME_DATE|TIME_MINUTES), InpFreshMaxAgeBars);
+      return;
+   }
+
+   // Placed (1) or permanent skip (-1) — lock this setup bar
    g_lastSetupTime = last.barTime;
 
-   PrintFormat("TRH SETUP %s %s E=%s SL=%s TP=%s @ %s age=%d lots?%s",
+   PrintFormat("TRH SETUP %s %s E=%s SL=%s TP=%s @ %s age=%d result=%s",
       TrhModeLabel(last.setupMode),
       last.dir == 1 ? "LONG" : "SHORT",
       DoubleToString(last.entry, _Digits),
@@ -606,9 +667,9 @@ void OnTick()
       DoubleToString(last.tp, _Digits),
       TimeToString(last.barTime, TIME_DATE|TIME_MINUTES),
       ageBars,
-      DoubleToString(previewLots, 2));
+      rc == 1 ? "PLACED" : "SKIPPED");
 
-   if(InpAlertOnSetup)
+   if(InpAlertOnSetup && rc == 1)
    {
       Alert(StringFormat("TRH %s %s SETUP\nENTRY %s\nSL %s\nTP %s\nlots?%s",
          last.dir == 1 ? "LONG" : "SHORT",
@@ -618,10 +679,5 @@ void OnTick()
          DoubleToString(last.tp, _Digits),
          DoubleToString(previewLots, 2)));
    }
-
-   if(!InpAutoTrade) return;
-
-   double atrNow = TrhCalcATR(copied - 2, h, l, c);
-   PlaceSetupTrade(last, atrNow);
 }
 //+------------------------------------------------------------------+
