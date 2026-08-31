@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.25"
-#property description "TRH EA v3.25: priority A>B>C · trade latest preferred setup"
+#property version   "3.26"
+#property description "TRH EA v3.26: pullback Buy/SellLimit when past ENTRY"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -57,13 +57,14 @@ input bool   InpUseBreakEven      = true;   // Move SL to BE after +XR
 input double InpBreakEvenAtR      = 0.5;    // Trigger at this R multiple (0.5 = earlier protect)
 input double InpBreakEvenLockR    = 0.05;   // Lock +this R past entry (0=exact BE)
 
-input group "5) Entry fill — no expired pullbacks"
+input group "5) Entry fill — market at ENTRY, limit for pullback"
 input double InpMarketTolAtr      = 0.20;   // Market if within this ATR of ENTRY
-input double InpMaxChaseAtr       = 0.30;   // Max past ENTRY for market (else skip)
-input bool   InpSkipExpiredEntry  = true;   // If already past ENTRY toward TP: skip (no limit wait)
-input bool   InpCancelRunThrough  = true;   // Delete pending if price runs through ENTRY without fill
-input bool   InpAllowLimitWhenBehind = true;// Limit only when price has NOT reached ENTRY yet
-input int    InpFreshMaxAgeBars   = 3;      // Only trade setups this fresh (bars)
+input double InpMaxChaseAtr       = 0.30;   // Max past ENTRY for market chase
+input double InpExpireAtR         = 0.85;   // Skip/cancel if already this far of risk toward TP
+input bool   InpUsePullbackLimit  = true;   // Past ENTRY (not expired) → Buy/SellLimit for pullback
+input bool   InpLimitBeforeEntry  = true;   // Still before ENTRY → limit (wait for touch)
+input bool   InpCancelRunThrough  = true;   // Delete pending if price runs too far toward TP (ExpireAtR)
+input int    InpFreshMaxAgeBars   = 5;      // Only trade setups this fresh (bars)
 
 input group "TRH Detection (= Pine Mode A)"
 input int    InpPivotPeriod     = 5;
@@ -339,7 +340,10 @@ int PlaceSetupTrade(const TrhSetup &s, const double atrNow)
    if(!AdjustStops(s.dir, entry, sl, tp)) return -1;
 
    double lots = CalcLots(entry, sl);
-   double maxChase = atrNow * InpMaxChaseAtr;
+   double risk = MathAbs(entry - sl);
+   double marketTol = atrNow * InpMarketTolAtr;
+   double maxChase  = atrNow * InpMaxChaseAtr;
+   double expireDist = (risk > 0 && InpExpireAtR > 0) ? (risk * InpExpireAtR) : 0;
 
    g_trade.SetExpertMagicNumber(InpMagic);
    g_trade.SetDeviationInPoints(InpMaxSlippagePts);
@@ -349,33 +353,55 @@ int PlaceSetupTrade(const TrhSetup &s, const double atrNow)
    bool ok = false;
    string mode = "";
 
-   // pastEntry > 0 means price already moved from ENTRY toward TP (fill is late)
+   // pastEntry > 0 = price already moved from ENTRY toward TP
    double pastEntry = (s.dir == 1) ? (ask - entry) : (entry - bid);
 
-   if(pastEntry > maxChase && maxChase > 0)
+   // Too deep toward TP — pullback to ENTRY leaves almost no RR
+   if(expireDist > 0 && pastEntry >= expireDist)
    {
-      // Already deep past mid-ENTRY toward TP — pullback waits usually fail
-      if(InpSkipExpiredEntry)
+      PrintFormat("TRH: EXPIRED %s - %.2f past ENTRY (expire@%.2f = %.2fR) — skip",
+         s.dir == 1 ? "LONG" : "SHORT", pastEntry, expireDist, InpExpireAtR);
+      return -1;
+   }
+
+   if(MathAbs(pastEntry) <= marketTol || (pastEntry > 0 && pastEntry <= maxChase))
+   {
+      // At ENTRY or small chase → market now
+      mode = (s.dir == 1) ? "MARKET BUY" : "MARKET SELL";
+      ok = (s.dir == 1)
+         ? g_trade.Buy(lots, _Symbol, 0, sl, tp, comment)
+         : g_trade.Sell(lots, _Symbol, 0, sl, tp, comment);
+   }
+   else if(pastEntry > maxChase)
+   {
+      // Already past ENTRY toward TP — park limit and wait for pullback
+      if(!InpUsePullbackLimit)
       {
-         PrintFormat("TRH: EXPIRED %s - %.2f past ENTRY (max %.2f) — skip, no pullback limit",
-            s.dir == 1 ? "LONG" : "SHORT", pastEntry, maxChase);
+         PrintFormat("TRH: past ENTRY %.2f but pullback limit OFF — skip", pastEntry);
          return -1;
       }
-      if(!InpAllowLimitWhenBehind)
-         return -1;
-      mode = (s.dir == 1) ? "BUY LIMIT (hope pullback)" : "SELL LIMIT (hope pullback)";
+      mode = (s.dir == 1) ? "BUY LIMIT (pullback)" : "SELL LIMIT (pullback)";
       ok = (s.dir == 1)
          ? g_trade.BuyLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment)
          : g_trade.SellLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
    }
    else
    {
-      // At ENTRY, slightly past (within chase), or still before ENTRY → market now
-      // (Do not park limits that wait for failed pullbacks.)
-      mode = (s.dir == 1) ? "MARKET BUY" : "MARKET SELL";
-      ok = (s.dir == 1)
-         ? g_trade.Buy(lots, _Symbol, 0, sl, tp, comment)
-         : g_trade.Sell(lots, _Symbol, 0, sl, tp, comment);
+      // Still before ENTRY — wait for price to reach it (limit), or market if disabled
+      if(InpLimitBeforeEntry)
+      {
+         mode = (s.dir == 1) ? "BUY LIMIT (wait ENTRY)" : "SELL LIMIT (wait ENTRY)";
+         ok = (s.dir == 1)
+            ? g_trade.BuyLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment)
+            : g_trade.SellLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
+      }
+      else
+      {
+         mode = (s.dir == 1) ? "MARKET BUY" : "MARKET SELL";
+         ok = (s.dir == 1)
+            ? g_trade.Buy(lots, _Symbol, 0, sl, tp, comment)
+            : g_trade.Sell(lots, _Symbol, 0, sl, tp, comment);
+      }
    }
 
    if(ok)
@@ -422,14 +448,12 @@ void ExpireStalePendings()
    }
 }
 
-// If price already ran through ENTRY toward TP without filling the limit, kill it
+// Cancel pending only when price has run too far toward TP (ExpireAtR) — not on small chase
 void CancelRunThroughPendings(const double atrNow)
 {
    if(!InpCancelRunThrough) return;
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double maxChase = atrNow * InpMaxChaseAtr;
-   if(maxChase <= 0) return;
 
    for(int i = OrdersTotal() - 1; i >= 0; i--)
    {
@@ -440,16 +464,23 @@ void CancelRunThroughPendings(const double atrNow)
 
       long type = OrderGetInteger(ORDER_TYPE);
       double px = OrderGetDouble(ORDER_PRICE_OPEN);
+      double osl = OrderGetDouble(ORDER_SL);
+      double risk = MathAbs(px - osl);
+      if(risk <= 0)
+         risk = MathMax(atrNow * 0.5, _Point * 10);
+      double expireDist = risk * InpExpireAtR;
+      if(expireDist <= 0) continue;
+
       bool runThrough = false;
-      if(type == ORDER_TYPE_BUY_LIMIT && ask > px + maxChase)
+      if(type == ORDER_TYPE_BUY_LIMIT && ask >= px + expireDist)
          runThrough = true;
-      if(type == ORDER_TYPE_SELL_LIMIT && bid < px - maxChase)
+      if(type == ORDER_TYPE_SELL_LIMIT && bid <= px - expireDist)
          runThrough = true;
 
       if(runThrough)
       {
-         PrintFormat("TRH: cancel run-through pending #%I64u @ %s (no pullback)",
-            ticket, DoubleToString(px, _Digits));
+         PrintFormat("TRH: cancel run-through pending #%I64u @ %s (past %.2fR toward TP)",
+            ticket, DoubleToString(px, _Digits), InpExpireAtR);
          g_trade.OrderDelete(ticket);
       }
    }
@@ -529,15 +560,16 @@ int OnInit()
    g_trade.SetTypeFillingBySymbol(_Symbol);
    ResetDayIfNeeded();
 
-   PrintFormat("TRH AutoTrade v3.25 | mode=%d | AutoTrade=%s | skipExpired=%s | BE@%.2fR | BTB RR=%.1f | priority A>B>C | %s %s | risk=%.2f%% | maxSpread=%d",
+   PrintFormat("TRH AutoTrade v3.26 | mode=%d | AutoTrade=%s | pullbackLimit=%s | expire@%.2fR | BE@%.2fR | BTB RR=%.1f | priority A>B>C | %s %s | risk=%.2f%% | maxSpread=%d",
       (int)InpTradeMode,
       InpAutoTrade ? "ON" : "OFF",
-      InpSkipExpiredEntry ? "YES" : "NO",
+      InpUsePullbackLimit ? "YES" : "NO",
+      InpExpireAtR,
       InpBreakEvenAtR,
       InpBtbRiskReward,
       _Symbol, EnumToString(_Period), InpRiskPercent, InpMaxSpreadPoints);
 
-   Comment("TRH EA v3.25\nA·SWEEP > B·FVG > C·BTB\nlatest preferred setup | BE@0.5R");
+   Comment("TRH EA v3.26\nA·SWEEP > B·FVG > C·BTB\npullback LIMIT when past ENTRY");
    return INIT_SUCCEEDED;
 }
 
@@ -606,7 +638,7 @@ void OnTick()
 
    if(n <= 0)
    {
-      Comment(StringFormat("TRH EA v3.25 %s - scanning...\nday trades %d | equity %.2f",
+      Comment(StringFormat("TRH EA v3.26 %s - scanning...\nday trades %d | equity %.2f",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades, AccountInfoDouble(ACCOUNT_EQUITY)));
       return;
    }
@@ -619,7 +651,7 @@ void OnTick()
    int openNow = CountOurOrders();
 
    Comment(StringFormat(
-      "TRH %s | %s\nENTRY %s  SL %s  TP %s\nBar %s (age %d)\nAutoTrade %s | orders %d | day %d\nDyn lots ? %s (risk %.2f%% bal) skipExpired=%s",
+      "TRH %s | %s\nENTRY %s  SL %s  TP %s\nBar %s (age %d)\nAutoTrade %s | orders %d | day %d\nDyn lots ? %s (risk %.2f%%) pullback=%s expire@%.2fR",
       last.dir == 1 ? "LONG" : "SHORT",
       TrhModeFullName(last.setupMode),
       DoubleToString(last.entry, _Digits),
@@ -632,7 +664,8 @@ void OnTick()
       g_dayTrades,
       DoubleToString(previewLots, 2),
       InpRiskPercent,
-      InpSkipExpiredEntry ? "Y" : "N"));
+      InpUsePullbackLimit ? "Y" : "N",
+      InpExpireAtR));
 
    // Setup must be fresh; allow age 0..FreshMax so spread can retry next bars
    if(ageBars > InpFreshMaxAgeBars) return;

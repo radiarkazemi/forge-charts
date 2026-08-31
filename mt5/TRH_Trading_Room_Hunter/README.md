@@ -3,7 +3,7 @@
 | File | Role |
 |------|------|
 | `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.25 |
-| `TRH_AutoTrade.mq5` | **EA** v3.25 |
+| `TRH_AutoTrade.mq5` | **EA** v3.26 |
 | `TRH_Engine.mqh` | Shared Engine v225 |
 
 | Mode | Chart name | Logic |
@@ -21,6 +21,16 @@ BTB confirms faster than Mode A (A needs base bars). Old merge kept the earlier 
 - Same bar → keep **A over B over C**
 - Inside cooldown → a later **higher-priority** mode **replaces** a weaker one (A replaces C)
 - Chart / EA always use the **latest preferred** setup in the merged list
+
+## Pullback LIMIT (EA v3.26)
+
+Indicator **IN TRADE** is visual only — not a broker order. Old EA skipped when price was already past ENTRY (`SkipExpiredEntry`) and never parked a limit, so pullbacks were missed (your BTB long @ 4447.77).
+
+**Now:**
+- At / near ENTRY → market
+- Past ENTRY but &lt; 0.85R toward TP → **BuyLimit / SellLimit** (wait pullback)
+- Still before ENTRY → limit wait
+- Cancel pending only if price runs ≥ ExpireAtR toward TP (not on small chase)
 
 ## Mode C BTB quality (v224)
 
