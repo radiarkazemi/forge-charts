@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.31"
-#property description "TRH EA v3.31: smart late BE · mode-aware · closed-bar · no early 0.5R kills"
+#property version   "3.32"
+#property description "TRH EA v3.32: break-even OFF by default · SL stays at setup until TP/SL"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -58,16 +58,17 @@ input bool   InpUseDailyLimits    = true;
 input double InpMaxDailyLossPct   = 4.0;
 input int    InpMaxDailyTrades    = 8;
 
-input group "4) Smart break-even (not early risk-free)"
-input ENUM_TRH_BE_STYLE InpBeStyle     = TRH_BE_SMART; // Break-even style
-input double InpBreakEvenAtR           = 1.20;  // Smart/Step: full BE trigger (R) — was 0.5
-input double InpBreakEvenLockR         = 0.10;  // Lock this R past entry after BE
-input double InpBeModeAExtraR          = 0.30;  // Mode A needs more room (+R on trigger)
-input double InpBeModeBAtR             = 1.00;  // Mode B full BE trigger (R)
-input double InpBeStepReduceAtR        = 0.80;  // Step style: first move SL to cut risk at this R
-input double InpBeStepKeepRiskR        = 0.50;  // Step style: keep this fraction of original risk
-input bool   InpBeRequireClosedBar     = true;  // Only BE if last CLOSED bar reached trigger (ignore wicks)
-input int    InpBeMinBarsOpen          = 3;     // Min bars after open before any BE/step
+input group "4) Break-even / risk-free (OFF = leave setup SL alone)"
+// Renamed vs old InpUseBreakEven / InpBeStyle so MT5 does not remap saved "true" → EARLY
+input ENUM_TRH_BE_STYLE InpSLProtectStyle = TRH_BE_OFF; // OFF recommended — no risk-free
+input double InpBreakEvenAtR              = 1.20;  // Smart/Step: full BE trigger (R)
+input double InpBreakEvenLockR            = 0.10;  // Lock this R past entry after BE
+input double InpBeModeAExtraR             = 0.30;  // Mode A needs more room (+R on trigger)
+input double InpBeModeBAtR                = 1.00;  // Mode B full BE trigger (R)
+input double InpBeStepReduceAtR           = 0.80;  // Step style: first move SL to cut risk at this R
+input double InpBeStepKeepRiskR           = 0.50;  // Step style: keep this fraction of original risk
+input bool   InpBeRequireClosedBar        = true;  // Only BE if last CLOSED bar reached trigger
+input int    InpBeMinBarsOpen             = 3;     // Min bars after open before any BE/step
 
 input group "5) Smart ENTRY fill"
 input double InpMarketTolAtr      = 0.25;
@@ -692,7 +693,7 @@ double CommentOrigRisk(const string cmt, const double fallback)
 
 double BeTriggerR(const int modeId)
 {
-   if(InpBeStyle == TRH_BE_EARLY) return 0.50;
+   if(InpSLProtectStyle == TRH_BE_EARLY) return 0.50;
    if(modeId == TRH_MODE_FVG) return MathMax(InpBeModeBAtR, 0.8);
    // Mode A SWEEP — often revisits near SL before TP
    return MathMax(InpBreakEvenAtR + InpBeModeAExtraR, InpBreakEvenAtR);
@@ -710,7 +711,7 @@ bool ClosedBarReachedR(const int dir, const double entry, const double risk, con
 
 void ManageBreakEven()
 {
-   if(InpBeStyle == TRH_BE_OFF) return;
+   if(InpSLProtectStyle == TRH_BE_OFF) return;
 
    int periodSec = PeriodSeconds(_Period);
    if(periodSec <= 0) periodSec = 60;
@@ -756,7 +757,7 @@ void ManageBreakEven()
       double fullBeR = BeTriggerR(modeId);
 
       // Step 1: only cut risk (keep room for near-SL → TP paths)
-      if(InpBeStyle == TRH_BE_STEP && rNow >= InpBeStepReduceAtR && riskNow > risk0 * InpBeStepKeepRiskR + _Point)
+      if(InpSLProtectStyle == TRH_BE_STEP && rNow >= InpBeStepReduceAtR && riskNow > risk0 * InpBeStepKeepRiskR + _Point)
       {
          if(ClosedBarReachedR(dir, entry, risk0, InpBeStepReduceAtR))
          {
@@ -794,7 +795,7 @@ void ManageBreakEven()
 
       if(g_trade.PositionModify(ticket, newSL, tp))
          PrintFormat("TRH BE-SMART: #%I64u newSL=%s at %.2fR (trigger %.2fR, mode=%d, style=%d)",
-            ticket, DoubleToString(newSL, _Digits), rNow, fullBeR, modeId, (int)InpBeStyle);
+            ticket, DoubleToString(newSL, _Digits), rNow, fullBeR, modeId, (int)InpSLProtectStyle);
    }
 }
 
@@ -826,12 +827,12 @@ void UpdateComment(const TrhSetup &last, const int ageBars, const double lots)
       : ("idle: " + g_workStatus);
 
    string beName = "BE-OFF";
-   if(InpBeStyle == TRH_BE_EARLY) beName = "BE-EARLY";
-   else if(InpBeStyle == TRH_BE_SMART) beName = "BE-SMART";
-   else if(InpBeStyle == TRH_BE_STEP) beName = "BE-STEP";
+   if(InpSLProtectStyle == TRH_BE_EARLY) beName = "BE-EARLY";
+   else if(InpSLProtectStyle == TRH_BE_SMART) beName = "BE-SMART";
+   else if(InpSLProtectStyle == TRH_BE_STEP) beName = "BE-STEP";
 
    Comment(StringFormat(
-      "TRH EA v3.31 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
+      "TRH EA v3.32 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
       InpAutoTrade ? "ON" : "OFF",
       beName,
       last.dir == 1 ? "LONG" : "SHORT",
@@ -861,15 +862,15 @@ int OnInit()
    g_workActive = false;
    g_workStatus = "boot";
 
-   PrintFormat("TRH AutoTrade v3.31 | mode=A+B | BE=%d | pullback=%s | touchMarket=%s | adoptAge<=%d | workBars=%d | %s %s",
-      (int)InpBeStyle,
+   PrintFormat("TRH AutoTrade v3.32 | mode=A+B | BE=%d | pullback=%s | touchMarket=%s | adoptAge<=%d | workBars=%d | %s %s",
+      (int)InpSLProtectStyle,
       InpUsePullbackLimit ? "Y" : "N",
       InpMarketOnTouch ? "Y" : "N",
       InpAdoptMaxAgeBars,
       InpPendingExpiryBars,
       _Symbol, EnumToString(_Period));
 
-   Comment("TRH EA v3.31\nA·SWEEP + B·FVG · smart late BE\nno early 0.5R · pullback LIMIT");
+   Comment("TRH EA v3.32\nA·SWEEP + B·FVG · BE OFF\nSL stays at setup until TP");
    return INIT_SUCCEEDED;
 }
 
@@ -933,7 +934,7 @@ void OnTick()
    int n = TrhScanByMode(copied, t, o, h, l, c, cfg, (int)InpTradeMode, setups);
    if(n <= 0)
    {
-      Comment(StringFormat("TRH EA v3.31 %s — scanning...\nday %d | %s",
+      Comment(StringFormat("TRH EA v3.32 %s — scanning...\nday %d | %s",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades, g_workStatus));
       return;
    }

@@ -3,7 +3,7 @@
 | File | Role |
 |------|------|
 | `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.29 |
-| `TRH_AutoTrade.mq5` | **EA** v3.31 |
+| `TRH_AutoTrade.mq5` | **EA** v3.32 |
 | `TRH_Engine.mqh` | Shared Engine v228 |
 
 | Mode | Chart name | Live? |
@@ -37,16 +37,14 @@ Same-account multi-PC: panel shows `LIVE LONG/SHORT` from the open broker positi
 
 Active setup manager · BuyStop/SellStop before ENTRY · Limit pullback · market on touch.
 
-## Smart break-even (v3.31+)
+## Break-even (v3.32 — OFF by default)
 
-Early “risk-free @ 0.5R” is **off by default** — it killed setups that dip near SL then run to TP.
+**Default = OFF.** SL stays at the setup SL until TP or original SL. No “risk-free”.
 
-Default **BE-SMART**:
-- Mode A·SWEEP → full BE ~**1.5R** (1.20 + 0.30 extra)
-- Mode B·FVG → full BE ~**1.0R**
-- Needs a **closed bar** at the trigger (wicks alone do not move SL)
-- Min **3 bars** open before any BE
-- Styles: `OFF` / `EARLY` (old 0.5R) / `SMART` / `STEP` (cut risk first, full BE later)
+That early BE @ ~0.5R was moving SL to entry and stopping trades that dip back then run to TP (exactly what you saw on GOLD).
+
+Optional styles if you turn it on later: `EARLY` / `SMART` / `STEP`.  
+Input name is `InpSLProtectStyle` (not the old checkbox) so MT5 does not remount saved “true” as EARLY.
 
 ## Links
 
