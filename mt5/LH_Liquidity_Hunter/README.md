@@ -1,50 +1,40 @@
 # LH · Liquidity Hunter
 
-Our own liquidity-first strategy (standalone — **not TRH**).
+Liquidity-first strategy (standalone — **not TRH**).
 
-> Liquidity is the most important parameter. Recognize it correctly and you do not *become* liquidity. The market hunts liquidity — we wait for the hunt, then trade the expansion.
-
-## Model
+## Complete setup path
 
 ```
-1. Map BSL / SSL     swing highs/lows where stops rest
-2. Raid              price takes that liquidity (sweep + close back)
-3. CISD              change in state of delivery (close through raid open)
-4. MSS / BOS         structure confirms the shift (MSS preferred, BOS optional)
-5. FVG               imbalance = entry zone (mid, or CISD if inside FVG)
-6. SL / TP           SL beyond raided extreme · TP = opposing liquidity (else RR)
+1 RAID (BSL/SSL sweep) → 2 CISD → 3 MSS → 4 FVG → ENTRY / SL / TP
 ```
 
-| File | Role |
-|------|------|
-| **`LH_Liquidity_Hunter.pine`** | **TradingView — start here** |
-| `LH_Engine.mqh` | MT5 detector v100 |
-| `LH_Liquidity_Hunter.mq5` | MT5 Indicator v1.00 |
-| `LH_AutoTrade.mq5` | MT5 EA v1.00 |
+## Pine first
 
-## Pine (TradingView) — install first
+File: `LH_Liquidity_Hunter.pine`
 
-1. Open this zip → open **`LH_Liquidity_Hunter.pine`**
-2. TradingView → Pine Editor → paste all → **Add to chart**
-3. Use on XAUUSD M1 / M5 / M15
-4. Raw link (always latest on this branch):  
-   https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/liquidity-hunter-992e/indicators/LH_Liquidity_Hunter.pine
+1. TradingView → Pine Editor → paste → Add to chart  
+2. Raw: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/liquidity-hunter-992e/indicators/LH_Liquidity_Hunter.pine
 
-## Install (MT5) — later
+### What you should see on the last setup
+- **1 RAID** + SWEEP labels  
+- **2 CISD** level  
+- **3 MSS/BOS** level  
+- **4 FVG** box  
+- **ENTRY / SL / TP** lines + price labels  
+- RISK / REWARD boxes  
+- Panel: POSITION, STATUS, full path, levels, RESULT
 
-1. `Indicators/LH_Liquidity_Hunter/` ← Engine + Indicator → Compile  
-2. `Experts/LH_Liquidity_Hunter/` ← Engine + EA → Compile  
-3. EA: AutoTrade ON · Break-even **OFF** · far→market / near→pending  
+### Tuned defaults (vs the stopped-out short)
+| Param | New default | Why |
+|-------|-------------|-----|
+| Min MSS displacement | 0.55 ATR | Stronger structure shift |
+| Min sweep | 0.08 ATR | Clearer liquidity raid |
+| SL pad | 0.20 ATR | More room beyond sweep |
+| Min risk | 0.35 ATR | Skip tiny fragile stops |
+| Allow BOS | OFF | MSS only (less premature) |
+| Fallback RR | 2.5 | Slightly tighter target |
+| Cooldown | 50 bars | Less noise |
 
-## Defaults
+## MT5 (later)
 
-| Input | Value |
-|-------|-------|
-| Require CISD | ON |
-| Allow BOS | ON |
-| FVG retest | ON |
-| Opposing liquidity TP | ON |
-| Fallback RR | 3.0 |
-| EA break-even | **OFF** |
-
-Do **not** mix `LH_Engine.mqh` with TRH Engine files.
+Compile Engine + Indicator + EA from this folder. Do not mix with TRH.
