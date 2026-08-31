@@ -202,8 +202,7 @@ if barstate.isconfirmed
                 if barsBack > 0
                     for k = 0 to barsBack
                         mx := math.max(mx, high[k])
-                if na(mssLevel)
-                    mssRef := mx
+                float mssRef = na(mssLevel) ? mx : mssLevel
                 hitMss = close > mssRef and close > open and body >= a * minDispAtr
                 // internal BOS: break most recent pivot high after sweep
                 bosRef = f_lastPivot(pivHiPx, pivHiBar, bar_index, math.max(bar_index - sweepBar + 2, 5), 1)
@@ -219,7 +218,7 @@ if barstate.isconfirmed
                 if barsBack > 0
                     for k = 0 to barsBack
                         mn := math.min(mn, low[k])
-                mssRef = na(mssLevel) ? mn : mssLevel
+                float mssRef = na(mssLevel) ? mn : mssLevel
                 hitMss = close < mssRef and close < open and body >= a * minDispAtr
                 bosRef = f_lastPivot(pivLoPx, pivLoBar, bar_index, math.max(bar_index - sweepBar + 2, 5), 1)
                 hitBos = allowBos and not na(bosRef) and bosRef < sweepPx and close < bosRef and close < open and body >= a * minDispAtr * 0.75
