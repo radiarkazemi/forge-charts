@@ -5,7 +5,7 @@
 #ifndef TRH_ENGINE_MQH
 #define TRH_ENGINE_MQH
 
-#define TRH_ENGINE_VERSION 226
+#define TRH_ENGINE_VERSION 227
 #define TRH_MAX_PIVOTS 30
 #define TRH_ATR_LEN    14
 
@@ -132,18 +132,75 @@ color TrhModeAccent(const int mode, const int dir)
    return (dir == 1) ? clrTeal : clrCrimson;
 }
 
+// Pine ta.atr(14) = Wilder RMA of True Range (NOT SMA of last 14).
+// After a big selloff SMA ATR spikes harder and can fail minRoom — miss setups Pine finds.
 double TrhCalcATR(const int i, const double &h[], const double &l[], const double &c[])
 {
-   if(i < 1) return h[i] - l[i];
-   int start = MathMax(1, i - TRH_ATR_LEN + 1);
+   if(i < 1)
+      return MathMax(h[i] - l[i], 0.0001);
+
+   // Not enough bars for a full seed → SMA of available TR
+   if(i < TRH_ATR_LEN)
+   {
+      double sum = 0.0;
+      int n = 0;
+      for(int j = 1; j <= i; j++)
+      {
+         double tr = MathMax(h[j] - l[j],
+                      MathMax(MathAbs(h[j] - c[j - 1]), MathAbs(l[j] - c[j - 1])));
+         sum += tr;
+         n++;
+      }
+      return (n > 0) ? (sum / n) : MathMax(h[i] - l[i], 0.0001);
+   }
+
+   // Seed at bar TRH_ATR_LEN = SMA(TR, 14), then Wilder forward to i
    double sum = 0.0;
-   for(int j = start; j <= i; j++)
+   for(int j = 1; j <= TRH_ATR_LEN; j++)
    {
       double tr = MathMax(h[j] - l[j],
                    MathMax(MathAbs(h[j] - c[j - 1]), MathAbs(l[j] - c[j - 1])));
       sum += tr;
    }
-   return sum / (i - start + 1);
+   double atr = sum / TRH_ATR_LEN;
+   for(int j = TRH_ATR_LEN + 1; j <= i; j++)
+   {
+      double tr = MathMax(h[j] - l[j],
+                   MathMax(MathAbs(h[j] - c[j - 1]), MathAbs(l[j] - c[j - 1])));
+      atr = (atr * (TRH_ATR_LEN - 1) + tr) / TRH_ATR_LEN;
+   }
+   return atr;
+}
+
+// Precompute Wilder ATR for a full scan (oldest→newest) — O(n) once
+void TrhBuildAtrSeries(const int rates,
+                       const double &h[], const double &l[], const double &c[],
+                       double &atrOut[])
+{
+   ArrayResize(atrOut, rates);
+   if(rates <= 0) return;
+   atrOut[0] = MathMax(h[0] - l[0], 0.0001);
+   if(rates == 1) return;
+
+   double sum = 0.0;
+   int n = 0;
+   for(int j = 1; j < rates; j++)
+   {
+      double tr = MathMax(h[j] - l[j],
+                   MathMax(MathAbs(h[j] - c[j - 1]), MathAbs(l[j] - c[j - 1])));
+      if(j <= TRH_ATR_LEN)
+      {
+         sum += tr;
+         n++;
+         atrOut[j] = sum / n;
+         if(j == TRH_ATR_LEN)
+            atrOut[j] = sum / TRH_ATR_LEN;
+      }
+      else
+      {
+         atrOut[j] = (atrOut[j - 1] * (TRH_ATR_LEN - 1) + tr) / TRH_ATR_LEN;
+      }
+   }
 }
 
 bool TrhIsPivotLow(const int i, const int p, const double &l[], const int rates)
@@ -268,9 +325,13 @@ int TrhScanSetups(const int rates,
    int    lastClosed = rates - 2; // never confirm on forming tip (rates-1)
    if(lastClosed < 50) return 0;
 
+   double atrSeries[];
+   TrhBuildAtrSeries(rates, high, low, close, atrSeries);
+
    for(int i = 0; i <= lastClosed; i++)
    {
-      double a = TrhCalcATR(i, high, low, close);
+      double a = atrSeries[i];
+      if(a <= 0) a = TrhCalcATR(i, high, low, close);
 
       int pivI = i - p;
       if(pivI >= p && TrhIsPivotLow(pivI, p, low, rates))
@@ -456,9 +517,13 @@ int TrhScanFvgSetups(const int rates,
    int    lastClosed = rates - 2; // never signal on forming tip (rates-1)
    if(lastClosed < 50) return 0;
 
+   double atrSeries[];
+   TrhBuildAtrSeries(rates, high, low, close, atrSeries);
+
    for(int i = 0; i <= lastClosed; i++)
    {
-      double a = TrhCalcATR(i, high, low, close);
+      double a = atrSeries[i];
+      if(a <= 0) a = TrhCalcATR(i, high, low, close);
 
       int pivI = i - p;
       if(pivI >= p && TrhIsPivotLow(pivI, p, low, rates))
@@ -715,9 +780,13 @@ int TrhScanBtbSetups(const int rates,
    double rr = cfg.btbRiskReward;
    if(rr < 2.0) rr = 2.0;
 
+   double atrSeries[];
+   TrhBuildAtrSeries(rates, high, low, close, atrSeries);
+
    for(int i = 0; i <= lastClosed; i++)
    {
-      double a = TrhCalcATR(i, high, low, close);
+      double a = atrSeries[i];
+      if(a <= 0) a = TrhCalcATR(i, high, low, close);
 
       int pivI = i - p;
       if(pivI >= p && TrhIsPivotLow(pivI, p, low, rates))

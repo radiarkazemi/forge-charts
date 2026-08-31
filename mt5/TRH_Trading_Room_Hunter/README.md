@@ -2,9 +2,9 @@
 
 | File | Role |
 |------|------|
-| `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.27 |
-| `TRH_AutoTrade.mq5` | **EA** v3.28 |
-| `TRH_Engine.mqh` | Shared Engine v226 |
+| `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.28 |
+| `TRH_AutoTrade.mq5` | **EA** v3.29 |
+| `TRH_Engine.mqh` | Shared Engine v227 |
 
 | Mode | Chart name | Live? |
 |------|------------|--------|
@@ -13,6 +13,11 @@
 | **C** | `C · BTB` | **Removed** from live model |
 
 **Default Detection Mode = `A + B` (Both)** on Indicator and AutoTrade.
+
+## Why Pine found a SWEEP MT5 missed (v227)
+
+Pine `ta.atr(14)` is **Wilder RMA**. Old MT5 used SMA of the last 14 TRs — after a big selloff SMA ATR spikes and `minRoom` fails, so Mode A never confirms. Engine now matches Pine ATR.
+
 
 Priority when both fire: **A > B**.
 

@@ -49,7 +49,10 @@ assert(sources["TRH_Engine.mqh"].includes("cfg.riskReward      = 2.4"), "Engine 
 assert(sources["TRH_Engine.mqh"].includes("cfg.baseConfirmBars = 8"), "Engine default baseConfirmBars=8");
 assert(sources["TRH_Trading_Room_Hunter.mq5"].includes('InpPivotPeriod     = 5'), "Indicator InpPivotPeriod=5");
 assert(sources["TRH_Trading_Room_Hunter.mq5"].includes("InpRiskReward      = 2.4"), "Indicator InpRiskReward=2.4");
-assert(sources["TRH_AutoTrade.mq5"].includes("InpAutoTrade       = false"), "EA AutoTrade OFF by default");
+assert(sources["TRH_AutoTrade.mq5"].includes("InpAutoTrade         = true"), "EA AutoTrade ON by default");
+assert(sources["TRH_Engine.mqh"].includes("Wilder RMA"), "Engine ATR is Wilder RMA (Pine ta.atr)");
+assert(sources["TRH_Trading_Room_Hunter.mq5"].includes("InpTradeMode = TRH_TM_BOTH"), "Indicator default A+B");
+assert(sources["TRH_AutoTrade.mq5"].includes("InpTradeMode = TRH_TM_BOTH"), "EA default A+B");
 assert(sources["TRH_AutoTrade.mq5"].includes("InpRiskReward      = 2.4"), "EA InpRiskReward=2.4");
 assert(sources["TRH_AutoTrade.mq5"].includes('#include "TRH_Engine.mqh"'), "EA includes shared engine");
 assert(sources["TRH_Trading_Room_Hunter.mq5"].includes('#include "TRH_Engine.mqh"'), "Indicator includes shared engine");

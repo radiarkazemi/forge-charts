@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.28"
-#property description "TRH EA v3.28: A·SWEEP + B·FVG autotrade (BTB removed)"
+#property version   "3.29"
+#property description "TRH EA v3.29: Wilder ATR parity with Pine"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -738,7 +738,7 @@ void UpdateComment(const TrhSetup &last, const int ageBars, const double lots)
       : ("idle: " + g_workStatus);
 
    Comment(StringFormat(
-      "TRH EA v3.28 | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
+      "TRH EA v3.29 | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
       InpAutoTrade ? "ON" : "OFF",
       last.dir == 1 ? "LONG" : "SHORT",
       TrhModeFullName(last.setupMode),
@@ -753,7 +753,7 @@ void UpdateComment(const TrhSetup &last, const int ageBars, const double lots)
 
 int OnInit()
 {
-   if(TRH_ENGINE_VERSION < 226)
+   if(TRH_ENGINE_VERSION < 227)
    {
       Alert("TRH EA: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
             "). Put NEW TRH_Engine.mqh in the SAME folder as this .mq5 and recompile.");
@@ -767,14 +767,14 @@ int OnInit()
    g_workActive = false;
    g_workStatus = "boot";
 
-   PrintFormat("TRH AutoTrade v3.28 | mode=A+B | pullback=%s | touchMarket=%s | adoptAge<=%d | workBars=%d | %s %s",
+   PrintFormat("TRH AutoTrade v3.29 | mode=A+B | pullback=%s | touchMarket=%s | adoptAge<=%d | workBars=%d | %s %s",
       InpUsePullbackLimit ? "Y" : "N",
       InpMarketOnTouch ? "Y" : "N",
       InpAdoptMaxAgeBars,
       InpPendingExpiryBars,
       _Symbol, EnumToString(_Period));
 
-   Comment("TRH EA v3.28\nA·SWEEP + B·FVG autotrade both\nBTB removed · pullback LIMIT");
+   Comment("TRH EA v3.29\nA·SWEEP + B·FVG autotrade both\nBTB removed · pullback LIMIT");
    return INIT_SUCCEEDED;
 }
 
@@ -838,7 +838,7 @@ void OnTick()
    int n = TrhScanByMode(copied, t, o, h, l, c, cfg, (int)InpTradeMode, setups);
    if(n <= 0)
    {
-      Comment(StringFormat("TRH EA v3.28 %s — scanning...\nday %d | %s",
+      Comment(StringFormat("TRH EA v3.29 %s — scanning...\nday %d | %s",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades, g_workStatus));
       return;
    }
