@@ -1,5 +1,5 @@
 //@version=6
-indicator("LH · Liquidity Hunter MTF", overlay=true, max_boxes_count=60, max_lines_count=120, max_labels_count=80, max_bars_back=5000)
+indicator("LH · Liquidity Hunter MTF", overlay=true, max_boxes_count=80, max_lines_count=120, max_labels_count=80, max_bars_back=5000)
 
 // Trade 1m · Liquidity from 5m/15m · Execution on 1m FVG CE
 // RAID must sweep HTF/MTF BSL/SSL — not random 1m micro pivots
