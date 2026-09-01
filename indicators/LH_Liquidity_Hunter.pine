@@ -800,12 +800,13 @@ if nHist > 0
     setupFillBar := stS.fillBar
 
 string statusTxt = na(setupEntry) or setupDir == 0 ? "-" : setupStatus == 0 ? "WAIT FILL" : setupStatus == 1 ? "IN TRADE" : setupStatus == 2 ? "TP HIT" : "SL HIT"
-color statusCol = setupStatus == 0 ? color.gray : setupStatus == 1 ? color.orange : setupStatus == 2 ? longCol : shortCol
+color statusCol = setupStatus == 0 ? color.gray : setupStatus == 1 ? color.orange : setupStatus == 2 ? tpCol : slCol
 
-// ENTRY/SL/TP no longer full-chart plots — drawn only inside setup footprint below
 plot(na, "ENTRY", color=entryCol, display=display.none)
-plot(na, "SL", color=shortCol, display=display.none)
-plot(na, "TP", color=longCol, display=display.none)
+plot(na, "SL", color=slCol, display=display.none)
+plot(na, "TP", color=tpCol, display=display.none)
+
+panelCorner = panelPos == "Top Right" ? position.top_right : panelPos == "Bottom Left" ? position.bottom_left : panelPos == "Top Left" ? position.top_left : position.bottom_right
 
 if barstate.islast
     if array.size(drawBoxes) > 0
@@ -830,21 +831,24 @@ if barstate.islast
         int xCisd = math.max(nz(s.cisdBar, xRaid), minX)
         int xMss = math.max(nz(s.mssBar, xCisd), minX)
         int xSetup = math.max(nz(s.bar, xMss), minX)
-        // Confine ALL drawings to setup footprint only (raid → setup + pad)
         int xFill = setupFillBar > xSetup ? setupFillBar : xSetup
         int zoneEnd = math.min(bar_index, math.max(xSetup + 6, xFill + 2))
         int zonePad = math.min(zoneEnd + 3, bar_index + 2)
+        int rrEnd = math.min(bar_index, math.max(zonePad + 8, xSetup + 14))
         float risk = math.abs(s.entry - s.sl)
         float rr = risk > 0 ? math.abs(s.tp - s.entry) / risk : 0.0
         float fvgCe = (s.fvgTop + s.fvgBot) * 0.5
         float tick = syminfo.mintick
 
+        // RED = SL risk · GREEN = TP reward — only these use red/green
+        if showRrBoxes
+            array.push(drawBoxes, box.new(xSetup, s.entry, rrEnd, s.sl, xloc=xloc.bar_index, bgcolor=color.new(slCol, 82), border_color=color.new(slCol, 35), border_width=1))
+            array.push(drawBoxes, box.new(xSetup, s.entry, rrEnd, s.tp, xloc=xloc.bar_index, bgcolor=color.new(tpCol, 82), border_color=color.new(tpCol, 35), border_width=1))
+
         if showFvg
-            array.push(drawBoxes, box.new(xMss, s.fvgTop, zoneEnd, s.fvgBot, xloc=xloc.bar_index, bgcolor=color.new(sideCol, 88), border_color=color.new(sideCol, 50), border_width=1))
-            array.push(drawLines, line.new(xMss, s.fvgTop, zoneEnd, s.fvgTop, xloc=xloc.bar_index, color=color.new(sideCol, 20), style=line.style_solid, width=1))
-            array.push(drawLines, line.new(xMss, s.fvgBot, zoneEnd, s.fvgBot, xloc=xloc.bar_index, color=color.new(sideCol, 20), style=line.style_solid, width=1))
+            array.push(drawBoxes, box.new(xMss, s.fvgTop, zoneEnd, s.fvgBot, xloc=xloc.bar_index, bgcolor=color.new(fvgCol, 88), border_color=color.new(fvgCol, 45), border_width=1))
             array.push(drawLines, line.new(xMss, fvgCe, zoneEnd, fvgCe, xloc=xloc.bar_index, color=entryCol, style=line.style_solid, width=2))
-            array.push(drawLabels, label.new(zoneEnd, fvgCe, "ENTRY · CE\n" + str.tostring(s.entry, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(entryCol, 0), textcolor=color.black, size=size.small))
+            array.push(drawLabels, label.new(zoneEnd, fvgCe, "ENTRY · CE\n" + str.tostring(s.entry, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(entryCol, 0), textcolor=color.black, size=size.tiny))
 
         if showAnatomy
             array.push(drawLines, line.new(xRaid, s.raidPx, zoneEnd, s.raidPx, xloc=xloc.bar_index, color=color.new(raidCol, 15), style=line.style_dotted, width=2))
@@ -862,91 +866,75 @@ if barstate.islast
             array.push(drawBoxes, box.new(xSetup - 1, s.entry + tick * 2, xSetup + 3, s.entry - tick * 2, xloc=xloc.bar_index, bgcolor=color.new(entryCol, 40), border_color=entryCol, border_width=2))
 
         if showLevels
-            array.push(drawLines, line.new(xSetup, s.entry, zonePad, s.entry, xloc=xloc.bar_index, color=entryCol, style=line.style_solid, width=2))
-            array.push(drawLines, line.new(xSetup, s.sl, zonePad, s.sl, xloc=xloc.bar_index, color=shortCol, style=line.style_solid, width=2))
-            array.push(drawLines, line.new(xSetup, s.tp, zonePad, s.tp, xloc=xloc.bar_index, color=longCol, style=line.style_solid, width=2))
+            array.push(drawLines, line.new(xSetup, s.entry, rrEnd, s.entry, xloc=xloc.bar_index, color=entryCol, style=line.style_solid, width=2))
+            array.push(drawLines, line.new(xSetup, s.sl, rrEnd, s.sl, xloc=xloc.bar_index, color=slCol, style=line.style_solid, width=2))
+            array.push(drawLines, line.new(xSetup, s.tp, rrEnd, s.tp, xloc=xloc.bar_index, color=tpCol, style=line.style_solid, width=2))
 
         if setupStatus == 3
-            array.push(drawLabels, label.new(zonePad, s.sl, "SL HIT\n" + str.tostring(s.sl, format.mintick), xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_up : label.style_label_down, color=color.new(shortCol, 0), textcolor=color.white, size=size.small))
+            array.push(drawLabels, label.new(rrEnd, s.sl, "SL HIT\n" + str.tostring(s.sl, format.mintick), xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_up : label.style_label_down, color=color.new(slCol, 0), textcolor=color.white, size=size.tiny))
         else if setupStatus == 2
-            array.push(drawLabels, label.new(zonePad, s.tp, "TP HIT\n" + str.tostring(s.tp, format.mintick), xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_down : label.style_label_up, color=color.new(longCol, 0), textcolor=color.white, size=size.small))
+            array.push(drawLabels, label.new(rrEnd, s.tp, "TP HIT\n" + str.tostring(s.tp, format.mintick), xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_down : label.style_label_up, color=color.new(tpCol, 0), textcolor=color.white, size=size.tiny))
 
-        array.push(drawLabels, label.new(xSetup, s.dir == 1 ? s.fvgTop : s.fvgBot, "LH " + sideTxt + " · " + s.tag + " · " + s.liqSrc, xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_down : label.style_label_up, color=sideCol, textcolor=color.white, size=size.small))
+        array.push(drawLabels, label.new(xSetup, s.dir == 1 ? math.max(s.fvgTop, s.entry) : math.min(s.fvgBot, s.entry), "LH " + sideTxt + " · " + s.tag, xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_down : label.style_label_up, color=sideCol, textcolor=color.white, size=size.tiny))
 
         if showLevelLabels
-            array.push(drawLabels, label.new(zonePad, s.entry, "ENTRY  " + str.tostring(s.entry, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(entryCol, 5), textcolor=color.black, size=size.small))
-            array.push(drawLabels, label.new(zonePad, s.sl, "SL  " + str.tostring(s.sl, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(shortCol, 5), textcolor=color.white, size=size.small))
-            array.push(drawLabels, label.new(zonePad, s.tp, "TP  " + str.tostring(s.tp, format.mintick) + " (" + str.tostring(rr, "#.0") + "R)", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(longCol, 5), textcolor=color.white, size=size.small))
-            array.push(drawLabels, label.new(zonePad, (s.entry + s.sl) * 0.5, statusTxt, xloc=xloc.bar_index, style=label.style_label_left, color=color.new(statusCol, 0), textcolor=color.white, size=size.small))
+            array.push(drawLabels, label.new(rrEnd, s.entry, "ENTRY  " + str.tostring(s.entry, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(entryCol, 5), textcolor=color.black, size=size.tiny))
+            array.push(drawLabels, label.new(rrEnd, s.sl, "SL  " + str.tostring(s.sl, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(slCol, 5), textcolor=color.white, size=size.tiny))
+            array.push(drawLabels, label.new(rrEnd, s.tp, "TP  " + str.tostring(s.tp, format.mintick) + " (" + str.tostring(rr, "#.0") + "R)", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(tpCol, 5), textcolor=color.white, size=size.tiny))
 
         if not onlyLast and nHist > 1
-            int start = math.max(0, nHist - historyCount)
+            int startH = math.max(0, nHist - historyCount)
             int endHist = nHist - 2
-            if endHist >= start
-                for j = start to endHist
+            if endHist >= startH
+                for j = startH to endHist
                     Setup h = array.get(history, j)
                     int xh = math.max(nz(h.bar, minX), minX)
                     if bar_index - xh <= SAFE_DRAW
                         color hCol = h.dir == 1 ? longCol : shortCol
                         int xhEnd = math.min(xh + 8, bar_index)
                         if showFvg
-                            array.push(drawBoxes, box.new(xh, h.fvgTop, xhEnd, h.fvgBot, xloc=xloc.bar_index, bgcolor=color.new(hCol, 92), border_color=color.new(hCol, 70)))
+                            array.push(drawBoxes, box.new(xh, h.fvgTop, xhEnd, h.fvgBot, xloc=xloc.bar_index, bgcolor=color.new(fvgCol, 92), border_color=color.new(hCol, 70)))
                         array.push(drawLabels, label.new(xh, h.dir == 1 ? h.fvgTop : h.fvgBot, (h.dir == 1 ? "L" : "S") + " · " + h.tag, xloc=xloc.bar_index, style=label.style_label_down, color=color.new(hCol, 45), textcolor=color.white, size=size.tiny))
-var table panel = table.new(position.top_left, 2, 16, bgcolor=color.new(#0D1117, 5), border_width=1, border_color=#30363D)
+
+var table panel = table.new(panelCorner, 2, 9, bgcolor=color.new(#0D1117, 12), border_width=1, border_color=#30363D, frame_width=1, frame_color=#30363D)
 if barstate.islast
     string biasTxt = htfBiasVal == 1 ? "15m BULL" : "15m BEAR"
     color biasCol = htfBiasVal == 1 ? longCol : shortCol
     if na(setupEntry) or setupDir == 0
-        table.cell(panel, 0, 0, "LH · Liquidity Hunter MTF", text_color=color.white, text_size=size.normal)
+        table.cell(panel, 0, 0, "LH MTF", text_color=color.white, text_size=size.small)
         table.merge_cells(panel, 0, 0, 1, 0)
-        table.cell(panel, 0, 1, "HTF BIAS", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 1, biasTxt + "  ·  EMA " + str.tostring(htfEma, format.mintick), text_color=biasCol, text_size=size.small)
-        table.cell(panel, 0, 2, "LIQ POOLS", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 2, "15m " + str.tostring(htfSsl, format.mintick) + " / " + str.tostring(htfBsl, format.mintick) + "  ·  5m " + str.tostring(mtfSsl, format.mintick) + " / " + str.tostring(mtfBsl, format.mintick), text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 0, 3, "Pools tracked: " + str.tostring(array.size(htfBslPools) + array.size(mtfBslPools)) + " BSL · " + str.tostring(array.size(htfSslPools) + array.size(mtfSslPools)) + " SSL  ·  " + str.tostring(nHist) + " setups", text_color=color.gray, text_size=size.tiny)
-        table.merge_cells(panel, 0, 3, 1, 3)
-        table.cell(panel, 0, 4, "Scanning for HTF raid → CISD → MSS → FVG…", text_color=color.gray, text_size=size.small)
-        table.merge_cells(panel, 0, 4, 1, 4)
+        table.cell(panel, 0, 1, "BIAS", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 1, biasTxt, text_color=biasCol, text_size=size.tiny)
+        table.cell(panel, 0, 2, "POOLS", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 2, str.tostring(array.size(htfBslPools) + array.size(mtfBslPools)) + "B / " + str.tostring(array.size(htfSslPools) + array.size(mtfSslPools)) + "S", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 0, 3, "WAIT", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 3, "raid → CISD → MSS → FVG", text_color=color.gray, text_size=size.tiny)
     else
         float risk = math.abs(setupEntry - setupSl)
         float rr = risk > 0 ? math.abs(setupTp - setupEntry) / risk : 0.0
         float liveR = risk <= 0 ? 0.0 : setupStatus == 2 ? rr : setupStatus == 3 ? -1.0 : setupDir == 1 ? (close - setupEntry) / risk : (setupEntry - close) / risk
         color sideCol = setupDir == 1 ? longCol : shortCol
         string sideTxt = setupDir == 1 ? "LONG" : "SHORT"
-        string resultLbl = setupStatus == 2 or setupStatus == 3 ? "RESULT" : "LIVE"
-
         string locTxt = setupDir == 1 ? "DISCOUNT" : "PREMIUM"
-        string pdNote = useHtfPd ? "HTF range" : "raid leg"
-        table.cell(panel, 0, 0, "LH · Liquidity Hunter MTF", text_color=color.white, text_size=size.normal)
-        table.merge_cells(panel, 0, 0, 1, 0)
-        table.cell(panel, 0, 1, "HTF BIAS", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 1, biasTxt + "  ·  EMA " + str.tostring(htfEma, format.mintick), text_color=biasCol, text_size=size.small)
-        table.cell(panel, 0, 2, "POSITION", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 2, sideTxt, text_color=sideCol, text_size=size.large)
-        table.cell(panel, 0, 3, "LIQ RAIDED", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 3, setupLiqSrc + "  @  " + str.tostring(setupRaidPx, format.mintick), text_color=raidCol, text_size=size.small)
-        table.cell(panel, 0, 4, "QUALITY", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 4, "STRONG  ·  " + locTxt + " (" + pdNote + ")  ·  valid SL", text_color=longCol, text_size=size.small)
-        table.cell(panel, 0, 5, "STATUS", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 5, statusTxt, text_color=statusCol, text_size=size.normal)
-        table.cell(panel, 0, 6, "PATH", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 6, "1 RAID → 2 CISD → 3 " + setupTag + " → 4 FVG", text_color=sideCol, text_size=size.small)
-        table.cell(panel, 0, 7, "1 RAID", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 7, str.tostring(setupRaidPx, format.mintick) + "  (sweep " + str.tostring(setupRaidExt, format.mintick) + ")", text_color=raidCol, text_size=size.small)
-        table.cell(panel, 0, 8, "2 CISD", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 8, str.tostring(setupCisdPx, format.mintick), text_color=cisdCol, text_size=size.small)
-        table.cell(panel, 0, 9, "3 MSS", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 9, str.tostring(setupMssPx, format.mintick) + "  (" + setupTag + ")", text_color=mssCol, text_size=size.small)
-        table.cell(panel, 0, 10, "FVG ZONE", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 10, str.tostring(setupFvgBot, format.mintick) + "  →  " + str.tostring(setupFvgTop, format.mintick), text_color=sideCol, text_size=size.small)
-        table.cell(panel, 0, 11, "ENTRY", text_color=color.gray, text_size=size.small)
-        table.cell(panel, 1, 11, str.tostring(setupEntry, format.mintick) + "  (" + entryMode + ")", text_color=entryCol, text_size=size.normal)
-        table.cell(panel, 0, 12, "SL", text_color=color.gray, text_size=size.small)
-        table.cell(panel, 1, 12, str.tostring(setupSl, format.mintick) + "  (raid leg+" + str.tostring(slPadAtr, "#.2") + "ATR)", text_color=shortCol, text_size=size.normal)
-        table.cell(panel, 0, 13, "TP", text_color=color.gray, text_size=size.small)
-        table.cell(panel, 1, 13, str.tostring(setupTp, format.mintick) + "  (" + str.tostring(rr, "#.0") + "R → HTF liq)", text_color=longCol, text_size=size.normal)
-        string exitNote = setupStatus == 3 ? "SL tagged before TP" : setupStatus == 2 ? "TP reached" : setupStatus == 0 ? "Waiting for fill at CE" : "Live"
-        table.cell(panel, 0, 14, resultLbl, text_color=color.gray, text_size=size.small)
-        table.cell(panel, 1, 14, str.tostring(liveR, "#.00") + "R  ·  " + exitNote, text_color=liveR >= 0 ? longCol : shortCol, text_size=size.small)
+        string exitNote = setupStatus == 3 ? "SL hit" : setupStatus == 2 ? "TP hit" : setupStatus == 0 ? "wait fill" : "live"
+
+        table.cell(panel, 0, 0, "LH  " + sideTxt, text_color=sideCol, text_size=size.small)
+        table.cell(panel, 1, 0, statusTxt, text_color=statusCol, text_size=size.small)
+        table.cell(panel, 0, 1, "BIAS", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 1, biasTxt, text_color=biasCol, text_size=size.tiny)
+        table.cell(panel, 0, 2, "RAID", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 2, setupLiqSrc + " " + str.tostring(setupRaidPx, format.mintick), text_color=raidCol, text_size=size.tiny)
+        table.cell(panel, 0, 3, "PATH", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 3, "RAID→CISD→" + setupTag + "→FVG · " + locTxt, text_color=sideCol, text_size=size.tiny)
+        table.cell(panel, 0, 4, "FVG", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 4, str.tostring(setupFvgBot, format.mintick) + "→" + str.tostring(setupFvgTop, format.mintick), text_color=fvgCol, text_size=size.tiny)
+        table.cell(panel, 0, 5, "ENTRY", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 5, str.tostring(setupEntry, format.mintick), text_color=entryCol, text_size=size.tiny)
+        table.cell(panel, 0, 6, "SL", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 6, str.tostring(setupSl, format.mintick), text_color=slCol, text_size=size.tiny)
+        table.cell(panel, 0, 7, "TP", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 7, str.tostring(setupTp, format.mintick) + "  " + str.tostring(rr, "#.0") + "R", text_color=tpCol, text_size=size.tiny)
+        table.cell(panel, 0, 8, "R", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 8, str.tostring(liveR, "#.00") + "R · " + exitNote, text_color=liveR >= 0 ? tpCol : slCol, text_size=size.tiny)
 
 alertcondition(not na(setupEntry) and setupBar == bar_index, "LH New Setup", "Liquidity Hunter complete setup")
