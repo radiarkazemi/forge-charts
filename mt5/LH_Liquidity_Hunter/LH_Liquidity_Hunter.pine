@@ -1,23 +1,36 @@
 //@version=6
-indicator("LH · Liquidity Hunter", overlay=true, max_boxes_count=60, max_lines_count=120, max_labels_count=80, max_bars_back=5000)
+indicator("LH · Liquidity Hunter MTF", overlay=true, max_boxes_count=60, max_lines_count=120, max_labels_count=80, max_bars_back=5000)
 
-// Complete setup: 1 RAID → 2 CISD → 3 MSS → 4 FVG → ENTRY / SL / TP
-// Quality: rejection raid · body CISD · displacement MSS · PD FVG · CE tap · raid-leg SL
+// Trade 1m · Liquidity from 5m/15m · Execution on 1m FVG CE
+// RAID must sweep HTF/MTF BSL/SSL — not random 1m micro pivots
 
-pivotPeriod      = input.int(3, "Pivot Period (1m)", minval=2, group="Detection")
-minSweepAtr      = input.float(0.06, "Min Sweep Beyond Pivot (ATRx)", step=0.01, group="Detection")
-minDispAtr       = input.float(0.45, "Min MSS Displacement (ATRx)", step=0.05, group="Detection")
-minFvgAtr        = input.float(0.06, "Min FVG Size (ATRx)", step=0.01, group="Detection")
-maxFvgAtr        = input.float(0.35, "Max FVG Size (ATRx)", step=0.01, group="Detection")
-maxCisdBars      = input.int(4, "Max Bars After Raid For CISD", group="Detection")
-maxStructBars    = input.int(6, "Max Bars After CISD For MSS", group="Detection")
-maxFvgLagBars    = input.int(1, "Max Bars After MSS For FVG", minval=0, maxval=3, group="Detection")
-requireCisd      = input.bool(true, "Require CISD", group="Detection")
-allowBos         = input.bool(false, "Allow Internal BOS (OFF = MSS only)", group="Detection")
-requireFvgRetest = input.bool(true, "Wait For FVG Retest", group="Detection")
-maxRetestBars    = input.int(5, "Max Bars For Retest", group="Detection")
-cooldownBars     = input.int(18, "Cooldown Between Setups", group="Detection")
-cooldownAfterSl  = input.int(8, "Cooldown After SL Hit", minval=0, group="Detection")
+// ── HTF liquidity (where stops actually sit on 1m) ─────────────────
+htfTf            = input.timeframe("15", "HTF Liquidity TF", group="MTF Liquidity")
+mtfTf            = input.timeframe("5", "MTF Liquidity TF", group="MTF Liquidity")
+htfPivot         = input.int(5, "HTF Pivot Period", minval=3, group="MTF Liquidity")
+mtfPivot         = input.int(4, "MTF Pivot Period", minval=2, group="MTF Liquidity")
+htfRangeLen      = input.int(20, "HTF Dealing Range (HTF bars)", minval=8, group="MTF Liquidity")
+requireHtfRaid   = input.bool(true, "RAID must sweep 5m or 15m liquidity", group="MTF Liquidity")
+requireHtfBias   = input.bool(true, "Align with HTF trend (15m EMA)", group="MTF Liquidity")
+htfEmaLen        = input.int(20, "HTF EMA Length", minval=5, group="MTF Liquidity")
+useHtfPd         = input.bool(true, "PD zone from HTF dealing range", group="MTF Liquidity")
+showHtfLiq       = input.bool(true, "Show HTF/MTF BSL & SSL", group="MTF Liquidity")
+
+// ── 1m execution ────────────────────────────────────────────────────
+pivotPeriod      = input.int(5, "1m Internal Pivot", minval=2, group="1m Detection")
+minSweepAtr      = input.float(0.04, "Min Sweep Beyond Liq (ATRx)", step=0.01, group="1m Detection")
+minDispAtr       = input.float(0.45, "Min MSS Displacement (ATRx)", step=0.05, group="1m Detection")
+minFvgAtr        = input.float(0.06, "Min FVG Size (ATRx)", step=0.01, group="1m Detection")
+maxFvgAtr        = input.float(0.35, "Max FVG Size (ATRx)", step=0.01, group="1m Detection")
+maxCisdBars      = input.int(4, "Max Bars After Raid For CISD", group="1m Detection")
+maxStructBars    = input.int(6, "Max Bars After CISD For MSS", group="1m Detection")
+maxFvgLagBars    = input.int(1, "Max Bars After MSS For FVG", minval=0, maxval=3, group="1m Detection")
+requireCisd      = input.bool(true, "Require CISD", group="1m Detection")
+allowBos         = input.bool(false, "Allow Internal BOS (OFF = MSS only)", group="1m Detection")
+requireFvgRetest = input.bool(true, "Wait For FVG Retest", group="1m Detection")
+maxRetestBars    = input.int(5, "Max Bars For Retest", group="1m Detection")
+cooldownBars     = input.int(18, "Cooldown Between Setups", group="1m Detection")
+cooldownAfterSl  = input.int(8, "Cooldown After SL Hit", minval=0, group="1m Detection")
 
 requireRejectRaid = input.bool(true, "Strong RAID — close back + rejection wick", group="Quality")
 requireStrongCisd = input.bool(true, "Strong CISD — body close through raid open", group="Quality")
@@ -25,7 +38,7 @@ requireStrongMss  = input.bool(true, "Strong MSS — close beyond structure, bod
 minBodyRatio     = input.float(0.55, "Min MSS Body / Range", step=0.05, minval=0.35, maxval=0.90, group="Quality")
 minCloseThruAtr  = input.float(0.08, "Min MSS Close Beyond Structure (ATRx)", step=0.01, group="Quality")
 requirePd        = input.bool(true, "Entry in Discount (long) / Premium (short)", group="Quality")
-pdLevel          = input.float(0.50, "PD Threshold (0.50 = half of raid→MSS range)", step=0.05, minval=0.35, maxval=0.70, group="Quality")
+pdLevel          = input.float(0.45, "PD Threshold (0.45 = top/bottom 45% of range)", step=0.05, minval=0.30, maxval=0.55, group="Quality")
 requireFvgIntact = input.bool(true, "FVG distal must stay unfilled", group="Quality")
 requireRejectEntry = input.bool(true, "Strong ENTRY — tap CE, close back through CE", group="Quality")
 
@@ -109,12 +122,14 @@ f_bodyRatio() =>
 f_closePos() =>
     (close - low) / f_candleRange()
 
-// Longs buy discount of raid→MSS range; shorts sell premium
-f_inPd(int dir, float entry, float legLo, float legHi) =>
+// Longs buy discount; shorts sell premium — HTF dealing range when useHtfPd
+f_inPd(int dir, float entry, float legLo, float legHi, float pdLo, float pdHi) =>
     bool ok = true
-    float span = legHi - legLo
+    float lo = useHtfPd and not na(pdLo) and not na(pdHi) and pdHi > pdLo ? pdLo : legLo
+    float hi = useHtfPd and not na(pdLo) and not na(pdHi) and pdHi > pdLo ? pdHi : legHi
+    float span = hi - lo
     if requirePd and span > 0
-        float pos = (entry - legLo) / span
+        float pos = (entry - lo) / span
         ok := dir == 1 ? pos <= pdLevel : pos >= (1.0 - pdLevel)
     ok
 
@@ -199,11 +214,52 @@ f_buildSl(int dir, float entry, float sweepPx, float sweepExt, float cisdPx, flo
         sl := base + pad
     sl
 
-f_buildTp(int dir, float entry, float sl, float a, float[] pivHi, float[] pivLo) =>
+// Track last confirmed pivot on any TF — run inside request.security
+f_trackLiq(int pLen) =>
+    var float bsl = na
+    var float ssl = na
+    float ph = ta.pivothigh(high, pLen, pLen)
+    float pl = ta.pivotlow(low, pLen, pLen)
+    if not na(ph)
+        bsl := ph
+    if not na(pl)
+        ssl := pl
+    [bsl, ssl]
+
+f_htfDealRange(int len) =>
+    [ta.highest(high, len), ta.lowest(low, len)]
+
+f_htfTrend(int emaLen) =>
+    float e = ta.ema(close, emaLen)
+    int b = close >= e ? 1 : -1
+    [e, b]
+
+f_nearestOppLiq(int dir, float entry, float a, float hBsl, float mBsl, float hSsl, float mSsl) =>
+    float minD = a * liqExtendAtr
+    float out = na
+    if dir == 1
+        if not na(hBsl) and hBsl > entry + minD
+            out := na(out) ? hBsl : math.min(out, hBsl)
+        if not na(mBsl) and mBsl > entry + minD
+            out := na(out) ? mBsl : math.min(out, mBsl)
+    else
+        if not na(hSsl) and hSsl < entry - minD
+            out := na(out) ? hSsl : math.max(out, hSsl)
+        if not na(mSsl) and mSsl < entry - minD
+            out := na(out) ? mSsl : math.max(out, mSsl)
+    out
+
+f_buildTp(int dir, float entry, float sl, float a, float hBsl, float mBsl, float hSsl, float mSsl, float[] pivHi, float[] pivLo) =>
     float risk = math.abs(entry - sl)
     float tp = dir == 1 ? entry + risk * riskReward : entry - risk * riskReward
     if useOpposingLiq
-        float liq = dir == 1 ? f_nextHi(pivHi, entry, a * liqExtendAtr) : f_nextLo(pivLo, entry, a * liqExtendAtr)
+        float htfLiq = f_nearestOppLiq(dir, entry, a, hBsl, mBsl, hSsl, mSsl)
+        float liq1m = dir == 1 ? f_nextHi(pivHi, entry, a * liqExtendAtr) : f_nextLo(pivLo, entry, a * liqExtendAtr)
+        float liq = na
+        if not na(htfLiq)
+            liq := htfLiq
+        if not na(liq1m)
+            liq := na(liq) ? liq1m : (dir == 1 ? math.min(liq, liq1m) : math.max(liq, liq1m))
         if not na(liq)
             tp := dir == 1 ? math.max(tp, liq) : math.min(tp, liq)
     float minDist = risk * minTpR
@@ -226,11 +282,12 @@ type Setup
     int mssBar
     int bar
     string tag
+    string liqSrc
     int status
     int fillBar
 
-f_emit(Setup[] hist, int dir, float entry, float sl, float tp, float ft, float fb, float raidPx, float raidExt, float cisdPx, float mssPx, int raidBar, int cisdBar, int mssBar, int bar, string tag) =>
-    array.push(hist, Setup.new(dir, entry, sl, tp, ft, fb, raidPx, raidExt, cisdPx, mssPx, raidBar, cisdBar, mssBar, bar, tag, 0, -1))
+f_emit(Setup[] hist, int dir, float entry, float sl, float tp, float ft, float fb, float raidPx, float raidExt, float cisdPx, float mssPx, int raidBar, int cisdBar, int mssBar, int bar, string tag, string liqSrc) =>
+    array.push(hist, Setup.new(dir, entry, sl, tp, ft, fb, raidPx, raidExt, cisdPx, mssPx, raidBar, cisdBar, mssBar, bar, tag, liqSrc, 0, -1))
     if array.size(hist) > 20
         array.shift(hist)
     true
@@ -268,6 +325,12 @@ f_updateStatus(Setup[] hist) =>
     true
 
 atr = ta.atr(14)
+
+[htfBsl, htfSsl] = request.security(syminfo.tickerid, htfTf, f_trackLiq(htfPivot), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[mtfBsl, mtfSsl] = request.security(syminfo.tickerid, mtfTf, f_trackLiq(mtfPivot), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[htfDrHi, htfDrLo] = request.security(syminfo.tickerid, htfTf, f_htfDealRange(htfRangeLen), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[htfEma, htfBiasVal] = request.security(syminfo.tickerid, htfTf, f_htfTrend(htfEmaLen), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
 ph = ta.pivothigh(high, pivotPeriod, pivotPeriod)
 pl = ta.pivotlow(low, pivotPeriod, pivotPeriod)
 
@@ -292,6 +355,7 @@ var int fvgBar = na
 var float raidLegHi = na
 var float raidLegLo = na
 var int structType = 0
+var string raidSource = ""
 var int lastSetupBar = -9999
 
 var float setupEntry = na
@@ -302,6 +366,7 @@ var int setupBar = na
 var float setupFvgTop = na
 var float setupFvgBot = na
 var string setupTag = ""
+var string setupLiqSrc = ""
 var float setupRaidPx = na
 var float setupRaidExt = na
 var float setupCisdPx = na
@@ -347,18 +412,60 @@ if barstate.isconfirmed
             cdBars := cooldownAfterSl
     bool canStart = phase == 0 and bar_index - lastSetupBar >= cdBars
     float a = atr
-    bool sslRaid = canStart and not na(huntLo) and low < huntLo - a * minSweepAtr and close > huntLo and f_strongRaid(1)
-    bool bslRaid = canStart and not na(huntHi) and high > huntHi + a * minSweepAtr and close < huntHi and f_strongRaid(-1)
+    bool biasLong = not requireHtfBias or htfBiasVal == 1
+    bool biasShort = not requireHtfBias or htfBiasVal == -1
+
+    // Which HTF/MTF pool was actually swept this bar?
+    bool sweptHtfSsl = not na(htfSsl) and low < htfSsl - a * minSweepAtr and close > htfSsl
+    bool sweptMtfSsl = not na(mtfSsl) and low < mtfSsl - a * minSweepAtr and close > mtfSsl
+    bool sweptHtfBsl = not na(htfBsl) and high > htfBsl + a * minSweepAtr and close < htfBsl
+    bool sweptMtfBsl = not na(mtfBsl) and high > mtfBsl + a * minSweepAtr and close < mtfBsl
+    bool swept1mSsl = not requireHtfRaid and not na(huntLo) and low < huntLo - a * minSweepAtr and close > huntLo
+    bool swept1mBsl = not requireHtfRaid and not na(huntHi) and high > huntHi + a * minSweepAtr and close < huntHi
+
+    float sslLvl = na
+    string sslSrc = ""
+    if sweptHtfSsl and sweptMtfSsl
+        sslLvl := htfSsl <= mtfSsl ? htfSsl : mtfSsl
+        sslSrc := htfSsl <= mtfSsl ? "15m SSL" : "5m SSL"
+    else if sweptHtfSsl
+        sslLvl := htfSsl
+        sslSrc := "15m SSL"
+    else if sweptMtfSsl
+        sslLvl := mtfSsl
+        sslSrc := "5m SSL"
+    else if swept1mSsl
+        sslLvl := huntLo
+        sslSrc := "1m SSL"
+
+    float bslLvl = na
+    string bslSrc = ""
+    if sweptHtfBsl and sweptMtfBsl
+        bslLvl := htfBsl >= mtfBsl ? htfBsl : mtfBsl
+        bslSrc := htfBsl >= mtfBsl ? "15m BSL" : "5m BSL"
+    else if sweptHtfBsl
+        bslLvl := htfBsl
+        bslSrc := "15m BSL"
+    else if sweptMtfBsl
+        bslLvl := mtfBsl
+        bslSrc := "5m BSL"
+    else if swept1mBsl
+        bslLvl := huntHi
+        bslSrc := "1m BSL"
+
+    bool sslRaid = canStart and not na(sslLvl) and f_strongRaid(1) and biasLong
+    bool bslRaid = canStart and not na(bslLvl) and f_strongRaid(-1) and biasShort
 
     if sslRaid
         phase := requireCisd ? 1 : 2
         pendDir := 1
-        sweepPx := huntLo
+        sweepPx := sslLvl
+        raidSource := sslSrc
         sweepExt := low
         sweepBar := bar_index
         cisdLevel := open
         cisdBar := requireCisd ? na : bar_index
-        mssLevel := huntHi
+        mssLevel := not na(huntHi) ? huntHi : (not na(mtfBsl) ? mtfBsl : htfBsl)
         mssBar := na
         fvgBar := na
         structType := 0
@@ -367,12 +474,13 @@ if barstate.isconfirmed
     else if bslRaid
         phase := requireCisd ? 1 : 2
         pendDir := -1
-        sweepPx := huntHi
+        sweepPx := bslLvl
+        raidSource := bslSrc
         sweepExt := high
         sweepBar := bar_index
         cisdLevel := open
         cisdBar := requireCisd ? na : bar_index
-        mssLevel := huntLo
+        mssLevel := not na(huntLo) ? huntLo : (not na(mtfSsl) ? mtfSsl : htfSsl)
         mssBar := na
         fvgBar := na
         structType := 0
@@ -432,7 +540,7 @@ if barstate.isconfirmed
                 float ft = f_fvgTop(pendDir)
                 float fb = f_fvgBot(pendDir)
                 float ceNow = (ft + fb) * 0.5
-                if f_inPd(pendDir, ceNow, raidLegLo, raidLegHi)
+                if f_inPd(pendDir, ceNow, raidLegLo, raidLegHi, htfDrLo, htfDrHi)
                     fvgTop := ft
                     fvgBot := fb
                     fvgBar := bar_index
@@ -445,8 +553,8 @@ if barstate.isconfirmed
                         float sl = f_buildSl(pendDir, entry, sweepPx, sweepExt, cisdLevel, raidLegHi, raidLegLo, a)
                         if pendDir == 1
                             if entry > sl and f_validRisk(entry, sl, a)
-                                float tp = f_buildTp(1, entry, sl, a, pivHiPx, pivLoPx)
-                                f_emit(history, 1, entry, sl, tp, ft, fb, sweepPx, sweepExt, cisdLevel, mssLevel, sweepBar, cBar, mssBar, bar_index, tag)
+                                float tp = f_buildTp(1, entry, sl, a, htfBsl, mtfBsl, htfSsl, mtfSsl, pivHiPx, pivLoPx)
+                                f_emit(history, 1, entry, sl, tp, ft, fb, sweepPx, sweepExt, cisdLevel, mssLevel, sweepBar, cBar, mssBar, bar_index, tag, raidSource)
                                 setupEntry := entry
                                 setupSl := sl
                                 setupTp := tp
@@ -455,6 +563,7 @@ if barstate.isconfirmed
                                 setupFvgTop := ft
                                 setupFvgBot := fb
                                 setupTag := tag
+                                setupLiqSrc := raidSource
                                 setupRaidPx := sweepPx
                                 setupRaidExt := sweepExt
                                 setupCisdPx := cisdLevel
@@ -465,8 +574,8 @@ if barstate.isconfirmed
                                 lastSetupBar := bar_index
                         else
                             if sl > entry and f_validRisk(entry, sl, a)
-                                float tp2 = f_buildTp(-1, entry, sl, a, pivHiPx, pivLoPx)
-                                f_emit(history, -1, entry, sl, tp2, ft, fb, sweepPx, sweepExt, cisdLevel, mssLevel, sweepBar, cBar, mssBar, bar_index, tag)
+                                float tp2 = f_buildTp(-1, entry, sl, a, htfBsl, mtfBsl, htfSsl, mtfSsl, pivHiPx, pivLoPx)
+                                f_emit(history, -1, entry, sl, tp2, ft, fb, sweepPx, sweepExt, cisdLevel, mssLevel, sweepBar, cBar, mssBar, bar_index, tag, raidSource)
                                 setupEntry := entry
                                 setupSl := sl
                                 setupTp := tp2
@@ -475,6 +584,7 @@ if barstate.isconfirmed
                                 setupFvgTop := ft
                                 setupFvgBot := fb
                                 setupTag := tag
+                                setupLiqSrc := raidSource
                                 setupRaidPx := sweepPx
                                 setupRaidExt := sweepExt
                                 setupCisdPx := cisdLevel
@@ -497,12 +607,12 @@ if barstate.isconfirmed
                 string tag = structType == 2 ? "BOS" : "MSS"
                 int cBar = na(cisdBar) ? sweepBar : cisdBar
                 float sl = f_buildSl(pendDir, entry, sweepPx, sweepExt, cisdLevel, raidLegHi, raidLegLo, a)
-                bool locStill = f_inPd(pendDir, entry, raidLegLo, raidLegHi)
+                bool locStill = f_inPd(pendDir, entry, raidLegLo, raidLegHi, htfDrLo, htfDrHi)
                 if locStill
                     if pendDir == 1
                         if entry > sl and f_validRisk(entry, sl, a)
-                            float tp = f_buildTp(1, entry, sl, a, pivHiPx, pivLoPx)
-                            f_emit(history, 1, entry, sl, tp, fvgTop, fvgBot, sweepPx, sweepExt, cisdLevel, mssLevel, sweepBar, cBar, mssBar, bar_index, tag)
+                            float tp = f_buildTp(1, entry, sl, a, htfBsl, mtfBsl, htfSsl, mtfSsl, pivHiPx, pivLoPx)
+                            f_emit(history, 1, entry, sl, tp, fvgTop, fvgBot, sweepPx, sweepExt, cisdLevel, mssLevel, sweepBar, cBar, mssBar, bar_index, tag, raidSource)
                             setupEntry := entry
                             setupSl := sl
                             setupTp := tp
@@ -511,6 +621,7 @@ if barstate.isconfirmed
                             setupFvgTop := fvgTop
                             setupFvgBot := fvgBot
                             setupTag := tag
+                            setupLiqSrc := raidSource
                             setupRaidPx := sweepPx
                             setupRaidExt := sweepExt
                             setupCisdPx := cisdLevel
@@ -521,8 +632,8 @@ if barstate.isconfirmed
                             lastSetupBar := bar_index
                     else
                         if sl > entry and f_validRisk(entry, sl, a)
-                            float tp2 = f_buildTp(-1, entry, sl, a, pivHiPx, pivLoPx)
-                            f_emit(history, -1, entry, sl, tp2, fvgTop, fvgBot, sweepPx, sweepExt, cisdLevel, mssLevel, sweepBar, cBar, mssBar, bar_index, tag)
+                            float tp2 = f_buildTp(-1, entry, sl, a, htfBsl, mtfBsl, htfSsl, mtfSsl, pivHiPx, pivLoPx)
+                            f_emit(history, -1, entry, sl, tp2, fvgTop, fvgBot, sweepPx, sweepExt, cisdLevel, mssLevel, sweepBar, cBar, mssBar, bar_index, tag, raidSource)
                             setupEntry := entry
                             setupSl := sl
                             setupTp := tp2
@@ -531,6 +642,7 @@ if barstate.isconfirmed
                             setupFvgTop := fvgTop
                             setupFvgBot := fvgBot
                             setupTag := tag
+                            setupLiqSrc := raidSource
                             setupRaidPx := sweepPx
                             setupRaidExt := sweepExt
                             setupCisdPx := cisdLevel
@@ -542,8 +654,12 @@ if barstate.isconfirmed
                 phase := 0
                 pendDir := 0
 
-plot(showLiqPivots ? huntHi : na, "BSL", color=color.new(shortCol, 55), style=plot.style_linebr, linewidth=1)
-plot(showLiqPivots ? huntLo : na, "SSL", color=color.new(longCol, 55), style=plot.style_linebr, linewidth=1)
+plot(showHtfLiq ? htfBsl : na, "15m BSL", color=color.new(#EF5350, 35), style=plot.style_linebr, linewidth=2)
+plot(showHtfLiq ? htfSsl : na, "15m SSL", color=color.new(#26A69A, 35), style=plot.style_linebr, linewidth=2)
+plot(showHtfLiq ? mtfBsl : na, "5m BSL", color=color.new(#EF5350, 55), style=plot.style_linebr, linewidth=1)
+plot(showHtfLiq ? mtfSsl : na, "5m SSL", color=color.new(#26A69A, 55), style=plot.style_linebr, linewidth=1)
+plot(showLiqPivots and not requireHtfRaid ? huntHi : na, "1m BSL", color=color.new(shortCol, 70), style=plot.style_linebr, linewidth=1)
+plot(showLiqPivots and not requireHtfRaid ? huntLo : na, "1m SSL", color=color.new(longCol, 70), style=plot.style_linebr, linewidth=1)
 
 int nHist = array.size(history)
 f_updateStatus(history)
@@ -558,6 +674,7 @@ if barstate.islast and nHist > 0
     setupFvgTop := lastS.fvgTop
     setupFvgBot := lastS.fvgBot
     setupTag := lastS.tag
+    setupLiqSrc := lastS.liqSrc
     setupRaidPx := lastS.raidPx
     setupRaidExt := lastS.raidExt
     setupCisdPx := lastS.cisdPx
@@ -624,7 +741,7 @@ if barstate.islast
 
         if showAnatomy
             array.push(drawLines, line.new(xRaid, s.raidPx, endBar, s.raidPx, xloc=xloc.bar_index, color=color.new(raidCol, 15), style=line.style_dotted, width=2))
-            array.push(drawLabels, label.new(xRaid, s.raidPx, "1 RAID " + (s.dir == 1 ? "SSL" : "BSL") + "\n" + str.tostring(s.raidPx, format.mintick), xloc=xloc.bar_index, style=label.style_label_right, color=raidCol, textcolor=color.black, size=size.small))
+            array.push(drawLabels, label.new(xRaid, s.raidPx, "1 RAID " + s.liqSrc + "\n" + str.tostring(s.raidPx, format.mintick), xloc=xloc.bar_index, style=label.style_label_right, color=raidCol, textcolor=color.black, size=size.small))
             array.push(drawLines, line.new(xRaid, s.raidExt, math.min(math.max(xCisd, xRaid + 1), xRaid + 10), s.raidExt, xloc=xloc.bar_index, color=color.new(raidCol, 35), style=line.style_dashed, width=1))
             array.push(drawLabels, label.new(xRaid, s.raidExt, "SWEEP\n" + str.tostring(s.raidExt, format.mintick), xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_up : label.style_label_down, color=color.new(raidCol, 10), textcolor=color.black, size=size.tiny))
 
@@ -644,7 +761,7 @@ if barstate.islast
         else if setupStatus == 2
             array.push(drawLabels, label.new(bar_index + 1, s.tp, "TP HIT\n" + str.tostring(s.tp, format.mintick), xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_down : label.style_label_up, color=color.new(longCol, 0), textcolor=color.white, size=size.normal))
 
-        array.push(drawLabels, label.new(xSetup, s.dir == 1 ? s.fvgTop : s.fvgBot, "LH " + sideTxt + " · " + s.tag, xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_down : label.style_label_up, color=sideCol, textcolor=color.white, size=size.normal))
+        array.push(drawLabels, label.new(xSetup, s.dir == 1 ? s.fvgTop : s.fvgBot, "LH " + sideTxt + " · " + s.tag + " · " + s.liqSrc, xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_down : label.style_label_up, color=sideCol, textcolor=color.white, size=size.normal))
 
         if showLevelLabels
             array.push(drawLabels, label.new(bar_index + 2, s.entry, "ENTRY  " + str.tostring(s.entry, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(entryCol, 5), textcolor=color.black, size=size.normal))
@@ -665,13 +782,19 @@ if barstate.islast
                         if showFvg
                             array.push(drawBoxes, box.new(xh, h.fvgTop, xh + 10, h.fvgBot, xloc=xloc.bar_index, bgcolor=color.new(hCol, 92), border_color=color.new(hCol, 70)))
                         array.push(drawLabels, label.new(xh, h.dir == 1 ? h.fvgTop : h.fvgBot, (h.dir == 1 ? "L" : "S") + " · " + h.tag, xloc=xloc.bar_index, style=label.style_label_down, color=color.new(hCol, 45), textcolor=color.white, size=size.tiny))
-var table panel = table.new(position.top_left, 2, 13, bgcolor=color.new(#0D1117, 5), border_width=1, border_color=#30363D)
+var table panel = table.new(position.top_left, 2, 15, bgcolor=color.new(#0D1117, 5), border_width=1, border_color=#30363D)
 if barstate.islast
+    string biasTxt = htfBiasVal == 1 ? "15m BULL" : "15m BEAR"
+    color biasCol = htfBiasVal == 1 ? longCol : shortCol
     if na(setupEntry) or setupDir == 0
-        table.cell(panel, 0, 0, "LH · Liquidity Hunter", text_color=color.white, text_size=size.normal)
+        table.cell(panel, 0, 0, "LH · Liquidity Hunter MTF", text_color=color.white, text_size=size.normal)
         table.merge_cells(panel, 0, 0, 1, 0)
-        table.cell(panel, 0, 1, "Waiting for complete setup…", text_color=color.gray, text_size=size.small)
-        table.merge_cells(panel, 0, 1, 1, 1)
+        table.cell(panel, 0, 1, "HTF BIAS", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 1, biasTxt + "  ·  EMA " + str.tostring(htfEma, format.mintick), text_color=biasCol, text_size=size.small)
+        table.cell(panel, 0, 2, "LIQ POOLS", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 2, "15m " + str.tostring(htfSsl, format.mintick) + " / " + str.tostring(htfBsl, format.mintick), text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 0, 3, "Waiting for HTF raid setup…", text_color=color.gray, text_size=size.small)
+        table.merge_cells(panel, 0, 3, 1, 3)
     else
         float risk = math.abs(setupEntry - setupSl)
         float rr = risk > 0 ? math.abs(setupTp - setupEntry) / risk : 0.0
@@ -681,32 +804,37 @@ if barstate.islast
         string resultLbl = setupStatus == 2 or setupStatus == 3 ? "RESULT" : "LIVE"
 
         string locTxt = setupDir == 1 ? "DISCOUNT" : "PREMIUM"
-        table.cell(panel, 0, 0, "LH · Liquidity Hunter", text_color=color.white, text_size=size.normal)
+        string pdNote = useHtfPd ? "HTF range" : "raid leg"
+        table.cell(panel, 0, 0, "LH · Liquidity Hunter MTF", text_color=color.white, text_size=size.normal)
         table.merge_cells(panel, 0, 0, 1, 0)
-        table.cell(panel, 0, 1, "POSITION", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 1, sideTxt, text_color=sideCol, text_size=size.large)
-        table.cell(panel, 0, 2, "QUALITY", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 2, "STRONG  ·  " + locTxt + " CE  ·  valid SL", text_color=longCol, text_size=size.small)
-        table.cell(panel, 0, 3, "STATUS", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 3, statusTxt, text_color=statusCol, text_size=size.normal)
-        table.cell(panel, 0, 4, "PATH", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 4, "1 RAID → 2 CISD → 3 " + setupTag + " → 4 FVG", text_color=sideCol, text_size=size.small)
-        table.cell(panel, 0, 5, "1 RAID", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 5, str.tostring(setupRaidPx, format.mintick) + "  (sweep " + str.tostring(setupRaidExt, format.mintick) + ")", text_color=raidCol, text_size=size.small)
-        table.cell(panel, 0, 6, "2 CISD", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 6, str.tostring(setupCisdPx, format.mintick), text_color=cisdCol, text_size=size.small)
-        table.cell(panel, 0, 7, "3 MSS", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 7, str.tostring(setupMssPx, format.mintick) + "  (" + setupTag + ")", text_color=mssCol, text_size=size.small)
-        table.cell(panel, 0, 8, "FVG ZONE", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 8, str.tostring(setupFvgBot, format.mintick) + "  →  " + str.tostring(setupFvgTop, format.mintick), text_color=sideCol, text_size=size.small)
-        table.cell(panel, 0, 9, "ENTRY", text_color=color.gray, text_size=size.small)
-        table.cell(panel, 1, 9, str.tostring(setupEntry, format.mintick) + "  (" + entryMode + ")", text_color=entryCol, text_size=size.normal)
-        table.cell(panel, 0, 10, "SL", text_color=color.gray, text_size=size.small)
-        table.cell(panel, 1, 10, str.tostring(setupSl, format.mintick) + "  (raid leg+" + str.tostring(slPadAtr, "#.2") + "ATR)", text_color=shortCol, text_size=size.normal)
-        table.cell(panel, 0, 11, "TP", text_color=color.gray, text_size=size.small)
-        table.cell(panel, 1, 11, str.tostring(setupTp, format.mintick) + "  (" + str.tostring(rr, "#.0") + "R)", text_color=longCol, text_size=size.normal)
+        table.cell(panel, 0, 1, "HTF BIAS", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 1, biasTxt + "  ·  EMA " + str.tostring(htfEma, format.mintick), text_color=biasCol, text_size=size.small)
+        table.cell(panel, 0, 2, "POSITION", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 2, sideTxt, text_color=sideCol, text_size=size.large)
+        table.cell(panel, 0, 3, "LIQ RAIDED", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 3, setupLiqSrc + "  @  " + str.tostring(setupRaidPx, format.mintick), text_color=raidCol, text_size=size.small)
+        table.cell(panel, 0, 4, "QUALITY", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 4, "STRONG  ·  " + locTxt + " (" + pdNote + ")  ·  valid SL", text_color=longCol, text_size=size.small)
+        table.cell(panel, 0, 5, "STATUS", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 5, statusTxt, text_color=statusCol, text_size=size.normal)
+        table.cell(panel, 0, 6, "PATH", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 6, "1 RAID → 2 CISD → 3 " + setupTag + " → 4 FVG", text_color=sideCol, text_size=size.small)
+        table.cell(panel, 0, 7, "1 RAID", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 7, str.tostring(setupRaidPx, format.mintick) + "  (sweep " + str.tostring(setupRaidExt, format.mintick) + ")", text_color=raidCol, text_size=size.small)
+        table.cell(panel, 0, 8, "2 CISD", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 8, str.tostring(setupCisdPx, format.mintick), text_color=cisdCol, text_size=size.small)
+        table.cell(panel, 0, 9, "3 MSS", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 9, str.tostring(setupMssPx, format.mintick) + "  (" + setupTag + ")", text_color=mssCol, text_size=size.small)
+        table.cell(panel, 0, 10, "FVG ZONE", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 10, str.tostring(setupFvgBot, format.mintick) + "  →  " + str.tostring(setupFvgTop, format.mintick), text_color=sideCol, text_size=size.small)
+        table.cell(panel, 0, 11, "ENTRY", text_color=color.gray, text_size=size.small)
+        table.cell(panel, 1, 11, str.tostring(setupEntry, format.mintick) + "  (" + entryMode + ")", text_color=entryCol, text_size=size.normal)
+        table.cell(panel, 0, 12, "SL", text_color=color.gray, text_size=size.small)
+        table.cell(panel, 1, 12, str.tostring(setupSl, format.mintick) + "  (raid leg+" + str.tostring(slPadAtr, "#.2") + "ATR)", text_color=shortCol, text_size=size.normal)
+        table.cell(panel, 0, 13, "TP", text_color=color.gray, text_size=size.small)
+        table.cell(panel, 1, 13, str.tostring(setupTp, format.mintick) + "  (" + str.tostring(rr, "#.0") + "R → HTF liq)", text_color=longCol, text_size=size.normal)
         string exitNote = setupStatus == 3 ? "SL tagged before TP" : setupStatus == 2 ? "TP reached" : setupStatus == 0 ? "Waiting for fill at CE" : "Live"
-        table.cell(panel, 0, 12, resultLbl, text_color=color.gray, text_size=size.small)
-        table.cell(panel, 1, 12, str.tostring(liveR, "#.00") + "R  ·  " + exitNote, text_color=liveR >= 0 ? longCol : shortCol, text_size=size.small)
+        table.cell(panel, 0, 14, resultLbl, text_color=color.gray, text_size=size.small)
+        table.cell(panel, 1, 14, str.tostring(liveR, "#.00") + "R  ·  " + exitNote, text_color=liveR >= 0 ? longCol : shortCol, text_size=size.small)
 
 alertcondition(not na(setupEntry) and setupBar == bar_index, "LH New Setup", "Liquidity Hunter complete setup")
