@@ -796,12 +796,12 @@ if nHist > 0
 string statusTxt = na(setupEntry) or setupDir == 0 ? "-" : setupStatus == 0 ? "WAIT FILL" : setupStatus == 1 ? "IN TRADE" : setupStatus == 2 ? "TP HIT" : "SL HIT"
 color statusCol = setupStatus == 0 ? color.gray : setupStatus == 1 ? color.orange : setupStatus == 2 ? longCol : shortCol
 
-plot(showLevels and not na(setupEntry) ? setupEntry : na, "ENTRY", color=entryCol, linewidth=2, style=plot.style_linebr)
-plot(showLevels and not na(setupSl) ? setupSl : na, "SL", color=shortCol, linewidth=2, style=plot.style_linebr)
-plot(showLevels and not na(setupTp) ? setupTp : na, "TP", color=longCol, linewidth=2, style=plot.style_linebr)
+// ENTRY/SL/TP no longer full-chart plots — drawn only inside setup footprint below
+plot(na, "ENTRY", color=entryCol, display=display.none)
+plot(na, "SL", color=shortCol, display=display.none)
+plot(na, "TP", color=longCol, display=display.none)
 
 if barstate.islast
-    // clear old drawings
     if array.size(drawBoxes) > 0
         for i = 0 to array.size(drawBoxes) - 1
             box.delete(array.get(drawBoxes, i))
@@ -819,60 +819,60 @@ if barstate.islast
         Setup s = array.get(history, nHist - 1)
         color sideCol = s.dir == 1 ? longCol : shortCol
         string sideTxt = s.dir == 1 ? "LONG" : "SHORT"
-        int endBar = bar_index + 8
-        // Clamp object x into SAFE_DRAW — Pine errors if offset > historical buffer (e.g. 766 > 765)
         int minX = math.max(0, bar_index - SAFE_DRAW)
         int xRaid = math.max(nz(s.raidBar, minX), minX)
         int xCisd = math.max(nz(s.cisdBar, xRaid), minX)
         int xMss = math.max(nz(s.mssBar, xCisd), minX)
         int xSetup = math.max(nz(s.bar, xMss), minX)
-        int zoneEnd = math.min(endBar, xSetup + 5)
+        // Confine ALL drawings to setup footprint only (raid → setup + pad)
+        int xFill = setupFillBar > xSetup ? setupFillBar : xSetup
+        int zoneEnd = math.min(bar_index, math.max(xSetup + 6, xFill + 2))
+        int zonePad = math.min(zoneEnd + 3, bar_index + 2)
         float risk = math.abs(s.entry - s.sl)
         float rr = risk > 0 ? math.abs(s.tp - s.entry) / risk : 0.0
         float fvgCe = (s.fvgTop + s.fvgBot) * 0.5
         float tick = syminfo.mintick
 
         if showFvg
-            // FVG zone = gap edges; ENTRY = CE line inside (not the whole box)
             array.push(drawBoxes, box.new(xMss, s.fvgTop, zoneEnd, s.fvgBot, xloc=xloc.bar_index, bgcolor=color.new(sideCol, 88), border_color=color.new(sideCol, 50), border_width=1))
             array.push(drawLines, line.new(xMss, s.fvgTop, zoneEnd, s.fvgTop, xloc=xloc.bar_index, color=color.new(sideCol, 20), style=line.style_solid, width=1))
             array.push(drawLines, line.new(xMss, s.fvgBot, zoneEnd, s.fvgBot, xloc=xloc.bar_index, color=color.new(sideCol, 20), style=line.style_solid, width=1))
             array.push(drawLines, line.new(xMss, fvgCe, zoneEnd, fvgCe, xloc=xloc.bar_index, color=entryCol, style=line.style_solid, width=2))
-            array.push(drawLabels, label.new(zoneEnd, s.fvgTop, "FVG TOP\n" + str.tostring(s.fvgTop, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(sideCol, 30), textcolor=color.white, size=size.tiny))
-            array.push(drawLabels, label.new(zoneEnd, s.fvgBot, "FVG BOT\n" + str.tostring(s.fvgBot, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(sideCol, 30), textcolor=color.white, size=size.tiny))
             array.push(drawLabels, label.new(zoneEnd, fvgCe, "ENTRY · CE\n" + str.tostring(s.entry, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(entryCol, 0), textcolor=color.black, size=size.small))
 
         if showAnatomy
-            array.push(drawLines, line.new(xRaid, s.raidPx, endBar, s.raidPx, xloc=xloc.bar_index, color=color.new(raidCol, 15), style=line.style_dotted, width=2))
-            array.push(drawLabels, label.new(xRaid, s.raidPx, "1 RAID " + s.liqSrc + "\n" + str.tostring(s.raidPx, format.mintick), xloc=xloc.bar_index, style=label.style_label_right, color=raidCol, textcolor=color.black, size=size.small))
-            array.push(drawLines, line.new(xRaid, s.raidExt, math.min(math.max(xCisd, xRaid + 1), xRaid + 10), s.raidExt, xloc=xloc.bar_index, color=color.new(raidCol, 35), style=line.style_dashed, width=1))
-            array.push(drawLabels, label.new(xRaid, s.raidExt, "SWEEP\n" + str.tostring(s.raidExt, format.mintick), xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_up : label.style_label_down, color=color.new(raidCol, 10), textcolor=color.black, size=size.tiny))
+            array.push(drawLines, line.new(xRaid, s.raidPx, zoneEnd, s.raidPx, xloc=xloc.bar_index, color=color.new(raidCol, 15), style=line.style_dotted, width=2))
+            array.push(drawLabels, label.new(xRaid, s.raidPx, "1 RAID " + s.liqSrc + "\n" + str.tostring(s.raidPx, format.mintick), xloc=xloc.bar_index, style=label.style_label_right, color=raidCol, textcolor=color.black, size=size.tiny))
+            array.push(drawLines, line.new(xRaid, s.raidExt, math.min(math.max(xCisd, xRaid + 1), zoneEnd), s.raidExt, xloc=xloc.bar_index, color=color.new(raidCol, 35), style=line.style_dashed, width=1))
 
             if not na(s.cisdPx)
-                array.push(drawLines, line.new(xCisd, s.cisdPx, endBar, s.cisdPx, xloc=xloc.bar_index, color=color.new(cisdCol, 20), style=line.style_dotted, width=2))
-                array.push(drawLabels, label.new(xCisd, s.cisdPx, "2 CISD\n" + str.tostring(s.cisdPx, format.mintick), xloc=xloc.bar_index, style=label.style_label_right, color=cisdCol, textcolor=color.white, size=size.small))
+                array.push(drawLines, line.new(xCisd, s.cisdPx, zoneEnd, s.cisdPx, xloc=xloc.bar_index, color=color.new(cisdCol, 20), style=line.style_dotted, width=2))
+                array.push(drawLabels, label.new(xCisd, s.cisdPx, "2 CISD\n" + str.tostring(s.cisdPx, format.mintick), xloc=xloc.bar_index, style=label.style_label_right, color=cisdCol, textcolor=color.white, size=size.tiny))
 
             if not na(s.mssPx)
-                array.push(drawLines, line.new(xMss, s.mssPx, endBar, s.mssPx, xloc=xloc.bar_index, color=color.new(mssCol, 15), style=line.style_dotted, width=2))
-                array.push(drawLabels, label.new(xMss, s.mssPx, "3 " + s.tag + "\n" + str.tostring(s.mssPx, format.mintick), xloc=xloc.bar_index, style=label.style_label_right, color=mssCol, textcolor=color.white, size=size.small))
+                array.push(drawLines, line.new(xMss, s.mssPx, zoneEnd, s.mssPx, xloc=xloc.bar_index, color=color.new(mssCol, 15), style=line.style_dotted, width=2))
+                array.push(drawLabels, label.new(xMss, s.mssPx, "3 " + s.tag + "\n" + str.tostring(s.mssPx, format.mintick), xloc=xloc.bar_index, style=label.style_label_right, color=mssCol, textcolor=color.white, size=size.tiny))
 
-            // Entry pin at exact CE price
             array.push(drawBoxes, box.new(xSetup - 1, s.entry + tick * 2, xSetup + 3, s.entry - tick * 2, xloc=xloc.bar_index, bgcolor=color.new(entryCol, 40), border_color=entryCol, border_width=2))
 
-        if setupStatus == 3
-            array.push(drawLabels, label.new(bar_index + 1, s.sl, "SL HIT\n" + str.tostring(s.sl, format.mintick), xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_up : label.style_label_down, color=color.new(shortCol, 0), textcolor=color.white, size=size.normal))
-        else if setupStatus == 2
-            array.push(drawLabels, label.new(bar_index + 1, s.tp, "TP HIT\n" + str.tostring(s.tp, format.mintick), xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_down : label.style_label_up, color=color.new(longCol, 0), textcolor=color.white, size=size.normal))
+        if showLevels
+            array.push(drawLines, line.new(xSetup, s.entry, zonePad, s.entry, xloc=xloc.bar_index, color=entryCol, style=line.style_solid, width=2))
+            array.push(drawLines, line.new(xSetup, s.sl, zonePad, s.sl, xloc=xloc.bar_index, color=shortCol, style=line.style_solid, width=2))
+            array.push(drawLines, line.new(xSetup, s.tp, zonePad, s.tp, xloc=xloc.bar_index, color=longCol, style=line.style_solid, width=2))
 
-        array.push(drawLabels, label.new(xSetup, s.dir == 1 ? s.fvgTop : s.fvgBot, "LH " + sideTxt + " · " + s.tag + " · " + s.liqSrc, xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_down : label.style_label_up, color=sideCol, textcolor=color.white, size=size.normal))
+        if setupStatus == 3
+            array.push(drawLabels, label.new(zonePad, s.sl, "SL HIT\n" + str.tostring(s.sl, format.mintick), xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_up : label.style_label_down, color=color.new(shortCol, 0), textcolor=color.white, size=size.small))
+        else if setupStatus == 2
+            array.push(drawLabels, label.new(zonePad, s.tp, "TP HIT\n" + str.tostring(s.tp, format.mintick), xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_down : label.style_label_up, color=color.new(longCol, 0), textcolor=color.white, size=size.small))
+
+        array.push(drawLabels, label.new(xSetup, s.dir == 1 ? s.fvgTop : s.fvgBot, "LH " + sideTxt + " · " + s.tag + " · " + s.liqSrc, xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_down : label.style_label_up, color=sideCol, textcolor=color.white, size=size.small))
 
         if showLevelLabels
-            array.push(drawLabels, label.new(bar_index + 2, s.entry, "ENTRY  " + str.tostring(s.entry, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(entryCol, 5), textcolor=color.black, size=size.normal))
-            array.push(drawLabels, label.new(bar_index + 2, s.sl, "SL  " + str.tostring(s.sl, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(shortCol, 5), textcolor=color.white, size=size.normal))
-            array.push(drawLabels, label.new(bar_index + 2, s.tp, "TP  " + str.tostring(s.tp, format.mintick) + " (" + str.tostring(rr, "#.0") + "R)", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(longCol, 5), textcolor=color.white, size=size.normal))
-            array.push(drawLabels, label.new(bar_index + 2, (s.entry + s.sl) * 0.5, statusTxt, xloc=xloc.bar_index, style=label.style_label_left, color=color.new(statusCol, 0), textcolor=color.white, size=size.normal))
+            array.push(drawLabels, label.new(zonePad, s.entry, "ENTRY  " + str.tostring(s.entry, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(entryCol, 5), textcolor=color.black, size=size.small))
+            array.push(drawLabels, label.new(zonePad, s.sl, "SL  " + str.tostring(s.sl, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(shortCol, 5), textcolor=color.white, size=size.small))
+            array.push(drawLabels, label.new(zonePad, s.tp, "TP  " + str.tostring(s.tp, format.mintick) + " (" + str.tostring(rr, "#.0") + "R)", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(longCol, 5), textcolor=color.white, size=size.small))
+            array.push(drawLabels, label.new(zonePad, (s.entry + s.sl) * 0.5, statusTxt, xloc=xloc.bar_index, style=label.style_label_left, color=color.new(statusCol, 0), textcolor=color.white, size=size.small))
 
-        // Older history: only markers still inside SAFE_DRAW
         if not onlyLast and nHist > 1
             int start = math.max(0, nHist - historyCount)
             int endHist = nHist - 2
@@ -882,10 +882,11 @@ if barstate.islast
                     int xh = math.max(nz(h.bar, minX), minX)
                     if bar_index - xh <= SAFE_DRAW
                         color hCol = h.dir == 1 ? longCol : shortCol
+                        int xhEnd = math.min(xh + 8, bar_index)
                         if showFvg
-                            array.push(drawBoxes, box.new(xh, h.fvgTop, xh + 10, h.fvgBot, xloc=xloc.bar_index, bgcolor=color.new(hCol, 92), border_color=color.new(hCol, 70)))
+                            array.push(drawBoxes, box.new(xh, h.fvgTop, xhEnd, h.fvgBot, xloc=xloc.bar_index, bgcolor=color.new(hCol, 92), border_color=color.new(hCol, 70)))
                         array.push(drawLabels, label.new(xh, h.dir == 1 ? h.fvgTop : h.fvgBot, (h.dir == 1 ? "L" : "S") + " · " + h.tag, xloc=xloc.bar_index, style=label.style_label_down, color=color.new(hCol, 45), textcolor=color.white, size=size.tiny))
-var table panel = table.new(position.top_left, 2, 15, bgcolor=color.new(#0D1117, 5), border_width=1, border_color=#30363D)
+var table panel = table.new(position.top_left, 2, 16, bgcolor=color.new(#0D1117, 5), border_width=1, border_color=#30363D)
 if barstate.islast
     string biasTxt = htfBiasVal == 1 ? "15m BULL" : "15m BEAR"
     color biasCol = htfBiasVal == 1 ? longCol : shortCol
