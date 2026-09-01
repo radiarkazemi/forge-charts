@@ -3,7 +3,7 @@
 | File | Role |
 |------|------|
 | `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.29 |
-| `TRH_AutoTrade.mq5` | **EA** v3.33 |
+| `TRH_AutoTrade.mq5` | **EA** v3.34 |
 | `TRH_Engine.mqh` | Shared Engine v228 |
 
 | Mode | Chart name | Live? |
@@ -33,11 +33,14 @@ Priority when both fire: **A > B**.
 
 Same-account multi-PC: panel shows `LIVE LONG/SHORT` from the open broker position.
 
-## Smart EA fill (v3.33)
+## Smart EA fill (v3.34)
 
-- **Far from ENTRY** (outside near band) → **market open immediately** at discovery
+- **Far from ENTRY** → **market open immediately** (live SL/TP geometry)
 - **Near ENTRY** → pending **Stop/Limit @ ENTRY**
-- Still aborts if already too deep toward TP (`InpExpireAtR`)
+- **Session filter OFF** by default (Asian dumps trade)
+- **Adopt age 20 bars** (was 8 — gold was aging out)
+- Auto-pad SL vs live bid/ask · retry filling modes (IOC/FOK/RETURN)
+- Chart Comment shows block reason (`Algo Trading OFF`, spread, etc.)
 - Break-even still **OFF** by default
 
 ## Break-even (v3.32 — OFF by default)
