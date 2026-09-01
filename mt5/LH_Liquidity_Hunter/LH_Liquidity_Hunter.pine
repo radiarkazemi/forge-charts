@@ -155,7 +155,8 @@ f_updateStatus(Setup[] hist) =>
             if s.status == 0
                 bool tradedAt = s.dir == 1 ? low <= s.entry and high >= s.entry : high >= s.entry and low <= s.entry
                 bool closedThru = s.dir == 1 ? close >= s.entry and open < s.entry : close <= s.entry and open > s.entry
-                if tradedAt or closedThru or bar_index == s.bar
+                // Limit fill only when price actually trades at entry (not just on signal bar)
+                if tradedAt or closedThru
                     s.fillBar := bar_index
                     s.status := 1
                     array.set(hist, n - 1, s)
@@ -507,10 +508,14 @@ if barstate.islast
         float tick = syminfo.mintick
 
         if showFvg
-            // Compact FVG — only MSS → setup window, not full chart width
-            array.push(drawBoxes, box.new(xMss, s.fvgTop, zoneEnd, s.fvgBot, xloc=xloc.bar_index, bgcolor=color.new(sideCol, 82), border_color=color.new(sideCol, 40), border_width=1))
-            array.push(drawLines, line.new(xMss, fvgCe, zoneEnd, fvgCe, xloc=xloc.bar_index, color=color.new(entryCol, 30), style=line.style_dashed, width=1))
-            array.push(drawLabels, label.new(xMss, fvgCe, "4 FVG · CE", xloc=xloc.bar_index, style=label.style_label_right, color=color.new(sideCol, 25), textcolor=color.white, size=size.tiny))
+            // FVG zone = gap edges; ENTRY = CE line inside (not the whole box)
+            array.push(drawBoxes, box.new(xMss, s.fvgTop, zoneEnd, s.fvgBot, xloc=xloc.bar_index, bgcolor=color.new(sideCol, 88), border_color=color.new(sideCol, 50), border_width=1))
+            array.push(drawLines, line.new(xMss, s.fvgTop, zoneEnd, s.fvgTop, xloc=xloc.bar_index, color=color.new(sideCol, 20), style=line.style_solid, width=1))
+            array.push(drawLines, line.new(xMss, s.fvgBot, zoneEnd, s.fvgBot, xloc=xloc.bar_index, color=color.new(sideCol, 20), style=line.style_solid, width=1))
+            array.push(drawLines, line.new(xMss, fvgCe, zoneEnd, fvgCe, xloc=xloc.bar_index, color=entryCol, style=line.style_solid, width=2))
+            array.push(drawLabels, label.new(zoneEnd, s.fvgTop, "FVG TOP\n" + str.tostring(s.fvgTop, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(sideCol, 30), textcolor=color.white, size=size.tiny))
+            array.push(drawLabels, label.new(zoneEnd, s.fvgBot, "FVG BOT\n" + str.tostring(s.fvgBot, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(sideCol, 30), textcolor=color.white, size=size.tiny))
+            array.push(drawLabels, label.new(zoneEnd, fvgCe, "ENTRY · CE\n" + str.tostring(s.entry, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(entryCol, 0), textcolor=color.black, size=size.small))
 
         if showAnatomy
             array.push(drawLines, line.new(xRaid, s.raidPx, endBar, s.raidPx, xloc=xloc.bar_index, color=color.new(raidCol, 15), style=line.style_dotted, width=2))
@@ -526,9 +531,13 @@ if barstate.islast
                 array.push(drawLines, line.new(xMss, s.mssPx, endBar, s.mssPx, xloc=xloc.bar_index, color=color.new(mssCol, 15), style=line.style_dotted, width=2))
                 array.push(drawLabels, label.new(xMss, s.mssPx, "3 " + s.tag + "\n" + str.tostring(s.mssPx, format.mintick), xloc=xloc.bar_index, style=label.style_label_right, color=mssCol, textcolor=color.white, size=size.small))
 
-            // Exact entry pin — thin band at CE/proximal, not a huge RISK/REWARD zone
-            array.push(drawBoxes, box.new(xSetup - 1, s.entry + tick * 2, xSetup + 3, s.entry - tick * 2, xloc=xloc.bar_index, bgcolor=color.new(entryCol, 55), border_color=entryCol, border_width=2))
-            array.push(drawLabels, label.new(xSetup + 3, s.entry, "ENTRY\n" + str.tostring(s.entry, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(entryCol, 5), textcolor=color.black, size=size.small))
+            // Entry pin at exact CE price
+            array.push(drawBoxes, box.new(xSetup - 1, s.entry + tick * 2, xSetup + 3, s.entry - tick * 2, xloc=xloc.bar_index, bgcolor=color.new(entryCol, 40), border_color=entryCol, border_width=2))
+
+        if setupStatus == 3
+            array.push(drawLabels, label.new(bar_index + 1, s.sl, "SL HIT\n" + str.tostring(s.sl, format.mintick), xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_up : label.style_label_down, color=color.new(shortCol, 0), textcolor=color.white, size=size.normal))
+        else if setupStatus == 2
+            array.push(drawLabels, label.new(bar_index + 1, s.tp, "TP HIT\n" + str.tostring(s.tp, format.mintick), xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_down : label.style_label_up, color=color.new(longCol, 0), textcolor=color.white, size=size.normal))
 
         array.push(drawLabels, label.new(xSetup, s.dir == 1 ? s.fvgTop : s.fvgBot, "LH " + sideTxt + " · " + s.tag, xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_down : label.style_label_up, color=sideCol, textcolor=color.white, size=size.normal))
 
@@ -580,15 +589,16 @@ if barstate.islast
         table.cell(panel, 1, 5, str.tostring(setupCisdPx, format.mintick), text_color=cisdCol, text_size=size.small)
         table.cell(panel, 0, 6, "3 MSS", text_color=color.gray, text_size=size.tiny)
         table.cell(panel, 1, 6, str.tostring(setupMssPx, format.mintick) + "  (" + setupTag + ")", text_color=mssCol, text_size=size.small)
-        table.cell(panel, 0, 7, "ENTRY", text_color=color.gray, text_size=size.small)
-        table.cell(panel, 1, 7, str.tostring(setupEntry, format.mintick) + "  (" + entryMode + ")", text_color=color.white, text_size=size.normal)
-        table.cell(panel, 0, 8, "4 FVG", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 8, str.tostring(setupFvgBot, format.mintick) + " → " + str.tostring(setupFvgTop, format.mintick), text_color=sideCol, text_size=size.small)
+        table.cell(panel, 0, 7, "FVG ZONE", text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 1, 7, str.tostring(setupFvgBot, format.mintick) + "  →  " + str.tostring(setupFvgTop, format.mintick), text_color=sideCol, text_size=size.small)
+        table.cell(panel, 0, 8, "ENTRY", text_color=color.gray, text_size=size.small)
+        table.cell(panel, 1, 8, str.tostring(setupEntry, format.mintick) + "  (" + entryMode + ")", text_color=entryCol, text_size=size.normal)
         table.cell(panel, 0, 9, "SL", text_color=color.gray, text_size=size.small)
-        table.cell(panel, 1, 9, str.tostring(setupSl, format.mintick), text_color=shortCol, text_size=size.normal)
+        table.cell(panel, 1, 9, str.tostring(setupSl, format.mintick) + "  (beyond sweep)", text_color=shortCol, text_size=size.normal)
         table.cell(panel, 0, 10, "TP", text_color=color.gray, text_size=size.small)
         table.cell(panel, 1, 10, str.tostring(setupTp, format.mintick) + "  (" + str.tostring(rr, "#.0") + "R)", text_color=longCol, text_size=size.normal)
+        string exitNote = setupStatus == 3 ? "SL tagged before TP" : setupStatus == 2 ? "TP reached" : setupStatus == 0 ? "Waiting for fill at CE" : "Live"
         table.cell(panel, 0, 11, resultLbl, text_color=color.gray, text_size=size.small)
-        table.cell(panel, 1, 11, str.tostring(liveR, "#.00") + "R", text_color=liveR >= 0 ? longCol : shortCol, text_size=size.normal)
+        table.cell(panel, 1, 11, str.tostring(liveR, "#.00") + "R  ·  " + exitNote, text_color=liveR >= 0 ? longCol : shortCol, text_size=size.small)
 
 alertcondition(not na(setupEntry) and setupBar == bar_index, "LH New Setup", "Liquidity Hunter complete setup")
