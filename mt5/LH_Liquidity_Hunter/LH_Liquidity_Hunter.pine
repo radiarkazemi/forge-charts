@@ -385,34 +385,50 @@ f_emit(Setup[] hist, int dir, float entry, float sl, float tp, float ft, float f
         array.shift(hist)
     true
 
-// Update last setup's fill/TP/SL using only the current bar (no deep []).
-// Never resolve TP/SL on the fill bar — same-bar highs/lows include price BEFORE entry
-// and caused false "TP HIT" while price later smoked the SL.
+// Fill = real CE touch without already running to TP/SL on the same bar.
+// A dump that slices ENTRY→TP in one candle is NOT an entry (limit never rests).
+// status: 0 wait · 1 in trade · 2 TP · 3 SL · 4 MISSED (no fill / run-through)
 f_updateStatus(Setup[] hist) =>
     int n = array.size(hist)
     if n > 0
         Setup s = array.get(hist, n - 1)
         if s.status < 2 and bar_index >= s.bar
+            float risk = math.abs(s.entry - s.sl)
+            bool touchEntry = s.dir == 1 ? low <= s.entry and high >= s.entry : high >= s.entry and low <= s.entry
+            bool hitT = s.dir == 1 ? high >= s.tp : low <= s.tp
+            bool hitS = s.dir == 1 ? low <= s.sl : high >= s.sl
+            float pastR = risk > 0 ? (s.dir == 1 ? (close - s.entry) : (s.entry - close)) / risk : 0.0
+            // Same bar spans ENTRY and TP → price never gave a resting fill
+            bool runThrough = touchEntry and hitT
+            // Closed deep through ENTRY toward TP on the touch bar
+            bool blastedThru = touchEntry and pastR > 0.35
+            // Already past ENTRY toward TP with no fill yet
+            bool blownPast = risk > 0 and pastR >= 0.50 and not touchEntry
+
             if s.status == 0
-                bool tradedAt = s.dir == 1 ? low <= s.entry and high >= s.entry : high >= s.entry and low <= s.entry
-                bool closedThru = s.dir == 1 ? close >= s.entry and open < s.entry : close <= s.entry and open > s.entry
-                // Limit fill only when price actually trades at entry (not just on signal bar)
-                if tradedAt or closedThru
+                if runThrough or blastedThru or (hitT and not touchEntry) or blownPast
+                    s.status := 4
+                    array.set(hist, n - 1, s)
+                else if touchEntry and not hitT and not hitS
+                    // Clean touch near CE — limit could rest and fill
                     s.fillBar := bar_index
                     s.status := 1
                     array.set(hist, n - 1, s)
+                else if touchEntry and hitS and not hitT
+                    s.status := 4
+                    array.set(hist, n - 1, s)
+
             if s.status == 1 and bar_index > s.fillBar
-                bool hitT = s.dir == 1 ? high >= s.tp : low <= s.tp
-                bool hitS = s.dir == 1 ? low <= s.sl : high >= s.sl
-                if hitS and hitT
-                    // Both wicked — decide by close (which side settled)
+                bool hitT2 = s.dir == 1 ? high >= s.tp : low <= s.tp
+                bool hitS2 = s.dir == 1 ? low <= s.sl : high >= s.sl
+                if hitS2 and hitT2
                     bool slWins = s.dir == 1 ? close <= s.entry : close >= s.entry
                     s.status := slWins ? 3 : 2
                     array.set(hist, n - 1, s)
-                else if hitS
+                else if hitS2
                     s.status := 3
                     array.set(hist, n - 1, s)
-                else if hitT
+                else if hitT2
                     s.status := 2
                     array.set(hist, n - 1, s)
     true
@@ -799,8 +815,8 @@ if nHist > 0
     setupStatus := stS.status
     setupFillBar := stS.fillBar
 
-string statusTxt = na(setupEntry) or setupDir == 0 ? "-" : setupStatus == 0 ? "WAIT FILL" : setupStatus == 1 ? "IN TRADE" : setupStatus == 2 ? "TP HIT" : "SL HIT"
-color statusCol = setupStatus == 0 ? color.gray : setupStatus == 1 ? color.orange : setupStatus == 2 ? tpCol : slCol
+string statusTxt = na(setupEntry) or setupDir == 0 ? "-" : setupStatus == 0 ? "WAIT FILL" : setupStatus == 1 ? "IN TRADE" : setupStatus == 2 ? "TP HIT" : setupStatus == 3 ? "SL HIT" : "MISSED"
+color statusCol = setupStatus == 0 ? color.gray : setupStatus == 1 ? color.orange : setupStatus == 2 ? tpCol : setupStatus == 3 ? slCol : color.new(#FF9800, 0)
 
 plot(na, "ENTRY", color=entryCol, display=display.none)
 plot(na, "SL", color=slCol, display=display.none)
@@ -840,10 +856,14 @@ if barstate.islast
         float fvgCe = (s.fvgTop + s.fvgBot) * 0.5
         float tick = syminfo.mintick
 
-        // RED = SL risk · GREEN = TP reward — only these use red/green
+        // RED = SL risk · GREEN = TP reward — only after a real fill; MISSED stays muted
         if showRrBoxes
-            array.push(drawBoxes, box.new(xSetup, s.entry, rrEnd, s.sl, xloc=xloc.bar_index, bgcolor=color.new(slCol, 82), border_color=color.new(slCol, 35), border_width=1))
-            array.push(drawBoxes, box.new(xSetup, s.entry, rrEnd, s.tp, xloc=xloc.bar_index, bgcolor=color.new(tpCol, 82), border_color=color.new(tpCol, 35), border_width=1))
+            color riskBg = setupStatus == 4 ? color.new(#78909C, 88) : color.new(slCol, 82)
+            color rewBg = setupStatus == 4 ? color.new(#78909C, 88) : color.new(tpCol, 82)
+            color riskBd = setupStatus == 4 ? color.new(#78909C, 50) : color.new(slCol, 35)
+            color rewBd = setupStatus == 4 ? color.new(#78909C, 50) : color.new(tpCol, 35)
+            array.push(drawBoxes, box.new(xSetup, s.entry, rrEnd, s.sl, xloc=xloc.bar_index, bgcolor=riskBg, border_color=riskBd, border_width=1))
+            array.push(drawBoxes, box.new(xSetup, s.entry, rrEnd, s.tp, xloc=xloc.bar_index, bgcolor=rewBg, border_color=rewBd, border_width=1))
 
         if showFvg
             array.push(drawBoxes, box.new(xMss, s.fvgTop, zoneEnd, s.fvgBot, xloc=xloc.bar_index, bgcolor=color.new(fvgCol, 88), border_color=color.new(fvgCol, 45), border_width=1))
@@ -874,6 +894,8 @@ if barstate.islast
             array.push(drawLabels, label.new(rrEnd, s.sl, "SL HIT\n" + str.tostring(s.sl, format.mintick), xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_up : label.style_label_down, color=color.new(slCol, 0), textcolor=color.white, size=size.tiny))
         else if setupStatus == 2
             array.push(drawLabels, label.new(rrEnd, s.tp, "TP HIT\n" + str.tostring(s.tp, format.mintick), xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_down : label.style_label_up, color=color.new(tpCol, 0), textcolor=color.white, size=size.tiny))
+        else if setupStatus == 4
+            array.push(drawLabels, label.new(rrEnd, s.entry, "MISSED\nno CE fill", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(#FF9800, 0), textcolor=color.black, size=size.tiny))
 
         array.push(drawLabels, label.new(xSetup, s.dir == 1 ? math.max(s.fvgTop, s.entry) : math.min(s.fvgBot, s.entry), "LH " + sideTxt + " · " + s.tag, xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_down : label.style_label_up, color=sideCol, textcolor=color.white, size=size.tiny))
 
@@ -912,11 +934,11 @@ if barstate.islast
     else
         float risk = math.abs(setupEntry - setupSl)
         float rr = risk > 0 ? math.abs(setupTp - setupEntry) / risk : 0.0
-        float liveR = risk <= 0 ? 0.0 : setupStatus == 2 ? rr : setupStatus == 3 ? -1.0 : setupDir == 1 ? (close - setupEntry) / risk : (setupEntry - close) / risk
+        float liveR = risk <= 0 ? 0.0 : setupStatus == 2 ? rr : setupStatus == 3 ? -1.0 : setupStatus == 4 ? 0.0 : setupDir == 1 ? (close - setupEntry) / risk : (setupEntry - close) / risk
         color sideCol = setupDir == 1 ? longCol : shortCol
         string sideTxt = setupDir == 1 ? "LONG" : "SHORT"
         string locTxt = setupDir == 1 ? "DISCOUNT" : "PREMIUM"
-        string exitNote = setupStatus == 3 ? "SL hit" : setupStatus == 2 ? "TP hit" : setupStatus == 0 ? "wait fill" : "live"
+        string exitNote = setupStatus == 3 ? "SL hit" : setupStatus == 2 ? "TP hit" : setupStatus == 4 ? "no CE fill · run-through" : setupStatus == 0 ? "wait fill" : "live"
 
         table.cell(panel, 0, 0, "LH  " + sideTxt, text_color=sideCol, text_size=size.small)
         table.cell(panel, 1, 0, statusTxt, text_color=statusCol, text_size=size.small)
