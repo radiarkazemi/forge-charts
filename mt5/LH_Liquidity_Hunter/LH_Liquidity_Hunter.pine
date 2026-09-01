@@ -1,4 +1,4 @@
-//@version=5
+//@version=6
 indicator("LH · Liquidity Hunter", overlay=true, max_boxes_count=60, max_lines_count=120, max_labels_count=80, max_bars_back=5000)
 
 // Complete setup: 1 RAID → 2 CISD → 3 MSS → 4 FVG → ENTRY / SL / TP
@@ -91,19 +91,22 @@ f_validRisk(float entry, float sl, float a) =>
 f_fvgOnBar(int dir, float a) =>
     float ft = na
     float fb = na
-    bool ok = false
     if bar_index >= 2
         if dir == 1
-            fb := high[2]
-            ft := low
-            float sz = ft - fb
-            ok := sz >= a * minFvgAtr and sz <= a * maxFvgAtr and ft > fb
+            float candBot = high[2]
+            float candTop = low
+            float sz = candTop - candBot
+            if sz >= a * minFvgAtr and sz <= a * maxFvgAtr and candTop > candBot
+                fb := candBot
+                ft := candTop
         else
-            ft := low[2]
-            fb := high
-            float sz = ft - fb
-            ok := sz >= a * minFvgAtr and sz <= a * maxFvgAtr and ft > fb
-    ok ? [ft, fb] : [na, na]
+            float candTop = low[2]
+            float candBot = high
+            float sz = candTop - candBot
+            if sz >= a * minFvgAtr and sz <= a * maxFvgAtr and candTop > candBot
+                fb := candBot
+                ft := candTop
+    [ft, fb]
 
 // Exact entry: CE (50%) or proximal edge — never fuzzy midpoint + CISD fallback
 f_entryPx(int dir, float ft, float fb) =>
@@ -318,7 +321,9 @@ if barstate.isconfirmed
                 phase := 3
 
         if phase == 3 and not na(mssBar) and bar_index >= mssBar and bar_index <= mssBar + maxFvgLagBars
-            [ft, fb] = f_fvgOnBar(pendDir, a)
+            float ft = na
+            float fb = na
+            [ft, fb] := f_fvgOnBar(pendDir, a)
             if not na(ft) and not na(fb)
                 fvgTop := ft
                 fvgBot := fb
