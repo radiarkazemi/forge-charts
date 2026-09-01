@@ -53,19 +53,25 @@ useOpposingLiq   = input.bool(true, "TP = Opposing Liquidity", group="Entry / SL
 liqExtendAtr     = input.float(1.0, "Min Dist To Opposing Liq (ATRx)", step=0.1, group="Entry / SL / TP")
 minTpR           = input.float(1.5, "Min TP Distance (R)", step=0.1, group="Entry / SL / TP")
 
-onlyLast         = input.bool(false, "Only Last Setup", group="Display")
-historyCount     = input.int(5, "History Count", minval=1, maxval=10, group="Display")
+onlyLast         = input.bool(true, "Only Last Setup", group="Display")
+historyCount     = input.int(3, "History Count", minval=1, maxval=10, group="Display")
 showAnatomy      = input.bool(true, "Show Full Anatomy (RAID/CISD/MSS/FVG)", group="Display")
 showLiqPivots    = input.bool(true, "Mark Active BSL/SSL", group="Display")
 showFvg          = input.bool(true, "Show FVG Box", group="Display")
 showLevels       = input.bool(true, "Show ENTRY / SL / TP lines", group="Display")
 showLevelLabels  = input.bool(true, "Show price labels", group="Display")
-longCol          = input.color(#26A69A, "Long", group="Display")
-shortCol         = input.color(#EF5350, "Short", group="Display")
-entryCol         = input.color(#CFD8DC, "Entry", group="Display")
-raidCol          = input.color(#FFB74D, "Raid / Sweep", group="Display")
-cisdCol          = input.color(#64B5F6, "CISD", group="Display")
-mssCol           = input.color(#BA68C8, "MSS", group="Display")
+showRrBoxes      = input.bool(true, "Show SL (red) / TP (green) boxes", group="Display")
+panelPos         = input.string("Bottom Right", "Info Panel Position", options=["Bottom Right", "Top Right", "Bottom Left", "Top Left"], group="Display")
+// Green = TP only · Red = SL only · everything else uses distinct colors
+tpCol            = input.color(#26A69A, "TP (green only)", group="Display")
+slCol            = input.color(#EF5350, "SL (red only)", group="Display")
+longCol          = input.color(#42A5F5, "Long / SSL (blue)", group="Display")
+shortCol         = input.color(#AB47BC, "Short / BSL (purple)", group="Display")
+entryCol         = input.color(#FFEE58, "Entry (yellow)", group="Display")
+raidCol          = input.color(#FFB74D, "Raid / Sweep (amber)", group="Display")
+cisdCol          = input.color(#29B6F6, "CISD (cyan)", group="Display")
+mssCol           = input.color(#CE93D8, "MSS (lavender)", group="Display")
+fvgCol           = input.color(#90A4AE, "FVG zone (slate)", group="Display")
 
 f_push(float[] px, int[] br, float p, int b) =>
     array.push(px, p)
@@ -757,10 +763,10 @@ if barstate.isconfirmed
                 phase := 0
                 pendDir := 0
 
-plot(showHtfLiq ? htfBsl : na, "15m BSL", color=color.new(#EF5350, 35), style=plot.style_linebr, linewidth=2)
-plot(showHtfLiq ? htfSsl : na, "15m SSL", color=color.new(#26A69A, 35), style=plot.style_linebr, linewidth=2)
-plot(showHtfLiq ? mtfBsl : na, "5m BSL", color=color.new(#EF5350, 55), style=plot.style_linebr, linewidth=1)
-plot(showHtfLiq ? mtfSsl : na, "5m SSL", color=color.new(#26A69A, 55), style=plot.style_linebr, linewidth=1)
+plot(showHtfLiq ? htfBsl : na, "15m BSL", color=color.new(shortCol, 40), style=plot.style_linebr, linewidth=2)
+plot(showHtfLiq ? htfSsl : na, "15m SSL", color=color.new(longCol, 40), style=plot.style_linebr, linewidth=2)
+plot(showHtfLiq ? mtfBsl : na, "5m BSL", color=color.new(shortCol, 60), style=plot.style_linebr, linewidth=1)
+plot(showHtfLiq ? mtfSsl : na, "5m SSL", color=color.new(longCol, 60), style=plot.style_linebr, linewidth=1)
 plot(showLiqPivots and not requireHtfRaid ? huntHi : na, "1m BSL", color=color.new(shortCol, 70), style=plot.style_linebr, linewidth=1)
 plot(showLiqPivots and not requireHtfRaid ? huntLo : na, "1m SSL", color=color.new(longCol, 70), style=plot.style_linebr, linewidth=1)
 
