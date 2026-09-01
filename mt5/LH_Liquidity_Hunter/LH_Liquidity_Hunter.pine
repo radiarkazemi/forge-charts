@@ -10,6 +10,8 @@ mtfTf            = input.timeframe("5", "MTF Liquidity TF", group="MTF Liquidity
 htfPivot         = input.int(5, "HTF Pivot Period", minval=3, group="MTF Liquidity")
 mtfPivot         = input.int(4, "MTF Pivot Period", minval=2, group="MTF Liquidity")
 htfRangeLen      = input.int(20, "HTF Dealing Range (HTF bars)", minval=8, group="MTF Liquidity")
+htfPoolCount     = input.int(10, "HTF Pools To Track", minval=4, maxval=20, group="MTF Liquidity")
+raidConfirmBars  = input.int(3, "Raid Reject Window (bars)", minval=1, maxval=6, group="MTF Liquidity")
 requireHtfRaid   = input.bool(true, "RAID must sweep 5m or 15m liquidity", group="MTF Liquidity")
 requireHtfBias   = input.bool(true, "Align with HTF trend (15m EMA)", group="MTF Liquidity")
 htfEmaLen        = input.int(20, "HTF EMA Length", minval=5, group="MTF Liquidity")
@@ -19,28 +21,28 @@ showHtfLiq       = input.bool(true, "Show HTF/MTF BSL & SSL", group="MTF Liquidi
 // ── 1m execution ────────────────────────────────────────────────────
 pivotPeriod      = input.int(5, "1m Internal Pivot", minval=2, group="1m Detection")
 minSweepAtr      = input.float(0.04, "Min Sweep Beyond Liq (ATRx)", step=0.01, group="1m Detection")
-minDispAtr       = input.float(0.45, "Min MSS Displacement (ATRx)", step=0.05, group="1m Detection")
-minFvgAtr        = input.float(0.06, "Min FVG Size (ATRx)", step=0.01, group="1m Detection")
-maxFvgAtr        = input.float(0.35, "Max FVG Size (ATRx)", step=0.01, group="1m Detection")
-maxCisdBars      = input.int(4, "Max Bars After Raid For CISD", group="1m Detection")
-maxStructBars    = input.int(6, "Max Bars After CISD For MSS", group="1m Detection")
-maxFvgLagBars    = input.int(1, "Max Bars After MSS For FVG", minval=0, maxval=3, group="1m Detection")
+minDispAtr       = input.float(0.35, "Min MSS Displacement (ATRx)", step=0.05, group="1m Detection")
+minFvgAtr        = input.float(0.05, "Min FVG Size (ATRx)", step=0.01, group="1m Detection")
+maxFvgAtr        = input.float(0.40, "Max FVG Size (ATRx)", step=0.01, group="1m Detection")
+maxCisdBars      = input.int(8, "Max Bars After Raid For CISD", group="1m Detection")
+maxStructBars    = input.int(12, "Max Bars After CISD For MSS", group="1m Detection")
+maxFvgLagBars    = input.int(2, "Max Bars After MSS For FVG", minval=0, maxval=5, group="1m Detection")
 requireCisd      = input.bool(true, "Require CISD", group="1m Detection")
-allowBos         = input.bool(false, "Allow Internal BOS (OFF = MSS only)", group="1m Detection")
+allowBos         = input.bool(true, "Allow Internal BOS (easier MSS)", group="1m Detection")
 requireFvgRetest = input.bool(true, "Wait For FVG Retest", group="1m Detection")
-maxRetestBars    = input.int(5, "Max Bars For Retest", group="1m Detection")
-cooldownBars     = input.int(18, "Cooldown Between Setups", group="1m Detection")
+maxRetestBars    = input.int(10, "Max Bars For Retest", group="1m Detection")
+cooldownBars     = input.int(12, "Cooldown Between Setups", group="1m Detection")
 cooldownAfterSl  = input.int(8, "Cooldown After SL Hit", minval=0, group="1m Detection")
 
 requireRejectRaid = input.bool(true, "Strong RAID — close back + rejection wick", group="Quality")
 requireStrongCisd = input.bool(true, "Strong CISD — body close through raid open", group="Quality")
 requireStrongMss  = input.bool(true, "Strong MSS — close beyond structure, body candle", group="Quality")
-minBodyRatio     = input.float(0.55, "Min MSS Body / Range", step=0.05, minval=0.35, maxval=0.90, group="Quality")
-minCloseThruAtr  = input.float(0.08, "Min MSS Close Beyond Structure (ATRx)", step=0.01, group="Quality")
+minBodyRatio     = input.float(0.50, "Min MSS Body / Range", step=0.05, minval=0.35, maxval=0.90, group="Quality")
+minCloseThruAtr  = input.float(0.05, "Min MSS Close Beyond Structure (ATRx)", step=0.01, group="Quality")
 requirePd        = input.bool(true, "Entry in Discount (long) / Premium (short)", group="Quality")
-pdLevel          = input.float(0.45, "PD Threshold (0.45 = top/bottom 45% of range)", step=0.05, minval=0.30, maxval=0.55, group="Quality")
+pdLevel          = input.float(0.50, "PD Threshold (0.50 = top/bottom 50% of range)", step=0.05, minval=0.30, maxval=0.55, group="Quality")
 requireFvgIntact = input.bool(true, "FVG distal must stay unfilled", group="Quality")
-requireRejectEntry = input.bool(true, "Strong ENTRY — tap CE, close back through CE", group="Quality")
+requireRejectEntry = input.bool(false, "Strong ENTRY — tap CE, close back through CE", group="Quality")
 
 entryMode        = input.string("FVG CE (50%)", "Entry Level", options=["FVG CE (50%)", "FVG Proximal"], group="Entry / SL / TP")
 slPadAtr         = input.float(0.30, "SL Pad Beyond Raid Leg (ATRx)", step=0.01, group="Entry / SL / TP")
@@ -51,8 +53,8 @@ useOpposingLiq   = input.bool(true, "TP = Opposing Liquidity", group="Entry / SL
 liqExtendAtr     = input.float(1.0, "Min Dist To Opposing Liq (ATRx)", step=0.1, group="Entry / SL / TP")
 minTpR           = input.float(1.5, "Min TP Distance (R)", step=0.1, group="Entry / SL / TP")
 
-onlyLast         = input.bool(true, "Only Last Setup", group="Display")
-historyCount     = input.int(3, "History Count", minval=1, maxval=10, group="Display")
+onlyLast         = input.bool(false, "Only Last Setup", group="Display")
+historyCount     = input.int(5, "History Count", minval=1, maxval=10, group="Display")
 showAnatomy      = input.bool(true, "Show Full Anatomy (RAID/CISD/MSS/FVG)", group="Display")
 showLiqPivots    = input.bool(true, "Mark Active BSL/SSL", group="Display")
 showFvg          = input.bool(true, "Show FVG Box", group="Display")
@@ -71,6 +73,82 @@ f_push(float[] px, int[] br, float p, int b) =>
     if array.size(px) > 40
         array.shift(px)
         array.shift(br)
+
+// Store every HTF/MTF pivot level as it forms — raids can hit ANY recent pool
+f_poolPush(float[] pools, float px) =>
+    if not na(px)
+        int n = array.size(pools)
+        bool dup = false
+        if n > 0
+            for i = 0 to n - 1
+                if math.abs(array.get(pools, i) - px) <= syminfo.mintick * 2
+                    dup := true
+                    break
+        if not dup
+            array.push(pools, px)
+            if array.size(pools) > htfPoolCount
+                array.shift(pools)
+
+// Same-bar sweep + reject, OR wick sweep then reject within raidConfirmBars
+f_poolRaidBsl(float[] pools, float a) =>
+    float lvl = na
+    float pad = a * minSweepAtr
+    int n = array.size(pools)
+    if n > 0
+        for i = n - 1 to 0
+            if na(lvl)
+                float p = array.get(pools, i)
+                bool sameBar = high > p + pad and close < p
+                bool delayedReject = false
+                if raidConfirmBars > 0
+                    for k = 0 to raidConfirmBars
+                        if high[k] > p + pad and close < p
+                            delayedReject := true
+                if sameBar or delayedReject
+                    lvl := p
+    lvl
+
+f_poolRaidSsl(float[] pools, float a) =>
+    float lvl = na
+    float pad = a * minSweepAtr
+    int n = array.size(pools)
+    if n > 0
+        for i = n - 1 to 0
+            if na(lvl)
+                float p = array.get(pools, i)
+                bool sameBar = low < p - pad and close > p
+                bool delayedReject = false
+                if raidConfirmBars > 0
+                    for k = 0 to raidConfirmBars
+                        if low[k] < p - pad and close > p
+                            delayedReject := true
+                if sameBar or delayedReject
+                    lvl := p
+    lvl
+
+f_poolSrcBsl(float lvl, float hBsl, float mBsl) =>
+    string src = "HTF BSL"
+    if not na(mBsl) and math.abs(lvl - mBsl) <= syminfo.mintick * 2
+        src := "5m BSL"
+    else if not na(hBsl) and math.abs(lvl - hBsl) <= syminfo.mintick * 2
+        src := "15m BSL"
+    else if not na(mBsl) and math.abs(lvl - mBsl) < math.abs(nz(lvl - hBsl, 999999.0))
+        src := "5m BSL"
+    else
+        src := "15m BSL"
+    src
+
+f_poolSrcSsl(float lvl, float hSsl, float mSsl) =>
+    string src = "HTF SSL"
+    if not na(mSsl) and math.abs(lvl - mSsl) <= syminfo.mintick * 2
+        src := "5m SSL"
+    else if not na(hSsl) and math.abs(lvl - hSsl) <= syminfo.mintick * 2
+        src := "15m SSL"
+    else if not na(mSsl) and math.abs(lvl - mSsl) < math.abs(nz(lvl - hSsl, 999999.0))
+        src := "5m SSL"
+    else
+        src := "15m SSL"
+    src
 
 f_lastPivot(float[] px, int[] br, int before, int lookback, int minAge) =>
     float out = na
@@ -234,6 +312,15 @@ f_htfTrend(int emaLen) =>
     int b = close >= e ? 1 : -1
     [e, b]
 
+// Last 4 confirmed HTF/MTF pivots — backfill so raids detect historical pools
+f_fourPivots(int plen, bool isHigh) =>
+    float pv = isHigh ? ta.pivothigh(high, plen, plen) : ta.pivotlow(low, plen, plen)
+    float p0 = ta.valuewhen(not na(pv), pv, 0)
+    float p1 = ta.valuewhen(not na(pv), pv, 1)
+    float p2 = ta.valuewhen(not na(pv), pv, 2)
+    float p3 = ta.valuewhen(not na(pv), pv, 3)
+    [p0, p1, p2, p3]
+
 f_nearestOppLiq(int dir, float entry, float a, float hBsl, float mBsl, float hSsl, float mSsl) =>
     float minD = a * liqExtendAtr
     float out = na
@@ -330,6 +417,10 @@ atr = ta.atr(14)
 [mtfBsl, mtfSsl] = request.security(syminfo.tickerid, mtfTf, f_trackLiq(mtfPivot), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 [htfDrHi, htfDrLo] = request.security(syminfo.tickerid, htfTf, f_htfDealRange(htfRangeLen), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 [htfEma, htfBiasVal] = request.security(syminfo.tickerid, htfTf, f_htfTrend(htfEmaLen), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[htfBsl0, htfBsl1, htfBsl2, htfBsl3] = request.security(syminfo.tickerid, htfTf, f_fourPivots(htfPivot, true), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[htfSsl0, htfSsl1, htfSsl2, htfSsl3] = request.security(syminfo.tickerid, htfTf, f_fourPivots(htfPivot, false), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[mtfBsl0, mtfBsl1, mtfBsl2, mtfBsl3] = request.security(syminfo.tickerid, mtfTf, f_fourPivots(mtfPivot, true), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[mtfSsl0, mtfSsl1, mtfSsl2, mtfSsl3] = request.security(syminfo.tickerid, mtfTf, f_fourPivots(mtfPivot, false), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 ph = ta.pivothigh(high, pivotPeriod, pivotPeriod)
 pl = ta.pivotlow(low, pivotPeriod, pivotPeriod)
@@ -338,6 +429,10 @@ var float[] pivHiPx = array.new_float()
 var int[] pivHiBar = array.new_int()
 var float[] pivLoPx = array.new_float()
 var int[] pivLoBar = array.new_int()
+var float[] htfBslPools = array.new_float()
+var float[] htfSslPools = array.new_float()
+var float[] mtfBslPools = array.new_float()
+var float[] mtfSslPools = array.new_float()
 var Setup[] history = array.new<Setup>()
 
 var int phase = 0
@@ -387,6 +482,28 @@ if not na(ph)
 if not na(pl)
     f_push(pivLoPx, pivLoBar, pl, bar_index - pivotPeriod)
 
+if barstate.isconfirmed
+    f_poolPush(htfBslPools, htfBsl)
+    f_poolPush(htfSslPools, htfSsl)
+    f_poolPush(mtfBslPools, mtfBsl)
+    f_poolPush(mtfSslPools, mtfSsl)
+    f_poolPush(htfBslPools, htfBsl0)
+    f_poolPush(htfBslPools, htfBsl1)
+    f_poolPush(htfBslPools, htfBsl2)
+    f_poolPush(htfBslPools, htfBsl3)
+    f_poolPush(htfSslPools, htfSsl0)
+    f_poolPush(htfSslPools, htfSsl1)
+    f_poolPush(htfSslPools, htfSsl2)
+    f_poolPush(htfSslPools, htfSsl3)
+    f_poolPush(mtfBslPools, mtfBsl0)
+    f_poolPush(mtfBslPools, mtfBsl1)
+    f_poolPush(mtfBslPools, mtfBsl2)
+    f_poolPush(mtfBslPools, mtfBsl3)
+    f_poolPush(mtfSslPools, mtfSsl0)
+    f_poolPush(mtfSslPools, mtfSsl1)
+    f_poolPush(mtfSslPools, mtfSsl2)
+    f_poolPush(mtfSslPools, mtfSsl3)
+
 huntLo = f_lastPivot(pivLoPx, pivLoBar, bar_index, 100, pivotPeriod)
 huntHi = f_lastPivot(pivHiPx, pivHiBar, bar_index, 100, pivotPeriod)
 
@@ -415,43 +532,29 @@ if barstate.isconfirmed
     bool biasLong = not requireHtfBias or htfBiasVal == 1
     bool biasShort = not requireHtfBias or htfBiasVal == -1
 
-    // Which HTF/MTF pool was actually swept this bar?
-    bool sweptHtfSsl = not na(htfSsl) and low < htfSsl - a * minSweepAtr and close > htfSsl
-    bool sweptMtfSsl = not na(mtfSsl) and low < mtfSsl - a * minSweepAtr and close > mtfSsl
-    bool sweptHtfBsl = not na(htfBsl) and high > htfBsl + a * minSweepAtr and close < htfBsl
-    bool sweptMtfBsl = not na(mtfBsl) and high > mtfBsl + a * minSweepAtr and close < mtfBsl
-    bool swept1mSsl = not requireHtfRaid and not na(huntLo) and low < huntLo - a * minSweepAtr and close > huntLo
-    bool swept1mBsl = not requireHtfRaid and not na(huntHi) and high > huntHi + a * minSweepAtr and close < huntHi
-
-    float sslLvl = na
-    string sslSrc = ""
-    if sweptHtfSsl and sweptMtfSsl
-        sslLvl := htfSsl <= mtfSsl ? htfSsl : mtfSsl
-        sslSrc := htfSsl <= mtfSsl ? "15m SSL" : "5m SSL"
-    else if sweptHtfSsl
-        sslLvl := htfSsl
-        sslSrc := "15m SSL"
-    else if sweptMtfSsl
-        sslLvl := mtfSsl
-        sslSrc := "5m SSL"
-    else if swept1mSsl
-        sslLvl := huntLo
-        sslSrc := "1m SSL"
-
+    // Scan ALL stored HTF/MTF pools — not just the single latest pivot
     float bslLvl = na
     string bslSrc = ""
-    if sweptHtfBsl and sweptMtfBsl
-        bslLvl := htfBsl >= mtfBsl ? htfBsl : mtfBsl
-        bslSrc := htfBsl >= mtfBsl ? "15m BSL" : "5m BSL"
-    else if sweptHtfBsl
-        bslLvl := htfBsl
-        bslSrc := "15m BSL"
-    else if sweptMtfBsl
-        bslLvl := mtfBsl
-        bslSrc := "5m BSL"
-    else if swept1mBsl
-        bslLvl := huntHi
-        bslSrc := "1m BSL"
+    float sslLvl = na
+    string sslSrc = ""
+    if requireHtfRaid
+        bslLvl := f_poolRaidBsl(htfBslPools, a)
+        if na(bslLvl)
+            bslLvl := f_poolRaidBsl(mtfBslPools, a)
+        if not na(bslLvl)
+            bslSrc := f_poolSrcBsl(bslLvl, htfBsl, mtfBsl)
+        sslLvl := f_poolRaidSsl(htfSslPools, a)
+        if na(sslLvl)
+            sslLvl := f_poolRaidSsl(mtfSslPools, a)
+        if not na(sslLvl)
+            sslSrc := f_poolSrcSsl(sslLvl, htfSsl, mtfSsl)
+    else
+        if not na(huntHi) and high > huntHi + a * minSweepAtr and close < huntHi
+            bslLvl := huntHi
+            bslSrc := "1m BSL"
+        if not na(huntLo) and low < huntLo - a * minSweepAtr and close > huntLo
+            sslLvl := huntLo
+            sslSrc := "1m SSL"
 
     bool sslRaid = canStart and not na(sslLvl) and f_strongRaid(1) and biasLong
     bool bslRaid = canStart and not na(bslLvl) and f_strongRaid(-1) and biasShort
@@ -465,7 +568,7 @@ if barstate.isconfirmed
         sweepBar := bar_index
         cisdLevel := open
         cisdBar := requireCisd ? na : bar_index
-        mssLevel := not na(huntHi) ? huntHi : (not na(mtfBsl) ? mtfBsl : htfBsl)
+        mssLevel := f_lastPivot(pivHiPx, pivHiBar, bar_index, 35, 1)
         mssBar := na
         fvgBar := na
         structType := 0
@@ -480,7 +583,7 @@ if barstate.isconfirmed
         sweepBar := bar_index
         cisdLevel := open
         cisdBar := requireCisd ? na : bar_index
-        mssLevel := not na(huntLo) ? huntLo : (not na(mtfSsl) ? mtfSsl : htfSsl)
+        mssLevel := f_lastPivot(pivLoPx, pivLoBar, bar_index, 35, 1)
         mssBar := na
         fvgBar := na
         structType := 0
@@ -792,9 +895,11 @@ if barstate.islast
         table.cell(panel, 0, 1, "HTF BIAS", text_color=color.gray, text_size=size.tiny)
         table.cell(panel, 1, 1, biasTxt + "  ·  EMA " + str.tostring(htfEma, format.mintick), text_color=biasCol, text_size=size.small)
         table.cell(panel, 0, 2, "LIQ POOLS", text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 1, 2, "15m " + str.tostring(htfSsl, format.mintick) + " / " + str.tostring(htfBsl, format.mintick), text_color=color.gray, text_size=size.tiny)
-        table.cell(panel, 0, 3, "Waiting for HTF raid setup…", text_color=color.gray, text_size=size.small)
+        table.cell(panel, 1, 2, "15m " + str.tostring(htfSsl, format.mintick) + " / " + str.tostring(htfBsl, format.mintick) + "  ·  5m " + str.tostring(mtfSsl, format.mintick) + " / " + str.tostring(mtfBsl, format.mintick), text_color=color.gray, text_size=size.tiny)
+        table.cell(panel, 0, 3, "Pools tracked: " + str.tostring(array.size(htfBslPools) + array.size(mtfBslPools)) + " BSL · " + str.tostring(array.size(htfSslPools) + array.size(mtfSslPools)) + " SSL  ·  " + str.tostring(nHist) + " setups", text_color=color.gray, text_size=size.tiny)
         table.merge_cells(panel, 0, 3, 1, 3)
+        table.cell(panel, 0, 4, "Scanning for HTF raid → CISD → MSS → FVG…", text_color=color.gray, text_size=size.small)
+        table.merge_cells(panel, 0, 4, 1, 4)
     else
         float risk = math.abs(setupEntry - setupSl)
         float rr = risk > 0 ? math.abs(setupTp - setupEntry) / risk : 0.0
