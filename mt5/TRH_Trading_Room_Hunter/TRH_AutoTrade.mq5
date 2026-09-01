@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.33"
-#property description "TRH EA v3.33: far from ENTRY → market now · near → pending @ ENTRY"
+#property version   "3.34"
+#property description "TRH EA v3.34: place orders reliably — session OFF · fix SL · wider adopt · trade-allowed check"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -49,9 +49,9 @@ input int    InpMaxSpreadPoints   = 120;
 input double InpMaxSpreadAtr      = 0.45;
 
 input group "2) Session filter (broker server time)"
-input bool   InpUseSessionFilter  = true;
-input int    InpSessionStartHour  = 7;
-input int    InpSessionEndHour    = 21;
+input bool   InpUseSessionFilter  = false; // OFF = trade all sessions (Asian dumps included)
+input int    InpSessionStartHour  = 0;
+input int    InpSessionEndHour    = 24;
 
 input group "3) Daily limits"
 input bool   InpUseDailyLimits    = true;
@@ -73,14 +73,15 @@ input int    InpBeMinBarsOpen             = 3;     // Min bars after open before
 input group "5) ENTRY fill (far = market now · near = pending)"
 input double InpMarketTolAtr      = 0.25; // Near band (ATR): within this → pending @ ENTRY
 input double InpMaxChaseAtr       = 0.40; // legacy (unused when far-market-now is on)
-input double InpExpireAtR         = 0.90; // Abort if already this far toward TP (R)
+input double InpExpireAtR         = 1.20; // Abort only if this far toward TP (R) — was 0.90
 input bool   InpFarOpenMarket     = true; // Far from ENTRY → open market immediately
 input bool   InpUsePullbackLimit  = true; // Near + past ENTRY → Limit back to ENTRY
 input bool   InpLimitBeforeEntry  = true; // Near + before ENTRY → Stop into ENTRY
 input bool   InpMarketOnTouch     = true; // If pending sits, market when bar touches ENTRY
 input bool   InpCancelRunThrough  = true;
-input int    InpAdoptMaxAgeBars   = 8;
+input int    InpAdoptMaxAgeBars   = 20;   // Was 8 — gold dumps age out too fast
 input int    InpRetryEveryTicks   = 1;
+input bool   InpFixLiveStops      = true; // Auto-pad SL/TP when live market would reject
 
 input group "TRH Detection (= Pine Mode A)"
 input int    InpPivotPeriod     = 5;
@@ -278,6 +279,32 @@ bool SessionOk()
    return ok;
 }
 
+bool TradeAllowedOk()
+{
+   if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED))
+   {
+      g_workStatus = "Algo Trading OFF (toolbar)";
+      return false;
+   }
+   if(!MQLInfoInteger(MQL_TRADE_ALLOWED))
+   {
+      g_workStatus = "EA trading disabled in properties";
+      return false;
+   }
+   if(!AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))
+   {
+      g_workStatus = "account trade not allowed";
+      return false;
+   }
+   long mode = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_MODE);
+   if(mode == SYMBOL_TRADE_MODE_DISABLED)
+   {
+      g_workStatus = "symbol trade disabled";
+      return false;
+   }
+   return true;
+}
+
 bool DailyLimitsOk()
 {
    if(!InpUseDailyLimits) return true;
@@ -427,6 +454,7 @@ void AdoptWork(const TrhSetup &s)
 int PlaceSetupTrade(const TrhSetup &s, const double atrNow, const bool forceMarket)
 {
    if(!InpAutoTrade) return -1;
+   if(!TradeAllowedOk()) return 0;
    if(!SessionOk() || !DailyLimitsOk()) return 0;
    if(!SpreadOk(atrNow)) return 0;
    if(CountOurOrders() >= InpMaxOpenTrades)
@@ -443,7 +471,7 @@ int PlaceSetupTrade(const TrhSetup &s, const double atrNow, const bool forceMark
    if(!AdjustStops(s.dir, entry, sl, tp))
    {
       g_workStatus = "bad stops";
-      return -1;
+      return 0; // retryable — broker stops level can change
    }
 
    if(SetupSlHitBeforeFill(s))
@@ -453,8 +481,12 @@ int PlaceSetupTrade(const TrhSetup &s, const double atrNow, const bool forceMark
    }
    if(SetupTooDeepToTP(s))
    {
-      g_workStatus = "too deep toward TP — abort";
-      return -1;
+      // Still allow market if far-open and enough room left to extend TP
+      if(!(InpFarOpenMarket || forceMarket))
+      {
+         g_workStatus = "too deep toward TP — abort";
+         return -1;
+      }
    }
 
    double fillPx    = (s.dir == 1) ? ask : bid;
@@ -464,8 +496,8 @@ int PlaceSetupTrade(const TrhSetup &s, const double atrNow, const bool forceMark
    bool   nearEntry = (distEntry <= nearTol);
 
    // Far from ENTRY → market NOW. Near ENTRY → pending at exact ENTRY.
-   // forceMarket (bar touch) always markets.
-   bool openMarketNow = forceMarket || (InpFarOpenMarket && !nearEntry);
+   // forceMarket (bar touch) always markets. Too-deep → market with live geometry.
+   bool openMarketNow = forceMarket || (InpFarOpenMarket && !nearEntry) || SetupTooDeepToTP(s);
 
    g_trade.SetExpertMagicNumber(InpMagic);
    g_trade.SetDeviationInPoints(InpMaxSlippagePts);
@@ -481,21 +513,52 @@ int PlaceSetupTrade(const TrhSetup &s, const double atrNow, const bool forceMark
       double useEntry = NormalizeDouble(fillPx, _Digits);
       double useSL = sl;
       double useTP = tp;
+      double risk = MathAbs(entry - sl);
+      if(risk <= 0) risk = atrNow > 0 ? atrNow : _Point * 100;
+
+      // Keep geometry from live fill when price has moved
+      if(s.dir == 1)
+      {
+         useSL = useEntry - risk;
+         useTP = useEntry + risk * InpRiskReward;
+      }
+      else
+      {
+         useSL = useEntry + risk;
+         useTP = useEntry - risk * InpRiskReward;
+      }
+
       if(!AdjustStops(s.dir, useEntry, useSL, useTP))
       {
          g_workStatus = "bad stops @ market";
-         return -1;
+         return 0;
       }
-      // SL must still be on the adverse side of live price
+
+      // Pad SL beyond live quote if broker would reject
+      long stopsLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      double minDist = MathMax(stopsLevel * point, point * 10);
+      if(InpFixLiveStops)
+      {
+         if(s.dir == 1 && useSL >= bid - minDist)
+            useSL = NormalizeDouble(bid - minDist, _Digits);
+         if(s.dir == -1 && useSL <= ask + minDist)
+            useSL = NormalizeDouble(ask + minDist, _Digits);
+         if(s.dir == 1 && useTP <= ask + minDist)
+            useTP = NormalizeDouble(ask + minDist + risk * InpRiskReward, _Digits);
+         if(s.dir == -1 && useTP >= bid - minDist)
+            useTP = NormalizeDouble(bid - minDist - risk * InpRiskReward, _Digits);
+      }
+
       if(s.dir == 1 && useSL >= bid)
       {
-         g_workStatus = "SL invalid vs bid — abort";
-         return -1;
+         g_workStatus = "SL invalid vs bid — retry";
+         return 0;
       }
       if(s.dir == -1 && useSL <= ask)
       {
-         g_workStatus = "SL invalid vs ask — abort";
-         return -1;
+         g_workStatus = "SL invalid vs ask — retry";
+         return 0;
       }
 
       lots = CalcLots(useEntry, useSL);
@@ -510,10 +573,39 @@ int PlaceSetupTrade(const TrhSetup &s, const double atrNow, const bool forceMark
          (atrNow > 0 ? distEntry / atrNow : 0));
       if(forceMarket)
          mode = (s.dir == 1) ? "MARKET BUY (touch)" : "MARKET SELL (touch)";
+      if(SetupTooDeepToTP(s))
+         mode = (s.dir == 1) ? "MARKET BUY (chase)" : "MARKET SELL (chase)";
 
       ok = (s.dir == 1)
          ? g_trade.Buy(lots, _Symbol, 0, useSL, useTP, comment)
          : g_trade.Sell(lots, _Symbol, 0, useSL, useTP, comment);
+
+      // Retry with alternate filling if broker rejected filling mode
+      if(!ok)
+      {
+         uint ret = g_trade.ResultRetcode();
+         if(ret == TRADE_RETCODE_INVALID_FILL)
+         {
+            g_trade.SetTypeFilling(ORDER_FILLING_IOC);
+            ok = (s.dir == 1)
+               ? g_trade.Buy(lots, _Symbol, 0, useSL, useTP, comment)
+               : g_trade.Sell(lots, _Symbol, 0, useSL, useTP, comment);
+            if(!ok)
+            {
+               g_trade.SetTypeFilling(ORDER_FILLING_FOK);
+               ok = (s.dir == 1)
+                  ? g_trade.Buy(lots, _Symbol, 0, useSL, useTP, comment)
+                  : g_trade.Sell(lots, _Symbol, 0, useSL, useTP, comment);
+            }
+            if(!ok)
+            {
+               g_trade.SetTypeFilling(ORDER_FILLING_RETURN);
+               ok = (s.dir == 1)
+                  ? g_trade.Buy(lots, _Symbol, 0, useSL, useTP, comment)
+                  : g_trade.Sell(lots, _Symbol, 0, useSL, useTP, comment);
+            }
+         }
+      }
 
       g_workTries++;
       if(ok)
@@ -532,11 +624,11 @@ int PlaceSetupTrade(const TrhSetup &s, const double atrNow, const bool forceMark
          return 1;
       }
 
-      uint ret = g_trade.ResultRetcode();
-      g_workStatus = StringFormat("order fail %d %s", ret, g_trade.ResultRetcodeDescription());
+      uint retFail = g_trade.ResultRetcode();
+      g_workStatus = StringFormat("order fail %d %s", retFail, g_trade.ResultRetcodeDescription());
       PrintFormat("TRH ORDER FAIL %s %s ret=%d %s try=%d",
-         mode, s.dir == 1 ? "LONG" : "SHORT", ret, g_trade.ResultRetcodeDescription(), g_workTries);
-      return 0;
+         mode, s.dir == 1 ? "LONG" : "SHORT", retFail, g_trade.ResultRetcodeDescription(), g_workTries);
+      return 0; // retryable
    }
 
    // NEAR ENTRY → pending order at exact setup ENTRY
@@ -891,7 +983,7 @@ void UpdateComment(const TrhSetup &last, const int ageBars, const double lots)
    else if(InpSLProtectStyle == TRH_BE_STEP) beName = "BE-STEP";
 
    Comment(StringFormat(
-      "TRH EA v3.33 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
+      "TRH EA v3.34 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
       InpAutoTrade ? "ON" : "OFF",
       beName,
       last.dir == 1 ? "LONG" : "SHORT",
@@ -921,15 +1013,17 @@ int OnInit()
    g_workActive = false;
    g_workStatus = "boot";
 
-   PrintFormat("TRH AutoTrade v3.33 | mode=A+B | BE=%d | farMarket=%s | touchMarket=%s | adoptAge<=%d | workBars=%d | %s %s",
+   if(!TradeAllowedOk())
+      PrintFormat("TRH WARN: trading blocked — %s", g_workStatus);
+
+   PrintFormat("TRH AutoTrade v3.34 | mode=A+B | BE=%d | farMarket=%s | session=%s | adoptAge<=%d | %s %s",
       (int)InpSLProtectStyle,
       InpFarOpenMarket ? "Y" : "N",
-      InpMarketOnTouch ? "Y" : "N",
+      InpUseSessionFilter ? "ON" : "OFF",
       InpAdoptMaxAgeBars,
-      InpPendingExpiryBars,
       _Symbol, EnumToString(_Period));
 
-   Comment("TRH EA v3.33\nA·SWEEP + B·FVG · BE OFF\nfar→market · near→pending @ ENTRY");
+   Comment("TRH EA v3.34\nA·SWEEP + B·FVG · session OFF\nfar→market · near→pending @ ENTRY");
    return INIT_SUCCEEDED;
 }
 
@@ -993,7 +1087,7 @@ void OnTick()
    int n = TrhScanByMode(copied, t, o, h, l, c, cfg, (int)InpTradeMode, setups);
    if(n <= 0)
    {
-      Comment(StringFormat("TRH EA v3.33 %s — scanning...\nday %d | %s",
+      Comment(StringFormat("TRH EA v3.34 %s — scanning...\nday %d | %s",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades, g_workStatus));
       return;
    }
@@ -1060,10 +1154,6 @@ void OnTick()
       {
          ClearWork("SL before fill");
       }
-      else if(SetupTooDeepToTP(g_work))
-      {
-         ClearWork("too deep to TP");
-      }
       else if(g_tickCounter % MathMax(InpRetryEveryTicks, 1) == 0)
       {
          int rc = PlaceSetupTrade(g_work, atrNow, false);
@@ -1078,6 +1168,7 @@ void OnTick()
          {
             ClearWork(g_workStatus);
          }
+         // rc == 0 → retry next tick (spread / session / order fail / SL pad)
       }
    }
 
