@@ -16,11 +16,12 @@ requireCisd      = input.bool(true, "Require CISD", group="Detection")
 allowBos         = input.bool(false, "Allow Internal BOS (OFF = MSS only)", group="Detection")
 requireFvgRetest = input.bool(true, "Wait For FVG Retest", group="Detection")
 maxRetestBars    = input.int(5, "Max Bars For Retest", group="Detection")
-cooldownBars     = input.int(30, "Cooldown Between Setups", group="Detection")
+cooldownBars     = input.int(18, "Cooldown Between Setups", group="Detection")
+cooldownAfterSl  = input.int(8, "Cooldown After SL Hit", minval=0, group="Detection")
 
 entryMode        = input.string("FVG CE (50%)", "Entry Level", options=["FVG CE (50%)", "FVG Proximal"], group="Entry / SL / TP")
-slPadAtr         = input.float(0.12, "SL Pad Beyond Sweep (ATRx)", step=0.01, group="Entry / SL / TP")
-minRiskAtr       = input.float(0.25, "Min Risk Size (ATRx)", step=0.05, group="Entry / SL / TP")
+slPadAtr         = input.float(0.30, "SL Pad Beyond Raid Leg (ATRx)", step=0.01, group="Entry / SL / TP")
+minRiskAtr       = input.float(0.35, "Min Risk Size (ATRx)", step=0.05, group="Entry / SL / TP")
 riskReward       = input.float(2.5, "Fallback RR", step=0.1, group="Entry / SL / TP")
 useOpposingLiq   = input.bool(true, "TP = Opposing Liquidity", group="Entry / SL / TP")
 liqExtendAtr     = input.float(1.0, "Min Dist To Opposing Liq (ATRx)", step=0.1, group="Entry / SL / TP")
@@ -107,6 +108,22 @@ f_fvgOk(int dir, float a) =>
 f_entryPx(int dir, float ft, float fb) =>
     float ce = (ft + fb) * 0.5
     entryMode == "FVG Proximal" ? (dir == 1 ? ft : fb) : ce
+
+// SL beyond full raid leg (sweep→CISD→MSS), not just the sweep wick + tiny pad
+f_buildSl(int dir, float entry, float sweepPx, float sweepExt, float cisdPx, float legHi, float legLo, float a) =>
+    float pad = a * slPadAtr
+    float sl = na
+    if dir == 1
+        float base = math.min(nz(legLo, sweepExt), sweepExt, sweepPx)
+        if not na(cisdPx)
+            base := math.min(base, cisdPx)
+        sl := base - pad
+    else
+        float base = math.max(nz(legHi, sweepExt), sweepExt, sweepPx)
+        if not na(cisdPx)
+            base := math.max(base, cisdPx)
+        sl := base + pad
+    sl
 
 f_buildTp(int dir, float entry, float sl, float a, float[] pivHi, float[] pivLo) =>
     float risk = math.abs(entry - sl)
@@ -198,6 +215,8 @@ var int sweepBar = na
 var int cisdBar = na
 var int mssBar = na
 var int fvgBar = na
+var float raidLegHi = na
+var float raidLegLo = na
 var int structType = 0
 var int lastSetupBar = -9999
 
@@ -246,7 +265,13 @@ if barstate.isconfirmed
         phase := 0
         pendDir := 0
 
-    bool canStart = phase == 0 and bar_index - lastSetupBar >= cooldownBars
+    int cdBars = cooldownBars
+    int hN = array.size(history)
+    if hN > 0
+        Setup cdS = array.get(history, hN - 1)
+        if cdS.status == 3
+            cdBars := cooldownAfterSl
+    bool canStart = phase == 0 and bar_index - lastSetupBar >= cdBars
     float a = atr
     bool sslRaid = canStart and not na(huntLo) and low < huntLo - a * minSweepAtr and close > huntLo
     bool bslRaid = canStart and not na(huntHi) and high > huntHi + a * minSweepAtr and close < huntHi
@@ -263,6 +288,8 @@ if barstate.isconfirmed
         mssBar := na
         fvgBar := na
         structType := 0
+        raidLegHi := high
+        raidLegLo := low
     else if bslRaid
         phase := requireCisd ? 1 : 2
         pendDir := -1
@@ -275,8 +302,12 @@ if barstate.isconfirmed
         mssBar := na
         fvgBar := na
         structType := 0
+        raidLegHi := high
+        raidLegLo := low
 
     if phase != 0
+        raidLegHi := math.max(raidLegHi, high)
+        raidLegLo := math.min(raidLegLo, low)
         sweepExt := pendDir == 1 ? math.min(sweepExt, low) : math.max(sweepExt, high)
         float body = math.abs(close - open)
 
@@ -327,11 +358,10 @@ if barstate.isconfirmed
                     phase := 4
                 else
                     float entry = f_entryPx(pendDir, ft, fb)
-                    float pad = a * slPadAtr
                     string tag = structType == 2 ? "BOS" : "MSS"
                     int cBar = na(cisdBar) ? sweepBar : cisdBar
+                    float sl = f_buildSl(pendDir, entry, sweepPx, sweepExt, cisdLevel, raidLegHi, raidLegLo, a)
                     if pendDir == 1
-                        float sl = sweepExt - pad
                         if entry > sl and f_validRisk(entry, sl, a)
                             float tp = f_buildTp(1, entry, sl, a, pivHiPx, pivLoPx)
                             f_emit(history, 1, entry, sl, tp, ft, fb, sweepPx, sweepExt, cisdLevel, mssLevel, sweepBar, cBar, mssBar, bar_index, tag)
@@ -352,12 +382,11 @@ if barstate.isconfirmed
                             setupMssBar := mssBar
                             lastSetupBar := bar_index
                     else
-                        float sl2 = sweepExt + pad
-                        if sl2 > entry and f_validRisk(entry, sl2, a)
-                            float tp2 = f_buildTp(-1, entry, sl2, a, pivHiPx, pivLoPx)
-                            f_emit(history, -1, entry, sl2, tp2, ft, fb, sweepPx, sweepExt, cisdLevel, mssLevel, sweepBar, cBar, mssBar, bar_index, tag)
+                        if sl > entry and f_validRisk(entry, sl, a)
+                            float tp2 = f_buildTp(-1, entry, sl, a, pivHiPx, pivLoPx)
+                            f_emit(history, -1, entry, sl, tp2, ft, fb, sweepPx, sweepExt, cisdLevel, mssLevel, sweepBar, cBar, mssBar, bar_index, tag)
                             setupEntry := entry
-                            setupSl := sl2
+                            setupSl := sl
                             setupTp := tp2
                             setupDir := -1
                             setupBar := bar_index
@@ -376,66 +405,69 @@ if barstate.isconfirmed
                     pendDir := 0
 
         if phase == 4 and bar_index > fvgBar
-            float entryPx = f_entryPx(pendDir, fvgTop, fvgBot)
-            float ce = (fvgTop + fvgBot) * 0.5
-            float touchTol = a * 0.04
-            bool confirmed = false
-            if pendDir == 1
-                // Retest CE/proximal — not the whole wide FVG slack
-                bool tapped = low <= entryPx + touchTol and low >= fvgBot - touchTol
-                confirmed := tapped and close > open and close >= ce
-            else
-                bool tapped = high >= entryPx - touchTol and high <= fvgTop + touchTol
-                confirmed := tapped and close < open and close <= ce
-            if confirmed
-                float entry = entryPx
-                float pad = a * slPadAtr
-                string tag = structType == 2 ? "BOS" : "MSS"
-                int cBar = na(cisdBar) ? sweepBar : cisdBar
-                if pendDir == 1
-                    float sl = sweepExt - pad
-                    if entry > sl and f_validRisk(entry, sl, a)
-                        float tp = f_buildTp(1, entry, sl, a, pivHiPx, pivLoPx)
-                        f_emit(history, 1, entry, sl, tp, fvgTop, fvgBot, sweepPx, sweepExt, cisdLevel, mssLevel, sweepBar, cBar, mssBar, bar_index, tag)
-                        setupEntry := entry
-                        setupSl := sl
-                        setupTp := tp
-                        setupDir := 1
-                        setupBar := bar_index
-                        setupFvgTop := fvgTop
-                        setupFvgBot := fvgBot
-                        setupTag := tag
-                        setupRaidPx := sweepPx
-                        setupRaidExt := sweepExt
-                        setupCisdPx := cisdLevel
-                        setupMssPx := mssLevel
-                        setupRaidBar := sweepBar
-                        setupCisdBar := cBar
-                        setupMssBar := mssBar
-                        lastSetupBar := bar_index
-                else
-                    float sl2 = sweepExt + pad
-                    if sl2 > entry and f_validRisk(entry, sl2, a)
-                        float tp2 = f_buildTp(-1, entry, sl2, a, pivHiPx, pivLoPx)
-                        f_emit(history, -1, entry, sl2, tp2, fvgTop, fvgBot, sweepPx, sweepExt, cisdLevel, mssLevel, sweepBar, cBar, mssBar, bar_index, tag)
-                        setupEntry := entry
-                        setupSl := sl2
-                        setupTp := tp2
-                        setupDir := -1
-                        setupBar := bar_index
-                        setupFvgTop := fvgTop
-                        setupFvgBot := fvgBot
-                        setupTag := tag
-                        setupRaidPx := sweepPx
-                        setupRaidExt := sweepExt
-                        setupCisdPx := cisdLevel
-                        setupMssPx := mssLevel
-                        setupRaidBar := sweepBar
-                        setupCisdBar := cBar
-                        setupMssBar := mssBar
-                        lastSetupBar := bar_index
+            // Retest invalidated if price reclaims raid leg before entry
+            bool raidBroken = pendDir == 1 ? close < raidLegLo - a * 0.05 : close > raidLegHi + a * 0.05
+            if raidBroken
                 phase := 0
                 pendDir := 0
+            else
+                float entryPx = f_entryPx(pendDir, fvgTop, fvgBot)
+                float ce = (fvgTop + fvgBot) * 0.5
+                float touchTol = a * 0.04
+                bool confirmed = false
+                if pendDir == 1
+                    bool tapped = low <= entryPx + touchTol and low >= fvgBot - touchTol
+                    confirmed := tapped and close > open and close >= ce
+                else
+                    bool tapped = high >= entryPx - touchTol and high <= fvgTop + touchTol
+                    confirmed := tapped and close < open and close <= ce
+                if confirmed
+                    float entry = entryPx
+                    string tag = structType == 2 ? "BOS" : "MSS"
+                    int cBar = na(cisdBar) ? sweepBar : cisdBar
+                    float sl = f_buildSl(pendDir, entry, sweepPx, sweepExt, cisdLevel, raidLegHi, raidLegLo, a)
+                    if pendDir == 1
+                        if entry > sl and f_validRisk(entry, sl, a)
+                            float tp = f_buildTp(1, entry, sl, a, pivHiPx, pivLoPx)
+                            f_emit(history, 1, entry, sl, tp, fvgTop, fvgBot, sweepPx, sweepExt, cisdLevel, mssLevel, sweepBar, cBar, mssBar, bar_index, tag)
+                            setupEntry := entry
+                            setupSl := sl
+                            setupTp := tp
+                            setupDir := 1
+                            setupBar := bar_index
+                            setupFvgTop := fvgTop
+                            setupFvgBot := fvgBot
+                            setupTag := tag
+                            setupRaidPx := sweepPx
+                            setupRaidExt := sweepExt
+                            setupCisdPx := cisdLevel
+                            setupMssPx := mssLevel
+                            setupRaidBar := sweepBar
+                            setupCisdBar := cBar
+                            setupMssBar := mssBar
+                            lastSetupBar := bar_index
+                    else
+                        if sl > entry and f_validRisk(entry, sl, a)
+                            float tp2 = f_buildTp(-1, entry, sl, a, pivHiPx, pivLoPx)
+                            f_emit(history, -1, entry, sl, tp2, fvgTop, fvgBot, sweepPx, sweepExt, cisdLevel, mssLevel, sweepBar, cBar, mssBar, bar_index, tag)
+                            setupEntry := entry
+                            setupSl := sl
+                            setupTp := tp2
+                            setupDir := -1
+                            setupBar := bar_index
+                            setupFvgTop := fvgTop
+                            setupFvgBot := fvgBot
+                            setupTag := tag
+                            setupRaidPx := sweepPx
+                            setupRaidExt := sweepExt
+                            setupCisdPx := cisdLevel
+                            setupMssPx := mssLevel
+                            setupRaidBar := sweepBar
+                            setupCisdBar := cBar
+                            setupMssBar := mssBar
+                            lastSetupBar := bar_index
+                    phase := 0
+                    pendDir := 0
 
 plot(showLiqPivots ? huntHi : na, "BSL", color=color.new(shortCol, 55), style=plot.style_linebr, linewidth=1)
 plot(showLiqPivots ? huntLo : na, "SSL", color=color.new(longCol, 55), style=plot.style_linebr, linewidth=1)
