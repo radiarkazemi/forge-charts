@@ -87,26 +87,21 @@ f_nextLo(float[] px, float from, float minDist) =>
 f_validRisk(float entry, float sl, float a) =>
     math.abs(entry - sl) >= a * minRiskAtr
 
-// FVG must form on the MSS displacement candle (not random later gaps)
-f_fvgOnBar(int dir, float a) =>
-    float ft = na
-    float fb = na
+// FVG on MSS displacement bar — split helpers (no tuple [a,b] syntax)
+f_fvgTop(int dir) =>
+    dir == 1 ? low : low[2]
+
+f_fvgBot(int dir) =>
+    dir == 1 ? high[2] : high
+
+f_fvgOk(int dir, float a) =>
+    bool ok = false
     if bar_index >= 2
-        if dir == 1
-            float candBot = high[2]
-            float candTop = low
-            float sz = candTop - candBot
-            if sz >= a * minFvgAtr and sz <= a * maxFvgAtr and candTop > candBot
-                fb := candBot
-                ft := candTop
-        else
-            float candTop = low[2]
-            float candBot = high
-            float sz = candTop - candBot
-            if sz >= a * minFvgAtr and sz <= a * maxFvgAtr and candTop > candBot
-                fb := candBot
-                ft := candTop
-    [ft, fb]
+        float ft = f_fvgTop(dir)
+        float fb = f_fvgBot(dir)
+        float sz = ft - fb
+        ok := sz >= a * minFvgAtr and sz <= a * maxFvgAtr and ft > fb
+    ok
 
 // Exact entry: CE (50%) or proximal edge — never fuzzy midpoint + CISD fallback
 f_entryPx(int dir, float ft, float fb) =>
@@ -321,10 +316,9 @@ if barstate.isconfirmed
                 phase := 3
 
         if phase == 3 and not na(mssBar) and bar_index >= mssBar and bar_index <= mssBar + maxFvgLagBars
-            float ft = na
-            float fb = na
-            [ft, fb] := f_fvgOnBar(pendDir, a)
-            if not na(ft) and not na(fb)
+            if f_fvgOk(pendDir, a)
+                float ft = f_fvgTop(pendDir)
+                float fb = f_fvgBot(pendDir)
                 fvgTop := ft
                 fvgBot := fb
                 fvgBar := bar_index
