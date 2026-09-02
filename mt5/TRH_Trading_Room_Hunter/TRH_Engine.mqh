@@ -5,7 +5,7 @@
 #ifndef TRH_ENGINE_MQH
 #define TRH_ENGINE_MQH
 
-#define TRH_ENGINE_VERSION 228
+#define TRH_ENGINE_VERSION 229
 #define TRH_MAX_PIVOTS 30
 #define TRH_ATR_LEN    14
 
@@ -59,6 +59,8 @@ struct TrhConfig
    bool   requireFvgRetest;
    int    maxRetestBars;
    double fvgSlExtraAtr;
+   double fvgEntryBias;    // 0.5=CE mid · >0.5 toward premium (short)/discount (long)
+   double fvgMinRiskAtr;   // push SL out if risk < this × ATR (TV-efficient)
    // Mode C - Pro BTB (breakout -> back to breakeven) — quality filters
    double minBreakAtr;
    double minBreakBodyAtr;
@@ -92,7 +94,9 @@ void TrhDefaultConfig(TrhConfig &cfg)
    cfg.minFvgAtr       = 0.12;
    cfg.requireFvgRetest= true;
    cfg.maxRetestBars   = 8;
-   cfg.fvgSlExtraAtr   = 0.20;
+   cfg.fvgSlExtraAtr   = 0.45;   // wider than mid-gap so SL clears stop-hunts (TV parity)
+   cfg.fvgEntryBias    = 0.62;   // slightly premium/discount vs pure CE mid
+   cfg.fvgMinRiskAtr   = 1.00;   // never tighter than ~1×ATR risk
    cfg.minBreakAtr     = 0.20;
    cfg.minBreakBodyAtr = 0.45;
    cfg.maxBtbRetestBars= 10;
@@ -130,6 +134,60 @@ color TrhModeAccent(const int mode, const int dir)
       return (dir == 1) ? clrDarkOrange : clrOrangeRed;
    // Mode A SWEEP
    return (dir == 1) ? clrTeal : clrCrimson;
+}
+
+// TV-efficient Mode B geometry:
+// ENTRY biased toward FVG proximal (better fill than pure mid)
+// SL beyond max(sweep extreme, FVG outer) + pad, never tighter than fvgMinRiskAtr
+// TP = entry ± risk × RR (liquidity TP applied by caller)
+bool TrhModeBLevels(const int dir,
+                    const double gapTop,
+                    const double gapBot,
+                    const double sweepDistal,
+                    const double atr,
+                    const TrhConfig &cfg,
+                    double &entry,
+                    double &sl,
+                    double &tp,
+                    double &risk)
+{
+   double width = gapTop - gapBot;
+   if(width <= 0.0 || atr <= 0.0)
+      return false;
+
+   double bias = cfg.fvgEntryBias;
+   if(bias < 0.0) bias = 0.0;
+   if(bias > 1.0) bias = 1.0;
+   // Long: proximal = gapBot → bias>0.5 pulls entry down
+   // Short: proximal = gapTop → bias>0.5 pulls entry up
+   if(dir == 1)
+      entry = gapTop - width * bias;
+   else
+      entry = gapBot + width * bias;
+
+   double pad = atr * (cfg.slPadAtr + cfg.fvgSlExtraAtr);
+   // SL must clear both the raid extreme and the FVG outer edge
+   double slExt = (dir == 1) ? MathMin(sweepDistal, gapBot) : MathMax(sweepDistal, gapTop);
+   sl = (dir == 1) ? (slExt - pad) : (slExt + pad);
+
+   risk = MathAbs(entry - sl);
+   double minRisk = atr * cfg.fvgMinRiskAtr;
+   if(minRisk > 0.0 && risk < minRisk)
+   {
+      if(dir == 1) sl = entry - minRisk;
+      else         sl = entry + minRisk;
+      risk = minRisk;
+   }
+
+   if(risk <= 0.0)
+      return false;
+   if(dir == 1 && entry <= sl)
+      return false;
+   if(dir == -1 && sl <= entry)
+      return false;
+
+   tp = (dir == 1) ? (entry + risk * cfg.riskReward) : (entry - risk * cfg.riskReward);
+   return true;
 }
 
 // Pine ta.atr(14) = Wilder RMA of True Range (NOT SMA of last 14).
@@ -638,43 +696,23 @@ int TrhScanFvgSetups(const int rates,
                continue;
             }
 
-            // Immediate entry at FVG mid (retest disabled)
-            double entry = (gapTop + gapBot) * 0.5;
-            double pad = a * (cfg.slPadAtr + cfg.fvgSlExtraAtr);
+            // Immediate entry (retest disabled) — TV-efficient FVG levels
+            double entry = 0, sl = 0, tp = 0, risk = 0;
             TrhSetup s;
-            bool ok = false;
-            if(pendDir == 1)
-            {
-               double sl = pendDistal - pad;
-               if(entry > sl)
-               {
-                  double risk = entry - sl;
-                  double tp = entry + risk * cfg.riskReward;
-                  double liq;
-                  if(cfg.useLiquidityTP && TrhNextLiqHigh(pivHi, nHi, entry, risk * 1.5, liq))
-                     tp = MathMax(tp, liq);
-                  s.dir = 1; s.entry = entry; s.sl = sl; s.tp = tp;
-                  s.distal = gapBot; s.proximal = gapTop;
-                  ok = true;
-               }
-            }
-            else
-            {
-               double sl = pendDistal + pad;
-               if(sl > entry)
-               {
-                  double risk = sl - entry;
-                  double tp = entry - risk * cfg.riskReward;
-                  double liq;
-                  if(cfg.useLiquidityTP && TrhNextLiqLow(pivLo, nLo, entry, risk * 1.5, liq))
-                     tp = MathMin(tp, liq);
-                  s.dir = -1; s.entry = entry; s.sl = sl; s.tp = tp;
-                  s.distal = gapTop; s.proximal = gapBot;
-                  ok = true;
-               }
-            }
+            bool ok = TrhModeBLevels(pendDir, gapTop, gapBot, pendDistal, a, cfg, entry, sl, tp, risk);
             if(ok)
             {
+               double liq;
+               if(cfg.useLiquidityTP)
+               {
+                  if(pendDir == 1 && TrhNextLiqHigh(pivHi, nHi, entry, risk * 1.5, liq))
+                     tp = MathMax(tp, liq);
+                  if(pendDir == -1 && TrhNextLiqLow(pivLo, nLo, entry, risk * 1.5, liq))
+                     tp = MathMin(tp, liq);
+               }
+               s.dir = pendDir; s.entry = entry; s.sl = sl; s.tp = tp;
+               s.distal = (pendDir == 1) ? gapBot : gapTop;
+               s.proximal = (pendDir == 1) ? gapTop : gapBot;
                s.barIndex = i; s.barTime = time[i];
                s.setupMode = TRH_MODE_FVG;
                ArrayResize(outSetups, nSetups + 1);
@@ -692,46 +730,40 @@ int TrhScanFvgSetups(const int rates,
       if(phase == 3 && i > fvgBar)
       {
          bool confirmed = false;
+         double widthG = gapTop - gapBot;
+         double bias = cfg.fvgEntryBias;
+         if(bias < 0.0) bias = 0.0;
+         if(bias > 1.0) bias = 1.0;
+         double entryGate = pendDir == 1 ? (gapTop - widthG * bias) : (gapBot + widthG * bias);
          if(pendDir == 1)
          {
             bool retested = (low[i] <= gapTop && low[i] >= gapBot - a * 0.05);
-            confirmed = retested && close[i] > open[i] && close[i] >= (gapBot + gapTop) * 0.5;
+            confirmed = retested && close[i] > open[i] && close[i] >= entryGate;
          }
          else
          {
             bool retested = (high[i] >= gapBot && high[i] <= gapTop + a * 0.05);
-            confirmed = retested && close[i] < open[i] && close[i] <= (gapBot + gapTop) * 0.5;
+            confirmed = retested && close[i] < open[i] && close[i] <= entryGate;
          }
          if(!confirmed) continue;
 
-         double entry = (gapTop + gapBot) * 0.5;
-         double pad = a * (cfg.slPadAtr + cfg.fvgSlExtraAtr);
-         TrhSetup s;
-         if(pendDir == 1)
+         double entry = 0, sl = 0, tp = 0, risk = 0;
+         if(!TrhModeBLevels(pendDir, gapTop, gapBot, pendDistal, a, cfg, entry, sl, tp, risk))
+         { phase = 0; pendDir = 0; continue; }
+
+         double liq;
+         if(cfg.useLiquidityTP)
          {
-            double sl = pendDistal - pad;
-            if(entry <= sl) { phase = 0; pendDir = 0; continue; }
-            double risk = entry - sl;
-            double tp = entry + risk * cfg.riskReward;
-            double liq;
-            if(cfg.useLiquidityTP && TrhNextLiqHigh(pivHi, nHi, entry, risk * 1.5, liq))
+            if(pendDir == 1 && TrhNextLiqHigh(pivHi, nHi, entry, risk * 1.5, liq))
                tp = MathMax(tp, liq);
-            s.dir = 1; s.entry = entry; s.sl = sl; s.tp = tp;
-            s.distal = gapBot; s.proximal = gapTop;
-         }
-         else
-         {
-            double sl = pendDistal + pad;
-            if(sl <= entry) { phase = 0; pendDir = 0; continue; }
-            double risk = sl - entry;
-            double tp = entry - risk * cfg.riskReward;
-            double liq;
-            if(cfg.useLiquidityTP && TrhNextLiqLow(pivLo, nLo, entry, risk * 1.5, liq))
+            if(pendDir == -1 && TrhNextLiqLow(pivLo, nLo, entry, risk * 1.5, liq))
                tp = MathMin(tp, liq);
-            s.dir = -1; s.entry = entry; s.sl = sl; s.tp = tp;
-            s.distal = gapTop; s.proximal = gapBot;
          }
 
+         TrhSetup s;
+         s.dir = pendDir; s.entry = entry; s.sl = sl; s.tp = tp;
+         s.distal = (pendDir == 1) ? gapBot : gapTop;
+         s.proximal = (pendDir == 1) ? gapTop : gapBot;
          s.barIndex = i; s.barTime = time[i];
          s.setupMode = TRH_MODE_FVG;
          ArrayResize(outSetups, nSetups + 1);
@@ -1233,13 +1265,9 @@ int TrhScanABUnified(const int rates,
                if(cfg.requireFvgRetest) bPhase = 3;
                else
                {
-                  double entry = (bGapTop + bGapBot) * 0.5;
-                  double pad = a * (cfg.slPadAtr + cfg.fvgSlExtraAtr);
-                  double sl = bDir == 1 ? bDistal - pad : bDistal + pad;
-                  double risk = MathAbs(entry - sl);
-                  if(risk > 0)
+                  double entry = 0, sl = 0, tp = 0, risk = 0;
+                  if(TrhModeBLevels(bDir, bGapTop, bGapBot, bDistal, a, cfg, entry, sl, tp, risk))
                   {
-                     double tp = bDir == 1 ? entry + risk * cfg.riskReward : entry - risk * cfg.riskReward;
                      double liq;
                      if(cfg.useLiquidityTP)
                      {
@@ -1260,25 +1288,26 @@ int TrhScanABUnified(const int rates,
          if(bPhase == 3 && i > bFvgBar && newDir == 0)
          {
             bool confirmed = false;
+            double widthG = bGapTop - bGapBot;
+            double bias = cfg.fvgEntryBias;
+            if(bias < 0.0) bias = 0.0;
+            if(bias > 1.0) bias = 1.0;
+            double entryGate = bDir == 1 ? (bGapTop - widthG * bias) : (bGapBot + widthG * bias);
             if(bDir == 1)
             {
                bool retested = low[i] <= bGapTop && low[i] >= bGapBot - a * 0.05;
-               confirmed = retested && close[i] > open[i] && close[i] >= (bGapBot + bGapTop) * 0.5;
+               confirmed = retested && close[i] > open[i] && close[i] >= entryGate;
             }
             else
             {
                bool retested2 = high[i] >= bGapBot && high[i] <= bGapTop + a * 0.05;
-               confirmed = retested2 && close[i] < open[i] && close[i] <= (bGapBot + bGapTop) * 0.5;
+               confirmed = retested2 && close[i] < open[i] && close[i] <= entryGate;
             }
             if(confirmed)
             {
-               double entry = (bGapTop + bGapBot) * 0.5;
-               double pad = a * (cfg.slPadAtr + cfg.fvgSlExtraAtr);
-               double sl = bDir == 1 ? bDistal - pad : bDistal + pad;
-               double risk = MathAbs(entry - sl);
-               if(risk > 0)
+               double entry = 0, sl = 0, tp = 0, risk = 0;
+               if(TrhModeBLevels(bDir, bGapTop, bGapBot, bDistal, a, cfg, entry, sl, tp, risk))
                {
-                  double tp = bDir == 1 ? entry + risk * cfg.riskReward : entry - risk * cfg.riskReward;
                   double liq;
                   if(cfg.useLiquidityTP)
                   {

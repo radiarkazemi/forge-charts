@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.34"
-#property description "TRH EA v3.34: place orders reliably — session OFF · fix SL · wider adopt · trade-allowed check"
+#property version   "3.35"
+#property description "TRH EA v3.35: Mode B Entry/SL/TP match TV-efficient FVG geometry"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -100,7 +100,9 @@ input int    InpMaxFvgBars      = 10;
 input double InpMinFvgAtr       = 0.12;
 input bool   InpRequireFvgRetest= true;
 input int    InpMaxRetestBars   = 8;
-input double InpFvgSlExtraAtr   = 0.20;
+input double InpFvgSlExtraAtr   = 0.45;   // Extra SL Beyond Sweep/FVG (ATRx)
+input double InpFvgEntryBias    = 0.62;   // Entry bias (0.5=mid · 1.0=proximal)
+input double InpFvgMinRiskAtr   = 1.00;   // Min Mode B risk (ATRx)
 
 input group "Mode C - Pro BTB (Break + Retest)"
 input double InpMinBreakAtr     = 0.20;
@@ -164,6 +166,8 @@ void BuildConfig(TrhConfig &cfg)
    cfg.requireFvgRetest= InpRequireFvgRetest;
    cfg.maxRetestBars   = InpMaxRetestBars;
    cfg.fvgSlExtraAtr   = InpFvgSlExtraAtr;
+   cfg.fvgEntryBias    = InpFvgEntryBias;
+   cfg.fvgMinRiskAtr   = InpFvgMinRiskAtr;
    cfg.minBreakAtr     = InpMinBreakAtr;
    cfg.minBreakBodyAtr = InpMinBreakBodyAtr;
    cfg.maxBtbRetestBars= InpMaxBtbRetestBars;
@@ -983,7 +987,7 @@ void UpdateComment(const TrhSetup &last, const int ageBars, const double lots)
    else if(InpSLProtectStyle == TRH_BE_STEP) beName = "BE-STEP";
 
    Comment(StringFormat(
-      "TRH EA v3.34 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
+      "TRH EA v3.35 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
       InpAutoTrade ? "ON" : "OFF",
       beName,
       last.dir == 1 ? "LONG" : "SHORT",
@@ -1016,14 +1020,14 @@ int OnInit()
    if(!TradeAllowedOk())
       PrintFormat("TRH WARN: trading blocked — %s", g_workStatus);
 
-   PrintFormat("TRH AutoTrade v3.34 | mode=A+B | BE=%d | farMarket=%s | session=%s | adoptAge<=%d | %s %s",
+   PrintFormat("TRH AutoTrade v3.35 | mode=A+B | BE=%d | farMarket=%s | session=%s | adoptAge<=%d | %s %s",
       (int)InpSLProtectStyle,
       InpFarOpenMarket ? "Y" : "N",
       InpUseSessionFilter ? "ON" : "OFF",
       InpAdoptMaxAgeBars,
       _Symbol, EnumToString(_Period));
 
-   Comment("TRH EA v3.34\nA·SWEEP + B·FVG · session OFF\nfar→market · near→pending @ ENTRY");
+   Comment("TRH EA v3.35\nA·SWEEP + B·FVG · session OFF\nfar→market · near→pending @ ENTRY");
    return INIT_SUCCEEDED;
 }
 
@@ -1087,7 +1091,7 @@ void OnTick()
    int n = TrhScanByMode(copied, t, o, h, l, c, cfg, (int)InpTradeMode, setups);
    if(n <= 0)
    {
-      Comment(StringFormat("TRH EA v3.34 %s — scanning...\nday %d | %s",
+      Comment(StringFormat("TRH EA v3.35 %s — scanning...\nday %d | %s",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades, g_workStatus));
       return;
    }

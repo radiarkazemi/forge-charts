@@ -2,9 +2,9 @@
 
 | File | Role |
 |------|------|
-| `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.29 |
-| `TRH_AutoTrade.mq5` | **EA** v3.34 |
-| `TRH_Engine.mqh` | Shared Engine v228 |
+| `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.30 |
+| `TRH_AutoTrade.mq5` | **EA** v3.35 |
+| `TRH_Engine.mqh` | Shared Engine v229 |
 
 | Mode | Chart name | Live? |
 |------|------------|--------|
@@ -33,7 +33,19 @@ Priority when both fire: **A > B**.
 
 Same-account multi-PC: panel shows `LIVE LONG/SHORT` from the open broker position.
 
-## Smart EA fill (v3.34)
+## Mode B TV-efficient geometry (v229 / EA v3.35)
+
+TradingView Mode B was producing better Entry/SL/TP than MT5 (higher short entry, SL that survived the stop-hunt, deeper 2.4R TP). Engine now matches that model:
+
+| Level | Old MT5 | New (TV-efficient) |
+|-------|---------|---------------------|
+| **ENTRY** | FVG mid (0.50) | Bias **0.62** toward proximal |
+| **SL** | sweep ± 0.22 ATR | Beyond max(sweep, FVG outer) ± **0.47 ATR**, floor **1.0×ATR** risk |
+| **TP** | entry ± risk×2.4 | Same RR, deeper because risk is healthier |
+
+Inputs: `InpFvgEntryBias`, `InpFvgSlExtraAtr`, `InpFvgMinRiskAtr` (Indicator + EA).
+
+## Smart EA fill (v3.35)
 
 - **Far from ENTRY** → **market open immediately** (live SL/TP geometry)
 - **Near ENTRY** → pending **Stop/Limit @ ENTRY**
