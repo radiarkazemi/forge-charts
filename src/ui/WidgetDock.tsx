@@ -1,10 +1,12 @@
+import { conditionLabel, type PriceAlert } from "../data/alerts";
 import { UNIVERSE } from "../data/feed";
 import type { ChartEngine } from "../engine/ChartEngine";
 import { formatPrice, formatVolume } from "../engine/math";
 import type { SymbolInfo } from "../engine/types";
+import { alertStatusText } from "./AlertModal";
 import { useEngine } from "./useEngine";
 
-export type WidgetId = "watchlist" | "alerts" | "object" | "data" | "news" | "calendar";
+export type WidgetId = "watchlist" | "alerts" | "object" | "data" | "news" | "calendar" | "ideas";
 
 const ICONS: { id: WidgetId; label: string; glyph: string }[] = [
   { id: "watchlist", label: "Watchlist", glyph: "☰" },
@@ -13,6 +15,7 @@ const ICONS: { id: WidgetId; label: string; glyph: string }[] = [
   { id: "data", label: "Data Window", glyph: "▤" },
   { id: "news", label: "News", glyph: "◉" },
   { id: "calendar", label: "Calendar", glyph: "▦" },
+  { id: "ideas", label: "Ideas", glyph: "✎" },
 ];
 
 type Props = {
@@ -21,10 +24,23 @@ type Props = {
   onActive: (id: WidgetId | null) => void;
   quotes: Record<string, { price: number; change: number }>;
   onPick: (s: SymbolInfo) => void;
-  alerts: string[];
+  alerts: PriceAlert[];
+  onCreateAlert?: () => void;
+  onToggleAlert?: (id: string) => void;
+  onDeleteAlert?: (id: string) => void;
 };
 
-export function WidgetDock({ engine, active, onActive, quotes, onPick, alerts }: Props) {
+export function WidgetDock({
+  engine,
+  active,
+  onActive,
+  quotes,
+  onPick,
+  alerts,
+  onCreateAlert,
+  onToggleAlert,
+  onDeleteAlert,
+}: Props) {
   const snap = useEngine(engine);
   const bar = snap?.hover ?? snap?.last;
   return (
@@ -85,7 +101,8 @@ export function WidgetDock({ engine, active, onActive, quotes, onPick, alerts }:
               ))}
             </ul>
           ) : null}
-          {active === "data" && bar ? (
+          {active === "data" ? (
+            bar ? (
             <dl className="data-win">
               <div>
                 <dt>Open</dt>
@@ -112,11 +129,48 @@ export function WidgetDock({ engine, active, onActive, quotes, onPick, alerts }:
                 <dd>{new Date(bar.time * 1000).toUTCString()}</dd>
               </div>
             </dl>
+            ) : (
+              <ul className="objects">
+                <li className="muted">Hover a bar for OHLC, or open Indicators from the toolbar.</li>
+              </ul>
+            )
           ) : null}
           {active === "alerts" ? (
-            <ul className="objects">
-              {alerts.length ? alerts.map((a) => <li key={a}>{a}</li>) : <li className="muted">No alerts yet. Use Alert on the toolbar.</li>}
-            </ul>
+            <div className="alerts-panel">
+              <button type="button" className="alerts-create" onClick={onCreateAlert}>
+                + Create alert
+              </button>
+              {alerts.length ? (
+                <ul className="objects alert-list">
+                  {alerts.map((a) => (
+                    <li key={a.id} className={a.enabled ? "" : "muted"}>
+                      <div className="alert-item-main">
+                        <strong>{a.name}</strong>
+                        <span>
+                          {a.symbol} · {conditionLabel(a.condition)} {a.price}
+                        </span>
+                        <em>
+                          {alertStatusText(a)}
+                          {a.fireCount ? ` · fired ${a.fireCount}×` : ""}
+                        </em>
+                      </div>
+                      <div className="alert-item-actions">
+                        <button type="button" title={a.enabled ? "Pause" : "Resume"} onClick={() => onToggleAlert?.(a.id)}>
+                          {a.enabled ? "Ⅱ" : "▶"}
+                        </button>
+                        <button type="button" title="Delete" onClick={() => onDeleteAlert?.(a.id)}>
+                          ×
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <ul className="objects">
+                  <li className="muted">No alerts yet. Use Alert on the toolbar or Alt+A.</li>
+                </ul>
+              )}
+            </div>
           ) : null}
           {active === "news" ? (
             <ul className="objects">
@@ -130,6 +184,20 @@ export function WidgetDock({ engine, active, onActive, quotes, onPick, alerts }:
               <li>CPI — tomorrow 12:30 UTC</li>
               <li>FOMC minutes — Wed</li>
               <li>NFP — Friday</li>
+              <li className="muted">Seasonality: {snap?.symbol.ticker ?? "symbol"} 5y same-week bias</li>
+            </ul>
+          ) : null}
+          {active === "ideas" ? (
+            <ul className="objects">
+              <li>
+                <strong>Break & retest</strong>
+                <span className="muted"> — local idea on {snap?.symbol.ticker}</span>
+              </li>
+              <li>
+                <strong>Range fade</strong>
+                <span className="muted"> — wait for failed auction</span>
+              </li>
+              <li className="muted">Community publish is OUT — ideas stay on-device only.</li>
             </ul>
           ) : null}
         </div>

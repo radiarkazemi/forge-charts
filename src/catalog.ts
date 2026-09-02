@@ -123,12 +123,17 @@ export const CHART_TYPES: { id: ChartType; label: string; group: string }[] = [
 
 export type IndicatorTab = "technicals" | "financials" | "community" | "invite" | "patterns";
 
+export type IndicatorRole = "indicator" | "strategy" | "metric" | "pattern" | "script";
+
 export type IndicatorCatalogEntry = {
   id: string;
   label: string;
   group: string;
   tab: IndicatorTab;
+  role: IndicatorRole;
   kind?: IndicatorKind;
+  /** Pattern tools that can be armed from the dialog. */
+  tool?: Tool;
   author?: string;
 };
 
@@ -140,38 +145,86 @@ export const INDICATOR_TABS: { id: IndicatorTab; label: string }[] = [
   { id: "patterns", label: "Patterns" },
 ];
 
+export const INDICATOR_ROLE_FILTERS: { id: "all" | IndicatorRole; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "indicator", label: "Indicators" },
+  { id: "strategy", label: "Strategies" },
+  { id: "metric", label: "Metrics" },
+  { id: "pattern", label: "Patterns" },
+  { id: "script", label: "Scripts" },
+];
+
 export const INDICATOR_CATALOG: IndicatorCatalogEntry[] = [
-  { id: "sma", kind: "sma", label: "Moving Average", group: "Trend", tab: "technicals" },
-  { id: "ema", kind: "ema", label: "Moving Average Exponential", group: "Trend", tab: "technicals" },
-  { id: "wma", kind: "wma", label: "Moving Average Weighted", group: "Trend", tab: "technicals" },
-  { id: "bb", kind: "bb", label: "Bollinger Bands", group: "Trend", tab: "technicals" },
-  { id: "vwap", kind: "vwap", label: "VWAP", group: "Volume", tab: "technicals" },
-  { id: "vol", kind: "vol", label: "Volume", group: "Volume", tab: "technicals" },
-  { id: "rsi", kind: "rsi", label: "Relative Strength Index", group: "Oscillators", tab: "technicals" },
-  { id: "macd", kind: "macd", label: "MACD", group: "Oscillators", tab: "technicals" },
-  { id: "stoch", kind: "stoch", label: "Stochastic", group: "Oscillators", tab: "technicals" },
-  { id: "atr", kind: "atr", label: "Average True Range", group: "Volatility", tab: "technicals" },
-  { id: "fin:eps", label: "Earnings Per Share", group: "Income Statement", tab: "financials" },
-  { id: "fin:revenue", label: "Total Revenue", group: "Income Statement", tab: "financials" },
-  { id: "fin:net-income", label: "Net Income", group: "Income Statement", tab: "financials" },
-  { id: "fin:pe", label: "Price to Earnings Ratio", group: "Valuation", tab: "financials" },
-  { id: "fin:pb", label: "Price to Book Ratio", group: "Valuation", tab: "financials" },
-  { id: "fin:debt", label: "Total Debt", group: "Balance Sheet", tab: "financials" },
-  { id: "fin:cash", label: "Cash and Equivalents", group: "Balance Sheet", tab: "financials" },
-  { id: "fin:margin", label: "Profit Margin", group: "Ratios", tab: "financials" },
-  { id: "fin:roe", label: "Return on Equity", group: "Ratios", tab: "financials" },
-  { id: "com:rsi-div", label: "RSI Divergence Indicator", group: "Oscillators", tab: "community", author: "ChartMaster42" },
-  { id: "com:supertrend-pro", label: "Supertrend Pro+", group: "Trend", tab: "community", author: "AlphaSignals" },
-  { id: "com:vol-profile", label: "Volume Profile Lite", group: "Volume", tab: "community", author: "QuantForge" },
-  { id: "com:session-map", label: "Session Map Overlay", group: "Time", tab: "community", author: "DayTraderX" },
-  { id: "com:smart-money", label: "Smart Money Concepts", group: "Trend", tab: "community", author: "ICTFan" },
-  { id: "inv:alpha", label: "Alpha Momentum Suite", group: "Invite-only", tab: "invite", author: "PrivateLab" },
-  { id: "inv:inst-flow", label: "Institutional Flow Tracker", group: "Invite-only", tab: "invite", author: "HedgeDesk" },
-  { id: "pat:hs", label: "Head and Shoulders", group: "Reversal", tab: "patterns" },
-  { id: "pat:double-top", label: "Double Top", group: "Reversal", tab: "patterns" },
-  { id: "pat:triangle", label: "Ascending Triangle", group: "Continuation", tab: "patterns" },
-  { id: "pat:flag", label: "Bull Flag", group: "Continuation", tab: "patterns" },
-  { id: "pat:wedge", label: "Rising Wedge", group: "Reversal", tab: "patterns" },
+  // Built-in technicals (runnable)
+  { id: "sma", kind: "sma", label: "Moving Average", group: "Trend", tab: "technicals", role: "indicator" },
+  { id: "ema", kind: "ema", label: "Moving Average Exponential", group: "Trend", tab: "technicals", role: "indicator" },
+  { id: "wma", kind: "wma", label: "Moving Average Weighted", group: "Trend", tab: "technicals", role: "indicator" },
+  { id: "bb", kind: "bb", label: "Bollinger Bands", group: "Trend", tab: "technicals", role: "indicator" },
+  { id: "vwap", kind: "vwap", label: "VWAP", group: "Volume", tab: "technicals", role: "indicator" },
+  { id: "vol", kind: "vol", label: "Volume", group: "Volume", tab: "technicals", role: "indicator" },
+  { id: "rsi", kind: "rsi", label: "Relative Strength Index", group: "Oscillators", tab: "technicals", role: "indicator" },
+  { id: "macd", kind: "macd", label: "MACD", group: "Oscillators", tab: "technicals", role: "indicator" },
+  { id: "stoch", kind: "stoch", label: "Stochastic", group: "Oscillators", tab: "technicals", role: "indicator" },
+  { id: "atr", kind: "atr", label: "Average True Range", group: "Volatility", tab: "technicals", role: "indicator" },
+  // Built-in technicals catalog density (preview until engine support)
+  { id: "tech:smma", label: "Moving Average Smoothed", group: "Trend", tab: "technicals", role: "indicator" },
+  { id: "tech:vwma", label: "Moving Average Volume Weighted", group: "Trend", tab: "technicals", role: "indicator" },
+  { id: "tech:hma", label: "Hull Moving Average", group: "Trend", tab: "technicals", role: "indicator" },
+  { id: "tech:ichimoku", label: "Ichimoku Cloud", group: "Trend", tab: "technicals", role: "indicator" },
+  { id: "tech:psar", label: "Parabolic SAR", group: "Trend", tab: "technicals", role: "indicator" },
+  { id: "tech:supertrend", label: "Supertrend", group: "Trend", tab: "technicals", role: "indicator" },
+  { id: "tech:adx", label: "Average Directional Index", group: "Trend", tab: "technicals", role: "indicator" },
+  { id: "tech:stochrsi", label: "Stochastic RSI", group: "Oscillators", tab: "technicals", role: "indicator" },
+  { id: "tech:cci", label: "Commodity Channel Index", group: "Oscillators", tab: "technicals", role: "indicator" },
+  { id: "tech:willr", label: "Williams %R", group: "Oscillators", tab: "technicals", role: "indicator" },
+  { id: "tech:obv", label: "On Balance Volume", group: "Volume", tab: "technicals", role: "indicator" },
+  { id: "tech:cmf", label: "Chaikin Money Flow", group: "Volume", tab: "technicals", role: "indicator" },
+  { id: "tech:donchian", label: "Donchian Channels", group: "Volatility", tab: "technicals", role: "indicator" },
+  { id: "tech:keltner", label: "Keltner Channels", group: "Volatility", tab: "technicals", role: "indicator" },
+  { id: "tech:pivot", label: "Pivot Points Standard", group: "Levels", tab: "technicals", role: "indicator" },
+  // Strategies
+  { id: "strat:ma-cross", label: "MA Cross Strategy", group: "Strategies", tab: "technicals", role: "strategy" },
+  { id: "strat:rsi-revert", label: "RSI Reversion Strategy", group: "Strategies", tab: "technicals", role: "strategy" },
+  { id: "strat:macd-trend", label: "MACD Trend Strategy", group: "Strategies", tab: "technicals", role: "strategy" },
+  { id: "strat:breakout", label: "Donchian Breakout Strategy", group: "Strategies", tab: "technicals", role: "strategy" },
+  // Financials (metrics)
+  { id: "fin:eps", label: "Earnings Per Share", group: "Income Statement", tab: "financials", role: "metric" },
+  { id: "fin:revenue", label: "Total Revenue", group: "Income Statement", tab: "financials", role: "metric" },
+  { id: "fin:net-income", label: "Net Income", group: "Income Statement", tab: "financials", role: "metric" },
+  { id: "fin:ebitda", label: "EBITDA", group: "Income Statement", tab: "financials", role: "metric" },
+  { id: "fin:pe", label: "Price to Earnings Ratio", group: "Valuation", tab: "financials", role: "metric" },
+  { id: "fin:pb", label: "Price to Book Ratio", group: "Valuation", tab: "financials", role: "metric" },
+  { id: "fin:ps", label: "Price to Sales Ratio", group: "Valuation", tab: "financials", role: "metric" },
+  { id: "fin:debt", label: "Total Debt", group: "Balance Sheet", tab: "financials", role: "metric" },
+  { id: "fin:cash", label: "Cash and Equivalents", group: "Balance Sheet", tab: "financials", role: "metric" },
+  { id: "fin:assets", label: "Total Assets", group: "Balance Sheet", tab: "financials", role: "metric" },
+  { id: "fin:margin", label: "Profit Margin", group: "Ratios", tab: "financials", role: "metric" },
+  { id: "fin:roe", label: "Return on Equity", group: "Ratios", tab: "financials", role: "metric" },
+  { id: "fin:roa", label: "Return on Assets", group: "Ratios", tab: "financials", role: "metric" },
+  // Community scripts
+  { id: "com:rsi-div", label: "RSI Divergence Indicator", group: "Oscillators", tab: "community", role: "script", author: "ChartMaster42" },
+  { id: "com:supertrend-pro", label: "Supertrend Pro+", group: "Trend", tab: "community", role: "script", author: "AlphaSignals" },
+  { id: "com:vol-profile", label: "Volume Profile Lite", group: "Volume", tab: "community", role: "script", author: "QuantForge" },
+  { id: "com:session-map", label: "Session Map Overlay", group: "Time", tab: "community", role: "script", author: "DayTraderX" },
+  { id: "com:smart-money", label: "Smart Money Concepts", group: "Trend", tab: "community", role: "script", author: "ICTFan" },
+  { id: "com:order-blocks", label: "Order Blocks Detector", group: "Trend", tab: "community", role: "script", author: "SMCTools" },
+  { id: "com:liquidity-hunt", label: "Liquidity Hunt Zones", group: "Levels", tab: "community", role: "script", author: "FlowDesk" },
+  // Invite-only
+  { id: "inv:alpha", label: "Alpha Momentum Suite", group: "Invite-only", tab: "invite", role: "script", author: "PrivateLab" },
+  { id: "inv:inst-flow", label: "Institutional Flow Tracker", group: "Invite-only", tab: "invite", role: "script", author: "HedgeDesk" },
+  { id: "inv:dark-pool", label: "Dark Pool Heatmap", group: "Invite-only", tab: "invite", role: "script", author: "VaultSignals" },
+  // Patterns → drawing tools
+  { id: "pat:hs", label: "Head and Shoulders", group: "Reversal", tab: "patterns", role: "pattern", tool: "headshoulders" },
+  { id: "pat:xabcd", label: "XABCD Pattern", group: "Harmonic", tab: "patterns", role: "pattern", tool: "xabcd" },
+  { id: "pat:cypher", label: "Cypher Pattern", group: "Harmonic", tab: "patterns", role: "pattern", tool: "cypher" },
+  { id: "pat:abcd", label: "ABCD Pattern", group: "Harmonic", tab: "patterns", role: "pattern", tool: "abcd" },
+  { id: "pat:triangle", label: "Triangle Pattern", group: "Continuation", tab: "patterns", role: "pattern", tool: "trianglepattern" },
+  { id: "pat:three-drives", label: "Three Drives Pattern", group: "Harmonic", tab: "patterns", role: "pattern", tool: "threedrives" },
+  { id: "pat:elliott-impulse", label: "Elliott Impulse Wave (12345)", group: "Elliott", tab: "patterns", role: "pattern", tool: "elliottimpulse" },
+  { id: "pat:elliott-abc", label: "Elliott Correction Wave (ABC)", group: "Elliott", tab: "patterns", role: "pattern", tool: "elliottcorrection" },
+  { id: "pat:double-top", label: "Double Top / Bottom", group: "Reversal", tab: "patterns", role: "pattern" },
+  { id: "pat:flag", label: "Bull / Bear Flag", group: "Continuation", tab: "patterns", role: "pattern" },
+  { id: "pat:wedge", label: "Rising / Falling Wedge", group: "Reversal", tab: "patterns", role: "pattern" },
 ];
 
 export const INDICATORS = INDICATOR_CATALOG.filter((item): item is IndicatorCatalogEntry & { kind: IndicatorKind } => !!item.kind);
