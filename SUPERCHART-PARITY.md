@@ -20,7 +20,7 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | ID | Supercharts item | Forge | Notes |
 | --- | --- | --- | --- |
 | C-01 | App header (product, search, alerts, profile) | MATCH | Brand + Products/Community/Markets/Brokers/More menus, search (⌘K), alerts badge, local profile menu. Cloud account/sync remains OUT |
-| C-02 | Top chart toolbar | PARTIAL | T-02/T-03/T-04 advanced; remaining T-* still open |
+| C-02 | Top chart toolbar | PARTIAL | T-02–T-04, T-08, T-09 advanced; remaining T-* still open |
 | C-03 | Left drawing toolbar | PARTIAL | See section 2 |
 | C-04 | Chart canvas + legend + overlays | PARTIAL | See section 4 |
 | C-05 | Right widget bar | PARTIAL | See section 8 |
