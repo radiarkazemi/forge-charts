@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "2.34"
-#property description "TRH v2.34: reject micro-FVG (<1.5pt) · SL floor 1.55ATR · show history"
+#property version   "2.35"
+#property description "TRH v2.35: force-skip micro-FVG even with stale inputs · history always on"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -17,8 +17,8 @@
 #define TRH_ENGINE_VERSION 0
 #endif
 
-#define TRH_IND_BUILD 234
-#define TRH_MIN_ENGINE 232
+#define TRH_IND_BUILD 235
+#define TRH_MIN_ENGINE 233
 
 enum ENUM_TRH_PANEL_CORNER
 {
@@ -79,8 +79,8 @@ input bool   InpUseLiquidityTP  = true;   // Prefer Opposing Pivot As TP
 
 input group "Display - layout"
 input int    InpSetupWidth      = 80;     // Box Width (bars)
-input bool   InpOnlyLast        = false;  // Only Last Setup (false=show history like TV)
-input int    InpHistoryCount    = 8;      // History Setups (if Only Last = false)
+input bool   InpOnlyLast        = false;  // ignored — history always drawn (TV parity)
+input int    InpHistoryCount    = 12;     // History Setups To Keep On Chart
 input bool   InpExtendToNow     = true;   // Extend Boxes Until TP/SL (then freeze)
 input bool   InpFreezeOnExit    = true;   // Freeze setup at TP/SL bar (keep until next)
 input ENUM_TRH_PANEL_CORNER InpPanelCorner = TRH_PANEL_LEFT; // Info Panel Corner
@@ -122,7 +122,7 @@ input bool   InpSyncLivePosition = true;  // Show open broker position on this c
 input ulong  InpSyncMagic        = 260825;// EA magic (0 = any position on symbol)
 input bool   InpPreferLivePanel  = true;  // Panel follows live position over old SL/TP hold
 
-string   OBJ_PREFIX = "TRH234_";  // new prefix forces wipe of stale drawings
+string   OBJ_PREFIX = "TRH235_";  // new prefix forces wipe of stale drawings
 TrhSetup g_setups[];
 int      g_nSetups = 0;
 datetime g_lastAlertTime = 0;
@@ -146,6 +146,7 @@ int OnInit()
    ObjectsDeleteAll(0, "TRH232_");
    ObjectsDeleteAll(0, "TRH233_");
    ObjectsDeleteAll(0, "TRH234_");
+   ObjectsDeleteAll(0, "TRH235_");
 
    if(TRH_ENGINE_VERSION < TRH_MIN_ENGINE)
    {
@@ -157,9 +158,21 @@ int OnInit()
    }
    IndicatorSetString(INDICATOR_SHORTNAME,
       "TRH v" + IntegerToString(TRH_IND_BUILD) + " Eng" + IntegerToString(TRH_ENGINE_VERSION) + " Q-FVG");
+
+   // Stale chart inputs from v233 caused micro-FVG + hidden history. Warn loudly.
+   if(InpMinFvgPoints < 1.50 || InpOnlyLast || InpFvgMinRiskAtr < 1.55)
+   {
+      Alert("TRH v235: chart had stale inputs (OnlyLast / weak FVG). ",
+            "Engine now FORCE-clamps Min FVG≥1.50pt and always draws history. ",
+            "Panel MUST read: TRH v235 · Eng233 · Q-FVG");
+   }
+   else
+   {
+      Print("TRH v235 Eng233 ready — panel must show TRH v235 · Eng233 · Q-FVG");
+   }
    Print("TRH indicator build ", TRH_IND_BUILD,
          " | Engine ", TRH_ENGINE_VERSION,
-         " | Mode B Q-FVG min1.5pt | minRisk=1.55ATR | history ON");
+         " | Mode B clamp min1.5pt | minRisk=1.55ATR | history FORCED ON");
    return INIT_SUCCEEDED;
 }
 
@@ -576,7 +589,7 @@ void DrawInfoPanel(const TrhSetup &s, const string stTxt, const int stCode,
 
 void DrawOneSetup(const TrhSetup &s, const datetime &time[],
                   const double &high[], const double &low[], const double &close[],
-                  const int rates)
+                  const int rates, const bool primary = true)
 {
    int bi = s.barIndex;
    if(bi < 0 || bi >= rates) return;
@@ -627,8 +640,8 @@ void DrawOneSetup(const TrhSetup &s, const datetime &time[],
       SetTrend(OBJ_PREFIX + "TT_" + tag, t1, s.tp, t2, s.tp, InpTpCol, STYLE_DOT, 1);
    }
 
-   // Full-width HLines only while trade is open; freeze = no endless lines after exit
-   if(InpShowHLines && stCode <= 1)
+   // Full-width HLines only on primary active setup (history keeps boxes/labels like TV)
+   if(InpShowHLines && primary && stCode <= 1)
    {
       SetHLine(OBJ_PREFIX + "HE_" + tag, s.entry, InpEntryCol, STYLE_SOLID, 1);
       SetHLine(OBJ_PREFIX + "HS_" + tag, s.sl, InpSlCol, STYLE_DOT, 1);
@@ -843,30 +856,40 @@ int OnCalculate(const int rates_total,
          return rates_total;
       }
 
-      // Draw hold (active trade setup) first; optionally history behind it
-      if(!InpOnlyLast && g_nSetups > 0)
+      // Always draw history like TradingView (ignore stale OnlyLast=true)
+      if(g_nSetups > 0)
       {
          int from = MathMax(0, g_nSetups - MathMax(1, InpHistoryCount));
          for(int i = from; i < g_nSetups; i++)
          {
             if(g_holdValid && g_setups[i].barTime == g_holdSetup.barTime) continue;
-            DrawOneSetup(g_setups[i], t, h, l, c, rates_total);
+            DrawOneSetup(g_setups[i], t, h, l, c, rates_total, false);
          }
       }
       if(g_holdValid)
-         DrawOneSetup(g_holdSetup, t, h, l, c, rates_total);
+         DrawOneSetup(g_holdSetup, t, h, l, c, rates_total, true);
       else if(g_nSetups > 0)
-         DrawOneSetup(g_setups[g_nSetups - 1], t, h, l, c, rates_total);
+         DrawOneSetup(g_setups[g_nSetups - 1], t, h, l, c, rates_total, true);
    }
    else if(g_holdValid)
    {
-      DrawOneSetup(g_holdSetup, t, h, l, c, rates_total);
+      // Refresh primary + keep history boxes alive on tick
+      if(g_nSetups > 0)
+      {
+         int from = MathMax(0, g_nSetups - MathMax(1, InpHistoryCount));
+         for(int i = from; i < g_nSetups; i++)
+         {
+            if(g_setups[i].barTime == g_holdSetup.barTime) continue;
+            DrawOneSetup(g_setups[i], t, h, l, c, rates_total, false);
+         }
+      }
+      DrawOneSetup(g_holdSetup, t, h, l, c, rates_total, true);
    }
    else if(g_nSetups > 0)
    {
-      int from = InpOnlyLast ? g_nSetups - 1 : MathMax(0, g_nSetups - MathMax(1, InpHistoryCount));
+      int from = MathMax(0, g_nSetups - MathMax(1, InpHistoryCount));
       for(int i = from; i < g_nSetups; i++)
-         DrawOneSetup(g_setups[i], t, h, l, c, rates_total);
+         DrawOneSetup(g_setups[i], t, h, l, c, rates_total, (i == g_nSetups - 1));
    }
 
    // Always refresh live broker position (same account on other PCs)

@@ -2,35 +2,38 @@
 
 | File | Role |
 |------|------|
-| `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.34 (build 234) |
-| `TRH_AutoTrade.mq5` | **EA** v3.39 |
-| `TRH_Engine.mqh` | Shared Engine v232 |
+| `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.35 (build 235) |
+| `TRH_AutoTrade.mq5` | **EA** v3.40 |
+| `TRH_Engine.mqh` | Shared Engine v233 |
 
-## Why TV hit TP and MT5 kept hitting SL
+## Why your chart still showed the bad setup
 
-MT5 was locking a **0.81pt micro FVG** (mid 4327.01, SL ~4330.4). That setup:
-1. Got stop-hunted on the wick
-2. Started cooldown → **blocked the real TV-quality setup** (mid 4328.01, SL 4331.99)
-3. With OnlyLast=true, history disappeared so you only saw the bad one
+Your screenshot panel says **`TRH v233 · Eng231`** — that is the **old** build. It accepted the **0.81pt micro FVG** (ENTRY 4327.01 / SL 4330.43 → SL HIT).
 
-### v234 / Eng232 fixes
-| Setting | Value | Effect |
-|---------|-------|--------|
-| `minFvgPoints` | **1.50** | Hard-rejects the 0.81pt micro gap |
-| `minFvgAtr` | **0.45** | ATR gate |
-| `fvgMinRiskAtr` | **1.55** | SL floor clears ~4330.5–4331 wick |
-| `fvgSlExtraAtr` | **0.45** | Wider pad beyond FVG outer |
-| Upgrade FVG | while waiting retest | Prefer larger quality gap |
-| OnlyLast | **false** | Show setup history again |
-| ENTRY | still FVG mid | Same as TV |
+TradingView used the quality gap (ENTRY **4328.01** / SL **4331.99** → TP HIT).
 
-## Fresh install
+MT5 also **keeps old input values** after recompile. Even with newer source, a chart that once had `OnlyLast=true` or a weak Min FVG will keep those values unless you remove/re-add the indicator — or the engine force-clamps them (v235).
 
-1. Remove TRH from chart · delete `.ex5`
-2. [Download zip](https://github.com/radiarkazemi/forge-charts/raw/cursor/trh-mt5-abc-992e/mt5/TRH_Trading_Room_Hunter_MT5.zip)
-3. Replace Engine + Indicator + EA · compile both
-4. Panel must say **`TRH v234 · Eng232 · Q-FVG`**
-5. **Reset inputs** if Min FVG Points is missing / still 0.12
-6. Reload Pine from repo (same filters)
+## v235 / Eng233 fixes
+
+| Fix | Effect |
+|-----|--------|
+| **Force-clamp** Min FVG ≥ **1.50pt** | Stale inputs cannot recreate the 0.81pt trap |
+| Clamp minRisk ≥ **1.55 ATR**, SL pad ≥ **0.45 ATR** | Survive the ~4330.5–4331 wick |
+| **History always drawn** | Ignores stale `OnlyLast=true` |
+| Upgrade FVG while waiting retest | Prefer larger quality gap |
+| Panel must read | **`TRH v235 · Eng233 · Q-FVG`** |
+
+## Fresh install (required)
+
+1. **Remove** TRH indicator + EA from the chart
+2. Delete old `TRH_Trading_Room_Hunter.ex5` / `TRH_AutoTrade.ex5` in `MQL5/Indicators` and `MQL5/Experts`
+3. Copy these three files from the zip into the same folder:
+   - `TRH_Engine.mqh`
+   - `TRH_Trading_Room_Hunter.mq5`
+   - `TRH_AutoTrade.mq5`
+4. Compile **both** mq5 files in MetaEditor (F7)
+5. Re-attach indicator — panel **must** say **`TRH v235 · Eng233 · Q-FVG`**
+6. If panel still says v233 / Eng231 → wrong folder / old `.ex5` still loaded
 
 That `FVG 4326.61→4327.42` setup must **not** appear anymore.

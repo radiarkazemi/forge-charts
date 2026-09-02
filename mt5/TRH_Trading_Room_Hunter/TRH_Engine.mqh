@@ -5,7 +5,7 @@
 #ifndef TRH_ENGINE_MQH
 #define TRH_ENGINE_MQH
 
-#define TRH_ENGINE_VERSION 232
+#define TRH_ENGINE_VERSION 233
 #define TRH_MAX_PIVOTS 30
 #define TRH_ATR_LEN    14
 
@@ -117,6 +117,18 @@ bool TrhFvgWideEnough(const double width, const double atr, const TrhConfig &cfg
    if(width < cfg.minFvgPoints) return false;
    if(atr > 0.0 && width < atr * cfg.minFvgAtr) return false;
    return true;
+}
+
+// MT5 keeps old chart inputs after recompile. Floor Mode B so a stale
+// MinFvgPoints=0.12 / weak SL pad cannot recreate the 0.81pt micro-FVG trap.
+void TrhClampModeBQuality(TrhConfig &cfg)
+{
+   if(cfg.minFvgPoints  < 1.50) cfg.minFvgPoints  = 1.50;
+   if(cfg.minFvgAtr     < 0.45) cfg.minFvgAtr     = 0.45;
+   if(cfg.fvgMinRiskAtr < 1.55) cfg.fvgMinRiskAtr = 1.55;
+   if(cfg.fvgSlExtraAtr < 0.45) cfg.fvgSlExtraAtr = 0.45;
+   if(cfg.maxFvgBars    < 18)   cfg.maxFvgBars    = 18;
+   if(cfg.maxRetestBars < 12)   cfg.maxRetestBars = 12;
 }
 
 // Short labels on chart tags / panel
@@ -726,6 +738,28 @@ int TrhScanFvgSetups(const int rates,
          continue;
       }
 
+      // While waiting for retest, upgrade to a larger quality FVG if one forms
+      if(phase == 3 && i >= 2 && i > fvgBar)
+      {
+         double curW = gapTop - gapBot;
+         if(pendDir == 1)
+         {
+            double bot = high[i - 2];
+            double top = low[i];
+            double w = top - bot;
+            if(TrhFvgWideEnough(w, a, cfg) && w > curW)
+            { gapBot = bot; gapTop = top; fvgBar = i; }
+         }
+         else
+         {
+            double top2 = low[i - 2];
+            double bot2 = high[i];
+            double w = top2 - bot2;
+            if(TrhFvgWideEnough(w, a, cfg) && w > curW)
+            { gapBot = bot2; gapTop = top2; fvgBar = i; }
+         }
+      }
+
       // Phase 3 -> retest FVG then confirm close back in trade direction
       if(phase == 3 && i > fvgBar)
       {
@@ -744,7 +778,12 @@ int TrhScanFvgSetups(const int rates,
 
          double entry = 0, sl = 0, tp = 0, risk = 0;
          if(!TrhModeBLevels(pendDir, gapTop, gapBot, pendDistal, a, cfg, entry, sl, tp, risk))
-         { phase = 0; pendDir = 0; continue; }
+         {
+            // Bad geometry — resume hunt instead of aborting the sweep
+            phase = 2;
+            fvgBar = -1;
+            continue;
+         }
 
          double liq;
          if(cfg.useLiquidityTP)
@@ -1382,10 +1421,13 @@ int TrhScanByMode(const int rates,
                   const double &high[],
                   const double &low[],
                   const double &close[],
-                  const TrhConfig &cfg,
+                  const TrhConfig &cfgIn,
                   const int tradeMode,
                   TrhSetup &outSetups[])
 {
+   TrhConfig cfg = cfgIn;
+   TrhClampModeBQuality(cfg);
+
    ArrayResize(outSetups, 0);
    if(tradeMode == TRH_SCAN_CLASSIC)
       return TrhScanSetups(rates, time, open, high, low, close, cfg, outSetups);

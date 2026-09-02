@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.39"
-#property description "TRH EA v3.39: reject micro-FVG (<1.5pt) · SL floor 1.55ATR"
+#property version   "3.40"
+#property description "TRH EA v3.40: force-clamp micro-FVG floors (stale inputs safe)"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -987,7 +987,7 @@ void UpdateComment(const TrhSetup &last, const int ageBars, const double lots)
    else if(InpSLProtectStyle == TRH_BE_STEP) beName = "BE-STEP";
 
    Comment(StringFormat(
-      "TRH EA v3.39 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
+      "TRH EA v3.40 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
       InpAutoTrade ? "ON" : "OFF",
       beName,
       last.dir == 1 ? "LONG" : "SHORT",
@@ -1003,10 +1003,10 @@ void UpdateComment(const TrhSetup &last, const int ageBars, const double lots)
 
 int OnInit()
 {
-   if(TRH_ENGINE_VERSION < 232)
+   if(TRH_ENGINE_VERSION < 233)
    {
-      Alert("TRH EA v3.39: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
-            "). Copy NEW TRH_Engine.mqh into THIS EA folder and recompile. Need Engine >= 232.");
+      Alert("TRH EA v3.40: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
+            "). Copy NEW TRH_Engine.mqh into THIS EA folder and recompile. Need Engine >= 233.");
       return INIT_FAILED;
    }
 
@@ -1020,7 +1020,7 @@ int OnInit()
    if(!TradeAllowedOk())
       PrintFormat("TRH WARN: trading blocked — %s", g_workStatus);
 
-   PrintFormat("TRH AutoTrade v3.39 | Eng%d | Mode B mid-FVG | BE=%d | farMarket=%s | session=%s | adoptAge<=%d | %s %s",
+   PrintFormat("TRH AutoTrade v3.40 | Eng%d | Mode B mid-FVG | BE=%d | farMarket=%s | session=%s | adoptAge<=%d | %s %s",
       TRH_ENGINE_VERSION,
       (int)InpSLProtectStyle,
       InpFarOpenMarket ? "Y" : "N",
@@ -1028,7 +1028,7 @@ int OnInit()
       InpAdoptMaxAgeBars,
       _Symbol, EnumToString(_Period));
 
-   Comment("TRH EA v3.39 Eng" + IntegerToString(TRH_ENGINE_VERSION) +
+   Comment("TRH EA v3.40 Eng" + IntegerToString(TRH_ENGINE_VERSION) +
            "\nQ-FVG min1.5pt · SL floor 1.55ATR\nfar→market · near→pending @ ENTRY");
    return INIT_SUCCEEDED;
 }
@@ -1093,7 +1093,7 @@ void OnTick()
    int n = TrhScanByMode(copied, t, o, h, l, c, cfg, (int)InpTradeMode, setups);
    if(n <= 0)
    {
-      Comment(StringFormat("TRH EA v3.39 %s — scanning...\nday %d | %s",
+      Comment(StringFormat("TRH EA v3.40 %s — scanning...\nday %d | %s",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades, g_workStatus));
       return;
    }

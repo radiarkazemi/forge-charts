@@ -397,6 +397,25 @@ if barstate.isconfirmed
                         bPhase := 0
                         bDir := 0
 
+            if bPhase == 3 and bar_index >= 2 and bar_index > bFvgBar and newDir == 0
+                float curW = bGapTop - bGapBot
+                if bDir == 1
+                    float botU = high[2]
+                    float topU = low
+                    float wU = topU - botU
+                    if wU >= atr * minFvgAtr and wU >= minFvgPoints and wU > curW
+                        bGapBot := botU
+                        bGapTop := topU
+                        bFvgBar := bar_index
+                else
+                    float topU2 = low[2]
+                    float botU2 = high
+                    float wU2 = topU2 - botU2
+                    if wU2 >= atr * minFvgAtr and wU2 >= minFvgPoints and wU2 > curW
+                        bGapBot := botU2
+                        bGapTop := topU2
+                        bFvgBar := bar_index
+
             if bPhase == 3 and bar_index > bFvgBar and newDir == 0
                 bool confirmed = false
                 if bDir == 1
@@ -434,8 +453,12 @@ if barstate.isconfirmed
                         newDistal := bGapBot
                         newMode := "B · FVG"
                         newModeId := 1
-                    bPhase := 0
-                    bDir := 0
+                        bPhase := 0
+                        bDir := 0
+                    else
+                        // Bad geometry — resume FVG hunt instead of aborting
+                        bPhase := 2
+                        bFvgBar := na
 
     // ── Mode C Pro BTB (quality filters) ──────────────────────────
     if useBtbMode
