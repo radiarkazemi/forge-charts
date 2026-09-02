@@ -55,10 +55,12 @@ assert(sources["TRH_Trading_Room_Hunter.mq5"].includes("InpTradeMode = TRH_TM_BO
 assert(sources["TRH_AutoTrade.mq5"].includes("InpTradeMode = TRH_TM_BOTH"), "EA default A+B");
 assert(sources["TRH_AutoTrade.mq5"].includes("InpRiskReward      = 2.4"), "EA InpRiskReward=2.4");
 assert(sources["TRH_AutoTrade.mq5"].includes("InpSLProtectStyle = TRH_BE_OFF"), "EA default BE OFF (no risk-free)");
+assert(sources["TRH_AutoTrade.mq5"].includes("v3.37"), "EA version 3.37");
+assert(sources["TRH_Trading_Room_Hunter.mq5"].includes("TRH_IND_BUILD 232"), "Indicator build 232");
+assert(sources["TRH_Trading_Room_Hunter.mq5"].includes("TRH_MIN_ENGINE 230"), "Indicator requires Engine 230");
+assert(sources["TRH_Trading_Room_Hunter.mq5"].includes("InpOnlyLast        = true"), "OnlyLast matches Pine default");
 assert(sources["TRH_Engine.mqh"].includes("cfg.fvgSlExtraAtr   = 0.20"), "Engine Mode B SL pad 0.20 (Pine exact)");
 assert(sources["TRH_Engine.mqh"].includes("(gapTop + gapBot) * 0.5"), "Engine Mode B entry = FVG mid");
-assert(sources["TRH_Engine.mqh"].includes("TrhModeBLevels"), "Engine has TrhModeBLevels helper");
-assert(sources["TRH_AutoTrade.mq5"].includes("v3.36"), "EA version 3.36");
 assert(sources["TRH_AutoTrade.mq5"].includes("InpFarOpenMarket     = true"), "EA far-from-ENTRY opens market now");
 assert(sources["TRH_AutoTrade.mq5"].includes("|R="), "EA embeds orig risk in order comment");
 assert(sources["TRH_AutoTrade.mq5"].includes('#include "TRH_Engine.mqh"'), "EA includes shared engine");

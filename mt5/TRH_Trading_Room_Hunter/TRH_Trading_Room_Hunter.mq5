@@ -4,18 +4,21 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "2.31"
-#property description "TRH v2.31: unified A+B · always show latest SWEEP"
+#property version   "2.32"
+#property description "TRH v2.32 Pine-exact Mode B: ENTRY=(FVG mid) SL=distal+0.22ATR — remove old TRH from chart first!"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
 
 #include "TRH_Engine.mqh"
 
-// MQL5 has no #error — version is checked in OnInit (need Engine v228+ in SAME folder).
+// MQL5 has no #error — version is checked in OnInit (need Engine v230+ in SAME folder).
 #ifndef TRH_ENGINE_VERSION
 #define TRH_ENGINE_VERSION 0
 #endif
+
+#define TRH_IND_BUILD 232
+#define TRH_MIN_ENGINE 230
 
 enum ENUM_TRH_PANEL_CORNER
 {
@@ -74,7 +77,7 @@ input bool   InpUseLiquidityTP  = true;   // Prefer Opposing Pivot As TP
 
 input group "Display - layout"
 input int    InpSetupWidth      = 80;     // Box Width (bars)
-input bool   InpOnlyLast        = false;  // Only Last Setup (false=show history)
+input bool   InpOnlyLast        = true;   // Only Last Setup (Pine default)
 input int    InpHistoryCount    = 8;      // History Setups (if Only Last = false)
 input bool   InpExtendToNow     = true;   // Extend Boxes Until TP/SL (then freeze)
 input bool   InpFreezeOnExit    = true;   // Freeze setup at TP/SL bar (keep until next)
@@ -92,7 +95,7 @@ input bool   InpShowPriceLabels = true;   // Show ENTRY / SL / TP Text
 input bool   InpShowTag         = true;   // Show TRH LONG/SHORT Tag
 input bool   InpShowArrow       = true;   // Show Confirm Arrow
 input bool   InpShowMidRoom     = true;   // Mark Mid-Room ENTRY Dot
-input bool   InpShowDistalProx  = false;  // Label Distal / Proximal
+input bool   InpShowDistalProx  = true;   // Label Distal / Proximal / FVG edges
 
 input group "Display - colors"
 input color  InpBullZoneCol     = C'38,166,154';   // Long Room
@@ -117,7 +120,7 @@ input bool   InpSyncLivePosition = true;  // Show open broker position on this c
 input ulong  InpSyncMagic        = 260825;// EA magic (0 = any position on symbol)
 input bool   InpPreferLivePanel  = true;  // Panel follows live position over old SL/TP hold
 
-string   OBJ_PREFIX = "TRH2_";
+string   OBJ_PREFIX = "TRH232_";  // new prefix forces wipe of stale TRH2_ drawings
 TrhSetup g_setups[];
 int      g_nSetups = 0;
 datetime g_lastAlertTime = 0;
@@ -135,13 +138,24 @@ ulong    g_liveTicket = 0;
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   if(TRH_ENGINE_VERSION < 228)
+   // Wipe any leftover drawings from older builds (different prefixes)
+   ObjectsDeleteAll(0, "TRH2_");
+   ObjectsDeleteAll(0, "TRH231_");
+   ObjectsDeleteAll(0, "TRH232_");
+
+   if(TRH_ENGINE_VERSION < TRH_MIN_ENGINE)
    {
-      Alert("TRH: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
-            "). Put NEW TRH_Engine.mqh in the SAME folder as this .mq5 and recompile.");
+      Alert("TRH v", IntegerToString(TRH_IND_BUILD),
+            ": Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
+            "). Copy NEW TRH_Engine.mqh into THIS folder and recompile. Need Engine >= ",
+            IntegerToString(TRH_MIN_ENGINE), ".");
       return INIT_FAILED;
    }
-   IndicatorSetString(INDICATOR_SHORTNAME, "TRH A·SWEEP + B·FVG");
+   IndicatorSetString(INDICATOR_SHORTNAME,
+      "TRH v" + IntegerToString(TRH_IND_BUILD) + " Eng" + IntegerToString(TRH_ENGINE_VERSION) + " mid-FVG");
+   Print("TRH indicator build ", TRH_IND_BUILD,
+         " | Engine ", TRH_ENGINE_VERSION,
+         " | Mode B ENTRY=(gapTop+gapBot)/2 | fvgSlExtra=0.20");
    return INIT_SUCCEEDED;
 }
 
@@ -507,7 +521,7 @@ void DrawInfoPanel(const TrhSetup &s, const string stTxt, const int stCode,
    int y0 = 28;
    if(InpPanelCorner == TRH_PANEL_LEFT) y0 = 70;
 
-   SetPanelBg(OBJ_PREFIX + "PBG", x0, y0, 248, 168, corner);
+   SetPanelBg(OBJ_PREFIX + "PBG", x0, y0, 268, 188, corner);
 
    color sideCol = (s.dir == 1) ? InpBullZoneCol : InpBearZoneCol;
    color stCol = InpEntryCol;
@@ -530,7 +544,9 @@ void DrawInfoPanel(const TrhSetup &s, const string stTxt, const int stCode,
 
    int y = y0 + 8;
    int dy = 16;
-   SetPanelLabel(OBJ_PREFIX + "P0", x0 + 10, y, "TRH | Trading Room Hunter", clrWhite, 10, corner); y += dy + 2;
+   SetPanelLabel(OBJ_PREFIX + "P0", x0 + 10, y,
+      "TRH v" + IntegerToString(TRH_IND_BUILD) + " · Eng" + IntegerToString(TRH_ENGINE_VERSION) + " · mid-FVG",
+      clrWhite, 9, corner); y += dy + 2;
    SetPanelLabel(OBJ_PREFIX + "P1", x0 + 10, y,
       (s.dir == 1 ? "LONG" : "SHORT") + " · " + TrhModeLabel(s.setupMode) + " · " + stTxt, sideCol, 9, corner); y += dy;
    SetPanelLabel(OBJ_PREFIX + "P1b", x0 + 10, y, TrhModeFullName(s.setupMode), TrhModeAccent(s.setupMode, s.dir), 8, corner); y += dy;
@@ -539,6 +555,15 @@ void DrawInfoPanel(const TrhSetup &s, const string stTxt, const int stCode,
    SetPanelLabel(OBJ_PREFIX + "P4", x0 + 10, y, "TP     " + DoubleToString(s.tp, _Digits), InpTpCol, 9, corner); y += dy;
    SetPanelLabel(OBJ_PREFIX + "P5", x0 + 10, y,
       "Risk   " + DoubleToString(risk, _Digits) + "   (" + DoubleToString(rr, 1) + "R)", clrSilver, 9, corner); y += dy;
+   // Mode B anatomy — proves ENTRY is FVG mid on this build
+   if(s.setupMode == TRH_MODE_FVG)
+   {
+      double mid = (s.proximal + s.distal) * 0.5;
+      SetPanelLabel(OBJ_PREFIX + "P5b", x0 + 10, y,
+         "FVG " + DoubleToString(MathMin(s.distal, s.proximal), _Digits) + "→" +
+         DoubleToString(MathMax(s.distal, s.proximal), _Digits) +
+         " mid " + DoubleToString(mid, _Digits), clrSilver, 8, corner); y += dy;
+   }
    SetPanelLabel(OBJ_PREFIX + "P6", x0 + 10, y,
       liveLabel + DoubleToString(liveR, 2) + "R   @ " + DoubleToString(bid, _Digits), stCol, 9, corner); y += dy;
    SetPanelLabel(OBJ_PREFIX + "P7", x0 + 10, y,

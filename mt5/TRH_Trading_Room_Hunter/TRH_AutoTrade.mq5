@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.36"
-#property description "TRH EA v3.36: Mode B Entry/SL/TP exact Pine mid-FVG parity"
+#property version   "3.37"
+#property description "TRH EA v3.37: Mode B Entry/SL/TP exact Pine mid-FVG parity"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -983,7 +983,7 @@ void UpdateComment(const TrhSetup &last, const int ageBars, const double lots)
    else if(InpSLProtectStyle == TRH_BE_STEP) beName = "BE-STEP";
 
    Comment(StringFormat(
-      "TRH EA v3.35 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
+      "TRH EA v3.37 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
       InpAutoTrade ? "ON" : "OFF",
       beName,
       last.dir == 1 ? "LONG" : "SHORT",
@@ -999,10 +999,10 @@ void UpdateComment(const TrhSetup &last, const int ageBars, const double lots)
 
 int OnInit()
 {
-   if(TRH_ENGINE_VERSION < 228)
+   if(TRH_ENGINE_VERSION < 230)
    {
-      Alert("TRH EA: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
-            "). Put NEW TRH_Engine.mqh in the SAME folder as this .mq5 and recompile.");
+      Alert("TRH EA v3.37: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
+            "). Copy NEW TRH_Engine.mqh into THIS EA folder and recompile. Need Engine >= 230.");
       return INIT_FAILED;
    }
 
@@ -1016,14 +1016,16 @@ int OnInit()
    if(!TradeAllowedOk())
       PrintFormat("TRH WARN: trading blocked — %s", g_workStatus);
 
-   PrintFormat("TRH AutoTrade v3.35 | mode=A+B | BE=%d | farMarket=%s | session=%s | adoptAge<=%d | %s %s",
+   PrintFormat("TRH AutoTrade v3.37 | Eng%d | Mode B mid-FVG | BE=%d | farMarket=%s | session=%s | adoptAge<=%d | %s %s",
+      TRH_ENGINE_VERSION,
       (int)InpSLProtectStyle,
       InpFarOpenMarket ? "Y" : "N",
       InpUseSessionFilter ? "ON" : "OFF",
       InpAdoptMaxAgeBars,
       _Symbol, EnumToString(_Period));
 
-   Comment("TRH EA v3.35\nA·SWEEP + B·FVG · session OFF\nfar→market · near→pending @ ENTRY");
+   Comment("TRH EA v3.37 Eng" + IntegerToString(TRH_ENGINE_VERSION) +
+           "\nMode B ENTRY=FVG mid · pad 0.20\nfar→market · near→pending @ ENTRY");
    return INIT_SUCCEEDED;
 }
 
@@ -1087,7 +1089,7 @@ void OnTick()
    int n = TrhScanByMode(copied, t, o, h, l, c, cfg, (int)InpTradeMode, setups);
    if(n <= 0)
    {
-      Comment(StringFormat("TRH EA v3.35 %s — scanning...\nday %d | %s",
+      Comment(StringFormat("TRH EA v3.37 %s — scanning...\nday %d | %s",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades, g_workStatus));
       return;
    }

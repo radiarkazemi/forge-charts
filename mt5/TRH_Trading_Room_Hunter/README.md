@@ -2,8 +2,8 @@
 
 | File | Role |
 |------|------|
-| `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.31 |
-| `TRH_AutoTrade.mq5` | **EA** v3.36 |
+| `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.32 (build 232) |
+| `TRH_AutoTrade.mq5` | **EA** v3.37 |
 | `TRH_Engine.mqh` | Shared Engine v230 |
 
 | Mode | Chart name | Live? |
@@ -33,7 +33,7 @@ Priority when both fire: **A > B**.
 
 Same-account multi-PC: panel shows `LIVE LONG/SHORT` from the open broker position.
 
-## Mode B = exact TradingView Pine (v230 / EA v3.36)
+## Mode B = exact TradingView Pine (v230 / EA v3.37 / Ind build 232)
 
 User TV script is the source of truth. Mode B levels are identical:
 
@@ -44,9 +44,17 @@ SL    = sweepDistal ± pad
 TP    = entry ± risk * 2.4               // + liquidity TP if enabled
 ```
 
-No entry bias / min-risk overrides — those diverged from Pine and were reverted.
+### Fresh install (required — old chart instances keep stale levels)
+1. **Remove** old TRH indicator + EA from the chart
+2. Delete old `.ex5` in `MQL5/Indicators/TRH_Trading_Room_Hunter/` and `MQL5/Experts/TRH_Trading_Room_Hunter/`
+3. Copy **all three** files from the zip into those folders
+4. Compile Indicator + EA in MetaEditor
+5. Re-attach — panel header must say **`TRH v232 · Eng230 · mid-FVG`**
+6. EA Comment must say **`TRH EA v3.37 Eng230`**
 
-## Smart EA fill (v3.36)
+If the panel still shows ENTRY like `4326.61` without an FVG mid line, you are still on the old build.
+
+## Smart EA fill (v3.37)
 
 - **Far from ENTRY** → **market open immediately** (live SL/TP geometry)
 - **Near ENTRY** → pending **Stop/Limit @ ENTRY**
