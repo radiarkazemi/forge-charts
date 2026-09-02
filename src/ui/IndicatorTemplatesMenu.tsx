@@ -140,18 +140,21 @@ export function IndicatorTemplatesMenu({ engine }: Props) {
     <div className="menu-wrap tpl-wrap" ref={wrapRef}>
       <button
         type="button"
-        className={open ? "tb-icon on" : "tb-icon"}
+        className={open ? "tb-btn on" : "tb-btn"}
         title="Indicator templates"
+        aria-expanded={open}
         aria-label="Indicator templates"
-        onClick={() => {
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
           setOpen((v) => !v);
           setSaving(false);
         }}
       >
-        ▦
+        Templates
       </button>
       {open ? (
-        <div className="menu wide tpl-menu">
+        <div className="menu wide tpl-menu" role="menu" onMouseDown={(e) => e.stopPropagation()}>
           <div className="tpl-menu-head">
             <strong>Indicator templates</strong>
             {active ? <span className="tpl-active">Active: {active.name}</span> : <span className="tpl-active">No active template</span>}

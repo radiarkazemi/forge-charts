@@ -320,14 +320,15 @@ button { cursor: pointer; }
 .menu button.on, .menu button:hover { background: var(--hover); }
 .caret { margin-left: 4px; color: var(--muted); font-size: 10px; }
 
-.tpl-wrap { position: relative; }
+.tpl-wrap { position: relative; z-index: 40; }
 .tpl-menu {
   min-width: 320px;
   max-width: min(92vw, 380px);
   max-height: min(70vh, 480px);
   overflow: auto;
-  right: 0;
-  left: auto;
+  left: 0;
+  right: auto;
+  z-index: 1200;
 }
 .tpl-menu-head {
   display: grid;
