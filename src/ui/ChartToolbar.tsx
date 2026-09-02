@@ -5,6 +5,7 @@ import type { ChartEngine } from "../engine/ChartEngine";
 import type { ChartType, Interval } from "../engine/types";
 import { loadJson, saveJson } from "../persist";
 import { useEngine } from "./useEngine";
+import { IndicatorTemplatesMenu } from "./IndicatorTemplatesMenu";
 
 const FAV_KEY = "forge.intervalFavorites";
 const TYPE_FAV_KEY = "forge.chartTypeFavorites";
@@ -320,9 +321,7 @@ export function ChartToolbar({
       <button className="tb-btn accent" onClick={onOpenIndicators} title="Indicators (Alt+I)">
         Indicators
       </button>
-      <button className="tb-icon" title="Indicator templates" onClick={onOpenIndicators}>
-        ▦
-      </button>
+      <IndicatorTemplatesMenu engine={engine} />
       <button className="tb-btn" onClick={onAlert} title="Alert">
         Alert
       </button>
