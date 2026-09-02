@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.35"
-#property description "TRH EA v3.35: Mode B Entry/SL/TP match TV-efficient FVG geometry"
+#property version   "3.36"
+#property description "TRH EA v3.36: Mode B Entry/SL/TP exact Pine mid-FVG parity"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -100,9 +100,7 @@ input int    InpMaxFvgBars      = 10;
 input double InpMinFvgAtr       = 0.12;
 input bool   InpRequireFvgRetest= true;
 input int    InpMaxRetestBars   = 8;
-input double InpFvgSlExtraAtr   = 0.45;   // Extra SL Beyond Sweep/FVG (ATRx)
-input double InpFvgEntryBias    = 0.62;   // Entry bias (0.5=mid · 1.0=proximal)
-input double InpFvgMinRiskAtr   = 1.00;   // Min Mode B risk (ATRx)
+input double InpFvgSlExtraAtr   = 0.20;   // Extra SL Beyond Sweep (ATRx) — Pine exact
 
 input group "Mode C - Pro BTB (Break + Retest)"
 input double InpMinBreakAtr     = 0.20;
@@ -166,8 +164,6 @@ void BuildConfig(TrhConfig &cfg)
    cfg.requireFvgRetest= InpRequireFvgRetest;
    cfg.maxRetestBars   = InpMaxRetestBars;
    cfg.fvgSlExtraAtr   = InpFvgSlExtraAtr;
-   cfg.fvgEntryBias    = InpFvgEntryBias;
-   cfg.fvgMinRiskAtr   = InpFvgMinRiskAtr;
    cfg.minBreakAtr     = InpMinBreakAtr;
    cfg.minBreakBodyAtr = InpMinBreakBodyAtr;
    cfg.maxBtbRetestBars= InpMaxBtbRetestBars;

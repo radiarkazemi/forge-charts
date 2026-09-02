@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "2.29"
-#property description "TRH v2.29: unified A+B · always show latest SWEEP"
+#property version   "2.31"
+#property description "TRH v2.31: unified A+B · always show latest SWEEP"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -52,9 +52,7 @@ input int    InpMaxFvgBars      = 10;     // Max Bars After Displacement For FVG
 input double InpMinFvgAtr       = 0.12;   // Min FVG Gap Size (ATRx)
 input bool   InpRequireFvgRetest= true;   // Wait For FVG Retest Before Signal
 input int    InpMaxRetestBars   = 8;      // Max Bars To Wait For Retest
-input double InpFvgSlExtraAtr   = 0.45;   // Extra SL Beyond Sweep/FVG (ATRx) — TV-wide
-input double InpFvgEntryBias    = 0.62;   // Entry bias (0.5=mid CE · 1.0=full proximal)
-input double InpFvgMinRiskAtr   = 1.00;   // Min Mode B risk (ATRx) — avoid tight SL hunts
+input double InpFvgSlExtraAtr   = 0.20;   // Extra SL Beyond Sweep (ATRx) — Pine exact
 
 input group "Mode C - Pro BTB (Break + Retest)"
 input double InpMinBreakAtr     = 0.20;   // Min Break Beyond Pivot (ATRx)
@@ -699,8 +697,6 @@ void BuildConfig(TrhConfig &cfg)
    cfg.requireFvgRetest= InpRequireFvgRetest;
    cfg.maxRetestBars   = InpMaxRetestBars;
    cfg.fvgSlExtraAtr   = InpFvgSlExtraAtr;
-   cfg.fvgEntryBias    = InpFvgEntryBias;
-   cfg.fvgMinRiskAtr   = InpFvgMinRiskAtr;
    cfg.minBreakAtr     = InpMinBreakAtr;
    cfg.minBreakBodyAtr = InpMinBreakBodyAtr;
    cfg.maxBtbRetestBars= InpMaxBtbRetestBars;

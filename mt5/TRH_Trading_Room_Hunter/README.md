@@ -2,9 +2,9 @@
 
 | File | Role |
 |------|------|
-| `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.30 |
-| `TRH_AutoTrade.mq5` | **EA** v3.35 |
-| `TRH_Engine.mqh` | Shared Engine v229 |
+| `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.31 |
+| `TRH_AutoTrade.mq5` | **EA** v3.36 |
+| `TRH_Engine.mqh` | Shared Engine v230 |
 
 | Mode | Chart name | Live? |
 |------|------------|--------|
@@ -33,19 +33,20 @@ Priority when both fire: **A > B**.
 
 Same-account multi-PC: panel shows `LIVE LONG/SHORT` from the open broker position.
 
-## Mode B TV-efficient geometry (v229 / EA v3.35)
+## Mode B = exact TradingView Pine (v230 / EA v3.36)
 
-TradingView Mode B was producing better Entry/SL/TP than MT5 (higher short entry, SL that survived the stop-hunt, deeper 2.4R TP). Engine now matches that model:
+User TV script is the source of truth. Mode B levels are identical:
 
-| Level | Old MT5 | New (TV-efficient) |
-|-------|---------|---------------------|
-| **ENTRY** | FVG mid (0.50) | Bias **0.62** toward proximal |
-| **SL** | sweep ± 0.22 ATR | Beyond max(sweep, FVG outer) ± **0.47 ATR**, floor **1.0×ATR** risk |
-| **TP** | entry ± risk×2.4 | Same RR, deeper because risk is healthier |
+```
+ENTRY = (gapTop + gapBot) * 0.5          // FVG mid / CE
+pad   = atr * (slPadAtr + fvgSlExtraAtr) // 0.02 + 0.20
+SL    = sweepDistal ± pad
+TP    = entry ± risk * 2.4               // + liquidity TP if enabled
+```
 
-Inputs: `InpFvgEntryBias`, `InpFvgSlExtraAtr`, `InpFvgMinRiskAtr` (Indicator + EA).
+No entry bias / min-risk overrides — those diverged from Pine and were reverted.
 
-## Smart EA fill (v3.35)
+## Smart EA fill (v3.36)
 
 - **Far from ENTRY** → **market open immediately** (live SL/TP geometry)
 - **Near ENTRY** → pending **Stop/Limit @ ENTRY**

@@ -28,12 +28,7 @@ maxFvgBars     = input.int(10, "Max Bars Disp → FVG", group=grpB)
 minFvgAtr      = input.float(0.12, "Min FVG Size (ATR×)", step=0.01, group=grpB)
 requireFvgRetest = input.bool(true, "Require FVG Retest", group=grpB)
 maxRetestBars  = input.int(8, "Max Bars For Retest", group=grpB)
-fvgSlExtraAtr  = input.float(0.45, "Extra SL Pad (ATR×)", step=0.01, group=grpB,
-     tooltip="Wider pad so SL clears stop-hunts (TV-efficient).")
-fvgEntryBias   = input.float(0.62, "FVG Entry Bias", minval=0.5, maxval=1.0, step=0.01, group=grpB,
-     tooltip="0.5 = CE mid · 1.0 = full proximal (better fill). Default 0.62 TV-efficient.")
-fvgMinRiskAtr  = input.float(1.00, "Min Mode B Risk (ATR×)", step=0.05, group=grpB,
-     tooltip="Push SL out if risk would be tighter than this.")
+fvgSlExtraAtr  = input.float(0.20, "Extra SL Pad (ATR×)", step=0.01, group=grpB)
 
 grpC = "Mode C — Pro BTB (quality)"
 minBreakAtr    = input.float(0.20, "Min Break Beyond Pivot (ATR×)", step=0.01, group=grpC)
@@ -150,23 +145,6 @@ f_nextLiquidityLow(fromPrice, minDist) =>
                 if na(best) or px > best
                     best := px
     best
-
-// TV-efficient Mode B levels: proximal-biased entry, wide SL, min risk floor
-f_modeBLevels(int dir, float gapTop, float gapBot, float sweepDistal, float a) =>
-    float width = gapTop - gapBot
-    float bias = math.min(math.max(fvgEntryBias, 0.0), 1.0)
-    float entry = dir == 1 ? gapTop - width * bias : gapBot + width * bias
-    float pad = a * (slPadAtr + fvgSlExtraAtr)
-    float slExt = dir == 1 ? math.min(sweepDistal, gapBot) : math.max(sweepDistal, gapTop)
-    float sl = dir == 1 ? slExt - pad : slExt + pad
-    float risk = math.abs(entry - sl)
-    float minRisk = a * fvgMinRiskAtr
-    if minRisk > 0 and risk < minRisk
-        sl := dir == 1 ? entry - minRisk : entry + minRisk
-        risk := minRisk
-    float tp = dir == 1 ? entry + risk * riskReward : entry - risk * riskReward
-    bool ok = width > 0 and risk > syminfo.mintick and (dir == 1 ? entry > sl : sl > entry)
-    [ok, entry, sl, tp, risk]
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PENDING SWEEP → BUILD ROOM (sample path)
@@ -384,21 +362,24 @@ if barstate.isconfirmed
                     if requireFvgRetest
                         bPhase := 3
                     else if newDir == 0
-                        [okB, eB, slB, tpB, riskB] = f_modeBLevels(bDir, bGapTop, bGapBot, bDistal, atr)
-                        if okB
-                            float tp = tpB
+                        float entry = (bGapTop + bGapBot) * 0.5
+                        float pad = atr * (slPadAtr + fvgSlExtraAtr)
+                        float sl = bDir == 1 ? bDistal - pad : bDistal + pad
+                        float risk = math.abs(entry - sl)
+                        if risk > syminfo.mintick
+                            float tp = bDir == 1 ? entry + risk * riskReward : entry - risk * riskReward
                             if useLiquidityTP
                                 if bDir == 1
-                                    float liq = f_nextLiquidityHigh(eB, riskB * 1.5)
+                                    float liq = f_nextLiquidityHigh(entry, risk * 1.5)
                                     if not na(liq)
                                         tp := math.max(tp, liq)
                                 else
-                                    float liq2 = f_nextLiquidityLow(eB, riskB * 1.5)
+                                    float liq2 = f_nextLiquidityLow(entry, risk * 1.5)
                                     if not na(liq2)
                                         tp := math.min(tp, liq2)
                             newDir := bDir
-                            newEntry := eB
-                            newSl := slB
+                            newEntry := entry
+                            newSl := sl
                             newTp := tp
                             newProximal := bGapTop
                             newDistal := bGapBot
@@ -409,30 +390,31 @@ if barstate.isconfirmed
 
             if bPhase == 3 and bar_index > bFvgBar and newDir == 0
                 bool confirmed = false
-                float bias = math.min(math.max(fvgEntryBias, 0.0), 1.0)
-                float entryGate = bDir == 1 ? bGapTop - (bGapTop - bGapBot) * bias : bGapBot + (bGapTop - bGapBot) * bias
                 if bDir == 1
                     bool retested = low <= bGapTop and low >= bGapBot - atr * 0.05
-                    confirmed := retested and close > open and close >= entryGate
+                    confirmed := retested and close > open and close >= (bGapBot + bGapTop) * 0.5
                 else
                     bool retested2 = high >= bGapBot and high <= bGapTop + atr * 0.05
-                    confirmed := retested2 and close < open and close <= entryGate
+                    confirmed := retested2 and close < open and close <= (bGapBot + bGapTop) * 0.5
                 if confirmed
-                    [okB, eB, slB, tpB, riskB] = f_modeBLevels(bDir, bGapTop, bGapBot, bDistal, atr)
-                    if okB
-                        float tp = tpB
+                    float entry = (bGapTop + bGapBot) * 0.5
+                    float pad = atr * (slPadAtr + fvgSlExtraAtr)
+                    float sl = bDir == 1 ? bDistal - pad : bDistal + pad
+                    float risk = math.abs(entry - sl)
+                    if risk > syminfo.mintick
+                        float tp = bDir == 1 ? entry + risk * riskReward : entry - risk * riskReward
                         if useLiquidityTP
                             if bDir == 1
-                                float liq = f_nextLiquidityHigh(eB, riskB * 1.5)
+                                float liq = f_nextLiquidityHigh(entry, risk * 1.5)
                                 if not na(liq)
                                     tp := math.max(tp, liq)
                             else
-                                float liq2 = f_nextLiquidityLow(eB, riskB * 1.5)
+                                float liq2 = f_nextLiquidityLow(entry, risk * 1.5)
                                 if not na(liq2)
                                     tp := math.min(tp, liq2)
                         newDir := bDir
-                        newEntry := eB
-                        newSl := slB
+                        newEntry := entry
+                        newSl := sl
                         newTp := tp
                         newProximal := bGapTop
                         newDistal := bGapBot
@@ -559,15 +541,17 @@ signalDir := 0
 
 if newDir != 0
     if onlyLast and array.size(sDir) > 0
-        for i = 0 to array.size(bZone) - 1
-            box.delete(array.get(bZone, i))
-            box.delete(array.get(bTp, i))
-            box.delete(array.get(bSl, i))
-            line.delete(array.get(lEntry, i))
-            label.delete(array.get(labE, i))
-            label.delete(array.get(labS, i))
-            label.delete(array.get(labT, i))
-            label.delete(array.get(labTag, i))
+        int nClear = array.size(bZone)
+        if nClear > 0
+            for i = 0 to nClear - 1
+                box.delete(array.get(bZone, i))
+                box.delete(array.get(bTp, i))
+                box.delete(array.get(bSl, i))
+                line.delete(array.get(lEntry, i))
+                label.delete(array.get(labE, i))
+                label.delete(array.get(labS, i))
+                label.delete(array.get(labT, i))
+                label.delete(array.get(labTag, i))
         array.clear(bZone)
         array.clear(bTp)
         array.clear(bSl)

@@ -5,7 +5,7 @@
 #ifndef TRH_ENGINE_MQH
 #define TRH_ENGINE_MQH
 
-#define TRH_ENGINE_VERSION 229
+#define TRH_ENGINE_VERSION 230
 #define TRH_MAX_PIVOTS 30
 #define TRH_ATR_LEN    14
 
@@ -59,8 +59,6 @@ struct TrhConfig
    bool   requireFvgRetest;
    int    maxRetestBars;
    double fvgSlExtraAtr;
-   double fvgEntryBias;    // 0.5=CE mid · >0.5 toward premium (short)/discount (long)
-   double fvgMinRiskAtr;   // push SL out if risk < this × ATR (TV-efficient)
    // Mode C - Pro BTB (breakout -> back to breakeven) — quality filters
    double minBreakAtr;
    double minBreakBodyAtr;
@@ -94,9 +92,7 @@ void TrhDefaultConfig(TrhConfig &cfg)
    cfg.minFvgAtr       = 0.12;
    cfg.requireFvgRetest= true;
    cfg.maxRetestBars   = 8;
-   cfg.fvgSlExtraAtr   = 0.45;   // wider than mid-gap so SL clears stop-hunts (TV parity)
-   cfg.fvgEntryBias    = 0.62;   // slightly premium/discount vs pure CE mid
-   cfg.fvgMinRiskAtr   = 1.00;   // never tighter than ~1×ATR risk
+   cfg.fvgSlExtraAtr   = 0.20;   // exact Pine default
    cfg.minBreakAtr     = 0.20;
    cfg.minBreakBodyAtr = 0.45;
    cfg.maxBtbRetestBars= 10;
@@ -136,10 +132,10 @@ color TrhModeAccent(const int mode, const int dir)
    return (dir == 1) ? clrTeal : clrCrimson;
 }
 
-// TV-efficient Mode B geometry:
-// ENTRY biased toward FVG proximal (better fill than pure mid)
-// SL beyond max(sweep extreme, FVG outer) + pad, never tighter than fvgMinRiskAtr
-// TP = entry ± risk × RR (liquidity TP applied by caller)
+// Exact Pine Mode B levels (user TV script):
+// ENTRY = (gapTop + gapBot) * 0.5
+// SL    = sweepDistal ± atr * (slPadAtr + fvgSlExtraAtr)
+// TP    = entry ± risk * riskReward  (liquidity TP applied by caller)
 bool TrhModeBLevels(const int dir,
                     const double gapTop,
                     const double gapBot,
@@ -155,30 +151,10 @@ bool TrhModeBLevels(const int dir,
    if(width <= 0.0 || atr <= 0.0)
       return false;
 
-   double bias = cfg.fvgEntryBias;
-   if(bias < 0.0) bias = 0.0;
-   if(bias > 1.0) bias = 1.0;
-   // Long: proximal = gapBot → bias>0.5 pulls entry down
-   // Short: proximal = gapTop → bias>0.5 pulls entry up
-   if(dir == 1)
-      entry = gapTop - width * bias;
-   else
-      entry = gapBot + width * bias;
-
+   entry = (gapTop + gapBot) * 0.5;
    double pad = atr * (cfg.slPadAtr + cfg.fvgSlExtraAtr);
-   // SL must clear both the raid extreme and the FVG outer edge
-   double slExt = (dir == 1) ? MathMin(sweepDistal, gapBot) : MathMax(sweepDistal, gapTop);
-   sl = (dir == 1) ? (slExt - pad) : (slExt + pad);
-
+   sl = (dir == 1) ? (sweepDistal - pad) : (sweepDistal + pad);
    risk = MathAbs(entry - sl);
-   double minRisk = atr * cfg.fvgMinRiskAtr;
-   if(minRisk > 0.0 && risk < minRisk)
-   {
-      if(dir == 1) sl = entry - minRisk;
-      else         sl = entry + minRisk;
-      risk = minRisk;
-   }
-
    if(risk <= 0.0)
       return false;
    if(dir == 1 && entry <= sl)
@@ -711,8 +687,7 @@ int TrhScanFvgSetups(const int rates,
                      tp = MathMin(tp, liq);
                }
                s.dir = pendDir; s.entry = entry; s.sl = sl; s.tp = tp;
-               s.distal = (pendDir == 1) ? gapBot : gapTop;
-               s.proximal = (pendDir == 1) ? gapTop : gapBot;
+               s.proximal = gapTop; s.distal = gapBot; // Pine: newProximal=bGapTop, newDistal=bGapBot
                s.barIndex = i; s.barTime = time[i];
                s.setupMode = TRH_MODE_FVG;
                ArrayResize(outSetups, nSetups + 1);
@@ -730,20 +705,15 @@ int TrhScanFvgSetups(const int rates,
       if(phase == 3 && i > fvgBar)
       {
          bool confirmed = false;
-         double widthG = gapTop - gapBot;
-         double bias = cfg.fvgEntryBias;
-         if(bias < 0.0) bias = 0.0;
-         if(bias > 1.0) bias = 1.0;
-         double entryGate = pendDir == 1 ? (gapTop - widthG * bias) : (gapBot + widthG * bias);
          if(pendDir == 1)
          {
             bool retested = (low[i] <= gapTop && low[i] >= gapBot - a * 0.05);
-            confirmed = retested && close[i] > open[i] && close[i] >= entryGate;
+            confirmed = retested && close[i] > open[i] && close[i] >= (gapBot + gapTop) * 0.5;
          }
          else
          {
             bool retested = (high[i] >= gapBot && high[i] <= gapTop + a * 0.05);
-            confirmed = retested && close[i] < open[i] && close[i] <= entryGate;
+            confirmed = retested && close[i] < open[i] && close[i] <= (gapBot + gapTop) * 0.5;
          }
          if(!confirmed) continue;
 
@@ -762,8 +732,7 @@ int TrhScanFvgSetups(const int rates,
 
          TrhSetup s;
          s.dir = pendDir; s.entry = entry; s.sl = sl; s.tp = tp;
-         s.distal = (pendDir == 1) ? gapBot : gapTop;
-         s.proximal = (pendDir == 1) ? gapTop : gapBot;
+         s.proximal = gapTop; s.distal = gapBot; // Pine: newProximal=bGapTop, newDistal=bGapBot
          s.barIndex = i; s.barTime = time[i];
          s.setupMode = TRH_MODE_FVG;
          ArrayResize(outSetups, nSetups + 1);
@@ -1288,20 +1257,15 @@ int TrhScanABUnified(const int rates,
          if(bPhase == 3 && i > bFvgBar && newDir == 0)
          {
             bool confirmed = false;
-            double widthG = bGapTop - bGapBot;
-            double bias = cfg.fvgEntryBias;
-            if(bias < 0.0) bias = 0.0;
-            if(bias > 1.0) bias = 1.0;
-            double entryGate = bDir == 1 ? (bGapTop - widthG * bias) : (bGapBot + widthG * bias);
             if(bDir == 1)
             {
                bool retested = low[i] <= bGapTop && low[i] >= bGapBot - a * 0.05;
-               confirmed = retested && close[i] > open[i] && close[i] >= entryGate;
+               confirmed = retested && close[i] > open[i] && close[i] >= (bGapBot + bGapTop) * 0.5;
             }
             else
             {
                bool retested2 = high[i] >= bGapBot && high[i] <= bGapTop + a * 0.05;
-               confirmed = retested2 && close[i] < open[i] && close[i] <= entryGate;
+               confirmed = retested2 && close[i] < open[i] && close[i] <= (bGapBot + bGapTop) * 0.5;
             }
             if(confirmed)
             {
