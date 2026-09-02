@@ -244,7 +244,9 @@ export class ChartEngine {
             ? [14]
             : kind === "stoch"
               ? [14, 3]
-              : [12, 26, 9];
+              : kind === "vol"
+                ? []
+                : [12, 26, 9];
     this.indicators.push({
       id: uid("ind"),
       kind,
@@ -253,6 +255,49 @@ export class ChartEngine {
       visible: true,
       color: COLORS[this.indicators.length % COLORS.length],
     });
+    this.emit();
+    this.draw();
+  }
+
+  setIndicatorsFromTemplate(
+    items: Array<{
+      kind: IndicatorInstance["kind"];
+      params: number[];
+      visible: boolean;
+      color: string;
+      lineWidth?: number;
+      lineStyle?: IndicatorInstance["lineStyle"];
+      source?: IndicatorInstance["source"];
+      pane?: IndicatorInstance["pane"];
+    }>,
+  ): void {
+    this.indicators = items.map((item, index) => {
+      const pane =
+        item.pane ??
+        (item.kind === "rsi"
+          ? "rsi"
+          : item.kind === "macd"
+            ? "macd"
+            : item.kind === "stoch"
+              ? "stoch"
+              : item.kind === "atr"
+                ? "atr"
+                : item.kind === "vol"
+                  ? "volume"
+                  : "main");
+      return {
+        id: uid("ind"),
+        kind: item.kind,
+        pane,
+        params: [...item.params],
+        visible: item.visible,
+        color: item.color || COLORS[index % COLORS.length],
+        lineWidth: item.lineWidth,
+        lineStyle: item.lineStyle,
+        source: item.source,
+      };
+    });
+    this.selectedIndicatorId = null;
     this.emit();
     this.draw();
   }

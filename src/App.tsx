@@ -7,9 +7,10 @@ import { CHART_STYLE_KEY } from "./chartStyle";
 import { loadJson, saveJson } from "./persist";
 import { BottomDock } from "./ui/BottomDock";
 import { ChartOverlays } from "./ui/ChartOverlays";
-import { ChartToolbar } from "./ui/ChartToolbar";
+import { ChartToolbar, type DataMode } from "./ui/ChartToolbar";
 import { DrawingToolbar } from "./ui/DrawingToolbar";
 import { IndicatorModal, SettingsModal, SymbolModal } from "./ui/Modals";
+import { ProductHeader } from "./ui/ProductHeader";
 import { useEngine } from "./ui/useEngine";
 import { WidgetDock, type WidgetId } from "./ui/WidgetDock";
 
@@ -36,6 +37,7 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [symbolQuery, setSymbolQuery] = useState("");
   const [widget, setWidget] = useState<WidgetId | null>("watchlist");
+  const [dataMode, setDataMode] = useState<DataMode>("technicals");
   const [bottomOpen, setBottomOpen] = useState(false);
   const [alerts, setAlerts] = useState<string[]>([]);
   const [quotes, setQuotes] = useState<Record<string, { price: number; change: number }>>({});
@@ -132,6 +134,13 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if ((e.altKey && e.key.toLowerCase() === "i") || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "i" && e.shiftKey)) {
+        const target = e.target as HTMLElement | null;
+        if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+        e.preventDefault();
+        setIndOpen(true);
+        return;
+      }
       if (symbolOpen || compareOpen || indOpen || settingsOpen || searchOpen) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const target = e.target as HTMLElement | null;
@@ -173,33 +182,47 @@ export default function App() {
     void attachFeed(eng.getSnapshot().symbol, interval, "interval");
   };
 
+  const applyDataMode = (mode: DataMode) => {
+    setDataMode(mode);
+    if (mode === "technicals") setWidget("data");
+    else if (mode === "seasonals") setWidget("calendar");
+    else if (mode === "news") setWidget("news");
+    else setWidget("ideas");
+  };
+
+  useEffect(() => {
+    // Keep right dock locked to the toolbar data switcher.
+    if (dataMode === "technicals" && widget !== "data" && widget !== "object") setWidget("data");
+    if (dataMode === "seasonals" && widget !== "calendar") setWidget("calendar");
+    if (dataMode === "news" && widget !== "news") setWidget("news");
+    if (dataMode === "ideas" && widget !== "ideas") setWidget("ideas");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataMode]);
+
   return (
     <div className="shell" data-theme={snap?.theme ?? "dark"}>
-      <header className="product-header">
-        <div className="logo">F</div>
-        <b>Forge</b>
-        <nav>
-          <span>Products</span>
-          <span>Community</span>
-          <span>Markets</span>
-          <span>Brokers</span>
-          <span>More</span>
-        </nav>
-        <span className="spacer" />
-        <button onClick={() => setSearchOpen(true)}>Search</button>
-        <button onClick={() => engine?.setTheme(snap?.theme === "dark" ? "light" : "dark")}>
-          {snap?.theme === "dark" ? "Light" : "Dark"}
-        </button>
-      </header>
+      <ProductHeader
+        theme={snap?.theme ?? "dark"}
+        alertCount={alerts.length}
+        symbolLabel={snap?.symbol.ticker}
+        onOpenSearch={() => setSearchOpen(true)}
+        onOpenAlerts={() => setWidget("alerts")}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onToggleTheme={() => engine?.setTheme(snap?.theme === "dark" ? "light" : "dark")}
+        onOpenMarkets={() => setWidget("watchlist")}
+      />
       <ChartToolbar
         engine={engine}
         live={live}
+        dataMode={dataMode}
+        onDataMode={applyDataMode}
         onOpenSymbol={() => setSymbolOpen(true)}
         onOpenIndicators={() => setIndOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenSearch={() => setSearchOpen(true)}
         onInterval={loadInterval}
         onCompare={() => setCompareOpen(true)}
+        onClearCompare={() => engineRef.current?.setCompare(null, null)}
         onAlert={() => {
           const s = engine?.getSnapshot();
           if (s?.last) {
@@ -255,9 +278,14 @@ export default function App() {
         favorites={indicatorFavorites}
         onToggleFavorite={toggleIndicatorFavorite}
         recent={recentIndicators}
+        activeKinds={(snap?.indicators ?? []).map((item) => item.kind)}
         onPick={(kind) => {
           engine?.addIndicator(kind);
           touchRecentIndicator(kind);
+          setIndOpen(false);
+        }}
+        onPickTool={(tool) => {
+          engine?.setTool(tool);
           setIndOpen(false);
         }}
       />
