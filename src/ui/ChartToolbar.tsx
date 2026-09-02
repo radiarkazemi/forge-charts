@@ -317,7 +317,7 @@ export function ChartToolbar({
           </div>
         ) : null}
       </div>
-      <button className="tb-btn accent" onClick={onOpenIndicators} title="Indicators">
+      <button className="tb-btn accent" onClick={onOpenIndicators} title="Indicators (Alt+I)">
         Indicators
       </button>
       <button className="tb-icon" title="Indicator templates" onClick={onOpenIndicators}>

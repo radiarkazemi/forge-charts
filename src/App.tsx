@@ -134,6 +134,13 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if ((e.altKey && e.key.toLowerCase() === "i") || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "i" && e.shiftKey)) {
+        const target = e.target as HTMLElement | null;
+        if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+        e.preventDefault();
+        setIndOpen(true);
+        return;
+      }
       if (symbolOpen || compareOpen || indOpen || settingsOpen || searchOpen) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const target = e.target as HTMLElement | null;
@@ -271,9 +278,14 @@ export default function App() {
         favorites={indicatorFavorites}
         onToggleFavorite={toggleIndicatorFavorite}
         recent={recentIndicators}
+        activeKinds={(snap?.indicators ?? []).map((item) => item.kind)}
         onPick={(kind) => {
           engine?.addIndicator(kind);
           touchRecentIndicator(kind);
+          setIndOpen(false);
+        }}
+        onPickTool={(tool) => {
+          engine?.setTool(tool);
           setIndOpen(false);
         }}
       />
