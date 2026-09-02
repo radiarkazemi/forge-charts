@@ -7,11 +7,19 @@ import {
   type AlertFire,
   type PriceAlert,
 } from "./data/alerts";
+import {
+  fetchExternalBars,
+  makeExternalSymbol,
+  normalizeBars,
+  parseInboundMessage,
+  postToParent,
+  resolveDataUrl,
+} from "./data/externalFeed";
 import { findSymbol, generateBars } from "./data/feed";
 import { fetchHistory, fetchQuotes, subscribeLive } from "./data/market";
 import { parseEmbedConfig } from "./embed";
 import { ChartEngine } from "./engine/ChartEngine";
-import type { ChartStyle, IndicatorKind, Interval, SymbolInfo } from "./engine/types";
+import type { Bar, ChartStyle, IndicatorKind, Interval, SymbolInfo } from "./engine/types";
 import { CHART_STYLE_KEY } from "./chartStyle";
 import { loadJson, saveJson } from "./persist";
 import { AlertModal } from "./ui/AlertModal";
@@ -46,6 +54,21 @@ function useNarrow(maxWidth = 720): boolean {
     return () => mq.removeEventListener("change", onChange);
   }, [maxWidth]);
   return narrow;
+}
+
+function bootSymbol(boot: ReturnType<typeof parseEmbedConfig>): SymbolInfo {
+  if (boot.source === "external") {
+    return makeExternalSymbol(
+      {
+        ticker: boot.symbol,
+        name: boot.name,
+        exchange: boot.exchange || "CUSTOM",
+        pricePrecision: boot.pricePrecision,
+      },
+      boot.symbol,
+    );
+  }
+  return findSymbol(boot.symbol, boot.exchange);
 }
 
 export default function App() {
@@ -101,21 +124,67 @@ export default function App() {
     }
   };
 
+  const applyBars = (eng: ChartEngine, symbol: SymbolInfo, interval: Interval, bars: Bar[], mode: "symbol" | "interval") => {
+    if (mode === "symbol") eng.setSymbol(symbol, bars);
+    else eng.setInterval(interval, bars);
+    prevCloseRef.current = bars.at(-1)?.close ?? null;
+  };
+
+  const attachExternal = async (symbol: SymbolInfo, interval: Interval, mode: "symbol" | "interval") => {
+    const eng = engineRef.current;
+    if (!eng) return;
+    unsubRef.current();
+    prevCloseRef.current = null;
+    applyBars(eng, symbol, interval, [], mode);
+    setLive(false);
+
+    const targetOrigin = boot.parentOrigin || "*";
+    postToParent({ type: "requestData", symbol: symbol.ticker, exchange: symbol.exchange, interval }, targetOrigin);
+
+    if (!boot.dataUrl) return;
+
+    const load = async () => {
+      try {
+        const url = resolveDataUrl(boot.dataUrl!, symbol.ticker, String(interval));
+        const payload = await fetchExternalBars(url);
+        const nextSymbol = payload.symbol
+          ? makeExternalSymbol(payload.symbol, symbol.ticker)
+          : symbol;
+        if (boot.pricePrecision != null) nextSymbol.pricePrecision = boot.pricePrecision;
+        if (boot.name) nextSymbol.name = boot.name;
+        const bars = payload.bars;
+        const nextInterval = (payload.interval || interval) as Interval;
+        applyBars(eng, nextSymbol, nextInterval, bars, mode === "symbol" || payload.symbol ? "symbol" : "interval");
+        setLive(!!payload.live || boot.dataRefresh > 0);
+      } catch (err) {
+        console.warn("external dataUrl failed", err);
+        setLive(false);
+      }
+    };
+
+    await load();
+    if (boot.dataRefresh > 0) {
+      const id = window.setInterval(() => void load(), boot.dataRefresh * 1000);
+      unsubRef.current = () => window.clearInterval(id);
+    }
+  };
+
   const attachFeed = async (symbol: SymbolInfo, interval: Interval, mode: "symbol" | "interval") => {
+    if (boot.source === "external") {
+      await attachExternal(symbol, interval, mode);
+      return;
+    }
     const eng = engineRef.current;
     if (!eng) return;
     unsubRef.current();
     prevCloseRef.current = null;
     // Show demo bars immediately so the chart is never blank while network loads.
     const placeholder = generateBars(symbol, interval, 200);
-    if (mode === "symbol") eng.setSymbol(symbol, placeholder);
-    else eng.setInterval(interval, placeholder);
+    applyBars(eng, symbol, interval, placeholder, mode);
     try {
       const { bars, live: isLive } = await fetchHistory(symbol, interval);
       if (bars.length) {
-        if (mode === "symbol") eng.setSymbol(symbol, bars);
-        else eng.setInterval(interval, bars);
-        prevCloseRef.current = bars.at(-1)?.close ?? null;
+        applyBars(eng, symbol, interval, bars, mode);
       }
       setLive(isLive);
       unsubRef.current = subscribeLive(symbol, interval, (bar) => {
@@ -131,12 +200,22 @@ export default function App() {
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const symbol = findSymbol(boot.symbol, boot.exchange);
+    const symbol = bootSymbol(boot);
     const eng = new ChartEngine(host, symbol);
     engineRef.current = eng;
     setEngine(eng);
     if (boot.theme) eng.setTheme(boot.theme);
     void attachFeed(symbol, boot.interval, "interval");
+    postToParent(
+      {
+        type: "ready",
+        sourceMode: boot.source,
+        symbol: symbol.ticker,
+        exchange: symbol.exchange,
+        interval: boot.interval,
+      },
+      boot.parentOrigin || "*",
+    );
     return () => {
       unsubRef.current();
       eng.destroy();
@@ -147,13 +226,73 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (boot.source === "external") return;
     const tick = () => {
       void fetchQuotes().then(setQuotes);
     };
     tick();
     const id = window.setInterval(tick, 5000);
     return () => window.clearInterval(id);
-  }, []);
+  }, [boot.source]);
+
+  useEffect(() => {
+    if (boot.source !== "external") return;
+    const allowed = boot.parentOrigin;
+    const onMessage = (event: MessageEvent) => {
+      if (allowed && event.origin !== allowed) return;
+      const msg = parseInboundMessage(event.data);
+      if (!msg) return;
+      const eng = engineRef.current;
+      if (!eng) return;
+      const snapNow = eng.getSnapshot();
+
+      if (msg.type === "ping") {
+        postToParent({ type: "pong" }, allowed || "*");
+        return;
+      }
+      if (msg.type === "setTheme") {
+        eng.setTheme(msg.theme);
+        return;
+      }
+      if (msg.type === "setSymbol") {
+        const symbol = makeExternalSymbol(msg.symbol, snapNow.symbol.ticker);
+        if (boot.pricePrecision != null) symbol.pricePrecision = boot.pricePrecision;
+        void attachFeed(symbol, snapNow.interval, "symbol");
+        return;
+      }
+      if (msg.type === "setInterval") {
+        void attachFeed(snapNow.symbol, msg.interval, "interval");
+        return;
+      }
+      if (msg.type === "upsertBar") {
+        const bars = normalizeBars([msg.bar]);
+        const bar = bars[0];
+        if (!bar) return;
+        eng.upsertBar(bar);
+        setLive(true);
+        onPriceTick(snapNow.symbol, bar.close);
+        return;
+      }
+      if (msg.type === "setBars" || msg.type === "setData") {
+        const bars = normalizeBars(msg.type === "setBars" ? msg.bars : msg.bars ?? msg.data);
+        const symbol = msg.type === "setData" && msg.symbol
+          ? makeExternalSymbol(msg.symbol, snapNow.symbol.ticker)
+          : snapNow.symbol;
+        if (boot.pricePrecision != null) symbol.pricePrecision = boot.pricePrecision;
+        const interval = (msg.type === "setData" && msg.interval ? msg.interval : snapNow.interval) as Interval;
+        unsubRef.current();
+        applyBars(eng, symbol, interval, bars, "symbol");
+        setLive(msg.type === "setData" ? !!msg.live : true);
+        postToParent(
+          { type: "dataApplied", symbol: symbol.ticker, interval, bars: bars.length },
+          allowed || "*",
+        );
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boot.parentOrigin, boot.pricePrecision, boot.source]);
 
   useEffect(() => {
     if (!snap?.replayPlaying) return;
@@ -203,8 +342,12 @@ export default function App() {
     url.searchParams.set("exchange", snap.symbol.exchange);
     url.searchParams.set("interval", String(snap.interval));
     url.searchParams.set("theme", snap.theme);
+    if (boot.source === "external") {
+      url.searchParams.set("source", "external");
+      if (boot.dataUrl) url.searchParams.set("dataUrl", boot.dataUrl);
+    }
     window.history.replaceState({}, "", `${url.pathname}${url.search}`);
-  }, [boot.embed, snap?.interval, snap?.symbol.exchange, snap?.symbol.ticker, snap?.theme]);
+  }, [boot.dataUrl, boot.embed, boot.source, snap?.interval, snap?.symbol.exchange, snap?.symbol.ticker, snap?.theme]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -222,6 +365,7 @@ export default function App() {
         setAlertOpen(true);
         return;
       }
+      if (boot.source === "external") return;
       if (symbolOpen || compareOpen || indOpen || alertOpen || settingsOpen || searchOpen) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (typing) return;
@@ -232,7 +376,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [alertOpen, compareOpen, indOpen, searchOpen, settingsOpen, symbolOpen]);
+  }, [alertOpen, boot.source, compareOpen, indOpen, searchOpen, settingsOpen, symbolOpen]);
 
   useEffect(() => {
     if (!toast) return;
@@ -257,8 +401,22 @@ export default function App() {
   const loadSymbol = (symbol: SymbolInfo) => {
     const eng = engineRef.current;
     if (!eng) return;
-    touchRecent(symbol);
-    void attachFeed(symbol, eng.getSnapshot().interval, "symbol");
+    if (boot.source === "external") {
+      const custom = makeExternalSymbol(
+        {
+          ticker: symbol.ticker,
+          name: symbol.name,
+          exchange: symbol.exchange === "BINANCE" || symbol.exchange === "FOREXCOM" ? "CUSTOM" : symbol.exchange,
+          pricePrecision: boot.pricePrecision ?? symbol.pricePrecision,
+          type: symbol.type,
+        },
+        symbol.ticker,
+      );
+      void attachFeed(custom, eng.getSnapshot().interval, "symbol");
+    } else {
+      touchRecent(symbol);
+      void attachFeed(symbol, eng.getSnapshot().interval, "symbol");
+    }
     setSymbolOpen(false);
     setSearchOpen(false);
     setSymbolQuery("");
@@ -269,6 +427,16 @@ export default function App() {
     const eng = engineRef.current;
     if (!eng) return;
     void attachFeed(eng.getSnapshot().symbol, interval, "interval");
+    if (boot.source === "external") {
+      postToParent(
+        {
+          type: "interval",
+          symbol: eng.getSnapshot().symbol.ticker,
+          interval,
+        },
+        boot.parentOrigin || "*",
+      );
+    }
   };
 
   const applyDataMode = (mode: DataMode) => {

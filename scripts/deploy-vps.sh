@@ -31,6 +31,9 @@ tar -C dist/assets -cf - . | "${SSH[@]}" "${USER}@${HOST}" \
 
 echo "Uploading /charts/index.html (+ static checklist if present)"
 "${SCP[@]}" dist/index.html "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/index.html"
+if [[ -f dist/sample-ohlc.json ]]; then
+  "${SCP[@]}" dist/sample-ohlc.json "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/sample-ohlc.json" || true
+fi
 if [[ -f CHECKLIST.md ]]; then
   "${SCP[@]}" CHECKLIST.md "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/CHECKLIST.md" || true
 fi

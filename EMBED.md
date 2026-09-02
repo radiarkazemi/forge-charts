@@ -2,7 +2,7 @@
 
 Host the **entire Forge Superchart** inside a mobile app WebView or any site via iframe. The chart fills the container, scales to phone sizes, and stays responsive.
 
-## Embed URL
+## Embed URL (market data)
 
 ```
 https://goldanil.ir/charts/?embed=1&symbol=BTCUSDT&exchange=BINANCE&interval=15&theme=dark
@@ -12,7 +12,7 @@ https://goldanil.ir/charts/?embed=1&symbol=BTCUSDT&exchange=BINANCE&interval=15&
 | --- | --- | --- |
 | `embed` | — | `1` enables embed / iframe mode |
 | `symbol` / `ticker` | `XAUUSD` | Instrument ticker |
-| `exchange` / `ex` | auto | `BINANCE` or `FOREXCOM` |
+| `exchange` / `ex` | auto | `BINANCE`, `FOREXCOM`, or `CUSTOM` |
 | `interval` / `resolution` | `15` | Bar size (`1`, `5`, `15`, `60`, `1D`, …) |
 | `theme` | saved / dark | `dark` or `light` |
 | `header` | `0` | Product header |
@@ -22,7 +22,85 @@ https://goldanil.ir/charts/?embed=1&symbol=BTCUSDT&exchange=BINANCE&interval=15&
 | `bottom` | `0` | Pine / bottom dock |
 | `mobile` | `0` | Force phone chrome on any width |
 
-Full desktop chrome (no embed) still becomes phone-sized under **720px** width: side rails collapse to FAB overlays, toolbar densifies, chart stays full-bleed.
+## Your own data (chart only)
+
+Skip Binance / Forex feeds and plot **only your OHLC**.
+
+### Option A — JSON URL (`dataUrl`)
+
+```
+https://goldanil.ir/charts/?embed=1&source=external&symbol=MYASSET&name=My%20Asset&interval=15&theme=dark&dataUrl=https://goldanil.ir/charts/sample-ohlc.json
+```
+
+| Param | Description |
+| --- | --- |
+| `source=external` | Chart-only mode (also implied if `dataUrl` is set) |
+| `dataUrl` / `data` / `ohlc` | HTTPS JSON endpoint. Supports `{symbol}` and `{interval}` placeholders |
+| `dataRefresh` | Poll every N seconds (`0` = once) |
+| `name` | Display name |
+| `precision` | Price decimals |
+| `parentOrigin` | Optional: only accept `postMessage` from this origin |
+
+**JSON shapes accepted:**
+
+```json
+{
+  "symbol": "MYASSET",
+  "interval": "15",
+  "live": false,
+  "bars": [
+    { "time": 1710000000, "open": 1, "high": 2, "low": 0.5, "close": 1.5, "volume": 100 }
+  ]
+}
+```
+
+Also accepted: top-level array of bars, `data` / `candles` arrays, compact tuples `[t,o,h,l,c,v]`, and `t/o/h/l/c/v` keys. `time` may be unix seconds, ms, or ISO string.
+
+> Your `dataUrl` must allow browser CORS from the chart origin (or use Option B).
+
+Sample file on the VPS: `https://goldanil.ir/charts/sample-ohlc.json`
+
+### Option B — push bars from your app (`postMessage`)
+
+Best when data lives in your app / WebView (no CORS):
+
+```html
+<iframe id="chart" src="https://goldanil.ir/charts/?embed=1&source=external&symbol=MYASSET&interval=15&theme=dark"></iframe>
+<script>
+  const iframe = document.getElementById("chart");
+  window.addEventListener("message", (ev) => {
+    if (ev.data?.source !== "forge-charts") return;
+    if (ev.data.type === "ready" || ev.data.type === "requestData") {
+      iframe.contentWindow.postMessage({
+        source: "forge-charts",
+        type: "setData",
+        symbol: "MYASSET",
+        interval: "15",
+        live: true,
+        bars: [
+          { time: 1710000000, open: 10, high: 11, low: 9.5, close: 10.5, volume: 1200 },
+          // …more OHLC bars
+        ],
+      }, "*");
+    }
+  });
+
+  // Live tick later:
+  // iframe.contentWindow.postMessage({ source: "forge-charts", type: "upsertBar", bar: { time, open, high, low, close, volume } }, "*");
+</script>
+```
+
+**Parent → chart**
+
+| `type` | Purpose |
+| --- | --- |
+| `setData` | Replace series (`bars` / `data`, optional `symbol`, `interval`, `live`) |
+| `setBars` | Replace bars only |
+| `upsertBar` | Update / append one live candle |
+| `setSymbol` / `setInterval` / `setTheme` | Control chrome |
+| `ping` | Health check → `pong` |
+
+**Chart → parent:** `ready`, `requestData`, `dataApplied`, `interval`, `pong`.
 
 ## iframe snippet (mobile app size)
 
@@ -37,11 +115,9 @@ Full desktop chrome (no embed) still becomes phone-sized under **720px** width: 
 ></iframe>
 ```
 
-React Native / Capacitor / Flutter WebView: load the same HTTPS URL; the chart uses `100dvh` and ResizeObserver so it matches the WebView bounds.
+React Native / Capacitor / Flutter WebView: load the same HTTPS URL; the chart uses `100dvh` and ResizeObserver so it matches the WebView bounds. For custom series in a WebView, prefer **postMessage** (`setData` / `upsertBar`).
 
 ## Optional chrome
-
-Keep drawing tools in an in-app chart:
 
 ```
 ...?embed=1&symbol=EURUSD&exchange=FOREXCOM&interval=60&drawings=1&toolbar=1
@@ -53,10 +129,11 @@ Keep drawing tools in an in-app chart:
 import { buildEmbedUrl } from "./embed";
 
 const src = buildEmbedUrl({
-  symbol: "BTCUSDT",
-  exchange: "BINANCE",
+  symbol: "MYASSET",
+  source: "external",
   interval: "15",
   theme: "dark",
+  dataUrl: "https://api.example.com/ohlc/{symbol}.json",
 });
 ```
 

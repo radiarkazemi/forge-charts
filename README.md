@@ -15,11 +15,19 @@ Open http://127.0.0.1:5173
 
 ## Embed in your app (iframe / WebView)
 
-Full chart as a responsive embed (phone / tablet sized):
+Market data:
 
 ```
 https://goldanil.ir/charts/?embed=1&symbol=BTCUSDT&exchange=BINANCE&interval=15&theme=dark
 ```
+
+**Your own OHLC** (chart only — no Binance/Forex):
+
+```
+https://goldanil.ir/charts/?embed=1&source=external&symbol=MYASSET&dataUrl=https://goldanil.ir/charts/sample-ohlc.json
+```
+
+Or push bars from the parent app with `postMessage` (`setData` / `upsertBar`). See [EMBED.md](./EMBED.md).
 
 ```html
 <iframe
@@ -28,8 +36,6 @@ https://goldanil.ir/charts/?embed=1&symbol=BTCUSDT&exchange=BINANCE&interval=15&
   title="Forge Chart"
 ></iframe>
 ```
-
-See [EMBED.md](./EMBED.md) for query params, chrome flags, and mobile layout notes.
 
 ## Production (VPS)
 
