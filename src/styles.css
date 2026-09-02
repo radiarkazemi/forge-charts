@@ -310,6 +310,11 @@ button { cursor: pointer; }
   background: var(--up);
   border-color: transparent;
 }
+.live-pill.external {
+  color: #dbe7ff;
+  background: #243556;
+  border-color: #3d5a8a;
+}
 @keyframes livePulse {
   0% { box-shadow: 0 0 0 0 rgba(38, 166, 154, 0.5); }
   70% { box-shadow: 0 0 0 8px rgba(38, 166, 154, 0); }

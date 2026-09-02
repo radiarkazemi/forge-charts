@@ -26,6 +26,8 @@ type Props = {
   dataMode: DataMode;
   /** Phone / embed: denser toolbar, fewer secondary controls. */
   compact?: boolean;
+  /** Chart-only custom OHLC (no exchange feed). */
+  external?: boolean;
   onDataMode: (mode: DataMode) => void;
   onOpenSymbol: () => void;
   onOpenIndicators: () => void;
@@ -51,6 +53,7 @@ export function ChartToolbar({
   live,
   dataMode,
   compact = false,
+  external = false,
   onDataMode,
   onOpenSymbol,
   onOpenIndicators,
@@ -144,8 +147,11 @@ export function ChartToolbar({
           <b>{snap?.symbol.ticker ?? "XAUUSD"}</b>
           <em>{snap?.symbol.exchange ?? "FOREXCOM"}</em>
         </span>
-        <span className={live ? "live-pill on" : "live-pill"} title={live ? "Live market data" : "Delayed / demo"}>
-          {live ? "LIVE" : "DELAYED"}
+        <span
+          className={live ? "live-pill on" : external ? "live-pill external" : "live-pill"}
+          title={external ? "Your OHLC data" : live ? "Live market data" : "Delayed / demo"}
+        >
+          {external ? (live ? "LIVE" : "CUSTOM") : live ? "LIVE" : "DELAYED"}
         </span>
       </button>
 

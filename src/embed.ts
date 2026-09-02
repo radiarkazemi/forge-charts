@@ -78,9 +78,9 @@ export function parseEmbedConfig(search = typeof window !== "undefined" ? window
   const exchangeRaw = (params.get("exchange") || params.get("ex") || "").trim().toUpperCase();
   const interval = (params.get("interval") || params.get("resolution") || "15").trim() || "15";
   const dataUrlRaw = (params.get("dataUrl") || params.get("data") || params.get("ohlc") || "").trim();
-  const dataUrl = dataUrlRaw || undefined;
   const refreshRaw = Number(params.get("dataRefresh") || params.get("refresh") || "0");
-  const precisionRaw = Number(params.get("precision") || params.get("pricePrecision") || "");
+  const precisionParam = params.get("precision") ?? params.get("pricePrecision");
+  const precisionRaw = precisionParam == null || precisionParam === "" ? NaN : Number(precisionParam);
   const name = (params.get("name") || "").trim() || undefined;
   const parentOrigin = (params.get("parentOrigin") || "").trim() || undefined;
 
@@ -91,6 +91,11 @@ export function parseEmbedConfig(search = typeof window !== "undefined" ? window
     widgets: parseBool(params.get("widgets") ?? params.get("dock"), embed ? false : true),
     bottom: parseBool(params.get("bottom"), embed ? false : true),
   };
+
+  let dataUrl = dataUrlRaw || undefined;
+  if (dataUrl && dataUrl.startsWith("/") && typeof window !== "undefined") {
+    dataUrl = `${window.location.origin}${dataUrl}`;
+  }
 
   return {
     embed,

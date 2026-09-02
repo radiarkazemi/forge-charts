@@ -509,6 +509,7 @@ export default function App() {
           live={live}
           dataMode={dataMode}
           compact={compact}
+          external={boot.source === "external"}
           onDataMode={applyDataMode}
           onOpenSymbol={() => setSymbolOpen(true)}
           onOpenIndicators={() => setIndOpen(true)}
