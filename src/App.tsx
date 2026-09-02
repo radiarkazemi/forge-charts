@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createAlert,
   evaluateAlerts,
@@ -7,8 +7,9 @@ import {
   type AlertFire,
   type PriceAlert,
 } from "./data/alerts";
-import { findSymbol } from "./data/feed";
+import { findSymbol, generateBars } from "./data/feed";
 import { fetchHistory, fetchQuotes, subscribeLive } from "./data/market";
+import { parseEmbedConfig } from "./embed";
 import { ChartEngine } from "./engine/ChartEngine";
 import type { ChartStyle, IndicatorKind, Interval, SymbolInfo } from "./engine/types";
 import { CHART_STYLE_KEY } from "./chartStyle";
@@ -33,7 +34,22 @@ function loadRecentSymbols(): SymbolInfo[] {
   return unique.map((ticker) => findSymbol(ticker)).slice(0, 10);
 }
 
+function useNarrow(maxWidth = 720): boolean {
+  const [narrow, setNarrow] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia(`(max-width: ${maxWidth}px)`).matches : false,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${maxWidth}px)`);
+    const onChange = () => setNarrow(mq.matches);
+    onChange();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [maxWidth]);
+  return narrow;
+}
+
 export default function App() {
+  const boot = useMemo(() => parseEmbedConfig(), []);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<ChartEngine | null>(null);
   const unsubRef = useRef<() => void>(() => {});
@@ -48,7 +64,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [symbolQuery, setSymbolQuery] = useState("");
-  const [widget, setWidget] = useState<WidgetId | null>("watchlist");
+  const [widget, setWidget] = useState<WidgetId | null>(boot.chrome.widgets ? "watchlist" : null);
   const [dataMode, setDataMode] = useState<DataMode>("technicals");
   const [bottomOpen, setBottomOpen] = useState(false);
   const [alerts, setAlerts] = useState<PriceAlert[]>(() => loadAlerts());
@@ -57,7 +73,17 @@ export default function App() {
   const [recentSymbols, setRecentSymbols] = useState<SymbolInfo[]>(loadRecentSymbols);
   const [indicatorFavorites, setIndicatorFavorites] = useState<string[]>(() => loadJson(IND_FAV_KEY, []));
   const [recentIndicators, setRecentIndicators] = useState<IndicatorKind[]>(() => loadJson(IND_RECENTS_KEY, ["sma", "rsi"]));
+  const [mobileDrawOpen, setMobileDrawOpen] = useState(false);
+  const [mobileWidgetOpen, setMobileWidgetOpen] = useState(false);
   const snap = useEngine(engine);
+  const narrow = useNarrow(720);
+  const compact = boot.embed || boot.mobile || narrow;
+
+  const showHeader = boot.chrome.header;
+  const showToolbar = boot.chrome.toolbar;
+  const showDrawings = boot.chrome.drawings;
+  const showWidgets = boot.chrome.widgets;
+  const showBottom = boot.chrome.bottom;
 
   useEffect(() => {
     alertsRef.current = alerts;
@@ -71,7 +97,7 @@ export default function App() {
     if (fires.length) {
       setAlerts(next);
       setToast(fires[0]!);
-      setWidget("alerts");
+      if (showWidgets) setWidget("alerts");
     }
   };
 
@@ -81,7 +107,7 @@ export default function App() {
     unsubRef.current();
     prevCloseRef.current = null;
     // Show demo bars immediately so the chart is never blank while network loads.
-    const placeholder = (await import("./data/feed")).generateBars(symbol, interval, 200);
+    const placeholder = generateBars(symbol, interval, 200);
     if (mode === "symbol") eng.setSymbol(symbol, placeholder);
     else eng.setInterval(interval, placeholder);
     try {
@@ -105,11 +131,12 @@ export default function App() {
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const symbol = findSymbol("XAUUSD");
+    const symbol = findSymbol(boot.symbol, boot.exchange);
     const eng = new ChartEngine(host, symbol);
     engineRef.current = eng;
     setEngine(eng);
-    void attachFeed(symbol, "15", "interval");
+    if (boot.theme) eng.setTheme(boot.theme);
+    void attachFeed(symbol, boot.interval, "interval");
     return () => {
       unsubRef.current();
       eng.destroy();
@@ -136,8 +163,10 @@ export default function App() {
 
   useEffect(() => {
     if (!snap?.symbol.ticker) return;
-    document.title = `${snap.symbol.ticker} Chart — Forge Superchart`;
-  }, [snap?.symbol.ticker]);
+    document.title = boot.embed
+      ? `${snap.symbol.ticker} — Forge Chart`
+      : `${snap.symbol.ticker} Chart — Forge Superchart`;
+  }, [boot.embed, snap?.symbol.ticker]);
 
   useEffect(() => {
     saveJson(
@@ -165,6 +194,17 @@ export default function App() {
     if (!snap?.chartStyle) return;
     saveJson(CHART_STYLE_KEY, snap.chartStyle);
   }, [snap?.chartStyle]);
+
+  useEffect(() => {
+    if (!boot.embed || !snap?.symbol.ticker) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("embed", "1");
+    url.searchParams.set("symbol", snap.symbol.ticker);
+    url.searchParams.set("exchange", snap.symbol.exchange);
+    url.searchParams.set("interval", String(snap.interval));
+    url.searchParams.set("theme", snap.theme);
+    window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+  }, [boot.embed, snap?.interval, snap?.symbol.exchange, snap?.symbol.ticker, snap?.theme]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -222,6 +262,7 @@ export default function App() {
     setSymbolOpen(false);
     setSearchOpen(false);
     setSymbolQuery("");
+    setMobileWidgetOpen(false);
   };
 
   const loadInterval = (interval: Interval) => {
@@ -232,66 +273,154 @@ export default function App() {
 
   const applyDataMode = (mode: DataMode) => {
     setDataMode(mode);
+    if (!showWidgets) return;
     if (mode === "technicals") setWidget("data");
     else if (mode === "seasonals") setWidget("calendar");
     else if (mode === "news") setWidget("news");
     else setWidget("ideas");
+    if (compact) setMobileWidgetOpen(true);
   };
 
   useEffect(() => {
-    // Keep right dock locked to the toolbar data switcher.
+    if (!showWidgets) return;
     if (dataMode === "technicals" && widget !== "data" && widget !== "object") setWidget("data");
     if (dataMode === "seasonals" && widget !== "calendar") setWidget("calendar");
     if (dataMode === "news" && widget !== "news") setWidget("news");
     if (dataMode === "ideas" && widget !== "ideas") setWidget("ideas");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dataMode]);
+  }, [dataMode, showWidgets]);
+
+  const shellClass = [
+    "shell",
+    boot.embed ? "embed" : "",
+    compact ? "compact" : "",
+    boot.mobile ? "force-mobile" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const drawOverlay = showDrawings && compact && mobileDrawOpen;
+  const widgetOverlay = showWidgets && compact && mobileWidgetOpen;
 
   return (
-    <div className="shell" data-theme={snap?.theme ?? "dark"}>
-      <ProductHeader
-        theme={snap?.theme ?? "dark"}
-        alertCount={alerts.filter((a) => a.enabled).length}
-        symbolLabel={snap?.symbol.ticker}
-        onOpenSearch={() => setSearchOpen(true)}
-        onOpenAlerts={() => setWidget("alerts")}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onToggleTheme={() => engine?.setTheme(snap?.theme === "dark" ? "light" : "dark")}
-        onOpenMarkets={() => setWidget("watchlist")}
-      />
-      <ChartToolbar
-        engine={engine}
-        live={live}
-        dataMode={dataMode}
-        onDataMode={applyDataMode}
-        onOpenSymbol={() => setSymbolOpen(true)}
-        onOpenIndicators={() => setIndOpen(true)}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onOpenSearch={() => setSearchOpen(true)}
-        onInterval={loadInterval}
-        onCompare={() => setCompareOpen(true)}
-        onClearCompare={() => engineRef.current?.setCompare(null, null)}
-        onAlert={openCreateAlert}
-      />
+    <div
+      className={shellClass}
+      data-theme={snap?.theme ?? boot.theme ?? "dark"}
+      data-embed={boot.embed ? "1" : "0"}
+      data-header={showHeader ? "1" : "0"}
+      data-toolbar={showToolbar ? "1" : "0"}
+      data-drawings={showDrawings ? "1" : "0"}
+      data-widgets={showWidgets ? "1" : "0"}
+      data-bottom={showBottom ? "1" : "0"}
+    >
+      {showHeader ? (
+        <ProductHeader
+          theme={snap?.theme ?? "dark"}
+          alertCount={alerts.filter((a) => a.enabled).length}
+          symbolLabel={snap?.symbol.ticker}
+          onOpenSearch={() => setSearchOpen(true)}
+          onOpenAlerts={() => {
+            if (showWidgets) {
+              setWidget("alerts");
+              if (compact) setMobileWidgetOpen(true);
+            }
+          }}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onToggleTheme={() => engine?.setTheme(snap?.theme === "dark" ? "light" : "dark")}
+          onOpenMarkets={() => {
+            if (showWidgets) {
+              setWidget("watchlist");
+              if (compact) setMobileWidgetOpen(true);
+            }
+          }}
+        />
+      ) : null}
+      {showToolbar ? (
+        <ChartToolbar
+          engine={engine}
+          live={live}
+          dataMode={dataMode}
+          compact={compact}
+          onDataMode={applyDataMode}
+          onOpenSymbol={() => setSymbolOpen(true)}
+          onOpenIndicators={() => setIndOpen(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSearch={() => setSearchOpen(true)}
+          onInterval={loadInterval}
+          onCompare={() => setCompareOpen(true)}
+          onClearCompare={() => engineRef.current?.setCompare(null, null)}
+          onAlert={openCreateAlert}
+        />
+      ) : null}
       <div className="workspace">
-        <DrawingToolbar engine={engine} />
+        {showDrawings ? (
+          <div className={drawOverlay ? "draw-rail-slot open" : "draw-rail-slot"}>
+            <DrawingToolbar engine={engine} />
+          </div>
+        ) : null}
         <div className="chart-stage">
           <div className="chart-host" ref={hostRef} />
           <ChartOverlays engine={engine} />
+          {showDrawings && compact ? (
+            <button
+              type="button"
+              className={mobileDrawOpen ? "mobile-fab left on" : "mobile-fab left"}
+              title="Drawing tools"
+              aria-pressed={mobileDrawOpen}
+              onClick={() => {
+                setMobileDrawOpen((v) => !v);
+                setMobileWidgetOpen(false);
+              }}
+            >
+              ✎
+            </button>
+          ) : null}
+          {showWidgets && compact ? (
+            <button
+              type="button"
+              className={mobileWidgetOpen ? "mobile-fab right on" : "mobile-fab right"}
+              title="Widgets"
+              aria-pressed={mobileWidgetOpen}
+              onClick={() => {
+                setMobileWidgetOpen((v) => !v);
+                setMobileDrawOpen(false);
+              }}
+            >
+              ▤
+            </button>
+          ) : null}
         </div>
-        <WidgetDock
-          engine={engine}
-          active={widget}
-          onActive={setWidget}
-          quotes={quotes}
-          onPick={loadSymbol}
-          alerts={alerts}
-          onCreateAlert={openCreateAlert}
-          onToggleAlert={(id) =>
-            setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, enabled: !a.enabled } : a)))
-          }
-          onDeleteAlert={(id) => setAlerts((prev) => prev.filter((a) => a.id !== id))}
-        />
+        {showWidgets ? (
+          <div className={widgetOverlay ? "widget-dock-slot open" : "widget-dock-slot"}>
+            <WidgetDock
+              engine={engine}
+              active={widget}
+              onActive={(id) => {
+                setWidget(id);
+                if (compact && id) setMobileWidgetOpen(true);
+              }}
+              quotes={quotes}
+              onPick={loadSymbol}
+              alerts={alerts}
+              onCreateAlert={openCreateAlert}
+              onToggleAlert={(id) =>
+                setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, enabled: !a.enabled } : a)))
+              }
+              onDeleteAlert={(id) => setAlerts((prev) => prev.filter((a) => a.id !== id))}
+            />
+          </div>
+        ) : null}
+        {(drawOverlay || widgetOverlay) && (
+          <button
+            type="button"
+            className="mobile-scrim"
+            aria-label="Close panel"
+            onClick={() => {
+              setMobileDrawOpen(false);
+              setMobileWidgetOpen(false);
+            }}
+          />
+        )}
       </div>
       {toast ? (
         <div className="alert-toast" role="status">
@@ -305,7 +434,7 @@ export default function App() {
           </button>
         </div>
       ) : null}
-      <BottomDock engine={engine} open={bottomOpen} onToggle={() => setBottomOpen((v) => !v)} />
+      {showBottom ? <BottomDock engine={engine} open={bottomOpen} onToggle={() => setBottomOpen((v) => !v)} /> : null}
       <SymbolModal
         open={symbolOpen || searchOpen}
         onClose={() => {
@@ -361,7 +490,10 @@ export default function App() {
             interval: input.interval as Interval | undefined,
           });
           setAlerts((prev) => [alert, ...prev]);
-          setWidget("alerts");
+          if (showWidgets) {
+            setWidget("alerts");
+            if (compact) setMobileWidgetOpen(true);
+          }
         }}
       />
       <SettingsModal

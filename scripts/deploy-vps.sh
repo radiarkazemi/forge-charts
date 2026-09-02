@@ -34,6 +34,9 @@ echo "Uploading /charts/index.html (+ static checklist if present)"
 if [[ -f CHECKLIST.md ]]; then
   "${SCP[@]}" CHECKLIST.md "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/CHECKLIST.md" || true
 fi
+if [[ -f EMBED.md ]]; then
+  "${SCP[@]}" EMBED.md "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/EMBED.md" || true
+fi
 if [[ -f SUPERCHART-PARITY.md ]]; then
   "${SCP[@]}" SUPERCHART-PARITY.md "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/SUPERCHART-PARITY.md" || true
 fi

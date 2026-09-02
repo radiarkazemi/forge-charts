@@ -24,6 +24,8 @@ type Props = {
   engine: ChartEngine | null;
   live: boolean;
   dataMode: DataMode;
+  /** Phone / embed: denser toolbar, fewer secondary controls. */
+  compact?: boolean;
   onDataMode: (mode: DataMode) => void;
   onOpenSymbol: () => void;
   onOpenIndicators: () => void;
@@ -48,6 +50,7 @@ export function ChartToolbar({
   engine,
   live,
   dataMode,
+  compact = false,
   onDataMode,
   onOpenSymbol,
   onOpenIndicators,
@@ -134,7 +137,7 @@ export function ChartToolbar({
   }));
 
   return (
-    <div className="chart-toolbar">
+    <div className={compact ? "chart-toolbar compact" : "chart-toolbar"}>
       <button className="symbol-chip" onClick={onOpenSymbol} title="Symbol Search">
         <span className={live ? "live-dot on" : "live-dot"} aria-hidden />
         <span className="symbol-chip-text">
@@ -146,34 +149,38 @@ export function ChartToolbar({
         </span>
       </button>
 
-      <div className="seg data-switch" role="tablist" aria-label="Chart data mode">
-        {DATA_MODES.map((mode) => (
-          <button
-            key={mode.id}
-            type="button"
-            role="tab"
-            aria-selected={dataMode === mode.id}
-            className={dataMode === mode.id ? "on" : ""}
-            title={mode.title}
-            onClick={() => onDataMode(mode.id)}
-          >
-            {mode.label}
-          </button>
-        ))}
-      </div>
+      {!compact ? (
+        <div className="seg data-switch" role="tablist" aria-label="Chart data mode">
+          {DATA_MODES.map((mode) => (
+            <button
+              key={mode.id}
+              type="button"
+              role="tab"
+              aria-selected={dataMode === mode.id}
+              className={dataMode === mode.id ? "on" : ""}
+              title={mode.title}
+              onClick={() => onDataMode(mode.id)}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
-      <div className="compare-wrap">
-        <button className={snap?.compare ? "tb-btn compare on" : "tb-btn compare"} title="Compare / overlay symbol" onClick={onCompare}>
-          <span aria-hidden>+</span>
-          Compare
-        </button>
-        {snap?.compare ? (
-          <button type="button" className="compare-chip" title="Remove compare overlay" onClick={onClearCompare}>
-            <b>{snap.compare}</b>
-            <span aria-hidden>×</span>
+      {!compact ? (
+        <div className="compare-wrap">
+          <button className={snap?.compare ? "tb-btn compare on" : "tb-btn compare"} title="Compare / overlay symbol" onClick={onCompare}>
+            <span aria-hidden>+</span>
+            Compare
           </button>
-        ) : null}
-      </div>
+          {snap?.compare ? (
+            <button type="button" className="compare-chip" title="Remove compare overlay" onClick={onClearCompare}>
+              <b>{snap.compare}</b>
+              <span aria-hidden>×</span>
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="menu-wrap" ref={ivRef}>
         <button
@@ -244,8 +251,8 @@ export function ChartToolbar({
           </div>
         ) : null}
       </div>
-      <div className="seg">
-        {quick.map((id) => {
+      <div className="seg quick-iv">
+        {(compact ? quick.slice(0, 5) : quick).map((id) => {
           const item = intervalMeta(id);
           return (
             <button key={id} className={snap?.interval === id ? "on" : ""} onClick={() => onInterval(id)}>
@@ -319,24 +326,28 @@ export function ChartToolbar({
         ) : null}
       </div>
       <button className="tb-btn accent" onClick={onOpenIndicators} title="Indicators (Alt+I)">
-        Indicators
+        {compact ? "Fx" : "Indicators"}
       </button>
-      <IndicatorTemplatesMenu engine={engine} />
+      {!compact ? <IndicatorTemplatesMenu engine={engine} /> : null}
       <button className="tb-btn" onClick={onAlert} title="Create alert (Alt+A)">
         Alert
       </button>
-      <button className={snap?.replay ? "tb-btn on" : "tb-btn"} onClick={() => engine?.setReplay(!snap?.replay)} title="Replay">
-        Replay
-      </button>
+      {!compact ? (
+        <button className={snap?.replay ? "tb-btn on" : "tb-btn"} onClick={() => engine?.setReplay(!snap?.replay)} title="Replay">
+          Replay
+        </button>
+      ) : null}
       <button className="tb-icon" disabled={!snap?.canUndo} onClick={() => engine?.undo()} title="Undo">
         ↺
       </button>
       <button className="tb-icon" disabled={!snap?.canRedo} onClick={() => engine?.redo()} title="Redo">
         ↻
       </button>
-      <button className="tb-icon" title="Select layout">
-        ⊞
-      </button>
+      {!compact ? (
+        <button className="tb-icon" title="Select layout">
+          ⊞
+        </button>
+      ) : null}
       <span className="spacer" />
       <button className="tb-icon" title="Quick search" onClick={onOpenSearch}>
         ⌕
@@ -344,9 +355,11 @@ export function ChartToolbar({
       <button className="tb-icon" title="Settings" onClick={onOpenSettings}>
         ⚙
       </button>
-      <button className="tb-icon" title="Fullscreen" onClick={() => document.documentElement.requestFullscreen?.()}>
-        ⛶
-      </button>
+      {!compact ? (
+        <button className="tb-icon" title="Fullscreen" onClick={() => document.documentElement.requestFullscreen?.()}>
+          ⛶
+        </button>
+      ) : null}
       <button className="tb-icon" title="Take a snapshot" onClick={() => engine?.screenshot()}>
         ⌗
       </button>

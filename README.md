@@ -13,6 +13,24 @@ npm run dev
 
 Open http://127.0.0.1:5173
 
+## Embed in your app (iframe / WebView)
+
+Full chart as a responsive embed (phone / tablet sized):
+
+```
+https://goldanil.ir/charts/?embed=1&symbol=BTCUSDT&exchange=BINANCE&interval=15&theme=dark
+```
+
+```html
+<iframe
+  src="https://goldanil.ir/charts/?embed=1&symbol=BTCUSDT&exchange=BINANCE&interval=15"
+  style="width:100%;max-width:430px;height:780px;border:0"
+  title="Forge Chart"
+></iframe>
+```
+
+See [EMBED.md](./EMBED.md) for query params, chrome flags, and mobile layout notes.
+
 ## Production (VPS)
 
 Prefer HTTPS (full assets + live Mongo/`crypto-chart` data):
