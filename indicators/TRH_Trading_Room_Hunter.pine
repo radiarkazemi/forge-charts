@@ -24,11 +24,14 @@ cooldownBars   = input.int(50, "Cooldown Between Setups", minval=10, maxval=300,
 grpB = "Mode B — Sweep + Disp + FVG"
 minDispAtr     = input.float(0.55, "Min Displacement Body (ATR×)", step=0.05, group=grpB)
 maxDispBars    = input.int(6, "Max Bars Sweep → Disp", group=grpB)
-maxFvgBars     = input.int(10, "Max Bars Disp → FVG", group=grpB)
-minFvgAtr      = input.float(0.12, "Min FVG Size (ATR×)", step=0.01, group=grpB)
+maxFvgBars     = input.int(14, "Max Bars Disp → FVG", group=grpB)
+minFvgAtr      = input.float(0.28, "Min FVG Size (ATR×)", step=0.01, group=grpB,
+     tooltip="Reject micro FVGs. MT5 was taking ~0.8pt gaps that get stop-hunted; TV used larger gaps.")
 requireFvgRetest = input.bool(true, "Require FVG Retest", group=grpB)
-maxRetestBars  = input.int(8, "Max Bars For Retest", group=grpB)
-fvgSlExtraAtr  = input.float(0.20, "Extra SL Pad (ATR×)", step=0.01, group=grpB)
+maxRetestBars  = input.int(10, "Max Bars For Retest", group=grpB)
+fvgSlExtraAtr  = input.float(0.35, "Extra SL Pad (ATR×)", step=0.01, group=grpB)
+fvgMinRiskAtr  = input.float(1.15, "Min Mode B Risk (ATR×)", step=0.05, group=grpB,
+     tooltip="Floor SL distance so broker wicks do not stop out trades TV survives.")
 
 grpC = "Mode C — Pro BTB (quality)"
 minBreakAtr    = input.float(0.20, "Min Break Beyond Pivot (ATR×)", step=0.01, group=grpC)
@@ -364,9 +367,14 @@ if barstate.isconfirmed
                     else if newDir == 0
                         float entry = (bGapTop + bGapBot) * 0.5
                         float pad = atr * (slPadAtr + fvgSlExtraAtr)
-                        float sl = bDir == 1 ? bDistal - pad : bDistal + pad
+                        float slExt = bDir == 1 ? math.min(bDistal, bGapBot) : math.max(bDistal, bGapTop)
+                        float sl = bDir == 1 ? slExt - pad : slExt + pad
                         float risk = math.abs(entry - sl)
-                        if risk > syminfo.mintick
+                        float minRisk = atr * fvgMinRiskAtr
+                        if minRisk > 0 and risk < minRisk
+                            sl := bDir == 1 ? entry - minRisk : entry + minRisk
+                            risk := minRisk
+                        if risk > syminfo.mintick and (bDir == 1 ? entry > sl : sl > entry)
                             float tp = bDir == 1 ? entry + risk * riskReward : entry - risk * riskReward
                             if useLiquidityTP
                                 if bDir == 1
@@ -399,9 +407,14 @@ if barstate.isconfirmed
                 if confirmed
                     float entry = (bGapTop + bGapBot) * 0.5
                     float pad = atr * (slPadAtr + fvgSlExtraAtr)
-                    float sl = bDir == 1 ? bDistal - pad : bDistal + pad
+                    float slExt = bDir == 1 ? math.min(bDistal, bGapBot) : math.max(bDistal, bGapTop)
+                    float sl = bDir == 1 ? slExt - pad : slExt + pad
                     float risk = math.abs(entry - sl)
-                    if risk > syminfo.mintick
+                    float minRisk = atr * fvgMinRiskAtr
+                    if minRisk > 0 and risk < minRisk
+                        sl := bDir == 1 ? entry - minRisk : entry + minRisk
+                        risk := minRisk
+                    if risk > syminfo.mintick and (bDir == 1 ? entry > sl : sl > entry)
                         float tp = bDir == 1 ? entry + risk * riskReward : entry - risk * riskReward
                         if useLiquidityTP
                             if bDir == 1

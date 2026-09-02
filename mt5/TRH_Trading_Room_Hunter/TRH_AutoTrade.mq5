@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.37"
-#property description "TRH EA v3.37: Mode B Entry/SL/TP exact Pine mid-FVG parity"
+#property version   "3.38"
+#property description "TRH EA v3.38: Mode B quality FVG (min 0.28ATR) + SL floor 1.15ATR"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -96,11 +96,12 @@ input int    InpCooldownBars    = 50;
 input group "Mode B - Sweep + Displacement + FVG"
 input double InpMinDispAtr      = 0.55;
 input int    InpMaxDispBars     = 6;
-input int    InpMaxFvgBars      = 10;
-input double InpMinFvgAtr       = 0.12;
+input int    InpMaxFvgBars      = 14;
+input double InpMinFvgAtr       = 0.28;
 input bool   InpRequireFvgRetest= true;
-input int    InpMaxRetestBars   = 8;
-input double InpFvgSlExtraAtr   = 0.20;   // Extra SL Beyond Sweep (ATRx) — Pine exact
+input int    InpMaxRetestBars   = 10;
+input double InpFvgSlExtraAtr   = 0.35;
+input double InpFvgMinRiskAtr   = 1.15;
 
 input group "Mode C - Pro BTB (Break + Retest)"
 input double InpMinBreakAtr     = 0.20;
@@ -164,6 +165,7 @@ void BuildConfig(TrhConfig &cfg)
    cfg.requireFvgRetest= InpRequireFvgRetest;
    cfg.maxRetestBars   = InpMaxRetestBars;
    cfg.fvgSlExtraAtr   = InpFvgSlExtraAtr;
+   cfg.fvgMinRiskAtr   = InpFvgMinRiskAtr;
    cfg.minBreakAtr     = InpMinBreakAtr;
    cfg.minBreakBodyAtr = InpMinBreakBodyAtr;
    cfg.maxBtbRetestBars= InpMaxBtbRetestBars;
@@ -983,7 +985,7 @@ void UpdateComment(const TrhSetup &last, const int ageBars, const double lots)
    else if(InpSLProtectStyle == TRH_BE_STEP) beName = "BE-STEP";
 
    Comment(StringFormat(
-      "TRH EA v3.37 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
+      "TRH EA v3.38 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
       InpAutoTrade ? "ON" : "OFF",
       beName,
       last.dir == 1 ? "LONG" : "SHORT",
@@ -999,10 +1001,10 @@ void UpdateComment(const TrhSetup &last, const int ageBars, const double lots)
 
 int OnInit()
 {
-   if(TRH_ENGINE_VERSION < 230)
+   if(TRH_ENGINE_VERSION < 231)
    {
-      Alert("TRH EA v3.37: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
-            "). Copy NEW TRH_Engine.mqh into THIS EA folder and recompile. Need Engine >= 230.");
+      Alert("TRH EA v3.38: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
+            "). Copy NEW TRH_Engine.mqh into THIS EA folder and recompile. Need Engine >= 231.");
       return INIT_FAILED;
    }
 
@@ -1016,7 +1018,7 @@ int OnInit()
    if(!TradeAllowedOk())
       PrintFormat("TRH WARN: trading blocked — %s", g_workStatus);
 
-   PrintFormat("TRH AutoTrade v3.37 | Eng%d | Mode B mid-FVG | BE=%d | farMarket=%s | session=%s | adoptAge<=%d | %s %s",
+   PrintFormat("TRH AutoTrade v3.38 | Eng%d | Mode B mid-FVG | BE=%d | farMarket=%s | session=%s | adoptAge<=%d | %s %s",
       TRH_ENGINE_VERSION,
       (int)InpSLProtectStyle,
       InpFarOpenMarket ? "Y" : "N",
@@ -1024,8 +1026,8 @@ int OnInit()
       InpAdoptMaxAgeBars,
       _Symbol, EnumToString(_Period));
 
-   Comment("TRH EA v3.37 Eng" + IntegerToString(TRH_ENGINE_VERSION) +
-           "\nMode B ENTRY=FVG mid · pad 0.20\nfar→market · near→pending @ ENTRY");
+   Comment("TRH EA v3.38 Eng" + IntegerToString(TRH_ENGINE_VERSION) +
+           "\nQ-FVG min0.28 · SL floor 1.15ATR\nfar→market · near→pending @ ENTRY");
    return INIT_SUCCEEDED;
 }
 
@@ -1089,7 +1091,7 @@ void OnTick()
    int n = TrhScanByMode(copied, t, o, h, l, c, cfg, (int)InpTradeMode, setups);
    if(n <= 0)
    {
-      Comment(StringFormat("TRH EA v3.37 %s — scanning...\nday %d | %s",
+      Comment(StringFormat("TRH EA v3.38 %s — scanning...\nday %d | %s",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades, g_workStatus));
       return;
    }

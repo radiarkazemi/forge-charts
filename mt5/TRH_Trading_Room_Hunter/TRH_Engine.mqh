@@ -5,7 +5,7 @@
 #ifndef TRH_ENGINE_MQH
 #define TRH_ENGINE_MQH
 
-#define TRH_ENGINE_VERSION 230
+#define TRH_ENGINE_VERSION 231
 #define TRH_MAX_PIVOTS 30
 #define TRH_ATR_LEN    14
 
@@ -59,6 +59,7 @@ struct TrhConfig
    bool   requireFvgRetest;
    int    maxRetestBars;
    double fvgSlExtraAtr;
+   double fvgMinRiskAtr;   // Mode B: floor SL distance (ATRx) — survive MT5 stop-hunt wicks
    // Mode C - Pro BTB (breakout -> back to breakeven) — quality filters
    double minBreakAtr;
    double minBreakBodyAtr;
@@ -88,11 +89,12 @@ void TrhDefaultConfig(TrhConfig &cfg)
    cfg.useLiquidityTP  = true;
    cfg.minDispAtr      = 0.55;
    cfg.maxDispBars     = 6;
-   cfg.maxFvgBars      = 10;
-   cfg.minFvgAtr       = 0.12;
+   cfg.maxFvgBars      = 14;     // more room to find a real FVG after skipping micros
+   cfg.minFvgAtr       = 0.28;   // reject micro gaps (MT5 took 0.8pt; TV used ~2pt)
    cfg.requireFvgRetest= true;
-   cfg.maxRetestBars   = 8;
-   cfg.fvgSlExtraAtr   = 0.20;   // exact Pine default
+   cfg.maxRetestBars   = 10;
+   cfg.fvgSlExtraAtr   = 0.35;   // slightly wider than pure 0.20 for broker wick noise
+   cfg.fvgMinRiskAtr   = 1.15;   // SL at least 1.15×ATR from entry (survives ~4330 wick)
    cfg.minBreakAtr     = 0.20;
    cfg.minBreakBodyAtr = 0.45;
    cfg.maxBtbRetestBars= 10;
@@ -132,9 +134,10 @@ color TrhModeAccent(const int mode, const int dir)
    return (dir == 1) ? clrTeal : clrCrimson;
 }
 
-// Exact Pine Mode B levels (user TV script):
+// Exact Pine Mode B levels + quality SL (reject stop-hunt micro risk):
 // ENTRY = (gapTop + gapBot) * 0.5
-// SL    = sweepDistal ± atr * (slPadAtr + fvgSlExtraAtr)
+// SL    = beyond max(sweepDistal, FVG outer) + atr*(slPad+fvgSlExtra)
+//         then floor risk to fvgMinRiskAtr × ATR (MT5 wicks often exceed TV)
 // TP    = entry ± risk * riskReward  (liquidity TP applied by caller)
 bool TrhModeBLevels(const int dir,
                     const double gapTop,
@@ -150,11 +153,25 @@ bool TrhModeBLevels(const int dir,
    double width = gapTop - gapBot;
    if(width <= 0.0 || atr <= 0.0)
       return false;
+   // Reject micro FVGs — MT5 was taking 0.8pt gaps that TV skipped for larger ones
+   if(width < atr * cfg.minFvgAtr)
+      return false;
 
    entry = (gapTop + gapBot) * 0.5;
    double pad = atr * (cfg.slPadAtr + cfg.fvgSlExtraAtr);
-   sl = (dir == 1) ? (sweepDistal - pad) : (sweepDistal + pad);
+   // SL must clear both the raid extreme and the FVG outer edge
+   double slExt = (dir == 1) ? MathMin(sweepDistal, gapBot) : MathMax(sweepDistal, gapTop);
+   sl = (dir == 1) ? (slExt - pad) : (slExt + pad);
+
    risk = MathAbs(entry - sl);
+   double minRisk = atr * cfg.fvgMinRiskAtr;
+   if(minRisk > 0.0 && risk < minRisk)
+   {
+      if(dir == 1) sl = entry - minRisk;
+      else         sl = entry + minRisk;
+      risk = minRisk;
+   }
+
    if(risk <= 0.0)
       return false;
    if(dir == 1 && entry <= sl)

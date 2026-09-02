@@ -2,80 +2,52 @@
 
 | File | Role |
 |------|------|
-| `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.32 (build 232) |
-| `TRH_AutoTrade.mq5` | **EA** v3.37 |
-| `TRH_Engine.mqh` | Shared Engine v230 |
+| `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.33 (build 233) |
+| `TRH_AutoTrade.mq5` | **EA** v3.38 |
+| `TRH_Engine.mqh` | Shared Engine v231 |
 
 | Mode | Chart name | Live? |
 |------|------------|--------|
-| **A** | `A · SWEEP` | **Yes** — main classic room |
-| **B** | `B · FVG` | **Yes** — sweep + disp + FVG |
-| **C** | `C · BTB` | **Removed** from live model |
+| **A** | `A · SWEEP` | **Yes** — classic room |
+| **B** | `B · FVG` | **Yes** — quality FVG (no micro gaps) |
+| **C** | `C · BTB` | **Removed** |
 
-**Default Detection Mode = `A + B` (Both)** on Indicator and AutoTrade.
+**Default = A + B (Both).** Priority when both fire: **A > B**.
 
-## Why Pine found a SWEEP MT5 missed (v228)
+## Why TV hit TP and MT5 hit SL (fixed in v231)
 
-Pine `ta.atr(14)` is **Wilder RMA**. Old MT5 used SMA of the last 14 TRs — after a big selloff SMA ATR spikes and `minRoom` fails, so Mode A never confirms. Engine now matches Pine ATR.
+Same gold move, different Mode B quality on the broker feed:
 
+| | TradingView (TP HIT) | Old MT5 (SL HIT) |
+|--|---------------------|------------------|
+| FVG | ~2pt · mid **4328.01** | micro **0.81pt** · mid 4327.01 |
+| SL | **4331.99** (cleared ~4330.5 wick) | **4330.08** (wick stopped out) |
+| TP | 4318.44 | 4319.65 |
 
-Priority when both fire: **A > B**.
+### Mode B quality defaults now
+- ENTRY still **FVG mid** `(gapTop+gapBot)/2`
+- `minFvgAtr = 0.28` — skip micro gaps; keep scanning for a real FVG
+- `fvgSlExtraAtr = 0.35` + SL beyond FVG outer edge
+- `fvgMinRiskAtr = 1.15` — SL floor so MT5 stop-hunt wicks do not kill the trade
+- `maxFvgBars = 14` — more room to find a quality gap
 
-## Install
+Reload the repo Pine too (same defaults).
 
-1. Unzip `TRH_Trading_Room_Hunter_MT5.zip`
-2. `Indicators/TRH_Trading_Room_Hunter/` ← Engine + Indicator  
-3. `Experts/TRH_Trading_Room_Hunter/` ← Engine + EA  
-4. Compile both `.mq5` · re-attach  
-5. Detection Mode = **A + B (Both)** · AutoTrade ON · Algo Trading ON  
+## Fresh install (required)
 
-## Live position sync (v2.26+)
-
-Same-account multi-PC: panel shows `LIVE LONG/SHORT` from the open broker position.
-
-## Mode B = exact TradingView Pine (v230 / EA v3.37 / Ind build 232)
-
-User TV script is the source of truth. Mode B levels are identical:
-
-```
-ENTRY = (gapTop + gapBot) * 0.5          // FVG mid / CE
-pad   = atr * (slPadAtr + fvgSlExtraAtr) // 0.02 + 0.20
-SL    = sweepDistal ± pad
-TP    = entry ± risk * 2.4               // + liquidity TP if enabled
-```
-
-### Fresh install (required — old chart instances keep stale levels)
 1. **Remove** old TRH indicator + EA from the chart
-2. Delete old `.ex5` in `MQL5/Indicators/TRH_Trading_Room_Hunter/` and `MQL5/Experts/TRH_Trading_Room_Hunter/`
-3. Copy **all three** files from the zip into those folders
-4. Compile Indicator + EA in MetaEditor
-5. Re-attach — panel header must say **`TRH v232 · Eng230 · mid-FVG`**
-6. EA Comment must say **`TRH EA v3.37 Eng230`**
+2. Delete old `.ex5` files
+3. Unzip [TRH_Trading_Room_Hunter_MT5.zip](https://github.com/radiarkazemi/forge-charts/raw/cursor/trh-mt5-abc-992e/mt5/TRH_Trading_Room_Hunter_MT5.zip)
+4. Copy Engine+Indicator → `MQL5/Indicators/TRH_Trading_Room_Hunter/`
+5. Copy Engine+EA → `MQL5/Experts/TRH_Trading_Room_Hunter/`
+6. Compile both in MetaEditor · re-attach
+7. Panel must say **`TRH v233 · Eng231 · Q-FVG`**
+8. EA Comment must say **`TRH EA v3.38 Eng231`**
 
-If the panel still shows ENTRY like `4326.61` without an FVG mid line, you are still on the old build.
+If inputs still show Min FVG = 0.12, click **Reset** on inputs (MT5 remembers old defaults).
 
-## Smart EA fill (v3.37)
+## Smart EA fill (v3.38)
 
-- **Far from ENTRY** → **market open immediately** (live SL/TP geometry)
-- **Near ENTRY** → pending **Stop/Limit @ ENTRY**
-- **Session filter OFF** by default (Asian dumps trade)
-- **Adopt age 20 bars** (was 8 — gold was aging out)
-- Auto-pad SL vs live bid/ask · retry filling modes (IOC/FOK/RETURN)
-- Chart Comment shows block reason (`Algo Trading OFF`, spread, etc.)
-- Break-even still **OFF** by default
-
-## Break-even (v3.32 — OFF by default)
-
-**Default = OFF.** SL stays at the setup SL until TP or original SL. No “risk-free”.
-
-That early BE @ ~0.5R was moving SL to entry and stopping trades that dip back then run to TP (exactly what you saw on GOLD).
-
-Optional styles if you turn it on later: `EARLY` / `SMART` / `STEP`.  
-Input name is `InpSLProtectStyle` (not the old checkbox) so MT5 does not remount saved “true” as EARLY.
-
-## Links
-
-- Zip: https://github.com/radiarkazemi/forge-charts/raw/cursor/trh-mt5-abc-992e/mt5/TRH_Trading_Room_Hunter_MT5.zip
-- Pine: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-mt5-abc-992e/indicators/TRH_Trading_Room_Hunter.pine
-- EA: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-mt5-abc-992e/mt5/TRH_Trading_Room_Hunter/TRH_AutoTrade.mq5
-- Indicator: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-mt5-abc-992e/mt5/TRH_Trading_Room_Hunter/TRH_Trading_Room_Hunter.mq5
+- Far from ENTRY → market now · Near → pending @ ENTRY
+- Session filter OFF · Adopt age 20 · BE OFF by default
+- Chart Comment shows block reason when not trading
