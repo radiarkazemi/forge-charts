@@ -22,24 +22,39 @@ const DEFAULT_FAVORITE_TYPES: ChartType[] = ["candle", "heikin", "line", "area",
 type Props = {
   engine: ChartEngine | null;
   live: boolean;
+  dataMode: DataMode;
+  onDataMode: (mode: DataMode) => void;
   onOpenSymbol: () => void;
   onOpenIndicators: () => void;
   onOpenSettings: () => void;
   onOpenSearch: () => void;
   onInterval: (interval: Interval) => void;
   onCompare: () => void;
+  onClearCompare: () => void;
   onAlert: () => void;
 };
+
+export type DataMode = "technicals" | "seasonals" | "news" | "ideas";
+
+const DATA_MODES: Array<{ id: DataMode; label: string; title: string }> = [
+  { id: "technicals", label: "Technicals", title: "Indicators & data window" },
+  { id: "seasonals", label: "Seasonals", title: "Economic calendar / seasonality" },
+  { id: "news", label: "News", title: "Symbol news" },
+  { id: "ideas", label: "Ideas", title: "Community ideas (local)" },
+];
 
 export function ChartToolbar({
   engine,
   live,
+  dataMode,
+  onDataMode,
   onOpenSymbol,
   onOpenIndicators,
   onOpenSettings,
   onOpenSearch,
   onInterval,
   onCompare,
+  onClearCompare,
   onAlert,
 }: Props) {
   const snap = useEngine(engine);
@@ -120,12 +135,45 @@ export function ChartToolbar({
   return (
     <div className="chart-toolbar">
       <button className="symbol-chip" onClick={onOpenSymbol} title="Symbol Search">
-        <span className={live ? "live-dot on" : "live-dot"} />
-        <b>{snap?.symbol.ticker ?? "XAUUSD"}</b>
+        <span className={live ? "live-dot on" : "live-dot"} aria-hidden />
+        <span className="symbol-chip-text">
+          <b>{snap?.symbol.ticker ?? "XAUUSD"}</b>
+          <em>{snap?.symbol.exchange ?? "FOREXCOM"}</em>
+        </span>
+        <span className={live ? "live-pill on" : "live-pill"} title={live ? "Live market data" : "Delayed / demo"}>
+          {live ? "LIVE" : "DELAYED"}
+        </span>
       </button>
-      <button className="tb-icon" title="Compare" onClick={onCompare}>
-        +
-      </button>
+
+      <div className="seg data-switch" role="tablist" aria-label="Chart data mode">
+        {DATA_MODES.map((mode) => (
+          <button
+            key={mode.id}
+            type="button"
+            role="tab"
+            aria-selected={dataMode === mode.id}
+            className={dataMode === mode.id ? "on" : ""}
+            title={mode.title}
+            onClick={() => onDataMode(mode.id)}
+          >
+            {mode.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="compare-wrap">
+        <button className={snap?.compare ? "tb-btn compare on" : "tb-btn compare"} title="Compare / overlay symbol" onClick={onCompare}>
+          <span aria-hidden>+</span>
+          Compare
+        </button>
+        {snap?.compare ? (
+          <button type="button" className="compare-chip" title="Remove compare overlay" onClick={onClearCompare}>
+            <b>{snap.compare}</b>
+            <span aria-hidden>×</span>
+          </button>
+        ) : null}
+      </div>
+
       <div className="menu-wrap" ref={ivRef}>
         <button
           className={ivOpen ? "tb-btn strong on" : "tb-btn strong"}
@@ -269,7 +317,7 @@ export function ChartToolbar({
           </div>
         ) : null}
       </div>
-      <button className="tb-btn accent" onClick={onOpenIndicators} title="Indicators">
+      <button className="tb-btn accent" onClick={onOpenIndicators} title="Indicators (Alt+I)">
         Indicators
       </button>
       <button className="tb-icon" title="Indicator templates" onClick={onOpenIndicators}>
