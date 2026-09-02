@@ -24,14 +24,15 @@ cooldownBars   = input.int(50, "Cooldown Between Setups", minval=10, maxval=300,
 grpB = "Mode B — Sweep + Disp + FVG"
 minDispAtr     = input.float(0.55, "Min Displacement Body (ATR×)", step=0.05, group=grpB)
 maxDispBars    = input.int(6, "Max Bars Sweep → Disp", group=grpB)
-maxFvgBars     = input.int(14, "Max Bars Disp → FVG", group=grpB)
-minFvgAtr      = input.float(0.28, "Min FVG Size (ATR×)", step=0.01, group=grpB,
-     tooltip="Reject micro FVGs. MT5 was taking ~0.8pt gaps that get stop-hunted; TV used larger gaps.")
+maxFvgBars     = input.int(18, "Max Bars Disp → FVG", group=grpB)
+minFvgAtr      = input.float(0.45, "Min FVG Size (ATR×)", step=0.01, group=grpB)
+minFvgPoints   = input.float(1.50, "Min FVG Size (price)", step=0.05, group=grpB,
+     tooltip="Absolute floor. Rejects ~0.8pt micro FVGs that MT5 was taking while TV used ~2pt gaps.")
 requireFvgRetest = input.bool(true, "Require FVG Retest", group=grpB)
-maxRetestBars  = input.int(10, "Max Bars For Retest", group=grpB)
-fvgSlExtraAtr  = input.float(0.35, "Extra SL Pad (ATR×)", step=0.01, group=grpB)
-fvgMinRiskAtr  = input.float(1.15, "Min Mode B Risk (ATR×)", step=0.05, group=grpB,
-     tooltip="Floor SL distance so broker wicks do not stop out trades TV survives.")
+maxRetestBars  = input.int(12, "Max Bars For Retest", group=grpB)
+fvgSlExtraAtr  = input.float(0.45, "Extra SL Pad (ATR×)", step=0.01, group=grpB)
+fvgMinRiskAtr  = input.float(1.55, "Min Mode B Risk (ATR×)", step=0.05, group=grpB,
+     tooltip="Floor SL so broker stop-hunt wicks do not kill trades TV survives.")
 
 grpC = "Mode C — Pro BTB (quality)"
 minBreakAtr    = input.float(0.20, "Min Break Beyond Pivot (ATR×)", step=0.01, group=grpC)
@@ -53,7 +54,7 @@ riskReward     = input.float(2.4, "Risk-Reward (Mode A/B)", minval=1.0, maxval=6
 useLiquidityTP = input.bool(true, "Prefer Opposing Pivot As TP", group=grpPos)
 
 grpDisp = "Display"
-onlyLast       = input.bool(true, "Only Last Setup", group=grpDisp)
+onlyLast       = input.bool(false, "Only Last Setup", group=grpDisp)
 setupWidth     = input.int(80, "Box Width (bars)", minval=20, maxval=400, group=grpDisp)
 showFillMark   = input.bool(true, "Show ENTRY/TP/SL Markers", group=grpDisp)
 showPanel      = input.bool(true, "Info Panel", group=grpDisp)
@@ -349,14 +350,14 @@ if barstate.isconfirmed
                 if bDir == 1
                     float bot = high[2]
                     float top = low
-                    if top - bot >= atr * minFvgAtr
+                    if top - bot >= atr * minFvgAtr and top - bot >= minFvgPoints
                         bGapBot := bot
                         bGapTop := top
                         found := true
                 else
                     float top2 = low[2]
                     float bot2 = high
-                    if top2 - bot2 >= atr * minFvgAtr
+                    if top2 - bot2 >= atr * minFvgAtr and top2 - bot2 >= minFvgPoints
                         bGapBot := bot2
                         bGapTop := top2
                         found := true

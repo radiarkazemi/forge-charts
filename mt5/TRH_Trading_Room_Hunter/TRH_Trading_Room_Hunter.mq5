@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "2.33"
-#property description "TRH v2.33: Mode B quality FVG + SL floor — skips micro gaps that get stop-hunted"
+#property version   "2.34"
+#property description "TRH v2.34: reject micro-FVG (<1.5pt) · SL floor 1.55ATR · show history"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -17,8 +17,8 @@
 #define TRH_ENGINE_VERSION 0
 #endif
 
-#define TRH_IND_BUILD 233
-#define TRH_MIN_ENGINE 231
+#define TRH_IND_BUILD 234
+#define TRH_MIN_ENGINE 232
 
 enum ENUM_TRH_PANEL_CORNER
 {
@@ -51,12 +51,13 @@ input int    InpCooldownBars    = 50;     // Cooldown Between Setups
 input group "Mode B - Sweep + Displacement + FVG"
 input double InpMinDispAtr      = 0.55;   // Min Displacement Body (ATRx)
 input int    InpMaxDispBars     = 6;      // Max Bars After Sweep For Displacement
-input int    InpMaxFvgBars      = 14;     // Max Bars After Displacement For FVG
-input double InpMinFvgAtr       = 0.28;   // Min FVG Gap Size (ATRx) — reject micro gaps
+input int    InpMaxFvgBars      = 18;     // Max Bars After Displacement For FVG
+input double InpMinFvgAtr       = 0.45;   // Min FVG Gap (ATRx)
+input double InpMinFvgPoints    = 1.50;   // Min FVG Gap (price) — rejects 0.8pt micros
 input bool   InpRequireFvgRetest= true;   // Wait For FVG Retest Before Signal
-input int    InpMaxRetestBars   = 10;     // Max Bars To Wait For Retest
-input double InpFvgSlExtraAtr   = 0.35;   // Extra SL Beyond Sweep/FVG (ATRx)
-input double InpFvgMinRiskAtr   = 1.15;   // Min Mode B risk (ATRx) — survive stop-hunt wicks
+input int    InpMaxRetestBars   = 12;     // Max Bars To Wait For Retest
+input double InpFvgSlExtraAtr   = 0.45;   // Extra SL Beyond Sweep/FVG (ATRx)
+input double InpFvgMinRiskAtr   = 1.55;   // Min Mode B risk (ATRx) — clear stop-hunt wicks
 
 input group "Mode C - Pro BTB (Break + Retest)"
 input double InpMinBreakAtr     = 0.20;   // Min Break Beyond Pivot (ATRx)
@@ -78,7 +79,7 @@ input bool   InpUseLiquidityTP  = true;   // Prefer Opposing Pivot As TP
 
 input group "Display - layout"
 input int    InpSetupWidth      = 80;     // Box Width (bars)
-input bool   InpOnlyLast        = true;   // Only Last Setup (Pine default)
+input bool   InpOnlyLast        = false;  // Only Last Setup (false=show history like TV)
 input int    InpHistoryCount    = 8;      // History Setups (if Only Last = false)
 input bool   InpExtendToNow     = true;   // Extend Boxes Until TP/SL (then freeze)
 input bool   InpFreezeOnExit    = true;   // Freeze setup at TP/SL bar (keep until next)
@@ -121,7 +122,7 @@ input bool   InpSyncLivePosition = true;  // Show open broker position on this c
 input ulong  InpSyncMagic        = 260825;// EA magic (0 = any position on symbol)
 input bool   InpPreferLivePanel  = true;  // Panel follows live position over old SL/TP hold
 
-string   OBJ_PREFIX = "TRH233_";  // new prefix forces wipe of stale drawings
+string   OBJ_PREFIX = "TRH234_";  // new prefix forces wipe of stale drawings
 TrhSetup g_setups[];
 int      g_nSetups = 0;
 datetime g_lastAlertTime = 0;
@@ -144,6 +145,7 @@ int OnInit()
    ObjectsDeleteAll(0, "TRH231_");
    ObjectsDeleteAll(0, "TRH232_");
    ObjectsDeleteAll(0, "TRH233_");
+   ObjectsDeleteAll(0, "TRH234_");
 
    if(TRH_ENGINE_VERSION < TRH_MIN_ENGINE)
    {
@@ -157,7 +159,7 @@ int OnInit()
       "TRH v" + IntegerToString(TRH_IND_BUILD) + " Eng" + IntegerToString(TRH_ENGINE_VERSION) + " Q-FVG");
    Print("TRH indicator build ", TRH_IND_BUILD,
          " | Engine ", TRH_ENGINE_VERSION,
-         " | Mode B mid-FVG | minFvg=0.28 | minRisk=1.15ATR | slExtra=0.35");
+         " | Mode B Q-FVG min1.5pt | minRisk=1.55ATR | history ON");
    return INIT_SUCCEEDED;
 }
 
@@ -721,6 +723,7 @@ void BuildConfig(TrhConfig &cfg)
    cfg.maxDispBars     = InpMaxDispBars;
    cfg.maxFvgBars      = InpMaxFvgBars;
    cfg.minFvgAtr       = InpMinFvgAtr;
+   cfg.minFvgPoints    = InpMinFvgPoints;
    cfg.requireFvgRetest= InpRequireFvgRetest;
    cfg.maxRetestBars   = InpMaxRetestBars;
    cfg.fvgSlExtraAtr   = InpFvgSlExtraAtr;

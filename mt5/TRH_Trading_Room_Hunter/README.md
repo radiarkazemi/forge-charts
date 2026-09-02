@@ -1,53 +1,36 @@
-# TRH for MetaTrader 5 — Modes A + B (BTB removed)
+# TRH for MetaTrader 5 — Modes A + B
 
 | File | Role |
 |------|------|
-| `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.33 (build 233) |
-| `TRH_AutoTrade.mq5` | **EA** v3.38 |
-| `TRH_Engine.mqh` | Shared Engine v231 |
+| `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.34 (build 234) |
+| `TRH_AutoTrade.mq5` | **EA** v3.39 |
+| `TRH_Engine.mqh` | Shared Engine v232 |
 
-| Mode | Chart name | Live? |
-|------|------------|--------|
-| **A** | `A · SWEEP` | **Yes** — classic room |
-| **B** | `B · FVG` | **Yes** — quality FVG (no micro gaps) |
-| **C** | `C · BTB` | **Removed** |
+## Why TV hit TP and MT5 kept hitting SL
 
-**Default = A + B (Both).** Priority when both fire: **A > B**.
+MT5 was locking a **0.81pt micro FVG** (mid 4327.01, SL ~4330.4). That setup:
+1. Got stop-hunted on the wick
+2. Started cooldown → **blocked the real TV-quality setup** (mid 4328.01, SL 4331.99)
+3. With OnlyLast=true, history disappeared so you only saw the bad one
 
-## Why TV hit TP and MT5 hit SL (fixed in v231)
+### v234 / Eng232 fixes
+| Setting | Value | Effect |
+|---------|-------|--------|
+| `minFvgPoints` | **1.50** | Hard-rejects the 0.81pt micro gap |
+| `minFvgAtr` | **0.45** | ATR gate |
+| `fvgMinRiskAtr` | **1.55** | SL floor clears ~4330.5–4331 wick |
+| `fvgSlExtraAtr` | **0.45** | Wider pad beyond FVG outer |
+| Upgrade FVG | while waiting retest | Prefer larger quality gap |
+| OnlyLast | **false** | Show setup history again |
+| ENTRY | still FVG mid | Same as TV |
 
-Same gold move, different Mode B quality on the broker feed:
+## Fresh install
 
-| | TradingView (TP HIT) | Old MT5 (SL HIT) |
-|--|---------------------|------------------|
-| FVG | ~2pt · mid **4328.01** | micro **0.81pt** · mid 4327.01 |
-| SL | **4331.99** (cleared ~4330.5 wick) | **4330.08** (wick stopped out) |
-| TP | 4318.44 | 4319.65 |
+1. Remove TRH from chart · delete `.ex5`
+2. [Download zip](https://github.com/radiarkazemi/forge-charts/raw/cursor/trh-mt5-abc-992e/mt5/TRH_Trading_Room_Hunter_MT5.zip)
+3. Replace Engine + Indicator + EA · compile both
+4. Panel must say **`TRH v234 · Eng232 · Q-FVG`**
+5. **Reset inputs** if Min FVG Points is missing / still 0.12
+6. Reload Pine from repo (same filters)
 
-### Mode B quality defaults now
-- ENTRY still **FVG mid** `(gapTop+gapBot)/2`
-- `minFvgAtr = 0.28` — skip micro gaps; keep scanning for a real FVG
-- `fvgSlExtraAtr = 0.35` + SL beyond FVG outer edge
-- `fvgMinRiskAtr = 1.15` — SL floor so MT5 stop-hunt wicks do not kill the trade
-- `maxFvgBars = 14` — more room to find a quality gap
-
-Reload the repo Pine too (same defaults).
-
-## Fresh install (required)
-
-1. **Remove** old TRH indicator + EA from the chart
-2. Delete old `.ex5` files
-3. Unzip [TRH_Trading_Room_Hunter_MT5.zip](https://github.com/radiarkazemi/forge-charts/raw/cursor/trh-mt5-abc-992e/mt5/TRH_Trading_Room_Hunter_MT5.zip)
-4. Copy Engine+Indicator → `MQL5/Indicators/TRH_Trading_Room_Hunter/`
-5. Copy Engine+EA → `MQL5/Experts/TRH_Trading_Room_Hunter/`
-6. Compile both in MetaEditor · re-attach
-7. Panel must say **`TRH v233 · Eng231 · Q-FVG`**
-8. EA Comment must say **`TRH EA v3.38 Eng231`**
-
-If inputs still show Min FVG = 0.12, click **Reset** on inputs (MT5 remembers old defaults).
-
-## Smart EA fill (v3.38)
-
-- Far from ENTRY → market now · Near → pending @ ENTRY
-- Session filter OFF · Adopt age 20 · BE OFF by default
-- Chart Comment shows block reason when not trading
+That `FVG 4326.61→4327.42` setup must **not** appear anymore.

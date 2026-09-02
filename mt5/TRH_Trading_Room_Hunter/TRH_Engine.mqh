@@ -5,7 +5,7 @@
 #ifndef TRH_ENGINE_MQH
 #define TRH_ENGINE_MQH
 
-#define TRH_ENGINE_VERSION 231
+#define TRH_ENGINE_VERSION 232
 #define TRH_MAX_PIVOTS 30
 #define TRH_ATR_LEN    14
 
@@ -56,6 +56,7 @@ struct TrhConfig
    int    maxDispBars;
    int    maxFvgBars;
    double minFvgAtr;
+   double minFvgPoints;    // absolute min FVG width (price) — kills 0.8pt gold micros
    bool   requireFvgRetest;
    int    maxRetestBars;
    double fvgSlExtraAtr;
@@ -89,12 +90,13 @@ void TrhDefaultConfig(TrhConfig &cfg)
    cfg.useLiquidityTP  = true;
    cfg.minDispAtr      = 0.55;
    cfg.maxDispBars     = 6;
-   cfg.maxFvgBars      = 14;     // more room to find a real FVG after skipping micros
-   cfg.minFvgAtr       = 0.28;   // reject micro gaps (MT5 took 0.8pt; TV used ~2pt)
+   cfg.maxFvgBars      = 18;     // more room after skipping micros
+   cfg.minFvgAtr       = 0.45;   // ATR gate
+   cfg.minFvgPoints    = 1.50;   // absolute gate — rejects 0.81pt micro that killed the trade
    cfg.requireFvgRetest= true;
-   cfg.maxRetestBars   = 10;
-   cfg.fvgSlExtraAtr   = 0.35;   // slightly wider than pure 0.20 for broker wick noise
-   cfg.fvgMinRiskAtr   = 1.15;   // SL at least 1.15×ATR from entry (survives ~4330 wick)
+   cfg.maxRetestBars   = 12;
+   cfg.fvgSlExtraAtr   = 0.45;
+   cfg.fvgMinRiskAtr   = 1.55;   // SL floor ~ clears 4330.5–4331 wick on GOLD M1
    cfg.minBreakAtr     = 0.20;
    cfg.minBreakBodyAtr = 0.45;
    cfg.maxBtbRetestBars= 10;
@@ -106,6 +108,15 @@ void TrhDefaultConfig(TrhConfig &cfg)
    cfg.btbRequireWickReject= true;
    cfg.btbMaxPastEntryAtr  = 0.20;
    cfg.btbMinBarsAfterBreak= 2;
+}
+
+// True if FVG width clears both ATR and absolute price floors
+bool TrhFvgWideEnough(const double width, const double atr, const TrhConfig &cfg)
+{
+   if(width <= 0.0) return false;
+   if(width < cfg.minFvgPoints) return false;
+   if(atr > 0.0 && width < atr * cfg.minFvgAtr) return false;
+   return true;
 }
 
 // Short labels on chart tags / panel
@@ -151,10 +162,7 @@ bool TrhModeBLevels(const int dir,
                     double &risk)
 {
    double width = gapTop - gapBot;
-   if(width <= 0.0 || atr <= 0.0)
-      return false;
-   // Reject micro FVGs — MT5 was taking 0.8pt gaps that TV skipped for larger ones
-   if(width < atr * cfg.minFvgAtr)
+   if(!TrhFvgWideEnough(width, atr, cfg))
       return false;
 
    entry = (gapTop + gapBot) * 0.5;
@@ -665,7 +673,7 @@ int TrhScanFvgSetups(const int rates,
          {
             double bot = high[i - 2];
             double top = low[i];
-            if(top - bot >= a * cfg.minFvgAtr)
+            if(TrhFvgWideEnough(top - bot, a, cfg))
             {
                gapBot = bot; gapTop = top; found = true;
             }
@@ -674,7 +682,7 @@ int TrhScanFvgSetups(const int rates,
          {
             double top = low[i - 2];
             double bot = high[i];
-            if(top - bot >= a * cfg.minFvgAtr)
+            if(TrhFvgWideEnough(top - bot, a, cfg))
             {
                gapBot = bot; gapTop = top; found = true;
             }
@@ -1237,13 +1245,13 @@ int TrhScanABUnified(const int rates,
             {
                double bot = high[i - 2];
                double top = low[i];
-               if(top - bot >= a * cfg.minFvgAtr) { bGapBot = bot; bGapTop = top; found = true; }
+               if(TrhFvgWideEnough(top - bot, a, cfg)) { bGapBot = bot; bGapTop = top; found = true; }
             }
             else
             {
                double top2 = low[i - 2];
                double bot2 = high[i];
-               if(top2 - bot2 >= a * cfg.minFvgAtr) { bGapBot = bot2; bGapTop = top2; found = true; }
+               if(TrhFvgWideEnough(top2 - bot2, a, cfg)) { bGapBot = bot2; bGapTop = top2; found = true; }
             }
             if(found)
             {
@@ -1265,9 +1273,32 @@ int TrhScanABUnified(const int rates,
                      s.barIndex = i; s.barTime = time[i];
                      s.setupMode = TRH_MODE_FVG;
                      newDir = bDir;
+                     bPhase = 0; bDir = 0;
                   }
-                  bPhase = 0; bDir = 0;
+                  // else keep phase 2 hunting — do not abort the sweep leg
                }
+            }
+         }
+
+         // While waiting for retest, upgrade to a larger quality FVG if one forms
+         if(bPhase == 3 && i >= 2 && i > bFvgBar && newDir == 0)
+         {
+            double curW = bGapTop - bGapBot;
+            if(bDir == 1)
+            {
+               double bot = high[i - 2];
+               double top = low[i];
+               double w = top - bot;
+               if(TrhFvgWideEnough(w, a, cfg) && w > curW)
+               { bGapBot = bot; bGapTop = top; bFvgBar = i; }
+            }
+            else
+            {
+               double top2 = low[i - 2];
+               double bot2 = high[i];
+               double w = top2 - bot2;
+               if(TrhFvgWideEnough(w, a, cfg) && w > curW)
+               { bGapBot = bot2; bGapTop = top2; bFvgBar = i; }
             }
          }
 
@@ -1300,8 +1331,14 @@ int TrhScanABUnified(const int rates,
                   s.barIndex = i; s.barTime = time[i];
                   s.setupMode = TRH_MODE_FVG;
                   newDir = bDir;
+                  bPhase = 0; bDir = 0;
                }
-               bPhase = 0; bDir = 0;
+               else
+               {
+                  // Bad FVG geometry — resume hunt instead of aborting the sweep
+                  bPhase = 2;
+                  bFvgBar = -1;
+               }
             }
          }
       }
