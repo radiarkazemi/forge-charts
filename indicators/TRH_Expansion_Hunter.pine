@@ -1,0 +1,575 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// TRH | Expansion Hunter — hunt sharp displacement moves (long + short)
+// Model: HTF bias (discount/premium + 1H FVG/CISD) → LTF sweep → displacement → FVG → retest
+// ENTRY = FVG midpoint · SL beyond sweep/FVG · TP = R×R (optional HTF magnet)
+
+//@version=5
+strategy("TRH | Expansion Hunter", shorttitle="TRH-XH", overlay=true,
+     max_boxes_count=60, max_lines_count=80, max_labels_count=80, max_bars_back=5000,
+     pyramiding=0, process_orders_on_close=true, calc_on_every_tick=false,
+     initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=2,
+     commission_type=strategy.commission.percent, commission_value=0.02)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+grpDir = "Direction"
+allowLong  = input.bool(true,  "Allow Longs",  group=grpDir)
+allowShort = input.bool(true,  "Allow Shorts", group=grpDir)
+
+grpHTF = "Higher-Timeframe Bias"
+useHtfFilter = input.bool(true, "Use HTF Bias Filter", group=grpHTF,
+     tooltip="Longs preferred in discount / near support. Shorts preferred in premium / into HTF FVG.")
+htfTf        = input.timeframe("60", "HTF Timeframe", group=grpHTF)
+htfLookback  = input.int(40, "HTF Range Lookback (bars)", minval=10, maxval=120, group=grpHTF)
+discountMax  = input.float(0.45, "Discount Zone Max (0-1)", minval=0.1, maxval=0.6, step=0.05, group=grpHTF,
+     tooltip="Longs allowed when price is in the lower portion of the HTF range.")
+premiumMin   = input.float(0.55, "Premium Zone Min (0-1)", minval=0.4, maxval=0.9, step=0.05, group=grpHTF,
+     tooltip="Shorts allowed when price is in the upper portion of the HTF range.")
+showHtfZones = input.bool(true, "Show HTF FVG / CISD Levels", group=grpHTF)
+
+grpSig = "Signal — Sweep + Displacement + FVG"
+pivotLen       = input.int(5, "Pivot Length", minval=2, maxval=20, group=grpSig)
+minContextAtr  = input.float(1.0, "Min Context Into Sweep (ATR×)", step=0.1, group=grpSig)
+minSweepAtr    = input.float(0.05, "Min Sweep Beyond Pivot (ATR×)", step=0.01, group=grpSig)
+minDispAtr     = input.float(0.55, "Min Displacement Body (ATR×)", step=0.05, group=grpSig)
+maxDispBars    = input.int(6, "Max Bars Sweep → Disp", group=grpSig)
+maxFvgBars     = input.int(18, "Max Bars Disp → FVG", group=grpSig)
+minFvgAtr      = input.float(0.35, "Min FVG Size (ATR×)", step=0.05, group=grpSig)
+minFvgPoints   = input.float(1.50, "Min FVG Size (price)", step=0.05, group=grpSig)
+requireRetest  = input.bool(true, "Require FVG Retest", group=grpSig)
+maxRetestBars  = input.int(12, "Max Bars For Retest", group=grpSig)
+cooldownBars   = input.int(30, "Cooldown Between Setups", minval=5, group=grpSig)
+
+grpRisk = "Entry / SL / TP"
+slPadAtr       = input.float(0.02, "SL Pad (ATR×)", step=0.01, group=grpRisk)
+fvgSlExtraAtr  = input.float(0.35, "Extra SL Beyond Sweep/FVG (ATR×)", step=0.05, group=grpRisk)
+minRiskAtr     = input.float(1.20, "Min Risk Size (ATR×)", step=0.05, group=grpRisk)
+riskReward     = input.float(2.4, "Risk-Reward", minval=1.0, maxval=6.0, step=0.1, group=grpRisk)
+useHtfMagnetTP = input.bool(true, "Prefer HTF FVG/CISD As TP Magnet", group=grpRisk)
+useLiqTP       = input.bool(true, "Prefer Opposing Pivot As TP", group=grpRisk)
+
+grpDisp = "Display"
+showBoxes   = input.bool(true, "Show Setup Boxes", group=grpDisp)
+showLabels  = input.bool(true, "Show ENTRY / SL / TP Labels", group=grpDisp)
+showPanel   = input.bool(true, "Info Panel", group=grpDisp)
+onlyLast    = input.bool(false, "Only Last Setup", group=grpDisp)
+boxBars     = input.int(40, "Box Width (bars)", minval=10, maxval=200, group=grpDisp)
+
+grpCol = "Colors"
+longCol  = input.color(color.new(#1E88E5, 78), "Long Zone", group=grpCol)
+shortCol = input.color(color.new(#8E24AA, 78), "Short Zone", group=grpCol)
+entryCol = input.color(#787B86, "Entry", group=grpCol)
+slCol    = input.color(#EF5350, "SL", group=grpCol)
+tpCol    = input.color(#26A69A, "TP", group=grpCol)
+htfBull  = input.color(color.new(#26A69A, 70), "HTF Bull FVG", group=grpCol)
+htfBear  = input.color(color.new(#EF5350, 70), "HTF Bear FVG", group=grpCol)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPERS + PIVOTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+atr = ta.atr(14)
+
+ph = ta.pivothigh(high, pivotLen, pivotLen)
+pl = ta.pivotlow(low, pivotLen, pivotLen)
+
+var float[] pivHi = array.new_float()
+var int[]   pivHiBar = array.new_int()
+var float[] pivLo = array.new_float()
+var int[]   pivLoBar = array.new_int()
+
+if not na(ph)
+    array.push(pivHi, ph)
+    array.push(pivHiBar, bar_index - pivotLen)
+    while array.size(pivHi) > 30
+        array.shift(pivHi)
+        array.shift(pivHiBar)
+
+if not na(pl)
+    array.push(pivLo, pl)
+    array.push(pivLoBar, bar_index - pivotLen)
+    while array.size(pivLo) > 30
+        array.shift(pivLo)
+        array.shift(pivLoBar)
+
+f_fvgWide(w) =>
+    w >= minFvgPoints and w >= atr * minFvgAtr
+
+f_nextLiqHigh(above, minDist) =>
+    float out = na
+    if array.size(pivHi) > 0
+        for i = array.size(pivHi) - 1 to 0
+            float px = array.get(pivHi, i)
+            int age = bar_index - array.get(pivHiBar, i)
+            if age >= pivotLen and px > above + minDist
+                out := na(out) ? px : math.min(out, px)
+    out
+
+f_nextLiqLow(below, minDist) =>
+    float out = na
+    if array.size(pivLo) > 0
+        for i = array.size(pivLo) - 1 to 0
+            float px = array.get(pivLo, i)
+            int age = bar_index - array.get(pivLoBar, i)
+            if age >= pivotLen and px < below - minDist
+                out := na(out) ? px : math.max(out, px)
+    out
+
+f_lastPivotLow(maxAge) =>
+    float best = na
+    if array.size(pivLo) > 0
+        for i = array.size(pivLo) - 1 to 0
+            int age = bar_index - array.get(pivLoBar, i)
+            float px = array.get(pivLo, i)
+            if age >= pivotLen and age <= maxAge
+                best := na(best) ? px : math.min(best, px)
+    best
+
+f_lastPivotHigh(maxAge) =>
+    float best = na
+    if array.size(pivHi) > 0
+        for i = array.size(pivHi) - 1 to 0
+            int age = bar_index - array.get(pivHiBar, i)
+            float px = array.get(pivHi, i)
+            if age >= pivotLen and age <= maxAge
+                best := na(best) ? px : math.max(best, px)
+    best
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HTF: range position + last FVG + simple CISD level
+// ═══════════════════════════════════════════════════════════════════════════
+
+f_htfBundle() =>
+    float a = ta.atr(14)
+    float hi = ta.highest(high, htfLookback)
+    float lo = ta.lowest(low, htfLookback)
+    float rng = math.max(hi - lo, syminfo.mintick)
+    float pos = (close - lo) / rng
+
+    // 3-candle FVG on HTF
+    float bullBot = high[2]
+    float bullTop = low
+    bool  bullFvg = bullTop > bullBot and (bullTop - bullBot) >= a * 0.25
+    float bearTop = low[2]
+    float bearBot = high
+    bool  bearFvg = bearTop > bearBot and (bearTop - bearBot) >= a * 0.25
+
+    // Simple CISD: first close through prior opposing impulse open
+    float cisdBull = na
+    float cisdBear = na
+    if close > open and close > open[1] and close[1] < open[1]
+        cisdBull := open[1]
+    if close < open and close < open[1] and close[1] > open[1]
+        cisdBear := open[1]
+
+    [pos, hi, lo,
+      bullFvg ? bullBot : na, bullFvg ? bullTop : na,
+      bearFvg ? bearBot : na, bearFvg ? bearTop : na,
+      cisdBull, cisdBear]
+
+[htfPos, htfHi, htfLo, htfBullBotRaw, htfBullTopRaw, htfBearBotRaw, htfBearTopRaw, htfCisdBullRaw, htfCisdBearRaw] =
+     request.security(syminfo.tickerid, htfTf, f_htfBundle(), barmerge.gaps_off, barmerge.lookahead_off)
+
+var float htfBullBot = na
+var float htfBullTop = na
+var float htfBearBot = na
+var float htfBearTop = na
+var float htfCisdBull = na
+var float htfCisdBear = na
+
+if not na(htfBullBotRaw)
+    htfBullBot := htfBullBotRaw
+    htfBullTop := htfBullTopRaw
+if not na(htfBearBotRaw)
+    htfBearBot := htfBearBotRaw
+    htfBearTop := htfBearTopRaw
+if not na(htfCisdBullRaw)
+    htfCisdBull := htfCisdBullRaw
+if not na(htfCisdBearRaw)
+    htfCisdBear := htfCisdBearRaw
+
+bool inDiscount = htfPos <= discountMax
+bool inPremium  = htfPos >= premiumMin
+bool longBiasOk  = not useHtfFilter or inDiscount or (not na(htfCisdBull) and close >= htfCisdBull)
+bool shortBiasOk = not useHtfFilter or inPremium  or (not na(htfBearBot) and close >= htfBearBot and close <= htfBearTop)
+
+// HTF visual levels
+var line htfBullLn = na
+var line htfBearLn = na
+var line htfCisdLn = na
+var label htfBullLab = na
+var label htfBearLab = na
+if showHtfZones and barstate.islast
+    if not na(htfBullLn)
+        line.delete(htfBullLn)
+    if not na(htfBearLn)
+        line.delete(htfBearLn)
+    if not na(htfCisdLn)
+        line.delete(htfCisdLn)
+    if not na(htfBullLab)
+        label.delete(htfBullLab)
+    if not na(htfBearLab)
+        label.delete(htfBearLab)
+    if not na(htfBullBot) and not na(htfBullTop)
+        float midB = (htfBullBot + htfBullTop) * 0.5
+        htfBullLn := line.new(bar_index - 30, midB, bar_index + 5, midB, color=htfBull, width=2, style=line.style_dashed)
+        htfBullLab := label.new(bar_index + 2, midB, "HTF Bull FVG", style=label.style_label_left, color=htfBull, textcolor=color.white, size=size.tiny)
+    if not na(htfBearBot) and not na(htfBearTop)
+        float midS = (htfBearBot + htfBearTop) * 0.5
+        htfBearLn := line.new(bar_index - 30, midS, bar_index + 5, midS, color=htfBear, width=2, style=line.style_dashed)
+        htfBearLab := label.new(bar_index + 2, midS, "HTF Bear FVG / CISD magnet", style=label.style_label_left, color=htfBear, textcolor=color.white, size=size.tiny)
+    else if not na(htfCisdBear)
+        htfCisdLn := line.new(bar_index - 30, htfCisdBear, bar_index + 5, htfCisdBear, color=htfBear, width=1, style=line.style_dotted)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LTF SWEEPS
+// ═══════════════════════════════════════════════════════════════════════════
+
+huntLo = f_lastPivotLow(80)
+huntHi = f_lastPivotHigh(80)
+priorHigh = ta.highest(high[1], 40)
+priorLow  = ta.lowest(low[1], 40)
+
+bullSweep = not na(huntLo) and low < huntLo - atr * minSweepAtr and close > huntLo and close > open and (priorHigh - low) >= atr * minContextAtr
+bearSweep = not na(huntHi) and high > huntHi + atr * minSweepAtr and close < huntHi and close < open and (high - priorLow) >= atr * minContextAtr
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STATE MACHINE: sweep → disp → FVG → retest → signal
+// ═══════════════════════════════════════════════════════════════════════════
+
+var int   phase = 0
+var int   pendDir = 0
+var float pendDistal = na
+var float pendHunt = na
+var int   sweepBar = na
+var int   dispBar = na
+var int   fvgBar = na
+var float gapBot = na
+var float gapTop = na
+var int   lastSetupBar = na
+
+var int   signalDir = 0
+var float signalEntry = na
+var float signalSl = na
+var float signalTp = na
+var float signalProx = na
+var float signalDist = na
+var string signalTag = ""
+
+signalDir := 0
+
+coolOk = na(lastSetupBar) or (bar_index - lastSetupBar >= cooldownBars)
+
+if phase == 1 and not na(sweepBar) and bar_index - sweepBar > maxDispBars
+    phase := 0
+    pendDir := 0
+if phase == 2 and not na(dispBar) and bar_index - dispBar > maxFvgBars
+    phase := 0
+    pendDir := 0
+if phase == 3 and not na(fvgBar) and bar_index - fvgBar > maxRetestBars
+    phase := 0
+    pendDir := 0
+
+canStart = phase == 0 and coolOk
+if canStart and allowLong and bullSweep and longBiasOk
+    phase := 1
+    pendDir := 1
+    pendDistal := low
+    pendHunt := huntLo
+    sweepBar := bar_index
+    dispBar := na
+    fvgBar := na
+else if canStart and allowShort and bearSweep and shortBiasOk
+    phase := 1
+    pendDir := -1
+    pendDistal := high
+    pendHunt := huntHi
+    sweepBar := bar_index
+    dispBar := na
+    fvgBar := na
+
+if phase != 0
+    if pendDir == 1 and low < pendDistal
+        pendDistal := low
+    if pendDir == -1 and high > pendDistal
+        pendDistal := high
+
+    float body = math.abs(close - open)
+
+    // Displacement
+    if phase == 1 and bar_index > sweepBar
+        bool bullDisp = pendDir == 1 and close > open and body >= atr * minDispAtr and close > pendHunt
+        bool bearDisp = pendDir == -1 and close < open and body >= atr * minDispAtr and close < pendHunt
+        if bullDisp or bearDisp
+            phase := 2
+            dispBar := bar_index
+
+    // FVG form
+    if phase == 2 and bar_index >= 2 and bar_index > dispBar
+        bool found = false
+        if pendDir == 1
+            float bot = high[2]
+            float top = low
+            if f_fvgWide(top - bot)
+                gapBot := bot
+                gapTop := top
+                found := true
+        else
+            float top2 = low[2]
+            float bot2 = high
+            if f_fvgWide(top2 - bot2)
+                gapBot := bot2
+                gapTop := top2
+                found := true
+        if found
+            fvgBar := bar_index
+            if requireRetest
+                phase := 3
+            else
+                float entry = (gapTop + gapBot) * 0.5
+                float pad = atr * (slPadAtr + fvgSlExtraAtr)
+                float slExt = pendDir == 1 ? math.min(pendDistal, gapBot) : math.max(pendDistal, gapTop)
+                float sl = pendDir == 1 ? slExt - pad : slExt + pad
+                float risk = math.abs(entry - sl)
+                float minRisk = atr * minRiskAtr
+                if minRisk > 0 and risk < minRisk
+                    sl := pendDir == 1 ? entry - minRisk : entry + minRisk
+                    risk := minRisk
+                if risk > syminfo.mintick and (pendDir == 1 ? entry > sl : sl > entry)
+                    float tp = pendDir == 1 ? entry + risk * riskReward : entry - risk * riskReward
+                    if useLiqTP
+                        if pendDir == 1
+                            float liq = f_nextLiqHigh(entry, risk * 1.5)
+                            if not na(liq)
+                                tp := math.max(tp, liq)
+                        else
+                            float liq2 = f_nextLiqLow(entry, risk * 1.5)
+                            if not na(liq2)
+                                tp := math.min(tp, liq2)
+                    if useHtfMagnetTP
+                        if pendDir == 1 and not na(htfBearBot)
+                            tp := math.max(tp, (htfBearBot + nz(htfBearTop, htfBearBot)) * 0.5)
+                        if pendDir == -1 and not na(htfBullTop)
+                            tp := math.min(tp, (htfBullTop + nz(htfBullBot, htfBullTop)) * 0.5)
+                    signalDir := pendDir
+                    signalEntry := entry
+                    signalSl := sl
+                    signalTp := tp
+                    signalProx := gapTop
+                    signalDist := gapBot
+                    signalTag := pendDir == 1 ? "LONG · EXP FVG" : "SHORT · EXP FVG"
+                    lastSetupBar := bar_index
+                phase := 0
+                pendDir := 0
+
+    // Upgrade FVG while waiting retest
+    if phase == 3 and bar_index >= 2 and bar_index > fvgBar
+        float curW = gapTop - gapBot
+        if pendDir == 1
+            float botU = high[2]
+            float topU = low
+            float wU = topU - botU
+            if f_fvgWide(wU) and wU > curW
+                gapBot := botU
+                gapTop := topU
+                fvgBar := bar_index
+        else
+            float topU2 = low[2]
+            float botU2 = high
+            float wU2 = topU2 - botU2
+            if f_fvgWide(wU2) and wU2 > curW
+                gapBot := botU2
+                gapTop := topU2
+                fvgBar := bar_index
+
+    // Retest confirm
+    if phase == 3 and bar_index > fvgBar
+        bool confirmed = false
+        if pendDir == 1
+            bool retested = low <= gapTop and low >= gapBot - atr * 0.05
+            confirmed := retested and close > open and close >= (gapBot + gapTop) * 0.5
+        else
+            bool retested2 = high >= gapBot and high <= gapTop + atr * 0.05
+            confirmed := retested2 and close < open and close <= (gapBot + gapTop) * 0.5
+        if confirmed
+            float entry = (gapTop + gapBot) * 0.5
+            float pad = atr * (slPadAtr + fvgSlExtraAtr)
+            float slExt = pendDir == 1 ? math.min(pendDistal, gapBot) : math.max(pendDistal, gapTop)
+            float sl = pendDir == 1 ? slExt - pad : slExt + pad
+            float risk = math.abs(entry - sl)
+            float minRisk = atr * minRiskAtr
+            if minRisk > 0 and risk < minRisk
+                sl := pendDir == 1 ? entry - minRisk : entry + minRisk
+                risk := minRisk
+            if risk > syminfo.mintick and (pendDir == 1 ? entry > sl : sl > entry)
+                float tp = pendDir == 1 ? entry + risk * riskReward : entry - risk * riskReward
+                if useLiqTP
+                    if pendDir == 1
+                        float liq = f_nextLiqHigh(entry, risk * 1.5)
+                        if not na(liq)
+                            tp := math.max(tp, liq)
+                    else
+                        float liq2 = f_nextLiqLow(entry, risk * 1.5)
+                        if not na(liq2)
+                            tp := math.min(tp, liq2)
+                if useHtfMagnetTP
+                    if pendDir == 1 and not na(htfBearBot)
+                        tp := math.max(tp, (htfBearBot + nz(htfBearTop, htfBearBot)) * 0.5)
+                    if pendDir == -1 and not na(htfBullTop)
+                        tp := math.min(tp, (htfBullTop + nz(htfBullBot, htfBullTop)) * 0.5)
+                signalDir := pendDir
+                signalEntry := entry
+                signalSl := sl
+                signalTp := tp
+                signalProx := gapTop
+                signalDist := gapBot
+                signalTag := pendDir == 1 ? "LONG · EXP FVG" : "SHORT · EXP FVG"
+                lastSetupBar := bar_index
+                phase := 0
+                pendDir := 0
+            else
+                phase := 2
+                fvgBar := na
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STRATEGY ORDERS + DRAWINGS
+// ═══════════════════════════════════════════════════════════════════════════
+
+var box[]  bZone = array.new_box()
+var box[]  bTp = array.new_box()
+var box[]  bSl = array.new_box()
+var line[] lEntry = array.new_line()
+var label[] labE = array.new_label()
+var label[] labS = array.new_label()
+var label[] labT = array.new_label()
+var label[] labTag = array.new_label()
+
+var float activeE = na
+var float activeS = na
+var float activeT = na
+var int   activeDir = 0
+var int   activeBar = na
+var int   activeStat = 0  // 0 wait/live, 2 TP, 3 SL
+
+f_clearDrawings() =>
+    if array.size(bZone) > 0
+        for i = 0 to array.size(bZone) - 1
+            box.delete(array.get(bZone, i))
+            box.delete(array.get(bTp, i))
+            box.delete(array.get(bSl, i))
+            line.delete(array.get(lEntry, i))
+            label.delete(array.get(labE, i))
+            label.delete(array.get(labS, i))
+            label.delete(array.get(labT, i))
+            label.delete(array.get(labTag, i))
+    array.clear(bZone)
+    array.clear(bTp)
+    array.clear(bSl)
+    array.clear(lEntry)
+    array.clear(labE)
+    array.clear(labS)
+    array.clear(labT)
+    array.clear(labTag)
+
+if signalDir != 0
+    if onlyLast
+        f_clearDrawings()
+
+    float zTop = math.max(signalProx, signalDist)
+    float zBot = math.min(signalProx, signalDist)
+    color zcol = signalDir == 1 ? longCol : shortCol
+    color tagC = signalDir == 1 ? #1E88E5 : #8E24AA
+    int right = bar_index + boxBars
+
+    if showBoxes
+        array.push(bZone, box.new(bar_index, zTop, right, zBot, bgcolor=zcol, border_color=color.new(tagC, 20), border_width=2))
+        if signalDir == 1
+            array.push(bTp, box.new(bar_index, signalTp, right, signalEntry, bgcolor=color.new(#26A69A, 85), border_color=color.new(#26A69A, 60)))
+            array.push(bSl, box.new(bar_index, signalEntry, right, signalSl, bgcolor=color.new(#EF5350, 85), border_color=color.new(#EF5350, 60)))
+        else
+            array.push(bTp, box.new(bar_index, signalEntry, right, signalTp, bgcolor=color.new(#26A69A, 85), border_color=color.new(#26A69A, 60)))
+            array.push(bSl, box.new(bar_index, signalSl, right, signalEntry, bgcolor=color.new(#EF5350, 85), border_color=color.new(#EF5350, 60)))
+        array.push(lEntry, line.new(bar_index, signalEntry, right, signalEntry, color=entryCol, width=2))
+
+    if showLabels
+        array.push(labE, label.new(right, signalEntry, "ENTRY " + str.tostring(signalEntry, format.mintick), style=label.style_label_left, color=entryCol, textcolor=color.white, size=size.small))
+        array.push(labS, label.new(right, signalSl, "SL " + str.tostring(signalSl, format.mintick), style=label.style_label_left, color=slCol, textcolor=color.white, size=size.small))
+        array.push(labT, label.new(right, signalTp, "TP " + str.tostring(signalTp, format.mintick), style=label.style_label_left, color=tpCol, textcolor=color.white, size=size.small))
+        array.push(labTag, label.new(bar_index, signalDir == 1 ? zTop : zBot,
+             "TRH " + signalTag + "\nR:R " + str.tostring(riskReward, "#.#"),
+             style=signalDir == 1 ? label.style_label_down : label.style_label_up,
+             color=tagC, textcolor=color.white, size=size.normal))
+
+    // Strategy order with hard SL / TP
+    if signalDir == 1
+        strategy.entry("XH Long", strategy.long, comment=signalTag)
+        strategy.exit("XH L Exit", from_entry="XH Long", stop=signalSl, limit=signalTp, comment="SL/TP")
+    else
+        strategy.entry("XH Short", strategy.short, comment=signalTag)
+        strategy.exit("XH S Exit", from_entry="XH Short", stop=signalSl, limit=signalTp, comment="SL/TP")
+
+    activeE := signalEntry
+    activeS := signalSl
+    activeT := signalTp
+    activeDir := signalDir
+    activeBar := bar_index
+    activeStat := 1
+
+    alert("TRH Expansion Hunter " + signalTag +
+         " | ENTRY " + str.tostring(signalEntry, format.mintick) +
+         " | SL " + str.tostring(signalSl, format.mintick) +
+         " | TP " + str.tostring(signalTp, format.mintick),
+         alert.freq_once_per_bar_close)
+
+// Track TP/SL hit for panel
+if activeDir != 0 and activeStat == 1
+    if activeDir == 1
+        if low <= activeS
+            activeStat := 3
+        else if high >= activeT
+            activeStat := 2
+    else
+        if high >= activeS
+            activeStat := 3
+        else if low <= activeT
+            activeStat := 2
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PANEL
+// ═══════════════════════════════════════════════════════════════════════════
+
+if showPanel and barstate.islast
+    var table info = table.new(position.top_right, 2, 8, bgcolor=color.new(#111111, 15), border_width=1, border_color=#505050)
+    string st = activeDir == 0 ? "SCANNING" : activeStat == 2 ? "TP HIT" : activeStat == 3 ? "SL HIT" : activeDir == 1 ? "LONG LIVE" : "SHORT LIVE"
+    color stc = activeStat == 2 ? #26A69A : activeStat == 3 ? #EF5350 : activeDir == 0 ? color.gray : #42A5F5
+    string bias = useHtfFilter ? (inDiscount ? "Discount" : inPremium ? "Premium" : "Mid") : "Off"
+    table.cell(info, 0, 0, "TRH Expansion Hunter", text_color=color.white, text_size=size.small)
+    table.cell(info, 1, 0, st, text_color=stc, text_size=size.small)
+    table.cell(info, 0, 1, "HTF Bias", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 1, bias + " (" + str.tostring(htfPos, "#.##") + ")", text_color=color.white, text_size=size.tiny)
+    table.cell(info, 0, 2, "Phase", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 2, str.tostring(phase) + (pendDir == 1 ? " L" : pendDir == -1 ? " S" : ""), text_color=color.white, text_size=size.tiny)
+    table.cell(info, 0, 3, "ENTRY", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 3, na(activeE) ? "—" : str.tostring(activeE, format.mintick), text_color=entryCol, text_size=size.tiny)
+    table.cell(info, 0, 4, "SL", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 4, na(activeS) ? "—" : str.tostring(activeS, format.mintick), text_color=slCol, text_size=size.tiny)
+    table.cell(info, 0, 5, "TP", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 5, na(activeT) ? "—" : str.tostring(activeT, format.mintick), text_color=tpCol, text_size=size.tiny)
+    float riskShow = na(activeE) or na(activeS) ? na : math.abs(activeE - activeS)
+    float rewShow = na(activeE) or na(activeT) ? na : math.abs(activeT - activeE)
+    table.cell(info, 0, 6, "Risk / Reward", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 6,
+         (na(riskShow) ? "—" : str.tostring(riskShow, format.mintick)) + " / " +
+         (na(rewShow) ? "—" : str.tostring(rewShow, format.mintick)),
+         text_color=color.white, text_size=size.tiny)
+    table.cell(info, 0, 7, "Model", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 7, "HTF→Sweep→Disp→FVG", text_color=#90CAF9, text_size=size.tiny)
+
+// Plots for data window / alerts
+plotshape(signalDir == 1, title="Long Signal", style=shape.triangleup, location=location.belowbar, color=#1E88E5, size=size.small)
+plotshape(signalDir == -1, title="Short Signal", style=shape.triangledown, location=location.abovebar, color=#8E24AA, size=size.small)
+plot(activeDir != 0 ? activeE : na, "Active Entry", color=entryCol, style=plot.style_linebr, linewidth=1)
+plot(activeDir != 0 ? activeS : na, "Active SL", color=slCol, style=plot.style_linebr, linewidth=1)
+plot(activeDir != 0 ? activeT : na, "Active TP", color=tpCol, style=plot.style_linebr, linewidth=1)
