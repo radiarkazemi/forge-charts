@@ -322,7 +322,7 @@ export function ChartToolbar({
         Indicators
       </button>
       <IndicatorTemplatesMenu engine={engine} />
-      <button className="tb-btn" onClick={onAlert} title="Alert">
+      <button className="tb-btn" onClick={onAlert} title="Create alert (Alt+A)">
         Alert
       </button>
       <button className={snap?.replay ? "tb-btn on" : "tb-btn"} onClick={() => engine?.setReplay(!snap?.replay)} title="Replay">

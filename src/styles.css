@@ -624,7 +624,68 @@ button { cursor: pointer; }
 }
 .shell[data-theme="light"] .pine textarea { background: #f4f6fb; color: #131722; }
 .pine-actions, .tester { display: flex; align-items: center; gap: 12px; padding: 8px 12px; color: var(--muted); }
-.primary { background: var(--accent); color: #fff; border: 0; border-radius: 4px; height: 28px; padding: 0 12px; }
+.alert-modal { width: min(420px, 94vw); }
+.alert-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.alert-modal-head h2 { margin: 0 0 4px; }
+.alert-modal .row { margin: 10px 0; }
+.alert-modal-actions { display: flex; gap: 8px; margin-top: 14px; }
+.alert-modal-actions .primary { color: #fff; }
+.alerts-panel { display: grid; gap: 8px; }
+.alerts-create {
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+}
+.alerts-create:hover { border-color: var(--accent); }
+.alert-list > li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: start;
+}
+.alert-item-main { display: grid; gap: 2px; }
+.alert-item-main span, .alert-item-main em { color: var(--muted); font-size: 11px; font-style: normal; }
+.alert-item-actions { display: flex; gap: 2px; }
+.alert-item-actions button {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+}
+.alert-item-actions button:hover { background: var(--hover); color: var(--text); }
+.alert-toast {
+  position: fixed;
+  right: 16px;
+  bottom: 72px;
+  z-index: 80;
+  min-width: 240px;
+  max-width: min(360px, 92vw);
+  display: grid;
+  gap: 2px;
+  padding: 12px 32px 12px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: 0 8px 28px rgba(0,0,0,.35);
+}
+.alert-toast em { color: var(--muted); font-style: normal; font-size: 12px; }
+.alert-toast button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
 
 .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: grid; place-items: center; z-index: 50; }
 .modal { width: min(460px, 92vw); background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }

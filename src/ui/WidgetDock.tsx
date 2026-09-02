@@ -1,7 +1,9 @@
+import { conditionLabel, type PriceAlert } from "../data/alerts";
 import { UNIVERSE } from "../data/feed";
 import type { ChartEngine } from "../engine/ChartEngine";
 import { formatPrice, formatVolume } from "../engine/math";
 import type { SymbolInfo } from "../engine/types";
+import { alertStatusText } from "./AlertModal";
 import { useEngine } from "./useEngine";
 
 export type WidgetId = "watchlist" | "alerts" | "object" | "data" | "news" | "calendar" | "ideas";
@@ -22,10 +24,23 @@ type Props = {
   onActive: (id: WidgetId | null) => void;
   quotes: Record<string, { price: number; change: number }>;
   onPick: (s: SymbolInfo) => void;
-  alerts: string[];
+  alerts: PriceAlert[];
+  onCreateAlert?: () => void;
+  onToggleAlert?: (id: string) => void;
+  onDeleteAlert?: (id: string) => void;
 };
 
-export function WidgetDock({ engine, active, onActive, quotes, onPick, alerts }: Props) {
+export function WidgetDock({
+  engine,
+  active,
+  onActive,
+  quotes,
+  onPick,
+  alerts,
+  onCreateAlert,
+  onToggleAlert,
+  onDeleteAlert,
+}: Props) {
   const snap = useEngine(engine);
   const bar = snap?.hover ?? snap?.last;
   return (
@@ -121,9 +136,41 @@ export function WidgetDock({ engine, active, onActive, quotes, onPick, alerts }:
             )
           ) : null}
           {active === "alerts" ? (
-            <ul className="objects">
-              {alerts.length ? alerts.map((a) => <li key={a}>{a}</li>) : <li className="muted">No alerts yet. Use Alert on the toolbar.</li>}
-            </ul>
+            <div className="alerts-panel">
+              <button type="button" className="alerts-create" onClick={onCreateAlert}>
+                + Create alert
+              </button>
+              {alerts.length ? (
+                <ul className="objects alert-list">
+                  {alerts.map((a) => (
+                    <li key={a.id} className={a.enabled ? "" : "muted"}>
+                      <div className="alert-item-main">
+                        <strong>{a.name}</strong>
+                        <span>
+                          {a.symbol} · {conditionLabel(a.condition)} {a.price}
+                        </span>
+                        <em>
+                          {alertStatusText(a)}
+                          {a.fireCount ? ` · fired ${a.fireCount}×` : ""}
+                        </em>
+                      </div>
+                      <div className="alert-item-actions">
+                        <button type="button" title={a.enabled ? "Pause" : "Resume"} onClick={() => onToggleAlert?.(a.id)}>
+                          {a.enabled ? "Ⅱ" : "▶"}
+                        </button>
+                        <button type="button" title="Delete" onClick={() => onDeleteAlert?.(a.id)}>
+                          ×
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <ul className="objects">
+                  <li className="muted">No alerts yet. Use Alert on the toolbar or Alt+A.</li>
+                </ul>
+              )}
+            </div>
           ) : null}
           {active === "news" ? (
             <ul className="objects">

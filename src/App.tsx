@@ -1,10 +1,19 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  createAlert,
+  evaluateAlerts,
+  loadAlerts,
+  saveAlerts,
+  type AlertFire,
+  type PriceAlert,
+} from "./data/alerts";
 import { findSymbol } from "./data/feed";
 import { fetchHistory, fetchQuotes, subscribeLive } from "./data/market";
 import { ChartEngine } from "./engine/ChartEngine";
 import type { ChartStyle, IndicatorKind, Interval, SymbolInfo } from "./engine/types";
 import { CHART_STYLE_KEY } from "./chartStyle";
 import { loadJson, saveJson } from "./persist";
+import { AlertModal } from "./ui/AlertModal";
 import { BottomDock } from "./ui/BottomDock";
 import { ChartOverlays } from "./ui/ChartOverlays";
 import { ChartToolbar, type DataMode } from "./ui/ChartToolbar";
@@ -28,28 +37,49 @@ export default function App() {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<ChartEngine | null>(null);
   const unsubRef = useRef<() => void>(() => {});
+  const prevCloseRef = useRef<number | null>(null);
+  const alertsRef = useRef<PriceAlert[]>([]);
   const [engine, setEngine] = useState<ChartEngine | null>(null);
   const [live, setLive] = useState(false);
   const [symbolOpen, setSymbolOpen] = useState(false);
   const [compareOpen, setCompareOpen] = useState(false);
   const [indOpen, setIndOpen] = useState(false);
+  const [alertOpen, setAlertOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [symbolQuery, setSymbolQuery] = useState("");
   const [widget, setWidget] = useState<WidgetId | null>("watchlist");
   const [dataMode, setDataMode] = useState<DataMode>("technicals");
   const [bottomOpen, setBottomOpen] = useState(false);
-  const [alerts, setAlerts] = useState<string[]>([]);
+  const [alerts, setAlerts] = useState<PriceAlert[]>(() => loadAlerts());
+  const [toast, setToast] = useState<AlertFire | null>(null);
   const [quotes, setQuotes] = useState<Record<string, { price: number; change: number }>>({});
   const [recentSymbols, setRecentSymbols] = useState<SymbolInfo[]>(loadRecentSymbols);
   const [indicatorFavorites, setIndicatorFavorites] = useState<string[]>(() => loadJson(IND_FAV_KEY, []));
   const [recentIndicators, setRecentIndicators] = useState<IndicatorKind[]>(() => loadJson(IND_RECENTS_KEY, ["sma", "rsi"]));
   const snap = useEngine(engine);
 
+  useEffect(() => {
+    alertsRef.current = alerts;
+    saveAlerts(alerts);
+  }, [alerts]);
+
+  const onPriceTick = (symbol: SymbolInfo, close: number) => {
+    const prev = prevCloseRef.current;
+    prevCloseRef.current = close;
+    const { alerts: next, fires } = evaluateAlerts(alertsRef.current, symbol.ticker, prev, close);
+    if (fires.length) {
+      setAlerts(next);
+      setToast(fires[0]!);
+      setWidget("alerts");
+    }
+  };
+
   const attachFeed = async (symbol: SymbolInfo, interval: Interval, mode: "symbol" | "interval") => {
     const eng = engineRef.current;
     if (!eng) return;
     unsubRef.current();
+    prevCloseRef.current = null;
     // Show demo bars immediately so the chart is never blank while network loads.
     const placeholder = (await import("./data/feed")).generateBars(symbol, interval, 200);
     if (mode === "symbol") eng.setSymbol(symbol, placeholder);
@@ -59,9 +89,13 @@ export default function App() {
       if (bars.length) {
         if (mode === "symbol") eng.setSymbol(symbol, bars);
         else eng.setInterval(interval, bars);
+        prevCloseRef.current = bars.at(-1)?.close ?? null;
       }
       setLive(isLive);
-      unsubRef.current = subscribeLive(symbol, interval, (bar) => eng.upsertBar(bar));
+      unsubRef.current = subscribeLive(symbol, interval, (bar) => {
+        eng.upsertBar(bar);
+        onPriceTick(symbol, bar.close);
+      });
     } catch (err) {
       console.warn("attachFeed failed", err);
       setLive(false);
@@ -134,17 +168,23 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const typing = !!(target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable));
       if ((e.altKey && e.key.toLowerCase() === "i") || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "i" && e.shiftKey)) {
-        const target = e.target as HTMLElement | null;
-        if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+        if (typing) return;
         e.preventDefault();
         setIndOpen(true);
         return;
       }
-      if (symbolOpen || compareOpen || indOpen || settingsOpen || searchOpen) return;
+      if (e.altKey && e.key.toLowerCase() === "a") {
+        if (typing) return;
+        e.preventDefault();
+        setAlertOpen(true);
+        return;
+      }
+      if (symbolOpen || compareOpen || indOpen || alertOpen || settingsOpen || searchOpen) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      if (typing) return;
       if (e.key.length === 1 && /[A-Za-z0-9]/.test(e.key)) {
         setSymbolQuery(e.key.toUpperCase());
         setSymbolOpen(true);
@@ -152,7 +192,15 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [compareOpen, indOpen, searchOpen, settingsOpen, symbolOpen]);
+  }, [alertOpen, compareOpen, indOpen, searchOpen, settingsOpen, symbolOpen]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const id = window.setTimeout(() => setToast(null), 5000);
+    return () => window.clearTimeout(id);
+  }, [toast]);
+
+  const openCreateAlert = () => setAlertOpen(true);
 
   const touchRecentIndicator = (kind: IndicatorKind) => {
     setRecentIndicators((prev) => [kind, ...prev.filter((item) => item !== kind)].slice(0, 12));
@@ -203,7 +251,7 @@ export default function App() {
     <div className="shell" data-theme={snap?.theme ?? "dark"}>
       <ProductHeader
         theme={snap?.theme ?? "dark"}
-        alertCount={alerts.length}
+        alertCount={alerts.filter((a) => a.enabled).length}
         symbolLabel={snap?.symbol.ticker}
         onOpenSearch={() => setSearchOpen(true)}
         onOpenAlerts={() => setWidget("alerts")}
@@ -223,14 +271,7 @@ export default function App() {
         onInterval={loadInterval}
         onCompare={() => setCompareOpen(true)}
         onClearCompare={() => engineRef.current?.setCompare(null, null)}
-        onAlert={() => {
-          const s = engine?.getSnapshot();
-          if (s?.last) {
-            const last = s.last;
-            setAlerts((a) => [`${s.symbol.ticker} @ ${last.close.toFixed(s.symbol.pricePrecision)}`, ...a]);
-          }
-          setWidget("alerts");
-        }}
+        onAlert={openCreateAlert}
       />
       <div className="workspace">
         <DrawingToolbar engine={engine} />
@@ -245,8 +286,25 @@ export default function App() {
           quotes={quotes}
           onPick={loadSymbol}
           alerts={alerts}
+          onCreateAlert={openCreateAlert}
+          onToggleAlert={(id) =>
+            setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, enabled: !a.enabled } : a)))
+          }
+          onDeleteAlert={(id) => setAlerts((prev) => prev.filter((a) => a.id !== id))}
         />
       </div>
+      {toast ? (
+        <div className="alert-toast" role="status">
+          <strong>{toast.name}</strong>
+          <span>{toast.message}</span>
+          <em>
+            {toast.symbol} @ {toast.price}
+          </em>
+          <button type="button" onClick={() => setToast(null)}>
+            ×
+          </button>
+        </div>
+      ) : null}
       <BottomDock engine={engine} open={bottomOpen} onToggle={() => setBottomOpen((v) => !v)} />
       <SymbolModal
         open={symbolOpen || searchOpen}
@@ -287,6 +345,23 @@ export default function App() {
         onPickTool={(tool) => {
           engine?.setTool(tool);
           setIndOpen(false);
+        }}
+      />
+      <AlertModal
+        open={alertOpen}
+        onClose={() => setAlertOpen(false)}
+        symbol={snap?.symbol.ticker ?? "SYMBOL"}
+        exchange={snap?.symbol.exchange}
+        interval={snap?.interval}
+        precision={snap?.symbol.pricePrecision ?? 2}
+        defaultPrice={snap?.last?.close ?? 0}
+        onCreate={(input) => {
+          const alert = createAlert({
+            ...input,
+            interval: input.interval as Interval | undefined,
+          });
+          setAlerts((prev) => [alert, ...prev]);
+          setWidget("alerts");
         }}
       />
       <SettingsModal

@@ -45,7 +45,7 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | T-07 | Chart type menu (20+ types, favorites) | MATCH |
 | T-08 | Indicators, metrics, strategies dialog (Technicals / Financials / Community / Invite-only / Patterns, search, favorites, recently used) | MATCH | Full tabbed dialog with role filters, favorites, recents, on-chart badges, pattern→draw arming, Alt+I |
 | T-09 | Indicator templates (save, remember symbol + interval) | MATCH | ▦ menu: save/update/apply/delete; optional bind to symbol+interval with auto-apply |
-| T-10 | Create Alert | PARTIAL |
+| T-10 | Create Alert | MATCH | Create-alert dialog (crossing/up/down, price, name, once/every); dock manager; live evaluate + toast; Alt+A |
 | T-11 | Bar Replay | PARTIAL |
 | T-12 | Undo | PARTIAL |
 | T-13 | Redo | PARTIAL |
