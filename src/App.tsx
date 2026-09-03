@@ -102,7 +102,6 @@ export default function App() {
   const [recentSymbols, setRecentSymbols] = useState<SymbolInfo[]>(loadRecentSymbols);
   const [indicatorFavorites, setIndicatorFavorites] = useState<string[]>(() => loadJson(IND_FAV_KEY, []));
   const [recentIndicators, setRecentIndicators] = useState<IndicatorKind[]>(() => loadJson(IND_RECENTS_KEY, ["sma", "rsi"]));
-  const [mobileDrawOpen, setMobileDrawOpen] = useState(false);
   const [mobileWidgetOpen, setMobileWidgetOpen] = useState(false);
   const [quickSearchOpen, setQuickSearchOpen] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
@@ -523,7 +522,6 @@ export default function App() {
     .filter(Boolean)
     .join(" ");
 
-  const drawOverlay = showDrawings && compact && mobileDrawOpen;
   const widgetOverlay = showWidgets && compact && mobileWidgetOpen;
 
   return (
@@ -613,8 +611,8 @@ export default function App() {
         />
       ) : null}
       <div className="workspace">
-        {showDrawings ? (
-          <div className={drawOverlay ? "draw-rail-slot open" : "draw-rail-slot"}>
+        {showDrawings && !compact ? (
+          <div className="draw-rail-slot">
             <DrawingToolbar engine={toolbarEngine} />
           </div>
         ) : null}
@@ -651,34 +649,6 @@ export default function App() {
               );
             })}
         </div>
-        {showDrawings && compact ? (
-          <button
-            type="button"
-            className={mobileDrawOpen ? "mobile-fab left on" : "mobile-fab left"}
-            title="Drawing tools"
-            aria-pressed={mobileDrawOpen}
-            onClick={() => {
-              setMobileDrawOpen((v) => !v);
-              setMobileWidgetOpen(false);
-            }}
-          >
-            ✎
-          </button>
-        ) : null}
-        {showWidgets && compact ? (
-          <button
-            type="button"
-            className={mobileWidgetOpen ? "mobile-fab right on" : "mobile-fab right"}
-            title="Widgets"
-            aria-pressed={mobileWidgetOpen}
-            onClick={() => {
-              setMobileWidgetOpen((v) => !v);
-              setMobileDrawOpen(false);
-            }}
-          >
-            ▤
-          </button>
-        ) : null}
         {showWidgets ? (
           <div className={widgetOverlay ? "widget-dock-slot open" : "widget-dock-slot"}>
             <WidgetDock
@@ -699,17 +669,14 @@ export default function App() {
             />
           </div>
         ) : null}
-        {(drawOverlay || widgetOverlay) && (
+        {widgetOverlay ? (
           <button
             type="button"
             className="mobile-scrim"
             aria-label="Close panel"
-            onClick={() => {
-              setMobileDrawOpen(false);
-              setMobileWidgetOpen(false);
-            }}
+            onClick={() => setMobileWidgetOpen(false)}
           />
-        )}
+        ) : null}
       </div>
       {toast ? (
         <div className="alert-toast" role="status">
@@ -749,6 +716,14 @@ export default function App() {
           if (document.fullscreenElement) document.exitFullscreen?.();
           else document.documentElement.requestFullscreen?.();
         }}
+        onOpenWatchlist={
+          showWidgets
+            ? () => {
+                setWidget("watchlist");
+                setMobileWidgetOpen(true);
+              }
+            : undefined
+        }
       />
       <MobileDrawingSheet
         open={mobileDrawSheetOpen}

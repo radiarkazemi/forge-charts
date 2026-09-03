@@ -740,7 +740,7 @@ export class ChartEngine {
   private layout(): { main: Rect; extras: { rect: Rect; ind: IndicatorInstance }[]; chart: Rect } {
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
-    const chart: Rect = { x: 0, y: 0, w: Math.max(0, w - PRICE_AXIS), h: Math.max(0, h - TIME_AXIS) };
+    const chart: Rect = { x: 0, y: 0, w: Math.max(0, w - this.priceAxisWidth()), h: Math.max(0, h - TIME_AXIS) };
     const extrasInd = this.extraIndicators();
     const extraH = extrasInd.length ? Math.min(120, chart.h * 0.18) : 0;
     const mainH = chart.h - extraH * extrasInd.length;
@@ -751,8 +751,14 @@ export class ChartEngine {
     return { main: { x: 0, y: 0, w: chart.w, h: mainH }, extras, chart };
   }
 
+  private priceAxisWidth(): number {
+    const w = this.container.clientWidth;
+    return w > 0 && w < 520 ? 54 : PRICE_AXIS;
+  }
+
   private rightPad(): number {
-    return Math.max(8, this.viewCount * 0.18);
+    const narrow = this.container.clientWidth > 0 && this.container.clientWidth < 520;
+    return Math.max(narrow ? 4 : 8, this.viewCount * (narrow ? 0.08 : 0.18));
   }
 
   private clampViewCount(count: number): number {
@@ -762,6 +768,12 @@ export class ChartEngine {
 
   private snapToLatest(): void {
     this.viewEnd = this.bars.length + this.rightPad();
+    // If history is shorter than the window, shrink so candles fill the plot
+    // instead of sitting in one half of an empty viewport.
+    if (this.fitMode && this.bars.length > 0 && this.viewStart() < -this.viewCount * 0.08) {
+      this.viewCount = this.clampViewCount(this.bars.length + this.rightPad());
+      this.viewEnd = this.bars.length + this.rightPad();
+    }
   }
 
   private isFollowing(): boolean {
@@ -1618,7 +1630,7 @@ export class ChartEngine {
     if (last) {
       const y = this.yOf(this.scaled(last.close, bars.length ? bars : [last]), range.min, range.max, layout.main);
       ctx.fillStyle = last.close >= last.open ? pal.up : pal.down;
-      ctx.fillRect(layout.chart.w, y - 9, PRICE_AXIS, 18);
+      ctx.fillRect(layout.chart.w, y - 9, this.priceAxisWidth(), 18);
       ctx.fillStyle = "#fff";
       ctx.fillText(
         this.percentScale ? `${this.scaled(last.close, bars).toFixed(2)}%` : formatPrice(last.close, this.symbol.pricePrecision),
@@ -1626,7 +1638,7 @@ export class ChartEngine {
         y + 4,
       );
       ctx.fillStyle = pal.panel;
-      ctx.fillRect(layout.chart.w, y + 10, PRICE_AXIS, 16);
+      ctx.fillRect(layout.chart.w, y + 10, this.priceAxisWidth(), 16);
       ctx.fillStyle = pal.muted;
       ctx.fillText(this.countdown(), layout.chart.w + 16, y + 22);
     }
@@ -1664,7 +1676,7 @@ export class ChartEngine {
     if (bar) this.hover = bar;
     const price = this.priceAtY(y, range.min, range.max, layout.main);
     ctx.fillStyle = "#2962ff";
-    ctx.fillRect(layout.chart.w, y - 8, PRICE_AXIS, 16);
+    ctx.fillRect(layout.chart.w, y - 8, this.priceAxisWidth(), 16);
     ctx.fillStyle = "#fff";
     ctx.font = AXIS_FONT;
     ctx.fillText(this.percentScale ? `${price.toFixed(2)}%` : formatPrice(price, this.symbol.pricePrecision), layout.chart.w + 8, y + 4);

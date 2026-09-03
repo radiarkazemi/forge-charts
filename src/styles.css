@@ -1080,6 +1080,7 @@ button { cursor: pointer; }
   width: min(275px, calc(88vw - 45px));
   max-height: 100%;
 }
+.shell.compact .range-bar { display: none; }
 .shell.compact .range-bar .tz { display: none; }
 .shell.compact .alert-toast {
   left: 12px;

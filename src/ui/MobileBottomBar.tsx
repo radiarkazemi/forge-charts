@@ -106,6 +106,7 @@ type MoreSheetProps = {
   onReplay: () => void;
   onSnapshot: () => void;
   onFullscreen: () => void;
+  onOpenWatchlist?: () => void;
 };
 
 export function MobileMoreSheet({
@@ -117,6 +118,7 @@ export function MobileMoreSheet({
   onReplay,
   onSnapshot,
   onFullscreen,
+  onOpenWatchlist,
 }: MoreSheetProps) {
   if (!open) return null;
   const run = (fn: () => void) => {
@@ -163,6 +165,11 @@ export function MobileMoreSheet({
           >
             <span>◑</span>Theme
           </button>
+          {onOpenWatchlist ? (
+            <button type="button" onClick={() => run(onOpenWatchlist)}>
+              <span>▤</span>Watchlist
+            </button>
+          ) : null}
         </div>
       </div>
     </div>
