@@ -972,13 +972,14 @@ button { cursor: pointer; }
 
 /* —— Embed + phone / app-size responsive —— */
 .chart-toolbar {
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: visible;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
 }
 .chart-toolbar::-webkit-scrollbar { display: none; }
 .chart-toolbar.compact {
+  overflow-x: auto;
+  overflow-y: hidden;
   gap: 4px;
   padding: 0 6px;
   min-height: 40px;
