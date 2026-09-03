@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // TRH | Expansion Hunter — hunt sharp displacement moves (long + short)
-// Model: HTF bias (discount/premium + 1H FVG/CISD) → LTF sweep → displacement → FVG → retest
-// ENTRY = FVG midpoint · SL beyond sweep/FVG · TP = R×R (optional HTF magnet)
+// Model: HTF discount/premium → sweep → displacement → FVG retest
+// ENTRY = FVG mid · SL = tight beyond FVG outer (max-risk filter) · TP = exact ≥2R
 
 //@version=5
 strategy("TRH | Expansion Hunter", shorttitle="TRH-XH", overlay=true,
