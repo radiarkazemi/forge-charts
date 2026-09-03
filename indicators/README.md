@@ -1,3 +1,15 @@
+# Indicators
+
+## LH · Liquidity Hunter (exact)
+
+Complete path: **1 RAID → 2 CISD → 3 MSS → 4 FVG → ENTRY / SL / TP**
+
+- Pine: [`LH_Liquidity_Hunter.pine`](./LH_Liquidity_Hunter.pine)
+- MT5 indicator + EA **v1.21 / Eng 121**: [`../mt5/LH_Liquidity_Hunter/`](../mt5/LH_Liquidity_Hunter/) · zip [`../mt5/LH_Liquidity_Hunter_MT5.zip`](../mt5/LH_Liquidity_Hunter_MT5.zip)
+- MT5 v1.21 is the fast build (O(n) ATR, 2500-bar lookback). v1.20 froze GOLD M1.
+
+---
+
 # TRH | Trading Room Hunter
 
 Classic **SWEEP** model from the real XAUUSD sample: Tue 25 Aug 2026 **04:19 UTC-4**.
