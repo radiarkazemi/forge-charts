@@ -27,7 +27,9 @@ https://goldanil.ir/charts/?embed=1&symbol=BTCUSDT&exchange=BINANCE&interval=15&
 https://goldanil.ir/charts/?embed=1&source=external&symbol=MYASSET&dataUrl=https://goldanil.ir/charts/sample-ohlc.json
 ```
 
-Or push bars from the parent app with `postMessage` (`setData` / `upsertBar`). See [EMBED.md](./EMBED.md).
+Or push bars from the parent app with `postMessage` (`setData` / `upsertBar`).
+
+**App team handoff:** [CHART-APP-INTEGRATION.md](./CHART-APP-INTEGRATION.md) · full notes: [EMBED.md](./EMBED.md)
 
 ```html
 <iframe
