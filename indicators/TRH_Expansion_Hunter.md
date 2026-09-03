@@ -1,51 +1,29 @@
 # TRH | Expansion Hunter (Strategy)
 
-Pine **strategy** that hunts sharp displacement moves like the Sep 2 XAUUSD squeeze — **long and short**, with explicit **ENTRY / SL / TP**.
-
-## Model
+## Rules
 
 ```
-HTF bias (discount/premium + 1H FVG/CISD magnet)
-    → LTF liquidity sweep
-    → Displacement candle
-    → Quality FVG (≥1.50pt)
-    → Retest mid-FVG
-    → ENTRY / SL / TP
+HTF discount (long) / premium (short)
+  → liquidity sweep → displacement → quality FVG → retest
+  → ENTRY = FVG mid
+  → SL = beyond FVG outer + small pad (tight)
+  → TP = exact 2R (never < SL distance)
 ```
 
-| Level | Rule |
-|-------|------|
-| **ENTRY** | FVG midpoint |
-| **SL** | Beyond sweep extreme & FVG outer + pad (min risk floor) |
-| **TP** | **Exact 1:R** (default **2.0**, minimum 2.0). Reward is never smaller than risk. |
+## Why trades were all SL (your chart)
 
-## TP fixes
+| Old bug | Effect on GOLD M1 |
+|---------|-------------------|
+| SL beyond **full sweep** + `minRisk 1.2 ATR` | Risk **5–7 pts** → TP **10–14 pts** |
+| Stop hunts take the wide SL first | **0 TPs** even with correct 1:2 math |
 
-1. Magnets used to **stretch** TP to 10–20R → capped.
-2. Then “early TP” magnets **shortened** below 1R (e.g. SL 7.03 / TP 3.69 while label said RR 2) → **removed**.
-3. Now TP = `entry ± |entry−SL| × RR` with **RR ≥ 2** always.
+## Current defaults
 
-## When to use
-
-- **Long:** HTF discount / CISD reclaim → sweep lows → bullish displacement → FVG retest (Sep 2-style expansion)
-- **Short:** HTF premium / into bearish 1H FVG → sweep highs → bearish displacement → FVG retest
+- SL behind **FVG outer** (sweep SL OFF)
+- Max risk **0.85 ATR** — skip fatter setups
+- Exact RR **≥ 2.0**
+- Longs only HTF **discount** · shorts only **premium**
 
 ## Install
 
-1. TradingView → Pine Editor → paste [`TRH_Expansion_Hunter.pine`](./TRH_Expansion_Hunter.pine)
-2. **Add to chart** as a *strategy* (not indicator)
-3. Best on **XAUUSD M1 or M5**, HTF default **60**
-
-Raw (this branch):  
-https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-expansion-hunter-992e/indicators/TRH_Expansion_Hunter.pine
-
-## Suggested defaults (Gold M1/M5)
-
-- HTF filter **ON** · TF `60`
-- Min FVG price `1.50` · Min disp `0.55 ATR`
-- Require retest **ON** · R:R `2.4` · Min risk `1.20 ATR`
-- Use HTF magnet TP **ON**
-
-## Panel
-
-Shows status (`LONG LIVE` / `SHORT LIVE` / `TP HIT` / `SL HIT`), HTF bias, ENTRY, SL, TP, risk/reward.
+Re-paste from the branch raw URL into TradingView Pine Editor → Add to chart as strategy.
