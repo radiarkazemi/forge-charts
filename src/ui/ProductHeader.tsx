@@ -11,6 +11,7 @@ type Props = {
   alertCount: number;
   symbolLabel?: string;
   onOpenSearch: () => void;
+  onOpenQuickSearch?: () => void;
   onOpenAlerts: () => void;
   onOpenSettings: () => void;
   onToggleTheme: () => void;
@@ -46,6 +47,7 @@ export function ProductHeader({
   alertCount,
   symbolLabel,
   onOpenSearch,
+  onOpenQuickSearch,
   onOpenAlerts,
   onOpenSettings,
   onToggleTheme,
@@ -69,7 +71,7 @@ export function ProductHeader({
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        onOpenSearch();
+        (onOpenQuickSearch || onOpenSearch)();
       }
     };
     document.addEventListener("pointerdown", onDoc);
@@ -78,7 +80,7 @@ export function ProductHeader({
       document.removeEventListener("pointerdown", onDoc);
       window.removeEventListener("keydown", onKey);
     };
-  }, [onOpenSearch]);
+  }, [onOpenQuickSearch, onOpenSearch]);
 
   const toggleMenu = (id: string) => {
     setProfileOpen(false);

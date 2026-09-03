@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { CHART_TYPES, DEFAULT_FAVORITE_INTERVALS, INTERVAL_GROUPS, intervalMeta } from "../catalog";
 import { makeIntervalId } from "../data/interval";
 import type { ChartEngine } from "../engine/ChartEngine";
@@ -28,11 +28,13 @@ type Props = {
   compact?: boolean;
   /** Chart-only custom OHLC (no exchange feed). */
   external?: boolean;
+  layoutSlot?: ReactNode;
   onDataMode: (mode: DataMode) => void;
   onOpenSymbol: () => void;
   onOpenIndicators: () => void;
   onOpenSettings: () => void;
   onOpenSearch: () => void;
+  onOpenQuickSearch: () => void;
   onInterval: (interval: Interval) => void;
   onCompare: () => void;
   onClearCompare: () => void;
@@ -54,11 +56,13 @@ export function ChartToolbar({
   dataMode,
   compact = false,
   external = false,
+  layoutSlot,
   onDataMode,
   onOpenSymbol,
   onOpenIndicators,
   onOpenSettings,
   onOpenSearch,
+  onOpenQuickSearch,
   onInterval,
   onCompare,
   onClearCompare,
@@ -339,24 +343,27 @@ export function ChartToolbar({
         Alert
       </button>
       {!compact ? (
-        <button className={snap?.replay ? "tb-btn on" : "tb-btn"} onClick={() => engine?.setReplay(!snap?.replay)} title="Replay">
+        <button
+          className={snap?.replay ? "tb-btn on" : "tb-btn"}
+          onClick={() => engine?.setReplay(!snap?.replay)}
+          title="Bar Replay (Shift+Alt+R)"
+        >
           Replay
         </button>
       ) : null}
-      <button className="tb-icon" disabled={!snap?.canUndo} onClick={() => engine?.undo()} title="Undo">
+      <button className="tb-icon" disabled={!snap?.canUndo} onClick={() => engine?.undo()} title="Undo (Ctrl/Cmd+Z)">
         ↺
       </button>
-      <button className="tb-icon" disabled={!snap?.canRedo} onClick={() => engine?.redo()} title="Redo">
+      <button className="tb-icon" disabled={!snap?.canRedo} onClick={() => engine?.redo()} title="Redo (Ctrl/Cmd+Y)">
         ↻
       </button>
-      {!compact ? (
-        <button className="tb-icon" title="Select layout">
-          ⊞
-        </button>
-      ) : null}
+      {!compact ? layoutSlot ?? null : null}
       <span className="spacer" />
-      <button className="tb-icon" title="Quick search" onClick={onOpenSearch}>
+      <button className="tb-icon" title="Quick search (Ctrl/Cmd+K)" onClick={onOpenQuickSearch}>
         ⌕
+      </button>
+      <button className="tb-icon" title="Symbol search" onClick={onOpenSearch}>
+        Ⓑ
       </button>
       <button className="tb-icon" title="Settings" onClick={onOpenSettings}>
         ⚙

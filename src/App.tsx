@@ -25,10 +25,14 @@ import { loadJson, saveJson } from "./persist";
 import { AlertModal } from "./ui/AlertModal";
 import { BottomDock } from "./ui/BottomDock";
 import { ChartOverlays } from "./ui/ChartOverlays";
+import { ChartPane } from "./ui/ChartPane";
 import { ChartToolbar, type DataMode } from "./ui/ChartToolbar";
 import { DrawingToolbar } from "./ui/DrawingToolbar";
+import { ARRANGEMENTS, LayoutMenu, createLayout, type LayoutArrangement } from "./ui/LayoutMenu";
 import { IndicatorModal, SettingsModal, SymbolModal } from "./ui/Modals";
 import { ProductHeader } from "./ui/ProductHeader";
+import { QuickSearchModal } from "./ui/QuickSearchModal";
+import { ReplayBar } from "./ui/ReplayBar";
 import { useEngine } from "./ui/useEngine";
 import { WidgetDock, type WidgetId } from "./ui/WidgetDock";
 
@@ -98,15 +102,44 @@ export default function App() {
   const [recentIndicators, setRecentIndicators] = useState<IndicatorKind[]>(() => loadJson(IND_RECENTS_KEY, ["sma", "rsi"]));
   const [mobileDrawOpen, setMobileDrawOpen] = useState(false);
   const [mobileWidgetOpen, setMobileWidgetOpen] = useState(false);
+  const [quickSearchOpen, setQuickSearchOpen] = useState(false);
+  const [arrangement, setArrangement] = useState<LayoutArrangement>("1");
+  const [paneSymbols, setPaneSymbols] = useState<string[]>(["XAUUSD"]);
+  const [activePane, setActivePane] = useState(0);
+  const [secondaryEngines, setSecondaryEngines] = useState<Record<number, ChartEngine | null>>({});
+  const paneEnginesRef = useRef<Record<number, ChartEngine | null>>({});
   const snap = useEngine(engine);
   const narrow = useNarrow(720);
   const compact = boot.embed || boot.mobile || narrow;
+  const toolbarEngine = activePane === 0 ? engine : secondaryEngines[activePane] ?? engine;
+  const toolbarSnap = useEngine(toolbarEngine);
 
   const showHeader = boot.chrome.header;
   const showToolbar = boot.chrome.toolbar;
   const showDrawings = boot.chrome.drawings;
   const showWidgets = boot.chrome.widgets;
   const showBottom = boot.chrome.bottom;
+
+  useEffect(() => {
+    const meta = ARRANGEMENTS.find((a) => a.id === arrangement) ?? ARRANGEMENTS[0];
+    setPaneSymbols((prev) => {
+      const next = [...prev];
+      const fill = snap?.symbol.ticker || boot.symbol || "XAUUSD";
+      while (next.length < meta.count) next.push(fill);
+      return next.slice(0, meta.count);
+    });
+    if (activePane >= meta.count) setActivePane(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [arrangement]);
+
+  useEffect(() => {
+    if (!toolbarSnap?.replayPlaying) return;
+    const id = window.setInterval(
+      () => toolbarEngine?.stepReplay(),
+      420 / (toolbarSnap.replaySpeed || 1),
+    );
+    return () => window.clearInterval(id);
+  }, [toolbarEngine, toolbarSnap?.replayPlaying, toolbarSnap?.replaySpeed]);
 
   useEffect(() => {
     alertsRef.current = alerts;
@@ -295,12 +328,6 @@ export default function App() {
   }, [boot.parentOrigin, boot.pricePrecision, boot.source]);
 
   useEffect(() => {
-    if (!snap?.replayPlaying) return;
-    const id = window.setInterval(() => engineRef.current?.stepReplay(), 420 / (snap.replaySpeed || 1));
-    return () => window.clearInterval(id);
-  }, [snap?.replayPlaying, snap?.replaySpeed]);
-
-  useEffect(() => {
     if (!snap?.symbol.ticker) return;
     document.title = boot.embed
       ? `${snap.symbol.ticker} — Forge Chart`
@@ -399,6 +426,22 @@ export default function App() {
   };
 
   const loadSymbol = (symbol: SymbolInfo) => {
+    setPaneSymbols((prev) => {
+      const next = [...prev];
+      next[activePane] = symbol.ticker;
+      return next;
+    });
+    if (activePane !== 0) {
+      const eng = secondaryEngines[activePane];
+      if (eng) {
+        // ChartPane watches symbol prop — update is enough via paneSymbols
+      }
+      setSymbolOpen(false);
+      setSearchOpen(false);
+      setSymbolQuery("");
+      setMobileWidgetOpen(false);
+      return;
+    }
     const eng = engineRef.current;
     if (!eng) return;
     if (boot.source === "external") {
@@ -424,6 +467,15 @@ export default function App() {
   };
 
   const loadInterval = (interval: Interval) => {
+    if (activePane !== 0) {
+      const eng = secondaryEngines[activePane];
+      if (!eng) return;
+      const sym = eng.getSnapshot().symbol;
+      void fetchHistory(sym, interval).then(({ bars }) => {
+        eng.setInterval(interval, bars.length ? bars : generateBars(sym, interval, 200));
+      });
+      return;
+    }
     const eng = engineRef.current;
     if (!eng) return;
     void attachFeed(eng.getSnapshot().symbol, interval, "interval");
@@ -487,6 +539,7 @@ export default function App() {
           alertCount={alerts.filter((a) => a.enabled).length}
           symbolLabel={snap?.symbol.ticker}
           onOpenSearch={() => setSearchOpen(true)}
+          onOpenQuickSearch={() => setQuickSearchOpen(true)}
           onOpenAlerts={() => {
             if (showWidgets) {
               setWidget("alerts");
@@ -505,31 +558,77 @@ export default function App() {
       ) : null}
       {showToolbar ? (
         <ChartToolbar
-          engine={engine}
+          engine={toolbarEngine}
           live={live}
           dataMode={dataMode}
           compact={compact}
           external={boot.source === "external"}
+          layoutSlot={
+            boot.embed ? null : (
+              <LayoutMenu
+                arrangement={arrangement}
+                symbols={paneSymbols}
+                onArrangement={setArrangement}
+                onOpenLayout={(layout) => {
+                  setArrangement(layout.arrangement);
+                  setPaneSymbols(layout.symbols);
+                  setActivePane(0);
+                  const sym = findSymbol(layout.symbols[0] || "XAUUSD");
+                  void attachFeed(sym, engineRef.current?.getSnapshot().interval ?? "15", "symbol");
+                }}
+                onSaveCurrent={(name) => createLayout(name, arrangement, paneSymbols)}
+              />
+            )
+          }
           onDataMode={applyDataMode}
           onOpenSymbol={() => setSymbolOpen(true)}
           onOpenIndicators={() => setIndOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenSearch={() => setSearchOpen(true)}
+          onOpenQuickSearch={() => setQuickSearchOpen(true)}
           onInterval={loadInterval}
           onCompare={() => setCompareOpen(true)}
-          onClearCompare={() => engineRef.current?.setCompare(null, null)}
+          onClearCompare={() => toolbarEngine?.setCompare(null, null)}
           onAlert={openCreateAlert}
         />
       ) : null}
       <div className="workspace">
         {showDrawings ? (
           <div className={drawOverlay ? "draw-rail-slot open" : "draw-rail-slot"}>
-            <DrawingToolbar engine={engine} />
+            <DrawingToolbar engine={toolbarEngine} />
           </div>
         ) : null}
-        <div className="chart-stage">
-          <div className="chart-host" ref={hostRef} />
-          <ChartOverlays engine={engine} />
+        <div className={`chart-grid layout-${arrangement}`}>
+          <div
+            className={activePane === 0 ? "chart-pane active" : "chart-pane"}
+            onMouseDown={() => setActivePane(0)}
+          >
+            <div className="chart-stage">
+              <div className="chart-host" ref={hostRef} />
+              <ChartOverlays engine={engine} />
+              <ReplayBar engine={engine} />
+            </div>
+            {arrangement !== "1" ? <div className="pane-tag">{snap?.symbol.ticker}</div> : null}
+          </div>
+          {!boot.embed &&
+            paneSymbols.slice(1).map((ticker, i) => {
+              const paneIndex = i + 1;
+              return (
+                <ChartPane
+                  key={`${arrangement}-${paneIndex}-${ticker}`}
+                  symbol={findSymbol(ticker)}
+                  interval={(toolbarSnap?.interval as Interval) || "15"}
+                  theme={snap?.theme}
+                  active={activePane === paneIndex}
+                  onActivate={() => setActivePane(paneIndex)}
+                  onEngine={(eng) => {
+                    paneEnginesRef.current[paneIndex] = eng;
+                    setSecondaryEngines((prev) => ({ ...prev, [paneIndex]: eng }));
+                  }}
+                  onPrice={onPriceTick}
+                />
+              );
+            })}
           {showDrawings && compact ? (
             <button
               type="button"
@@ -562,7 +661,7 @@ export default function App() {
         {showWidgets ? (
           <div className={widgetOverlay ? "widget-dock-slot open" : "widget-dock-slot"}>
             <WidgetDock
-              engine={engine}
+              engine={toolbarEngine}
               active={widget}
               onActive={(id) => {
                 setWidget(id);
@@ -603,7 +702,20 @@ export default function App() {
           </button>
         </div>
       ) : null}
-      {showBottom ? <BottomDock engine={engine} open={bottomOpen} onToggle={() => setBottomOpen((v) => !v)} /> : null}
+      {showBottom ? <BottomDock engine={toolbarEngine} open={bottomOpen} onToggle={() => setBottomOpen((v) => !v)} /> : null}
+      <QuickSearchModal
+        open={quickSearchOpen}
+        onClose={() => setQuickSearchOpen(false)}
+        engine={toolbarEngine}
+        onOpenSymbol={() => {
+          setQuickSearchOpen(false);
+          setSearchOpen(true);
+        }}
+        onOpenIndicators={() => setIndOpen(true)}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenAlert={openCreateAlert}
+        onReplay={() => toolbarEngine?.setReplay(!toolbarSnap?.replay)}
+      />
       <SymbolModal
         open={symbolOpen || searchOpen}
         onClose={() => {
@@ -621,7 +733,7 @@ export default function App() {
         title="Compare symbols"
         recent={recentSymbols.filter((item) => item.ticker !== (snap?.symbol.ticker ?? ""))}
         onPick={(s) => {
-          const eng = engineRef.current;
+          const eng = toolbarEngine ?? engineRef.current;
           if (!eng) return;
           touchRecent(s);
           void fetchHistory(s, eng.getSnapshot().interval).then(({ bars }) => eng.setCompare(s.ticker, bars));
@@ -634,25 +746,25 @@ export default function App() {
         favorites={indicatorFavorites}
         onToggleFavorite={toggleIndicatorFavorite}
         recent={recentIndicators}
-        activeKinds={(snap?.indicators ?? []).map((item) => item.kind)}
+        activeKinds={(toolbarSnap?.indicators ?? snap?.indicators ?? []).map((item) => item.kind)}
         onPick={(kind) => {
-          engine?.addIndicator(kind);
+          toolbarEngine?.addIndicator(kind);
           touchRecentIndicator(kind);
           setIndOpen(false);
         }}
         onPickTool={(tool) => {
-          engine?.setTool(tool);
+          toolbarEngine?.setTool(tool);
           setIndOpen(false);
         }}
       />
       <AlertModal
         open={alertOpen}
         onClose={() => setAlertOpen(false)}
-        symbol={snap?.symbol.ticker ?? "SYMBOL"}
-        exchange={snap?.symbol.exchange}
-        interval={snap?.interval}
-        precision={snap?.symbol.pricePrecision ?? 2}
-        defaultPrice={snap?.last?.close ?? 0}
+        symbol={toolbarSnap?.symbol.ticker ?? snap?.symbol.ticker ?? "SYMBOL"}
+        exchange={toolbarSnap?.symbol.exchange ?? snap?.symbol.exchange}
+        interval={toolbarSnap?.interval ?? snap?.interval}
+        precision={toolbarSnap?.symbol.pricePrecision ?? snap?.symbol.pricePrecision ?? 2}
+        defaultPrice={toolbarSnap?.last?.close ?? snap?.last?.close ?? 0}
         onCreate={(input) => {
           const alert = createAlert({
             ...input,
@@ -668,10 +780,10 @@ export default function App() {
       <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
-        theme={snap?.theme ?? "dark"}
-        onTheme={(t) => engine?.setTheme(t)}
-        engine={engine}
-        snap={snap}
+        theme={toolbarSnap?.theme ?? snap?.theme ?? "dark"}
+        onTheme={(t) => toolbarEngine?.setTheme(t)}
+        engine={toolbarEngine}
+        snap={toolbarSnap ?? snap}
       />
     </div>
   );
