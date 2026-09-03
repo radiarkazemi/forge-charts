@@ -37,6 +37,9 @@ fi
 if [[ -f CHECKLIST.md ]]; then
   "${SCP[@]}" CHECKLIST.md "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/CHECKLIST.md" || true
 fi
+if [[ -f CHART-APP-INTEGRATION.md ]]; then
+  "${SCP[@]}" CHART-APP-INTEGRATION.md "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/CHART-APP-INTEGRATION.md" || true
+fi
 if [[ -f EMBED.md ]]; then
   "${SCP[@]}" EMBED.md "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/EMBED.md" || true
 fi
