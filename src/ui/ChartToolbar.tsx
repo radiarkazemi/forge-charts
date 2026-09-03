@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { CHART_TYPES, DEFAULT_FAVORITE_INTERVALS, INTERVAL_GROUPS, intervalMeta } from "../catalog";
 import { makeIntervalId } from "../data/interval";
 import type { ChartEngine } from "../engine/ChartEngine";
 import type { ChartType, Interval } from "../engine/types";
 import { loadJson, saveJson } from "../persist";
 import { useEngine } from "./useEngine";
+import { IndicatorTemplatesMenu } from "./IndicatorTemplatesMenu";
 
 const FAV_KEY = "forge.intervalFavorites";
 const TYPE_FAV_KEY = "forge.chartTypeFavorites";
@@ -22,24 +23,49 @@ const DEFAULT_FAVORITE_TYPES: ChartType[] = ["candle", "heikin", "line", "area",
 type Props = {
   engine: ChartEngine | null;
   live: boolean;
+  dataMode: DataMode;
+  /** Phone / embed: denser toolbar, fewer secondary controls. */
+  compact?: boolean;
+  /** Chart-only custom OHLC (no exchange feed). */
+  external?: boolean;
+  layoutSlot?: ReactNode;
+  onDataMode: (mode: DataMode) => void;
   onOpenSymbol: () => void;
   onOpenIndicators: () => void;
   onOpenSettings: () => void;
   onOpenSearch: () => void;
+  onOpenQuickSearch: () => void;
   onInterval: (interval: Interval) => void;
   onCompare: () => void;
+  onClearCompare: () => void;
   onAlert: () => void;
 };
+
+export type DataMode = "technicals" | "seasonals" | "news" | "ideas";
+
+const DATA_MODES: Array<{ id: DataMode; label: string; title: string }> = [
+  { id: "technicals", label: "Technicals", title: "Indicators & data window" },
+  { id: "seasonals", label: "Seasonals", title: "Economic calendar / seasonality" },
+  { id: "news", label: "News", title: "Symbol news" },
+  { id: "ideas", label: "Ideas", title: "Community ideas (local)" },
+];
 
 export function ChartToolbar({
   engine,
   live,
+  dataMode,
+  compact = false,
+  external = false,
+  layoutSlot,
+  onDataMode,
   onOpenSymbol,
   onOpenIndicators,
   onOpenSettings,
   onOpenSearch,
+  onOpenQuickSearch,
   onInterval,
   onCompare,
+  onClearCompare,
   onAlert,
 }: Props) {
   const snap = useEngine(engine);
@@ -118,14 +144,54 @@ export function ChartToolbar({
   }));
 
   return (
-    <div className="chart-toolbar">
+    <div className={compact ? "chart-toolbar compact" : "chart-toolbar"}>
       <button className="symbol-chip" onClick={onOpenSymbol} title="Symbol Search">
-        <span className={live ? "live-dot on" : "live-dot"} />
-        <b>{snap?.symbol.ticker ?? "XAUUSD"}</b>
+        <span className={live ? "live-dot on" : "live-dot"} aria-hidden />
+        <span className="symbol-chip-text">
+          <b>{snap?.symbol.ticker ?? "XAUUSD"}</b>
+          <em>{snap?.symbol.exchange ?? "FOREXCOM"}</em>
+        </span>
+        <span
+          className={live ? "live-pill on" : external ? "live-pill external" : "live-pill"}
+          title={external ? "Your OHLC data" : live ? "Live market data" : "Delayed / demo"}
+        >
+          {external ? (live ? "LIVE" : "CUSTOM") : live ? "LIVE" : "DELAYED"}
+        </span>
       </button>
-      <button className="tb-icon" title="Compare" onClick={onCompare}>
-        +
-      </button>
+
+      {!compact ? (
+        <div className="seg data-switch" role="tablist" aria-label="Chart data mode">
+          {DATA_MODES.map((mode) => (
+            <button
+              key={mode.id}
+              type="button"
+              role="tab"
+              aria-selected={dataMode === mode.id}
+              className={dataMode === mode.id ? "on" : ""}
+              title={mode.title}
+              onClick={() => onDataMode(mode.id)}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {!compact ? (
+        <div className="compare-wrap">
+          <button className={snap?.compare ? "tb-btn compare on" : "tb-btn compare"} title="Compare / overlay symbol" onClick={onCompare}>
+            <span aria-hidden>+</span>
+            Compare
+          </button>
+          {snap?.compare ? (
+            <button type="button" className="compare-chip" title="Remove compare overlay" onClick={onClearCompare}>
+              <b>{snap.compare}</b>
+              <span aria-hidden>×</span>
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="menu-wrap" ref={ivRef}>
         <button
           className={ivOpen ? "tb-btn strong on" : "tb-btn strong"}
@@ -195,8 +261,8 @@ export function ChartToolbar({
           </div>
         ) : null}
       </div>
-      <div className="seg">
-        {quick.map((id) => {
+      <div className="seg quick-iv">
+        {(compact ? quick.slice(0, 5) : quick).map((id) => {
           const item = intervalMeta(id);
           return (
             <button key={id} className={snap?.interval === id ? "on" : ""} onClick={() => onInterval(id)}>
@@ -269,37 +335,44 @@ export function ChartToolbar({
           </div>
         ) : null}
       </div>
-      <button className="tb-btn accent" onClick={onOpenIndicators} title="Indicators">
-        Indicators
+      <button className="tb-btn accent" onClick={onOpenIndicators} title="Indicators (Alt+I)">
+        {compact ? "Fx" : "Indicators"}
       </button>
-      <button className="tb-icon" title="Indicator templates" onClick={onOpenIndicators}>
-        ▦
-      </button>
-      <button className="tb-btn" onClick={onAlert} title="Alert">
+      {!compact ? <IndicatorTemplatesMenu engine={engine} /> : null}
+      <button className="tb-btn" onClick={onAlert} title="Create alert (Alt+A)">
         Alert
       </button>
-      <button className={snap?.replay ? "tb-btn on" : "tb-btn"} onClick={() => engine?.setReplay(!snap?.replay)} title="Replay">
-        Replay
-      </button>
-      <button className="tb-icon" disabled={!snap?.canUndo} onClick={() => engine?.undo()} title="Undo">
+      {!compact ? (
+        <button
+          className={snap?.replay ? "tb-btn on" : "tb-btn"}
+          onClick={() => engine?.setReplay(!snap?.replay)}
+          title="Bar Replay (Shift+Alt+R)"
+        >
+          Replay
+        </button>
+      ) : null}
+      <button className="tb-icon" disabled={!snap?.canUndo} onClick={() => engine?.undo()} title="Undo (Ctrl/Cmd+Z)">
         ↺
       </button>
-      <button className="tb-icon" disabled={!snap?.canRedo} onClick={() => engine?.redo()} title="Redo">
+      <button className="tb-icon" disabled={!snap?.canRedo} onClick={() => engine?.redo()} title="Redo (Ctrl/Cmd+Y)">
         ↻
       </button>
-      <button className="tb-icon" title="Select layout">
-        ⊞
-      </button>
+      {!compact ? layoutSlot ?? null : null}
       <span className="spacer" />
-      <button className="tb-icon" title="Quick search" onClick={onOpenSearch}>
+      <button className="tb-icon" title="Quick search (Ctrl/Cmd+K)" onClick={onOpenQuickSearch}>
         ⌕
+      </button>
+      <button className="tb-icon" title="Symbol search" onClick={onOpenSearch}>
+        Ⓑ
       </button>
       <button className="tb-icon" title="Settings" onClick={onOpenSettings}>
         ⚙
       </button>
-      <button className="tb-icon" title="Fullscreen" onClick={() => document.documentElement.requestFullscreen?.()}>
-        ⛶
-      </button>
+      {!compact ? (
+        <button className="tb-icon" title="Fullscreen" onClick={() => document.documentElement.requestFullscreen?.()}>
+          ⛶
+        </button>
+      ) : null}
       <button className="tb-icon" title="Take a snapshot" onClick={() => engine?.screenshot()}>
         ⌗
       </button>

@@ -32,18 +32,7 @@ export function ChartOverlays({ engine }: { engine: ChartEngine | null }) {
         <span className="tz">UTC</span>
       </div>
       <ChartInspectors engine={engine} />
-      {snap.replay ? (
-        <div className="replay-bar">
-          <button onClick={() => engine?.setReplayPlaying(!snap.replayPlaying)}>{snap.replayPlaying ? "Pause" : "Play"}</button>
-          <button onClick={() => engine?.stepReplay()}>Step</button>
-          {[1, 2, 5, 10].map((s) => (
-            <button key={s} className={snap.replaySpeed === s ? "on" : ""} onClick={() => engine?.setReplaySpeed(s)}>
-              {s}x
-            </button>
-          ))}
-          <button onClick={() => engine?.setReplay(false)}>Exit</button>
-        </div>
-      ) : null}
+      {snap.replay ? <div className="replay-banner">{snap.replaySelecting ? "Bar Replay · select starting point" : "Bar Replay"}</div> : null}
     </>
   );
 }

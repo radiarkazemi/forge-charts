@@ -40,6 +40,19 @@ const RANGE_SEC: Record<RangePreset, number> = {
 
 type Rect = { x: number; y: number; w: number; h: number };
 type Listener = () => void;
+type HistoryState = {
+  drawings: Drawing[];
+  indicators: IndicatorInstance[];
+  chartType: ChartType;
+};
+
+function cloneDrawings(rows: Drawing[]): Drawing[] {
+  return rows.map((d) => ({ ...d, points: d.points.map((p) => ({ ...p })) }));
+}
+
+function cloneIndicators(rows: IndicatorInstance[]): IndicatorInstance[] {
+  return rows.map((i) => ({ ...i, params: [...i.params] }));
+}
 
 export class ChartEngine {
   private container: HTMLElement;
@@ -83,15 +96,18 @@ export class ChartEngine {
   private priceSpan: number | null = null;
   private priceMid: number | null = null;
   private replay = false;
+  private replaySelecting = false;
   private replayPlaying = false;
   private replaySpeed = 1;
+  private replayStartIndex: number | null = null;
+  private replayHoverIndex: number | null = null;
   private stayMode = false;
   private hideDrawings = false;
   private lockDrawings = false;
   private fitMode = true;
   private rangePreset: RangePreset = "1M";
-  private undoStack: Drawing[][] = [];
-  private redoStack: Drawing[][] = [];
+  private undoStack: HistoryState[] = [];
+  private redoStack: HistoryState[] = [];
   private listeners = new Set<Listener>();
   private raf = 0;
   private snapshot: EngineSnapshot;
@@ -138,8 +154,10 @@ export class ChartEngine {
       selectedId: this.selectedId,
       selectedIndicatorId: this.selectedIndicatorId,
       replay: this.replay,
+      replaySelecting: this.replaySelecting,
       replayPlaying: this.replayPlaying,
       replaySpeed: this.replaySpeed,
+      replayStartIndex: this.replayStartIndex,
       stayMode: this.stayMode,
       hideDrawings: this.hideDrawings,
       lockDrawings: this.lockDrawings,
@@ -157,7 +175,13 @@ export class ChartEngine {
 
   setBars(bars: Bar[]): void {
     this.fullBars = bars;
-    this.bars = this.replay ? bars.slice(0, Math.max(30, Math.floor(bars.length * 0.7))) : bars;
+    if (this.replay && this.replayStartIndex != null) {
+      this.bars = bars.slice(0, Math.min(bars.length, Math.max(this.bars.length, this.replayStartIndex + 1)));
+    } else if (this.replay) {
+      this.bars = bars.slice(0, Math.max(30, Math.floor(bars.length * 0.7)));
+    } else {
+      this.bars = bars;
+    }
     this.snapToLatest();
     this.hover = this.bars.at(-1) ?? null;
     this.emit();
@@ -181,6 +205,8 @@ export class ChartEngine {
   }
 
   setChartType(type: ChartType): void {
+    if (type === this.chartType) return;
+    this.pushUndo();
     this.chartType = type;
     this.emit();
     this.draw();
@@ -244,7 +270,10 @@ export class ChartEngine {
             ? [14]
             : kind === "stoch"
               ? [14, 3]
-              : [12, 26, 9];
+              : kind === "vol"
+                ? []
+                : [12, 26, 9];
+    this.pushUndo();
     this.indicators.push({
       id: uid("ind"),
       kind,
@@ -257,15 +286,54 @@ export class ChartEngine {
     this.draw();
   }
 
-  removeIndicator(id: string): void {
-    this.indicators = this.indicators.filter((i) => i.id !== id);
-    if (this.selectedIndicatorId === id) this.selectedIndicatorId = null;
+  setIndicatorsFromTemplate(
+    items: Array<{
+      kind: IndicatorInstance["kind"];
+      params: number[];
+      visible: boolean;
+      color: string;
+      lineWidth?: number;
+      lineStyle?: IndicatorInstance["lineStyle"];
+      source?: IndicatorInstance["source"];
+      pane?: IndicatorInstance["pane"];
+    }>,
+  ): void {
+    this.pushUndo();
+    this.indicators = items.map((item, index) => {
+      const pane =
+        item.pane ??
+        (item.kind === "rsi"
+          ? "rsi"
+          : item.kind === "macd"
+            ? "macd"
+            : item.kind === "stoch"
+              ? "stoch"
+              : item.kind === "atr"
+                ? "atr"
+                : item.kind === "vol"
+                  ? "volume"
+                  : "main");
+      return {
+        id: uid("ind"),
+        kind: item.kind,
+        pane,
+        params: [...item.params],
+        visible: item.visible,
+        color: item.color || COLORS[index % COLORS.length],
+        lineWidth: item.lineWidth,
+        lineStyle: item.lineStyle,
+        source: item.source,
+      };
+    });
+    this.selectedIndicatorId = null;
     this.emit();
     this.draw();
   }
 
-  toggleIndicator(id: string): void {
-    this.indicators = this.indicators.map((i) => (i.id === id ? { ...i, visible: !i.visible } : i));
+  removeIndicator(id: string): void {
+    this.pushUndo();
+    this.indicators = this.indicators.filter((i) => i.id !== id);
+    if (this.selectedIndicatorId === id) this.selectedIndicatorId = null;
     this.emit();
     this.draw();
   }
@@ -281,6 +349,7 @@ export class ChartEngine {
     id: string,
     patch: Partial<Pick<IndicatorInstance, "params" | "color" | "visible" | "lineWidth" | "lineStyle" | "source">>,
   ): void {
+    this.pushUndo();
     this.indicators = this.indicators.map((i) => (i.id === id ? { ...i, ...patch, params: patch.params ? [...patch.params] : i.params } : i));
     this.emit();
     this.draw();
@@ -297,7 +366,15 @@ export class ChartEngine {
     id: string,
     patch: Partial<Pick<Drawing, "color" | "lineWidth" | "lineStyle" | "text" | "locked">>,
   ): void {
+    this.pushUndo();
     this.drawings = this.drawings.map((d) => (d.id === id ? { ...d, ...patch } : d));
+    this.emit();
+    this.draw();
+  }
+
+  toggleIndicator(id: string): void {
+    this.pushUndo();
+    this.indicators = this.indicators.map((i) => (i.id === id ? { ...i, visible: !i.visible } : i));
     this.emit();
     this.draw();
   }
@@ -324,8 +401,16 @@ export class ChartEngine {
   undo(): void {
     const prev = this.undoStack.pop();
     if (!prev) return;
-    this.redoStack.push(this.drawings);
-    this.drawings = prev;
+    this.redoStack.push({
+      drawings: cloneDrawings(this.drawings),
+      indicators: cloneIndicators(this.indicators),
+      chartType: this.chartType,
+    });
+    this.drawings = cloneDrawings(prev.drawings);
+    this.indicators = cloneIndicators(prev.indicators);
+    this.chartType = prev.chartType;
+    this.selectedId = null;
+    this.selectedIndicatorId = null;
     this.emit();
     this.draw();
   }
@@ -333,8 +418,16 @@ export class ChartEngine {
   redo(): void {
     const next = this.redoStack.pop();
     if (!next) return;
-    this.undoStack.push(this.drawings);
-    this.drawings = next;
+    this.undoStack.push({
+      drawings: cloneDrawings(this.drawings),
+      indicators: cloneIndicators(this.indicators),
+      chartType: this.chartType,
+    });
+    this.drawings = cloneDrawings(next.drawings);
+    this.indicators = cloneIndicators(next.indicators);
+    this.chartType = next.chartType;
+    this.selectedId = null;
+    this.selectedIndicatorId = null;
     this.emit();
     this.draw();
   }
@@ -392,16 +485,74 @@ export class ChartEngine {
   }
 
   setReplay(on: boolean): void {
-    this.replay = on;
-    this.replayPlaying = on;
-    if (on) this.bars = this.fullBars.slice(0, Math.max(40, Math.floor(this.fullBars.length * 0.55)));
-    else this.bars = this.fullBars;
+    if (on) {
+      this.replay = true;
+      this.replaySelecting = true;
+      this.replayPlaying = false;
+      this.replayStartIndex = null;
+      this.replayHoverIndex = null;
+      this.bars = this.fullBars;
+      this.snapToLatest();
+    } else {
+      this.jumpToRealtime();
+      return;
+    }
+    this.emit();
+    this.draw();
+  }
+
+  /** Re-enter start-bar picker while already in replay (TV “Go to…” / Select bar). */
+  beginReplaySelect(): void {
+    if (!this.replay) {
+      this.setReplay(true);
+      return;
+    }
+    this.replaySelecting = true;
+    this.replayPlaying = false;
+    this.bars = this.fullBars;
+    this.snapToLatest();
+    this.emit();
+    this.draw();
+  }
+
+  selectReplayStart(index: number): void {
+    if (!this.fullBars.length) return;
+    const idx = clamp(Math.floor(index), 0, this.fullBars.length - 1);
+    this.replay = true;
+    this.replaySelecting = false;
+    this.replayPlaying = false;
+    this.replayStartIndex = idx;
+    this.replayHoverIndex = null;
+    this.bars = this.fullBars.slice(0, idx + 1);
+    this.snapToLatest();
+    this.emit();
+    this.draw();
+  }
+
+  pickRandomReplayStart(): void {
+    if (this.fullBars.length < 50) {
+      this.selectReplayStart(Math.max(0, this.fullBars.length - 1));
+      return;
+    }
+    const min = Math.floor(this.fullBars.length * 0.15);
+    const max = Math.floor(this.fullBars.length * 0.85);
+    this.selectReplayStart(min + Math.floor(Math.random() * Math.max(1, max - min)));
+  }
+
+  jumpToRealtime(): void {
+    this.replay = false;
+    this.replaySelecting = false;
+    this.replayPlaying = false;
+    this.replayStartIndex = null;
+    this.replayHoverIndex = null;
+    this.bars = this.fullBars;
     this.snapToLatest();
     this.emit();
     this.draw();
   }
 
   setReplayPlaying(on: boolean): void {
+    if (!this.replay || this.replaySelecting) return;
     this.replayPlaying = on;
     this.emit();
   }
@@ -412,7 +563,7 @@ export class ChartEngine {
   }
 
   stepReplay(): void {
-    if (!this.replay) return;
+    if (!this.replay || this.replaySelecting) return;
     const next = this.fullBars[this.bars.length];
     if (!next) {
       this.replayPlaying = false;
@@ -421,6 +572,24 @@ export class ChartEngine {
     }
     this.bars = [...this.bars, next];
     this.snapToLatest();
+    this.emit();
+    this.draw();
+  }
+
+  /** Logical bar index under pointer for replay selection. */
+  replayIndexAtClient(clientX: number, clientY: number): number | null {
+    const rect = this.canvas.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    if (this.hitZone(x, y) !== "chart") return null;
+    const layout = this.layout();
+    const logical = this.indexAtX(x, this.bars.length, layout.main);
+    return clamp(Math.round(logical), 0, Math.max(0, this.fullBars.length - 1));
+  }
+
+  setReplayHoverIndex(index: number | null): void {
+    if (this.replayHoverIndex === index) return;
+    this.replayHoverIndex = index;
     this.emit();
     this.draw();
   }
@@ -450,7 +619,12 @@ export class ChartEngine {
   }
 
   private pushUndo(): void {
-    this.undoStack.push(this.drawings.map((d) => ({ ...d, points: [...d.points] })));
+    this.undoStack.push({
+      drawings: cloneDrawings(this.drawings),
+      indicators: cloneIndicators(this.indicators),
+      chartType: this.chartType,
+    });
+    if (this.undoStack.length > 100) this.undoStack.shift();
     this.redoStack = [];
   }
 
@@ -880,7 +1054,42 @@ export class ChartEngine {
     if (!this.hideDrawings) this.paintDrawings(layout.main, bars.length ? bars : this.bars.slice(-40), range);
     this.paintAxes(layout, bars, range, pal);
     this.paintCrosshair(layout, bars, range, pal);
+    this.paintReplaySelectLine(layout.main);
     this.paintLegend(layout.main, pal);
+  }
+
+  private paintReplaySelectLine(rect: Rect): void {
+    if (!this.replaySelecting || this.replayHoverIndex == null) return;
+    const x = this.xOfIndex(this.replayHoverIndex, rect);
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.strokeStyle = "#2962ff";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(x + 0.5, rect.y);
+    ctx.lineTo(x + 0.5, rect.y + rect.h);
+    ctx.stroke();
+    // Scissors marker (TV-style start picker)
+    const cy = rect.y + 18;
+    ctx.fillStyle = "#2962ff";
+    ctx.beginPath();
+    ctx.arc(x, cy, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.font = "10px Trebuchet MS, Arial, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("✂", x, cy + 0.5);
+    const bar = this.fullBars[this.replayHoverIndex];
+    if (bar) {
+      ctx.fillStyle = "#2962ff";
+      ctx.fillRect(x - 54, rect.y + rect.h + 2, 108, 16);
+      ctx.fillStyle = "#fff";
+      ctx.font = AXIS_FONT;
+      ctx.fillText(formatTime(bar.time, this.interval), x, rect.y + rect.h + 14);
+    }
+    ctx.restore();
   }
 
   private paintWatermark(rect: Rect, color: string): void {
@@ -1478,6 +1687,10 @@ export class ChartEngine {
   }
 
   private updateCursor(x: number, y: number): void {
+    if (this.replaySelecting) {
+      this.canvas.style.cursor = this.hitZone(x, y) === "chart" ? "col-resize" : "default";
+      return;
+    }
     const zone = this.hitZone(x, y);
     if (zone === "price") this.canvas.style.cursor = "ns-resize";
     else if (zone === "time") this.canvas.style.cursor = "ew-resize";
@@ -1495,6 +1708,11 @@ export class ChartEngine {
     this.canvas.setPointerCapture(e.pointerId);
     const { x, y } = this.local(e);
     this.mouse = { x, y };
+    if (this.replaySelecting) {
+      const idx = this.replayIndexAtClient(e.clientX, e.clientY);
+      if (idx != null) this.selectReplayStart(idx);
+      return;
+    }
     const zone = this.hitZone(x, y);
     if (zone === "price") {
       this.ensurePriceSpan();
@@ -1577,6 +1795,12 @@ export class ChartEngine {
   private onMove = (e: PointerEvent): void => {
     const { x, y } = this.local(e);
     this.mouse = { x, y };
+    if (this.replaySelecting) {
+      const idx = this.replayIndexAtClient(e.clientX, e.clientY);
+      this.setReplayHoverIndex(idx);
+      this.updateCursor(x, y);
+      return;
+    }
     if (!this.dragging) this.updateCursor(x, y);
     if (this.dragging === "priceAxis" && this.priceSpan != null && this.priceMid != null) {
       const dy = y - this.dragLastY;
@@ -1719,10 +1943,35 @@ export class ChartEngine {
   };
 
   private onKey = (e: KeyboardEvent): void => {
+    const target = e.target as HTMLElement | null;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+
+    if (e.shiftKey && e.altKey && e.key.toLowerCase() === "r") {
+      e.preventDefault();
+      this.setReplay(!this.replay);
+      return;
+    }
+    if (this.replay && e.shiftKey && e.key === "ArrowDown") {
+      e.preventDefault();
+      this.setReplayPlaying(!this.replayPlaying);
+      return;
+    }
+    if (this.replay && e.shiftKey && e.key === "ArrowRight") {
+      e.preventDefault();
+      this.stepReplay();
+      return;
+    }
+
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
       e.preventDefault();
       if (e.shiftKey) this.redo();
       else this.undo();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+      e.preventDefault();
+      this.redo();
+      return;
     }
     if (e.key === "Delete" || e.key === "Backspace") {
       if (this.selectedId) this.removeDrawing(this.selectedId);
@@ -1734,6 +1983,10 @@ export class ChartEngine {
       return;
     }
     if (e.key === "Escape") {
+      if (this.replaySelecting) {
+        this.jumpToRealtime();
+        return;
+      }
       this.draft = null;
       this.selectedId = null;
       this.selectedIndicatorId = null;

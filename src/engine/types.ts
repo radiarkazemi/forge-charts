@@ -217,8 +217,12 @@ export type EngineSnapshot = {
   selectedId: string | null;
   selectedIndicatorId: string | null;
   replay: boolean;
+  /** Choosing start bar (blue scissors line) before / during replay. */
+  replaySelecting: boolean;
   replayPlaying: boolean;
   replaySpeed: number;
+  /** Index into fullBars for the replay start (inclusive end of visible history). */
+  replayStartIndex: number | null;
   stayMode: boolean;
   hideDrawings: boolean;
   lockDrawings: boolean;
