@@ -1,7 +1,7 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // TRH | Expansion Hunter
-// Goal setups (user drawings): RAID → CISD → MSS/displacement → enter at expansion BASE
-// SL beyond raid extreme · TP = opposing liquidity (high RR 1:4–1:6 allowed)
+// Goal setups: RAID → CISD → MSS → enter at expansion BASE (~8–10pt risk on Gold)
+// Rejects micro boxes (entry glued to raid). SL beyond raid · TP opposing liq (4–6R OK)
 
 //@version=5
 strategy("TRH | Expansion Hunter", shorttitle="TRH-XH", overlay=true,
@@ -37,13 +37,17 @@ cooldownBars  = input.int(40, "Cooldown Bars", minval=5, group=grpDet)
 
 grpRisk = "SL / TP — expansion targets"
 slPadAtr      = input.float(0.15, "SL Pad Beyond Raid (ATR×)", step=0.05, group=grpRisk)
-minRiskAtr    = input.float(0.35, "Min Risk (ATR×)", step=0.05, group=grpRisk)
-maxRiskAtr    = input.float(1.60, "Max Risk (ATR×) — reject wider", step=0.05, group=grpRisk,
-     tooltip="Your examples ~10pts. Rejects huge hunted stops.")
+minRiskAtr    = input.float(0.80, "Min Risk (ATR×)", step=0.05, group=grpRisk,
+     tooltip="Reject micro raids. Goal setups ~10pts on Gold M1.")
+minRiskPts    = input.float(8.0, "Min Risk (price)", step=0.5, group=grpRisk,
+     tooltip="Hard floor so RR boxes are not 0.4–0.8pt scalps. Your drawings ~10pts.")
+maxRiskAtr    = input.float(1.80, "Max Risk (ATR×) — reject wider", step=0.05, group=grpRisk,
+     tooltip="Rejects huge hunted stops.")
+maxRiskPts    = input.float(18.0, "Max Risk (price)", step=0.5, group=grpRisk)
 minRr         = input.float(2.0, "Minimum RR", minval=2.0, step=0.1, group=grpRisk)
 useOpposingLiq = input.bool(true, "TP = Opposing Liquidity (BSL/SSL)", group=grpRisk,
      tooltip="Allows 1:4–1:6 when liquidity is far — like your drawings.")
-liqMinAtr     = input.float(1.0, "Min Dist To Opposing Liq (ATR×)", step=0.1, group=grpRisk)
+liqMinAtr     = input.float(1.5, "Min Dist To Opposing Liq (ATR×)", step=0.1, group=grpRisk)
 fallbackRr    = input.float(4.0, "Fallback RR If No Liquidity", minval=2.0, step=0.5, group=grpRisk)
 
 grpDisp = "Display"
@@ -133,14 +137,11 @@ f_buildLevels(int dir, float entryHint, float raidExt) =>
     float entry = entryHint
     float sl = dir == 1 ? raidExt - pad : raidExt + pad
     float risk = math.abs(entry - sl)
-    // Keep entry above/below SL with sane risk band
-    float minRisk = atr * minRiskAtr
-    float maxRisk = atr * maxRiskAtr
-    if risk < minRisk
-        // Nudge entry toward TP so risk = minRisk while SL stays on raid
-        entry := dir == 1 ? sl + minRisk : sl - minRisk
-        risk := minRisk
-    if risk > maxRisk
+    // Hard floors/ceilings in ATR and price — never invent entry by nudging.
+    // Old bug: entry glued to raid → risk 0.4–0.8 → “6R” TP only ~5pts (micro boxes).
+    float minRisk = math.max(atr * minRiskAtr, minRiskPts)
+    float maxRisk = math.min(atr * maxRiskAtr, maxRiskPts)
+    if risk < minRisk or risk > maxRisk
         [false, entry, sl, entry]
     else
         float tp = dir == 1 ? entry + risk * fallbackRr : entry - risk * fallbackRr
@@ -273,6 +274,7 @@ if barstate.isconfirmed
                     phase := 3
 
         // Entry at expansion BASE: CISD inside first FVG, else FVG mid / CISD
+        // Reject when base is glued to the raid (that produced the micro 0.8pt boxes).
         if phase == 3 and bar_index >= mssBar and bar_index >= 2
             bool found = false
             float ft = na
@@ -291,40 +293,57 @@ if barstate.isconfirmed
                     fb := bot2
                     ft := top2
                     found := true
+            float minRisk = math.max(a * minRiskAtr, minRiskPts)
+            float pad = a * slPadAtr
+            float slProbe = pendDir == 1 ? raidExt - pad : raidExt + pad
             if found or bar_index == mssBar
                 if not found
-                    // No FVG yet on MSS bar — use CISD as base entry (drawing style)
                     ft := na
                     fb := na
-                float entryHint = cisdPx
+                // Candidate entries from structure only (no synthetic nudge)
+                float eCisd = cisdPx
+                float eFvg = na
                 if found
-                    entryHint := (cisdPx >= fb and cisdPx <= ft) ? cisdPx : (ft + fb) * 0.5
-                    // Prefer base of expansion: for longs use lower third of FVG if CISD not inside
+                    eFvg := (cisdPx >= fb and cisdPx <= ft) ? cisdPx : (ft + fb) * 0.5
                     if pendDir == 1 and not (cisdPx >= fb and cisdPx <= ft)
-                        entryHint := fb + (ft - fb) * 0.35
+                        eFvg := fb + (ft - fb) * 0.35
                     if pendDir == -1 and not (cisdPx >= fb and cisdPx <= ft)
-                        entryHint := ft - (ft - fb) * 0.35
-                [ok, e, s, t] = f_buildLevels(pendDir, entryHint, raidExt)
-                if ok
-                    signalDir := pendDir
-                    signalEntry := e
-                    signalSl := s
-                    signalTp := t
-                    signalRaid := raidPx
-                    signalRaidExt := raidExt
-                    signalCisd := cisdPx
-                    signalMss := mssPx
-                    signalFvgTop := ft
-                    signalFvgBot := fb
-                    lastSetupBar := bar_index
+                        eFvg := ft - (ft - fb) * 0.35
+                float entryHint = na
+                // Prefer first structural level that clears min risk vs raid SL
+                if not na(eFvg) and math.abs(eFvg - slProbe) >= minRisk
+                    entryHint := eFvg
+                else if math.abs(eCisd - slProbe) >= minRisk
+                    entryHint := eCisd
+                else if found and pendDir == 1 and math.abs(ft - slProbe) >= minRisk
+                    entryHint := ft
+                else if found and pendDir == -1 and math.abs(fb - slProbe) >= minRisk
+                    entryHint := fb
+
+                if not na(entryHint)
+                    [ok, e, s, t] = f_buildLevels(pendDir, entryHint, raidExt)
+                    if ok
+                        signalDir := pendDir
+                        signalEntry := e
+                        signalSl := s
+                        signalTp := t
+                        signalRaid := raidPx
+                        signalRaidExt := raidExt
+                        signalCisd := cisdPx
+                        signalMss := mssPx
+                        signalFvgTop := ft
+                        signalFvgBot := fb
+                        lastSetupBar := bar_index
+                        phase := 0
+                        pendDir := 0
+                    else if bar_index - mssBar >= maxFvgBars
+                        phase := 0
+                        pendDir := 0
+                    // else keep phase 3 — hunt next FVG
+                else if bar_index - mssBar >= maxFvgBars
                     phase := 0
                     pendDir := 0
-                else if found
-                    // Bad risk — keep hunting next FVG briefly
-                    phase := 3
-                else
-                    phase := 0
-                    pendDir := 0
+                // else keep waiting for a base far enough from the raid
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ORDERS + DRAWINGS
@@ -392,10 +411,10 @@ if signalDir != 0
         array.push(labTag, label.new(bar_index, signalDir == 1 ? signalEntry : signalEntry, "TRH " + (signalDir == 1 ? "LONG" : "SHORT") + " · EXP\nRAID→CISD→MSS  R:R " + str.tostring(rr, "#.0"), style=signalDir == 1 ? label.style_label_down : label.style_label_up, color=zc, textcolor=color.white, size=size.normal))
 
     if signalDir == 1
-        strategy.entry("XH Long", strategy.long, comment="EXP LONG")
+        strategy.entry("XH Long", strategy.long, limit=signalEntry, comment="EXP LONG")
         strategy.exit("XH L Exit", from_entry="XH Long", stop=signalSl, limit=signalTp)
     else
-        strategy.entry("XH Short", strategy.short, comment="EXP SHORT")
+        strategy.entry("XH Short", strategy.short, limit=signalEntry, comment="EXP SHORT")
         strategy.exit("XH S Exit", from_entry="XH Short", stop=signalSl, limit=signalTp)
 
     activeE := signalEntry
@@ -439,8 +458,8 @@ if showPanel and barstate.islast
     table.cell(info, 0, 5, "Risk / RR", text_color=color.gray, text_size=size.tiny)
     table.cell(info, 1, 5, (na(risk) ? "—" : str.tostring(risk, format.mintick)) + " / " + (na(rr) ? "—" : str.tostring(rr, "#.0") + "R"), text_color=color.white, text_size=size.tiny)
     table.cell(info, 0, 6, "Goal", text_color=color.gray, text_size=size.tiny)
-    table.cell(info, 1, 6, "Trade expansion legs (1:4–1:6)", text_color=#FFB74D, text_size=size.tiny)
+    table.cell(info, 1, 6, "Expansion legs · min risk 8pts", text_color=#FFB74D, text_size=size.tiny)
     table.cell(info, 0, 7, "Phase", text_color=color.gray, text_size=size.tiny)
     table.cell(info, 1, 7, str.tostring(phase) + (pendDir == 1 ? " L" : pendDir == -1 ? " S" : ""), text_color=color.white, text_size=size.tiny)
     table.cell(info, 0, 8, "Note", text_color=color.gray, text_size=size.tiny)
-    table.cell(info, 1, 8, "SL under raid · TP at opposing liq", text_color=color.new(color.gray, 20), text_size=size.tiny)
+    table.cell(info, 1, 8, "Skip micro SL · TP opposing liq", text_color=color.new(color.gray, 20), text_size=size.tiny)

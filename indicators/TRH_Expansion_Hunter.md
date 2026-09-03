@@ -1,6 +1,11 @@
 # TRH | Expansion Hunter
 
-Trades the **expansion legs** you drew — not tiny late FVG chops.
+Trades the **expansion legs** you drew — not micro 0.5–1pt boxes.
+
+## Why old positions looked wrong
+
+Entry sat on the raid low → risk ~0.4–0.8 → a “6R” TP was only ~5pts.  
+Those scalps are **not** the goal setups.
 
 ## Goal setup (your screenshots)
 
@@ -16,19 +21,18 @@ Trades the **expansion legs** you drew — not tiny late FVG chops.
 1 RAID (SSL/BSL sweep)
   → 2 CISD (delivery flip)
   → 3 MSS / strong displacement
-  → ENTRY at expansion BASE (CISD inside FVG, else FVG base)
+  → ENTRY at expansion BASE (only if risk ≥ min)
   → SL beyond raid extreme
   → TP at opposing liquidity (min 2R, allows 4–6R)
 ```
 
-## Defaults
+## Defaults (anti-micro)
 
-- Strong displacement body `0.70 ATR`
-- SL pad beyond raid `0.15 ATR`
-- Max risk `1.60 ATR` (rejects huge hunted stops)
-- Min RR `2.0` · Fallback RR `4.0` if no liquidity pivot
-- Opposing liquidity TP **ON**
+- Min risk **8.0 price** and **0.80 ATR** — reject thinner structure
+- Max risk **18 price** / **1.80 ATR**
+- Limit entry at base (boxes match fill)
+- Fallback RR **4.0** · opposing liquidity TP ON
 
 ## Install
 
-Paste into Pine Editor → Add to chart as **strategy** · XAUUSD M1/M5.
+Paste into Pine Editor → Add to chart as **strategy** · XAUUSD M1/M5 · **reset inputs**.
