@@ -46,12 +46,10 @@ grpRisk = "Entry / SL / TP"
 slPadAtr       = input.float(0.02, "SL Pad (ATR×)", step=0.01, group=grpRisk)
 fvgSlExtraAtr  = input.float(0.35, "Extra SL Beyond Sweep/FVG (ATR×)", step=0.05, group=grpRisk)
 minRiskAtr     = input.float(1.20, "Min Risk Size (ATR×)", step=0.05, group=grpRisk)
-riskReward     = input.float(2.0, "Risk-Reward (hard cap)", minval=1.0, maxval=6.0, step=0.1, group=grpRisk,
-     tooltip="TP is always ≤ this R. Magnets may only take profit EARLIER, never stretch beyond.")
-useLiqTP       = input.bool(true, "Early TP at closer opposing pivot", group=grpRisk,
-     tooltip="If an opposing pivot sits BETWEEN entry and RR target, take that earlier TP. Never widen past RR.")
-useHtfMagnetTP = input.bool(false, "Early TP at closer HTF FVG (OFF default)", group=grpRisk,
-     tooltip="Was stretching gold M1 TPs to 10–20R. Off by default — only shortens TP if magnet is closer than RR.")
+riskReward     = input.float(2.0, "Risk-Reward (exact 1:R)", minval=2.0, maxval=6.0, step=0.1, group=grpRisk,
+     tooltip="TP is ALWAYS exactly this many × risk. Minimum 2.0 so reward is never smaller than SL. No early/short magnets.")
+useLiqTP       = input.bool(false, "Unused (kept for compat)", group=grpRisk)
+useHtfMagnetTP = input.bool(false, "Unused (kept for compat)", group=grpRisk)
 
 grpDisp = "Display"
 showBoxes   = input.bool(true, "Show Setup Boxes", group=grpDisp)
@@ -198,29 +196,17 @@ bool inPremium  = htfPos >= premiumMin
 bool longBiasOk  = not useHtfFilter or inDiscount or (not na(htfCisdBull) and close >= htfCisdBull)
 bool shortBiasOk = not useHtfFilter or inPremium  or (not na(htfBearBot) and close >= htfBearBot and close <= htfBearTop)
 
-// TP hard-capped at RR. Magnets may only SHORTEN (earlier exit), never widen past RR.
+// Exact RR TP — never shorter than SL distance × riskReward (min 1:2).
+// Previous "early magnet" logic could set TP inside 1R (e.g. risk 7 → TP only +3.7).
 f_buildTp(int dir, float entry, float sl) =>
     float risk = math.abs(entry - sl)
-    float tpRR = dir == 1 ? entry + risk * riskReward : entry - risk * riskReward
-    float tp = tpRR
-    if useLiqTP and risk > 0
-        if dir == 1
-            float liq = f_nextLiqHigh(entry, risk * 0.5)
-            if not na(liq) and liq > entry and liq < tp
-                tp := liq
-        else
-            float liq2 = f_nextLiqLow(entry, risk * 0.5)
-            if not na(liq2) and liq2 < entry and liq2 > tp
-                tp := liq2
-    if useHtfMagnetTP
-        if dir == 1 and not na(htfBearBot)
-            float mag = (htfBearBot + nz(htfBearTop, htfBearBot)) * 0.5
-            if mag > entry and mag < tp
-                tp := mag
-        if dir == -1 and not na(htfBullTop)
-            float mag2 = (htfBullTop + nz(htfBullBot, htfBullTop)) * 0.5
-            if mag2 < entry and mag2 > tp
-                tp := mag2
+    float rr = math.max(riskReward, 2.0)
+    float tp = dir == 1 ? entry + risk * rr : entry - risk * rr
+    // Safety: refuse inverted geometry
+    if dir == 1 and tp <= entry
+        tp := entry + risk * 2.0
+    if dir == -1 and tp >= entry
+        tp := entry - risk * 2.0
     tp
 
 // HTF visual levels
@@ -498,7 +484,7 @@ if signalDir != 0
         array.push(labS, label.new(right, signalSl, "SL " + str.tostring(signalSl, format.mintick), style=label.style_label_left, color=slCol, textcolor=color.white, size=size.small))
         array.push(labT, label.new(right, signalTp, "TP " + str.tostring(signalTp, format.mintick), style=label.style_label_left, color=tpCol, textcolor=color.white, size=size.small))
         array.push(labTag, label.new(bar_index, signalDir == 1 ? zTop : zBot,
-             "TRH " + signalTag + "\nR:R " + str.tostring(riskReward, "#.#"),
+             "TRH " + signalTag + "\nR:R " + str.tostring(math.abs(signalTp - signalEntry) / math.max(math.abs(signalEntry - signalSl), syminfo.mintick), "#.#"),
              style=signalDir == 1 ? label.style_label_down : label.style_label_up,
              color=tagC, textcolor=color.white, size=size.normal))
 
