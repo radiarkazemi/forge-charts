@@ -730,6 +730,11 @@ export class ChartEngine {
     this.canvas.style.width = `${w}px`;
     this.canvas.style.height = `${h}px`;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (this.fitMode && w > 0 && w < 520) {
+      const target = Math.round((w - this.priceAxisWidth()) / 3.4);
+      this.viewCount = this.clampViewCount(clamp(target, 48, 120));
+      this.snapToLatest();
+    }
     this.draw();
   }
 
@@ -1618,7 +1623,8 @@ export class ChartEngine {
       const label = this.percentScale ? `${tick.toFixed(2)}%` : formatPrice(tick, this.symbol.pricePrecision);
       ctx.fillText(label, layout.chart.w + 8, y + 3);
     }
-    const step = Math.max(1, Math.floor(this.viewCount / 6));
+    const labelCount = w < 400 ? 3 : w < 720 ? 4 : 6;
+    const step = Math.max(1, Math.floor(this.viewCount / labelCount));
     ctx.textAlign = "center";
     const axisStart = Math.floor(this.viewStart());
     const axisEnd = Math.ceil(this.viewEnd);

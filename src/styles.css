@@ -1661,6 +1661,10 @@ button { cursor: pointer; }
 }
 
 /* Mobile overlay buttons (scale, range) enlarged */
+.shell.compact .scale-btns {
+  right: 58px;
+  top: 10px;
+}
 @media (max-width: 720px) {
   .scale-btns button, .range-bar button {
     min-width: 32px;
