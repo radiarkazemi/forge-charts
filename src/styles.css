@@ -1582,21 +1582,32 @@ button { cursor: pointer; }
   overflow: hidden;
 }
 .shell.compact > .mobile-header,
-.shell[data-mobile="1"] > .mobile-header,
+.shell[data-mobile="1"] > .mobile-header {
+  flex: 0 0 auto;
+  flex-grow: 0;
+  flex-shrink: 0;
+  height: 44px;
+  max-height: 44px;
+  min-height: 44px;
+  overflow: hidden;
+}
 .shell.compact > .mobile-bottom-bar,
 .shell[data-mobile="1"] > .mobile-bottom-bar {
   flex: 0 0 auto;
+  flex-grow: 0;
+  flex-shrink: 0;
 }
 .shell.compact > .workspace,
 .shell[data-mobile="1"] > .workspace {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   min-width: 0;
   width: 100%;
-  height: auto;
+  height: 0; /* flex-basis trick: force row to take remaining shell height */
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
+  position: relative;
 }
 .shell.compact > .workspace > .chart-grid,
 .shell[data-mobile="1"] > .workspace > .chart-grid {
@@ -1681,7 +1692,9 @@ button { cursor: pointer; }
 
 /* Landscape phone */
 @media (max-height: 500px) and (orientation: landscape) {
-  .mobile-header { height: 36px; }
+  .shell.compact > .mobile-header,
+  .shell[data-mobile="1"] > .mobile-header,
+  .mobile-header { height: 36px; max-height: 36px; min-height: 36px; }
   .mobile-bar-row { height: 42px; }
   .mobile-bar-icon { font-size: 16px; }
   .mobile-bar-label { font-size: 9px; }
