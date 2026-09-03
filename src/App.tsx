@@ -29,6 +29,8 @@ import { ChartPane } from "./ui/ChartPane";
 import { ChartToolbar, type DataMode } from "./ui/ChartToolbar";
 import { DrawingToolbar } from "./ui/DrawingToolbar";
 import { ARRANGEMENTS, LayoutMenu, createLayout, type LayoutArrangement } from "./ui/LayoutMenu";
+import { MobileBottomBar, MobileMoreSheet } from "./ui/MobileBottomBar";
+import { MobileDrawingSheet } from "./ui/MobileDrawingSheet";
 import { IndicatorModal, SettingsModal, SymbolModal } from "./ui/Modals";
 import { ProductHeader } from "./ui/ProductHeader";
 import { QuickSearchModal } from "./ui/QuickSearchModal";
@@ -103,6 +105,8 @@ export default function App() {
   const [mobileDrawOpen, setMobileDrawOpen] = useState(false);
   const [mobileWidgetOpen, setMobileWidgetOpen] = useState(false);
   const [quickSearchOpen, setQuickSearchOpen] = useState(false);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const [mobileDrawSheetOpen, setMobileDrawSheetOpen] = useState(false);
   const [arrangement, setArrangement] = useState<LayoutArrangement>("1");
   const [paneSymbols, setPaneSymbols] = useState<string[]>(["XAUUSD"]);
   const [activePane, setActivePane] = useState(0);
@@ -527,13 +531,29 @@ export default function App() {
       className={shellClass}
       data-theme={snap?.theme ?? boot.theme ?? "dark"}
       data-embed={boot.embed ? "1" : "0"}
-      data-header={showHeader ? "1" : "0"}
-      data-toolbar={showToolbar ? "1" : "0"}
+      data-header={showHeader && !compact ? "1" : "0"}
+      data-toolbar={showToolbar && !compact ? "1" : "0"}
       data-drawings={showDrawings ? "1" : "0"}
       data-widgets={showWidgets ? "1" : "0"}
-      data-bottom={showBottom ? "1" : "0"}
+      data-bottom={showBottom && !compact ? "1" : "0"}
+      data-mobile={compact ? "1" : "0"}
     >
-      {showHeader ? (
+      {showHeader && compact ? (
+        <header className="mobile-header">
+          <button type="button" className="mobile-header-sym" onClick={() => setSymbolOpen(true)}>
+            <b>{snap?.symbol.ticker ?? "XAUUSD"}</b>
+            <em>{snap?.symbol.exchange ?? ""}</em>
+            {live ? <span className="mobile-live-dot" /> : null}
+          </button>
+          <span className="mobile-header-price">
+            {snap?.last ? snap.last.close.toFixed(snap.symbol.pricePrecision) : "—"}
+          </span>
+          <span className="spacer" />
+          <button type="button" className="mobile-hdr-btn" onClick={() => setQuickSearchOpen(true)} title="Search">⌕</button>
+          <button type="button" className="mobile-hdr-btn" onClick={() => setSettingsOpen(true)} title="Settings">⚙</button>
+        </header>
+      ) : null}
+      {showHeader && !compact ? (
         <ProductHeader
           theme={snap?.theme ?? "dark"}
           alertCount={alerts.filter((a) => a.enabled).length}
@@ -556,7 +576,7 @@ export default function App() {
           }}
         />
       ) : null}
-      {showToolbar ? (
+      {showToolbar && !compact ? (
         <ChartToolbar
           engine={toolbarEngine}
           live={live}
@@ -702,7 +722,38 @@ export default function App() {
           </button>
         </div>
       ) : null}
-      {showBottom ? <BottomDock engine={toolbarEngine} open={bottomOpen} onToggle={() => setBottomOpen((v) => !v)} /> : null}
+      {showBottom && !compact ? <BottomDock engine={toolbarEngine} open={bottomOpen} onToggle={() => setBottomOpen((v) => !v)} /> : null}
+      {compact ? (
+        <MobileBottomBar
+          engine={toolbarEngine}
+          live={live}
+          onOpenSymbol={() => setSymbolOpen(true)}
+          onOpenIndicators={() => setIndOpen(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenDrawing={() => setMobileDrawSheetOpen(true)}
+          onOpenMore={() => setMobileMoreOpen(true)}
+          onInterval={loadInterval}
+          onAlert={openCreateAlert}
+        />
+      ) : null}
+      <MobileMoreSheet
+        open={mobileMoreOpen}
+        onClose={() => setMobileMoreOpen(false)}
+        engine={toolbarEngine}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSearch={() => setQuickSearchOpen(true)}
+        onReplay={() => toolbarEngine?.setReplay(!toolbarSnap?.replay)}
+        onSnapshot={() => toolbarEngine?.screenshot()}
+        onFullscreen={() => {
+          if (document.fullscreenElement) document.exitFullscreen?.();
+          else document.documentElement.requestFullscreen?.();
+        }}
+      />
+      <MobileDrawingSheet
+        open={mobileDrawSheetOpen}
+        onClose={() => setMobileDrawSheetOpen(false)}
+        engine={toolbarEngine}
+      />
       <QuickSearchModal
         open={quickSearchOpen}
         onClose={() => setQuickSearchOpen(false)}
