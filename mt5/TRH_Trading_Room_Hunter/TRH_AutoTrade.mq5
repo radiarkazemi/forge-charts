@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.40"
-#property description "TRH EA v3.40: force-clamp micro-FVG floors (stale inputs safe)"
+#property version   "3.50"
+#property description "TRH EA v3.50: trailing TP — if near TP2 pullback, close at TP1"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -70,7 +70,14 @@ input double InpBeStepKeepRiskR           = 0.50;  // Step style: keep this frac
 input bool   InpBeRequireClosedBar        = true;  // Only BE if last CLOSED bar reached trigger
 input int    InpBeMinBarsOpen             = 3;     // Min bars after open before any BE/step
 
-input group "5) ENTRY fill (far = market now · near = pending)"
+input group "5) Trailing TP — close at TP1 when TP2 pullback"
+input bool   InpTrailingTP        = true;  // Enable trailing TP (pullback close at TP1)
+input double InpTp1RR             = 2.0;   // TP1 level in R (first target, fallback)
+input double InpTpNearPct         = 0.85;  // Reached this % of TP before pullback triggers
+input double InpTpPullbackPct     = 0.40;  // Pullback this fraction of remaining-to-TP = trigger
+input int    InpTpTrailMinBars    = 3;     // Min bars after crossing near threshold
+
+input group "6) ENTRY fill (far = market now · near = pending)"
 input double InpMarketTolAtr      = 0.25; // Near band (ATR): within this → pending @ ENTRY
 input double InpMaxChaseAtr       = 0.40; // legacy (unused when far-market-now is on)
 input double InpExpireAtR         = 1.20; // Abort only if this far toward TP (R) — was 0.90
@@ -954,6 +961,105 @@ void ManageBreakEven()
    }
 }
 
+//+------------------------------------------------------------------+
+//| Trailing TP — close at TP1 when price reached near TP2 then      |
+//| pulled back without hitting it.                                   |
+//+------------------------------------------------------------------+
+void ManageTrailingTP()
+{
+   if(!InpTrailingTP) return;
+
+   int periodSec = PeriodSeconds(_Period);
+   if(periodSec <= 0) periodSec = 60;
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || !PositionSelectByTicket(ticket)) continue;
+      if(PositionGetInteger(POSITION_MAGIC) != (long)InpMagic) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+
+      long type = PositionGetInteger(POSITION_TYPE);
+      int dir = (type == POSITION_TYPE_BUY) ? 1 : -1;
+      double entry = PositionGetDouble(POSITION_PRICE_OPEN);
+      double sl    = PositionGetDouble(POSITION_SL);
+      double tp    = PositionGetDouble(POSITION_TP);
+      if(entry <= 0 || tp <= 0) continue;
+
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      double price = (dir == 1) ? bid : ask;
+
+      // Original risk from comment or SL
+      string cmt = PositionGetString(POSITION_COMMENT);
+      double risk0 = CommentOrigRisk(cmt, 0);
+      if(risk0 <= 0)
+      {
+         if(dir == 1 && sl > 0 && sl < entry) risk0 = entry - sl;
+         else if(dir == -1 && sl > 0 && sl > entry) risk0 = sl - entry;
+         else continue;
+      }
+
+      // TP1 = first target (fallback RR level)
+      double tp1 = (dir == 1) ? (entry + risk0 * InpTp1RR) : (entry - risk0 * InpTp1RR);
+
+      // Only act if TP is beyond TP1 (i.e. liquidity TP is farther)
+      double fullDist = MathAbs(tp - entry);
+      double tp1Dist = MathAbs(tp1 - entry);
+      if(tp1Dist >= fullDist * 0.95) continue; // TP1 is already near TP2, nothing to trail
+
+      // How far has price gone toward TP?
+      double favor = (dir == 1) ? (price - entry) : (entry - price);
+      double pctToTP = favor / fullDist;
+
+      // MFE tracking: check if previous bars reached near-TP threshold
+      // Use bar high/low as proxy for MFE
+      double mfe = favor;
+      int lookback = MathMin(InpTpTrailMinBars + 5, 20);
+      for(int k = 1; k <= lookback; k++)
+      {
+         double barH = iHigh(_Symbol, _Period, k);
+         double barL = iLow(_Symbol, _Period, k);
+         if(barH <= 0) continue;
+         double barFavor = (dir == 1) ? (barH - entry) : (entry - barL);
+         if(barFavor > mfe) mfe = barFavor;
+      }
+
+      double mfePct = mfe / fullDist;
+      if(mfePct < InpTpNearPct) continue; // never got close enough to TP
+
+      // Price has now pulled back — check if pullback is significant
+      double pullback = mfe - favor;
+      double remainAtMfe = fullDist - mfe;
+      if(remainAtMfe <= 0) continue; // actually hit TP, broker should fill
+
+      // Trigger: pullback from MFE exceeds threshold fraction of remaining distance
+      // OR price has come back below TP1
+      bool pullbackTrigger = (pullback >= (fullDist - mfe + pullback) * InpTpPullbackPct);
+      bool belowTp1 = (dir == 1) ? (price <= tp1) : (price >= tp1);
+
+      if(!pullbackTrigger && !belowTp1) continue;
+
+      // Check min bars since crossing the near threshold
+      datetime opened = (datetime)PositionGetInteger(POSITION_TIME);
+      int barsOpen = (int)((TimeCurrent() - opened) / periodSec);
+      if(barsOpen < InpTpTrailMinBars) continue;
+
+      // Tighten TP to TP1 if it's better than current price (still profitable)
+      bool tp1Profitable = (dir == 1) ? (tp1 > entry) : (tp1 < entry);
+      if(!tp1Profitable) continue;
+
+      // Close at market — TP1 was the intermediate target
+      bool ok = (dir == 1)
+         ? g_trade.Sell(PositionGetDouble(POSITION_VOLUME), _Symbol)
+         : g_trade.Buy(PositionGetDouble(POSITION_VOLUME), _Symbol);
+
+      if(ok)
+         PrintFormat("TRH TRAIL-TP: #%I64u closed at %.2fR — near TP2 (%.1f%%) pulled back to TP1 %s",
+            ticket, favor / risk0, mfePct * 100.0, DoubleToString(tp1, _Digits));
+   }
+}
+
 double EstimateAtr()
 {
    MqlRates tip[];
@@ -987,7 +1093,7 @@ void UpdateComment(const TrhSetup &last, const int ageBars, const double lots)
    else if(InpSLProtectStyle == TRH_BE_STEP) beName = "BE-STEP";
 
    Comment(StringFormat(
-      "TRH EA v3.40 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
+      "TRH EA v3.50 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
       InpAutoTrade ? "ON" : "OFF",
       beName,
       last.dir == 1 ? "LONG" : "SHORT",
@@ -1020,16 +1126,17 @@ int OnInit()
    if(!TradeAllowedOk())
       PrintFormat("TRH WARN: trading blocked — %s", g_workStatus);
 
-   PrintFormat("TRH AutoTrade v3.40 | Eng%d | Mode B mid-FVG | BE=%d | farMarket=%s | session=%s | adoptAge<=%d | %s %s",
+   PrintFormat("TRH AutoTrade v3.50 | Eng%d | Mode B mid-FVG | BE=%d | trailTP=%s | farMarket=%s | session=%s | adoptAge<=%d | %s %s",
       TRH_ENGINE_VERSION,
       (int)InpSLProtectStyle,
+      InpTrailingTP ? "Y" : "N",
       InpFarOpenMarket ? "Y" : "N",
       InpUseSessionFilter ? "ON" : "OFF",
       InpAdoptMaxAgeBars,
       _Symbol, EnumToString(_Period));
 
-   Comment("TRH EA v3.40 Eng" + IntegerToString(TRH_ENGINE_VERSION) +
-           "\nQ-FVG min1.5pt · SL floor 1.55ATR\nfar→market · near→pending @ ENTRY");
+   Comment("TRH EA v3.50 Eng" + IntegerToString(TRH_ENGINE_VERSION) +
+           "\nTrailing TP: close @ TP1 on TP2 pullback\nfar→market · near→pending @ ENTRY");
    return INIT_SUCCEEDED;
 }
 
@@ -1043,6 +1150,7 @@ void OnTick()
    ResetDayIfNeeded();
    ExpireStalePendings();
    ManageBreakEven();
+   ManageTrailingTP();
 
    double atrNow = EstimateAtr();
    if(atrNow > 0)
