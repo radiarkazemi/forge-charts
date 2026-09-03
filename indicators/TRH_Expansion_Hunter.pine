@@ -20,13 +20,11 @@ allowShort = input.bool(true,  "Allow Shorts", group=grpDir)
 
 grpHTF = "Higher-Timeframe Bias"
 useHtfFilter = input.bool(true, "Use HTF Bias Filter", group=grpHTF,
-     tooltip="Longs preferred in discount / near support. Shorts preferred in premium / into HTF FVG.")
+     tooltip="Longs ONLY in discount. Shorts ONLY in premium.")
 htfTf        = input.timeframe("60", "HTF Timeframe", group=grpHTF)
 htfLookback  = input.int(40, "HTF Range Lookback (bars)", minval=10, maxval=120, group=grpHTF)
-discountMax  = input.float(0.45, "Discount Zone Max (0-1)", minval=0.1, maxval=0.6, step=0.05, group=grpHTF,
-     tooltip="Longs allowed when price is in the lower portion of the HTF range.")
-premiumMin   = input.float(0.55, "Premium Zone Min (0-1)", minval=0.4, maxval=0.9, step=0.05, group=grpHTF,
-     tooltip="Shorts allowed when price is in the upper portion of the HTF range.")
+discountMax  = input.float(0.40, "Discount Zone Max (0-1)", minval=0.1, maxval=0.6, step=0.05, group=grpHTF)
+premiumMin   = input.float(0.60, "Premium Zone Min (0-1)", minval=0.4, maxval=0.9, step=0.05, group=grpHTF)
 showHtfZones = input.bool(true, "Show HTF FVG / CISD Levels", group=grpHTF)
 
 grpSig = "Signal — Sweep + Displacement + FVG"
@@ -36,20 +34,22 @@ minSweepAtr    = input.float(0.05, "Min Sweep Beyond Pivot (ATR×)", step=0.01, 
 minDispAtr     = input.float(0.55, "Min Displacement Body (ATR×)", step=0.05, group=grpSig)
 maxDispBars    = input.int(6, "Max Bars Sweep → Disp", group=grpSig)
 maxFvgBars     = input.int(18, "Max Bars Disp → FVG", group=grpSig)
-minFvgAtr      = input.float(0.35, "Min FVG Size (ATR×)", step=0.05, group=grpSig)
-minFvgPoints   = input.float(1.50, "Min FVG Size (price)", step=0.05, group=grpSig)
+minFvgAtr      = input.float(0.25, "Min FVG Size (ATR×)", step=0.05, group=grpSig)
+minFvgPoints   = input.float(1.20, "Min FVG Size (price)", step=0.05, group=grpSig)
 requireRetest  = input.bool(true, "Require FVG Retest", group=grpSig)
-maxRetestBars  = input.int(12, "Max Bars For Retest", group=grpSig)
-cooldownBars   = input.int(30, "Cooldown Between Setups", minval=5, group=grpSig)
+maxRetestBars  = input.int(10, "Max Bars For Retest", group=grpSig)
+cooldownBars   = input.int(40, "Cooldown Between Setups", minval=5, group=grpSig)
 
 grpRisk = "Entry / SL / TP"
-slPadAtr       = input.float(0.02, "SL Pad (ATR×)", step=0.01, group=grpRisk)
-fvgSlExtraAtr  = input.float(0.35, "Extra SL Beyond Sweep/FVG (ATR×)", step=0.05, group=grpRisk)
-minRiskAtr     = input.float(1.20, "Min Risk Size (ATR×)", step=0.05, group=grpRisk)
-riskReward     = input.float(2.0, "Risk-Reward (exact 1:R)", minval=2.0, maxval=6.0, step=0.1, group=grpRisk,
-     tooltip="TP is ALWAYS exactly this many × risk. Minimum 2.0 so reward is never smaller than SL. No early/short magnets.")
-useLiqTP       = input.bool(false, "Unused (kept for compat)", group=grpRisk)
-useHtfMagnetTP = input.bool(false, "Unused (kept for compat)", group=grpRisk)
+slPadAtr       = input.float(0.05, "SL Pad (ATR×)", step=0.01, group=grpRisk)
+fvgSlExtraAtr  = input.float(0.10, "Extra SL Beyond FVG Outer (ATR×)", step=0.01, group=grpRisk)
+useSweepSl     = input.bool(false, "SL Beyond Full Sweep (OFF = tight FVG SL)", group=grpRisk,
+     tooltip="OFF fixes unreachable TPs. Sweep SL made GOLD M1 risk 5–7pts → TP 10–14pts.")
+minRiskAtr     = input.float(0.30, "Min Risk Size (ATR×)", step=0.05, group=grpRisk)
+maxRiskAtr     = input.float(0.85, "Max Risk Size (ATR×) — reject wider", step=0.05, group=grpRisk)
+riskReward     = input.float(2.0, "Risk-Reward (exact 1:R)", minval=2.0, maxval=6.0, step=0.1, group=grpRisk)
+useLiqTP       = input.bool(false, "Unused", group=grpRisk)
+useHtfMagnetTP = input.bool(false, "Unused", group=grpRisk)
 
 grpDisp = "Display"
 showBoxes   = input.bool(true, "Show Setup Boxes", group=grpDisp)
@@ -193,21 +193,33 @@ if not na(htfCisdBearRaw)
 
 bool inDiscount = htfPos <= discountMax
 bool inPremium  = htfPos >= premiumMin
-bool longBiasOk  = not useHtfFilter or inDiscount or (not na(htfCisdBull) and close >= htfCisdBull)
-bool shortBiasOk = not useHtfFilter or inPremium  or (not na(htfBearBot) and close >= htfBearBot and close <= htfBearTop)
+bool longBiasOk  = not useHtfFilter or inDiscount
+bool shortBiasOk = not useHtfFilter or inPremium
 
-// Exact RR TP — never shorter than SL distance × riskReward (min 1:2).
-// Previous "early magnet" logic could set TP inside 1R (e.g. risk 7 → TP only +3.7).
-f_buildTp(int dir, float entry, float sl) =>
+// Tight FVG SL + exact ≥2R TP. Reject fat risk so TP stays reachable on M1.
+f_trySetup(int dir, float gapTop, float gapBot, float sweepDistal) =>
+    float entry = (gapTop + gapBot) * 0.5
+    float pad = atr * (slPadAtr + fvgSlExtraAtr)
+    float sl = dir == 1 ? gapBot - pad : gapTop + pad
+    if useSweepSl
+        float slSw = dir == 1 ? math.min(sweepDistal, gapBot) - pad : math.max(sweepDistal, gapTop) + pad
+        float riskSw = math.abs(entry - slSw)
+        if riskSw <= atr * maxRiskAtr
+            sl := slSw
     float risk = math.abs(entry - sl)
+    float minRisk = atr * minRiskAtr
+    if minRisk > 0 and risk < minRisk
+        sl := dir == 1 ? entry - minRisk : entry + minRisk
+        risk := minRisk
     float rr = math.max(riskReward, 2.0)
     float tp = dir == 1 ? entry + risk * rr : entry - risk * rr
-    // Safety: refuse inverted geometry
-    if dir == 1 and tp <= entry
-        tp := entry + risk * 2.0
-    if dir == -1 and tp >= entry
-        tp := entry - risk * 2.0
-    tp
+    bool geom = risk > syminfo.mintick and (dir == 1 ? entry > sl and tp > entry : sl > entry and tp < entry)
+    bool sizeOk = risk <= atr * maxRiskAtr
+    // Late chase: already ran >0.35R past entry toward TP on confirm close
+    float run = dir == 1 ? close - entry : entry - close
+    bool notChasing = run <= risk * 0.35
+    bool ok = geom and sizeOk and notChasing
+    [ok, entry, sl, tp]
 
 // HTF visual levels
 var line htfBullLn = na
@@ -342,17 +354,8 @@ if phase != 0
             if requireRetest
                 phase := 3
             else
-                float entry = (gapTop + gapBot) * 0.5
-                float pad = atr * (slPadAtr + fvgSlExtraAtr)
-                float slExt = pendDir == 1 ? math.min(pendDistal, gapBot) : math.max(pendDistal, gapTop)
-                float sl = pendDir == 1 ? slExt - pad : slExt + pad
-                float risk = math.abs(entry - sl)
-                float minRisk = atr * minRiskAtr
-                if minRisk > 0 and risk < minRisk
-                    sl := pendDir == 1 ? entry - minRisk : entry + minRisk
-                    risk := minRisk
-                if risk > syminfo.mintick and (pendDir == 1 ? entry > sl : sl > entry)
-                    float tp = f_buildTp(pendDir, entry, sl)
+                [okL, entry, sl, tp] = f_trySetup(pendDir, gapTop, gapBot, pendDistal)
+                if okL
                     signalDir := pendDir
                     signalEntry := entry
                     signalSl := sl
@@ -394,17 +397,8 @@ if phase != 0
             bool retested2 = high >= gapBot and high <= gapTop + atr * 0.05
             confirmed := retested2 and close < open and close <= (gapBot + gapTop) * 0.5
         if confirmed
-            float entry = (gapTop + gapBot) * 0.5
-            float pad = atr * (slPadAtr + fvgSlExtraAtr)
-            float slExt = pendDir == 1 ? math.min(pendDistal, gapBot) : math.max(pendDistal, gapTop)
-            float sl = pendDir == 1 ? slExt - pad : slExt + pad
-            float risk = math.abs(entry - sl)
-            float minRisk = atr * minRiskAtr
-            if minRisk > 0 and risk < minRisk
-                sl := pendDir == 1 ? entry - minRisk : entry + minRisk
-                risk := minRisk
-            if risk > syminfo.mintick and (pendDir == 1 ? entry > sl : sl > entry)
-                float tp = f_buildTp(pendDir, entry, sl)
+            [okR, entry, sl, tp] = f_trySetup(pendDir, gapTop, gapBot, pendDistal)
+            if okR
                 signalDir := pendDir
                 signalEntry := entry
                 signalSl := sl
