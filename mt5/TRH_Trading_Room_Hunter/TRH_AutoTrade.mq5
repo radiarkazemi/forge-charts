@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.50"
-#property description "TRH EA v3.50: trailing TP — if near TP2 pullback, close at TP1"
+#property version   "3.51"
+#property description "TRH EA v3.51: trailing TP locks SAME ticket at TP1 — never opens new orders"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -70,12 +70,12 @@ input double InpBeStepKeepRiskR           = 0.50;  // Step style: keep this frac
 input bool   InpBeRequireClosedBar        = true;  // Only BE if last CLOSED bar reached trigger
 input int    InpBeMinBarsOpen             = 3;     // Min bars after open before any BE/step
 
-input group "5) Trailing TP — close at TP1 when TP2 pullback"
-input bool   InpTrailingTP        = true;  // Enable trailing TP (pullback close at TP1)
-input double InpTp1RR             = 2.0;   // TP1 level in R (first target, fallback)
-input double InpTpNearPct         = 0.85;  // Reached this % of TP before pullback triggers
-input double InpTpPullbackPct     = 0.40;  // Pullback this fraction of remaining-to-TP = trigger
-input int    InpTpTrailMinBars    = 3;     // Min bars after crossing near threshold
+input group "5) Trailing TP — lock/close SAME ticket at TP1 (never opens)"
+input bool   InpTrailingTP        = true;  // Enable trailing TP (pullback → TP1 on SAME position)
+input double InpTp1RR             = 2.0;   // TP1 level in R (first target)
+input double InpTpNearPct         = 0.85;  // Reached this % of TP2 before pullback logic
+input double InpTpPullbackPct     = 0.40;  // Pullback fraction that triggers lock/close
+input int    InpTpTrailMinBars    = 3;     // Min bars in trade before trailing
 
 input group "6) ENTRY fill (far = market now · near = pending)"
 input double InpMarketTolAtr      = 0.25; // Near band (ATR): within this → pending @ ENTRY
@@ -152,6 +152,7 @@ datetime g_workAdopted    = 0;
 int      g_workTries      = 0;
 string   g_workStatus     = "";
 datetime g_doneSetupTime  = 0;
+ulong    g_trailLocked[];   // tickets already SL-locked to TP1 (do not re-fire)
 
 void BuildConfig(TrhConfig &cfg)
 {
@@ -962,8 +963,30 @@ void ManageBreakEven()
 }
 
 //+------------------------------------------------------------------+
-//| Trailing TP — close at TP1 when price reached near TP2 then      |
-//| pulled back without hitting it.                                   |
+//| Trailing TP helpers — never open a new order to "close"          |
+//+------------------------------------------------------------------+
+bool TrailTicketLocked(const ulong ticket)
+{
+   int n = ArraySize(g_trailLocked);
+   for(int i = 0; i < n; i++)
+      if(g_trailLocked[i] == ticket) return true;
+   return false;
+}
+
+void TrailMarkLocked(const ulong ticket)
+{
+   if(ticket == 0 || TrailTicketLocked(ticket)) return;
+   int n = ArraySize(g_trailLocked);
+   ArrayResize(g_trailLocked, n + 1);
+   g_trailLocked[n] = ticket;
+}
+
+//+------------------------------------------------------------------+
+//| Trailing TP — SAME ticket only.                                  |
+//| Near TP2 then pullback → move SL to TP1 (first TP line).         |
+//| If price already came back through TP1 → PositionClose(ticket).  |
+//| NEVER Buy()/Sell() — that opens a new hedge and leaves the       |
+//| original running (v3.50 bug).                                    |
 //+------------------------------------------------------------------+
 void ManageTrailingTP()
 {
@@ -972,12 +995,18 @@ void ManageTrailingTP()
    int periodSec = PeriodSeconds(_Period);
    if(periodSec <= 0) periodSec = 60;
 
+   long stopsLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   if(point <= 0) return;
+   double minDist = MathMax((double)stopsLevel * point, point);
+
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
       ulong ticket = PositionGetTicket(i);
       if(ticket == 0 || !PositionSelectByTicket(ticket)) continue;
       if(PositionGetInteger(POSITION_MAGIC) != (long)InpMagic) continue;
       if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      if(TrailTicketLocked(ticket)) continue;
 
       long type = PositionGetInteger(POSITION_TYPE);
       int dir = (type == POSITION_TYPE_BUY) ? 1 : -1;
@@ -990,7 +1019,6 @@ void ManageTrailingTP()
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       double price = (dir == 1) ? bid : ask;
 
-      // Original risk from comment or SL
       string cmt = PositionGetString(POSITION_COMMENT);
       double risk0 = CommentOrigRisk(cmt, 0);
       if(risk0 <= 0)
@@ -1000,20 +1028,15 @@ void ManageTrailingTP()
          else continue;
       }
 
-      // TP1 = first target (fallback RR level)
-      double tp1 = (dir == 1) ? (entry + risk0 * InpTp1RR) : (entry - risk0 * InpTp1RR);
+      double tp1 = (dir == 1)
+         ? NormalizeDouble(entry + risk0 * InpTp1RR, _Digits)
+         : NormalizeDouble(entry - risk0 * InpTp1RR, _Digits);
 
-      // Only act if TP is beyond TP1 (i.e. liquidity TP is farther)
       double fullDist = MathAbs(tp - entry);
       double tp1Dist = MathAbs(tp1 - entry);
-      if(tp1Dist >= fullDist * 0.95) continue; // TP1 is already near TP2, nothing to trail
+      if(fullDist <= 0 || tp1Dist >= fullDist * 0.95) continue;
 
-      // How far has price gone toward TP?
       double favor = (dir == 1) ? (price - entry) : (entry - price);
-      double pctToTP = favor / fullDist;
-
-      // MFE tracking: check if previous bars reached near-TP threshold
-      // Use bar high/low as proxy for MFE
       double mfe = favor;
       int lookback = MathMin(InpTpTrailMinBars + 5, 20);
       for(int k = 1; k <= lookback; k++)
@@ -1026,37 +1049,83 @@ void ManageTrailingTP()
       }
 
       double mfePct = mfe / fullDist;
-      if(mfePct < InpTpNearPct) continue; // never got close enough to TP
+      if(mfePct < InpTpNearPct) continue;
 
-      // Price has now pulled back — check if pullback is significant
       double pullback = mfe - favor;
       double remainAtMfe = fullDist - mfe;
-      if(remainAtMfe <= 0) continue; // actually hit TP, broker should fill
+      if(remainAtMfe <= 0) continue;
 
-      // Trigger: pullback from MFE exceeds threshold fraction of remaining distance
-      // OR price has come back below TP1
       bool pullbackTrigger = (pullback >= (fullDist - mfe + pullback) * InpTpPullbackPct);
-      bool belowTp1 = (dir == 1) ? (price <= tp1) : (price >= tp1);
+      bool throughTp1 = (dir == 1) ? (price <= tp1) : (price >= tp1);
+      if(!pullbackTrigger && !throughTp1) continue;
 
-      if(!pullbackTrigger && !belowTp1) continue;
-
-      // Check min bars since crossing the near threshold
       datetime opened = (datetime)PositionGetInteger(POSITION_TIME);
       int barsOpen = (int)((TimeCurrent() - opened) / periodSec);
       if(barsOpen < InpTpTrailMinBars) continue;
 
-      // Tighten TP to TP1 if it's better than current price (still profitable)
       bool tp1Profitable = (dir == 1) ? (tp1 > entry) : (tp1 < entry);
       if(!tp1Profitable) continue;
 
-      // Close at market — TP1 was the intermediate target
-      bool ok = (dir == 1)
-         ? g_trade.Sell(PositionGetDouble(POSITION_VOLUME), _Symbol)
-         : g_trade.Buy(PositionGetDouble(POSITION_VOLUME), _Symbol);
+      // Already pulled back through the first TP line → close THIS ticket only
+      if(throughTp1)
+      {
+         if(g_trade.PositionClose(ticket))
+         {
+            TrailMarkLocked(ticket);
+            PrintFormat("TRH TRAIL-TP: #%I64u PositionClose @ %.2fR — pullback through TP1 %s",
+               ticket, favor / risk0, DoubleToString(tp1, _Digits));
+         }
+         else
+            PrintFormat("TRH TRAIL-TP CLOSE FAIL #%I64u ret=%d %s",
+               ticket, g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription());
+         continue;
+      }
 
-      if(ok)
-         PrintFormat("TRH TRAIL-TP: #%I64u closed at %.2fR — near TP2 (%.1f%%) pulled back to TP1 %s",
-            ticket, favor / risk0, mfePct * 100.0, DoubleToString(tp1, _Digits));
+      // Still past TP1 toward TP2: lock profit by moving SL to TP1. Keep TP2.
+      double newSL = tp1;
+      if(dir == 1)
+      {
+         if(newSL >= bid - minDist)
+            newSL = NormalizeDouble(bid - minDist, _Digits);
+         if(newSL <= sl) { TrailMarkLocked(ticket); continue; }
+         if(bid <= newSL)
+         {
+            if(g_trade.PositionClose(ticket))
+            {
+               TrailMarkLocked(ticket);
+               PrintFormat("TRH TRAIL-TP: #%I64u PositionClose (SL lock would fill now) TP1 %s",
+                  ticket, DoubleToString(tp1, _Digits));
+            }
+            continue;
+         }
+      }
+      else
+      {
+         if(newSL <= ask + minDist)
+            newSL = NormalizeDouble(ask + minDist, _Digits);
+         if(sl > 0 && newSL >= sl) { TrailMarkLocked(ticket); continue; }
+         if(ask >= newSL)
+         {
+            if(g_trade.PositionClose(ticket))
+            {
+               TrailMarkLocked(ticket);
+               PrintFormat("TRH TRAIL-TP: #%I64u PositionClose (SL lock would fill now) TP1 %s",
+                  ticket, DoubleToString(tp1, _Digits));
+            }
+            continue;
+         }
+      }
+
+      newSL = NormalizeDouble(newSL, _Digits);
+      if(g_trade.PositionModify(ticket, newSL, tp))
+      {
+         TrailMarkLocked(ticket);
+         PrintFormat("TRH TRAIL-TP: #%I64u SL→TP1 %s (lock). TP2 kept %s  mfe=%.0f%%",
+            ticket, DoubleToString(newSL, _Digits), DoubleToString(tp, _Digits), mfePct * 100.0);
+      }
+      else
+         PrintFormat("TRH TRAIL-TP MODIFY FAIL #%I64u ret=%d %s",
+            ticket, g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription());
    }
 }
 
@@ -1093,7 +1162,7 @@ void UpdateComment(const TrhSetup &last, const int ageBars, const double lots)
    else if(InpSLProtectStyle == TRH_BE_STEP) beName = "BE-STEP";
 
    Comment(StringFormat(
-      "TRH EA v3.50 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
+      "TRH EA v3.51 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
       InpAutoTrade ? "ON" : "OFF",
       beName,
       last.dir == 1 ? "LONG" : "SHORT",
@@ -1111,7 +1180,7 @@ int OnInit()
 {
    if(TRH_ENGINE_VERSION < 233)
    {
-      Alert("TRH EA v3.40: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
+      Alert("TRH EA v3.51: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
             "). Copy NEW TRH_Engine.mqh into THIS EA folder and recompile. Need Engine >= 233.");
       return INIT_FAILED;
    }
@@ -1122,11 +1191,12 @@ int OnInit()
    ResetDayIfNeeded();
    g_workActive = false;
    g_workStatus = "boot";
+   ArrayResize(g_trailLocked, 0);
 
    if(!TradeAllowedOk())
       PrintFormat("TRH WARN: trading blocked — %s", g_workStatus);
 
-   PrintFormat("TRH AutoTrade v3.50 | Eng%d | Mode B mid-FVG | BE=%d | trailTP=%s | farMarket=%s | session=%s | adoptAge<=%d | %s %s",
+   PrintFormat("TRH AutoTrade v3.51 | Eng%d | Mode B mid-FVG | BE=%d | trailTP=%s | farMarket=%s | session=%s | adoptAge<=%d | %s %s",
       TRH_ENGINE_VERSION,
       (int)InpSLProtectStyle,
       InpTrailingTP ? "Y" : "N",
@@ -1135,8 +1205,8 @@ int OnInit()
       InpAdoptMaxAgeBars,
       _Symbol, EnumToString(_Period));
 
-   Comment("TRH EA v3.50 Eng" + IntegerToString(TRH_ENGINE_VERSION) +
-           "\nTrailing TP: close @ TP1 on TP2 pullback\nfar→market · near→pending @ ENTRY");
+   Comment("TRH EA v3.51 Eng" + IntegerToString(TRH_ENGINE_VERSION) +
+           "\nTrail TP: lock SAME ticket @ TP1 — never opens");
    return INIT_SUCCEEDED;
 }
 
@@ -1201,7 +1271,7 @@ void OnTick()
    int n = TrhScanByMode(copied, t, o, h, l, c, cfg, (int)InpTradeMode, setups);
    if(n <= 0)
    {
-      Comment(StringFormat("TRH EA v3.40 %s — scanning...\nday %d | %s",
+      Comment(StringFormat("TRH EA v3.51 %s — scanning...\nday %d | %s",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades, g_workStatus));
       return;
    }
