@@ -165,6 +165,7 @@ var int setupMssBar = na
 
 var int setupStatus = 0
 var int setupFillBar = -1
+var int setupExitBar = na
 var int statusTrackBar = na
 
 var box[] drawBoxes = array.new_box()
@@ -422,11 +423,13 @@ if barstate.islast and nHist > 0
 if na(setupEntry) or setupDir == 0 or na(setupBar)
     setupStatus := 0
     setupFillBar := -1
+    setupExitBar := na
     statusTrackBar := na
 else
     if na(statusTrackBar) or statusTrackBar != setupBar
         setupStatus := 0
         setupFillBar := -1
+        setupExitBar := na
         statusTrackBar := setupBar
     if setupStatus < 2 and bar_index >= setupBar
         if setupStatus == 0
@@ -440,15 +443,19 @@ else
             bool hitS = setupDir == 1 ? low <= setupSl : high >= setupSl
             if hitS
                 setupStatus := 3
+                setupExitBar := bar_index
             else if hitT
                 setupStatus := 2
+                setupExitBar := bar_index
 
 string statusTxt = na(setupEntry) or setupDir == 0 ? "-" : setupStatus == 0 ? "WAIT FILL" : setupStatus == 1 ? "IN TRADE" : setupStatus == 2 ? "TP HIT" : "SL HIT"
 color statusCol = setupStatus == 0 ? color.gray : setupStatus == 1 ? color.orange : setupStatus == 2 ? longCol : shortCol
 
-plot(showLevels and not na(setupEntry) ? setupEntry : na, "ENTRY", color=entryCol, linewidth=2, style=plot.style_linebr)
-plot(showLevels and not na(setupSl) ? setupSl : na, "SL", color=shortCol, linewidth=2, style=plot.style_linebr)
-plot(showLevels and not na(setupTp) ? setupTp : na, "TP", color=longCol, linewidth=2, style=plot.style_linebr)
+// Stop level plots once TP/SL is hit — no endless line to the right
+bool lvlLive = showLevels and not na(setupEntry) and bar_index >= setupBar and (na(setupExitBar) or bar_index <= setupExitBar)
+plot(lvlLive ? setupEntry : na, "ENTRY", color=entryCol, linewidth=2, style=plot.style_linebr)
+plot(lvlLive ? setupSl : na, "SL", color=shortCol, linewidth=2, style=plot.style_linebr)
+plot(lvlLive ? setupTp : na, "TP", color=longCol, linewidth=2, style=plot.style_linebr)
 
 if barstate.islast
     if array.size(drawBoxes) > 0
@@ -468,12 +475,17 @@ if barstate.islast
         Setup s = array.get(history, nHist - 1)
         color sideCol = s.dir == 1 ? longCol : shortCol
         string sideTxt = s.dir == 1 ? "LONG" : "SHORT"
-        int endBar = bar_index + 8
+        // Clip setup drawings at TP/SL bar — do not keep extending after the trade ends
+        bool resolved = setupStatus >= 2 and not na(setupExitBar)
+        int endBar = resolved ? math.max(setupExitBar, xSetup) : bar_index + 8
+        int labelX = resolved ? endBar : bar_index + 2
         int minX = math.max(0, bar_index - SAFE_DRAW)
         int xRaid = math.max(nz(s.raidBar, minX), minX)
         int xCisd = math.max(nz(s.cisdBar, xRaid), minX)
         int xMss = math.max(nz(s.mssBar, xCisd), minX)
         int xSetup = math.max(nz(s.bar, xMss), minX)
+        endBar := resolved ? math.max(nz(setupExitBar, xSetup), xSetup) : bar_index + 8
+        labelX := resolved ? endBar : bar_index + 2
         float risk = math.abs(s.entry - s.sl)
         float rr = risk > 0 ? math.abs(s.tp - s.entry) / risk : 0.0
 
@@ -503,10 +515,11 @@ if barstate.islast
         array.push(drawLabels, label.new(xSetup, s.dir == 1 ? s.fvgTop : s.fvgBot, "LH " + sideTxt + " · " + s.tag, xloc=xloc.bar_index, style=s.dir == 1 ? label.style_label_down : label.style_label_up, color=sideCol, textcolor=color.white, size=size.normal))
 
         if showLevelLabels
-            array.push(drawLabels, label.new(bar_index + 2, s.entry, "ENTRY  " + str.tostring(s.entry, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(entryCol, 5), textcolor=color.black, size=size.normal))
-            array.push(drawLabels, label.new(bar_index + 2, s.sl, "SL  " + str.tostring(s.sl, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(shortCol, 5), textcolor=color.white, size=size.normal))
-            array.push(drawLabels, label.new(bar_index + 2, s.tp, "TP  " + str.tostring(s.tp, format.mintick) + " (" + str.tostring(rr, "#.0") + "R)", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(longCol, 5), textcolor=color.white, size=size.normal))
-            array.push(drawLabels, label.new(bar_index + 2, (s.entry + s.sl) * 0.5, statusTxt, xloc=xloc.bar_index, style=label.style_label_left, color=color.new(statusCol, 0), textcolor=color.white, size=size.normal))
+            array.push(drawLabels, label.new(labelX, s.entry, "ENTRY  " + str.tostring(s.entry, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(entryCol, 5), textcolor=color.black, size=size.normal))
+            array.push(drawLabels, label.new(labelX, s.sl, "SL  " + str.tostring(s.sl, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(shortCol, 5), textcolor=color.white, size=size.normal))
+            array.push(drawLabels, label.new(labelX, s.tp, (resolved ? statusTxt + "  " : "TP  ") + str.tostring(s.tp, format.mintick) + " (" + str.tostring(rr, "#.0") + "R)", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(resolved ? statusCol : longCol, 5), textcolor=color.white, size=size.normal))
+            if not resolved
+                array.push(drawLabels, label.new(labelX, (s.entry + s.sl) * 0.5, statusTxt, xloc=xloc.bar_index, style=label.style_label_left, color=color.new(statusCol, 0), textcolor=color.white, size=size.normal))
 
         if not onlyLast and nHist > 1
             int start = math.max(0, nHist - historyCount)
