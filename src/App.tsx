@@ -531,11 +531,11 @@ export default function App() {
       className={shellClass}
       data-theme={snap?.theme ?? boot.theme ?? "dark"}
       data-embed={boot.embed ? "1" : "0"}
-      data-header={showHeader && !compact ? "1" : "0"}
+      data-header={showHeader ? "1" : "0"}
       data-toolbar={showToolbar && !compact ? "1" : "0"}
       data-drawings={showDrawings ? "1" : "0"}
       data-widgets={showWidgets ? "1" : "0"}
-      data-bottom={showBottom && !compact ? "1" : "0"}
+      data-bottom={compact || showBottom ? "1" : "0"}
       data-mobile={compact ? "1" : "0"}
     >
       {showHeader && compact ? (
@@ -618,7 +618,7 @@ export default function App() {
             <DrawingToolbar engine={toolbarEngine} />
           </div>
         ) : null}
-        <div className={`chart-grid layout-${arrangement}`}>
+        <div className={`chart-grid layout-${compact ? "1" : arrangement}`}>
           <div
             className={activePane === 0 ? "chart-pane active" : "chart-pane"}
             onMouseDown={() => setActivePane(0)}
@@ -628,9 +628,10 @@ export default function App() {
               <ChartOverlays engine={engine} />
               <ReplayBar engine={engine} />
             </div>
-            {arrangement !== "1" ? <div className="pane-tag">{snap?.symbol.ticker}</div> : null}
+            {!compact && arrangement !== "1" ? <div className="pane-tag">{snap?.symbol.ticker}</div> : null}
           </div>
           {!boot.embed &&
+            !compact &&
             paneSymbols.slice(1).map((ticker, i) => {
               const paneIndex = i + 1;
               return (
@@ -649,35 +650,35 @@ export default function App() {
                 />
               );
             })}
-          {showDrawings && compact ? (
-            <button
-              type="button"
-              className={mobileDrawOpen ? "mobile-fab left on" : "mobile-fab left"}
-              title="Drawing tools"
-              aria-pressed={mobileDrawOpen}
-              onClick={() => {
-                setMobileDrawOpen((v) => !v);
-                setMobileWidgetOpen(false);
-              }}
-            >
-              ✎
-            </button>
-          ) : null}
-          {showWidgets && compact ? (
-            <button
-              type="button"
-              className={mobileWidgetOpen ? "mobile-fab right on" : "mobile-fab right"}
-              title="Widgets"
-              aria-pressed={mobileWidgetOpen}
-              onClick={() => {
-                setMobileWidgetOpen((v) => !v);
-                setMobileDrawOpen(false);
-              }}
-            >
-              ▤
-            </button>
-          ) : null}
         </div>
+        {showDrawings && compact ? (
+          <button
+            type="button"
+            className={mobileDrawOpen ? "mobile-fab left on" : "mobile-fab left"}
+            title="Drawing tools"
+            aria-pressed={mobileDrawOpen}
+            onClick={() => {
+              setMobileDrawOpen((v) => !v);
+              setMobileWidgetOpen(false);
+            }}
+          >
+            ✎
+          </button>
+        ) : null}
+        {showWidgets && compact ? (
+          <button
+            type="button"
+            className={mobileWidgetOpen ? "mobile-fab right on" : "mobile-fab right"}
+            title="Widgets"
+            aria-pressed={mobileWidgetOpen}
+            onClick={() => {
+              setMobileWidgetOpen((v) => !v);
+              setMobileDrawOpen(false);
+            }}
+          >
+            ▤
+          </button>
+        ) : null}
         {showWidgets ? (
           <div className={widgetOverlay ? "widget-dock-slot open" : "widget-dock-slot"}>
             <WidgetDock
