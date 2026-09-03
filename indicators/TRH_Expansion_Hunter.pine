@@ -1,0 +1,465 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// TRH | Expansion Hunter
+// Goal setups: RAID → CISD → MSS → enter at expansion BASE (~8–10pt risk on Gold)
+// Rejects micro boxes (entry glued to raid). SL beyond raid · TP opposing liq (4–6R OK)
+
+//@version=5
+strategy("TRH | Expansion Hunter", shorttitle="TRH-XH", overlay=true,
+     max_boxes_count=60, max_lines_count=80, max_labels_count=80, max_bars_back=5000,
+     pyramiding=0, process_orders_on_close=true, calc_on_every_tick=false,
+     initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=2,
+     commission_type=strategy.commission.percent, commission_value=0.02)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+grpDir = "Direction"
+allowLong  = input.bool(true, "Allow Longs", group=grpDir)
+allowShort = input.bool(true, "Allow Shorts", group=grpDir)
+
+grpDet = "Detection — Expansion path"
+pivotLen      = input.int(5, "Pivot Length", minval=2, group=grpDet)
+minSweepAtr   = input.float(0.08, "Min Raid Beyond Pivot (ATR×)", step=0.01, group=grpDet)
+minContextAtr = input.float(0.80, "Min Context Into Raid (ATR×)", step=0.1, group=grpDet)
+minDispAtr    = input.float(0.70, "Min Displacement Body (ATR×)", step=0.05, group=grpDet,
+     tooltip="Strong expansion candle — matches the vertical legs in your drawings.")
+requireCisd   = input.bool(true, "Require CISD After Raid", group=grpDet)
+maxCisdBars   = input.int(8, "Max Bars Raid → CISD", group=grpDet)
+maxMssBars    = input.int(12, "Max Bars CISD → MSS", group=grpDet)
+maxFvgBars    = input.int(6, "Max Bars MSS → Entry FVG", group=grpDet)
+minFvgAtr     = input.float(0.15, "Min FVG (ATR×)", step=0.01, group=grpDet)
+minFvgPoints  = input.float(1.0, "Min FVG (price)", step=0.1, group=grpDet)
+entryMode     = input.string("Base (CISD/FVG)", "Entry Mode",
+     options=["Base (CISD/FVG)", "MSS Close"], group=grpDet,
+     tooltip="Base = enter near expansion origin (your drawings). MSS Close = market on confirm bar.")
+cooldownBars  = input.int(40, "Cooldown Bars", minval=5, group=grpDet)
+
+grpRisk = "SL / TP — expansion targets"
+slPadAtr      = input.float(0.15, "SL Pad Beyond Raid (ATR×)", step=0.05, group=grpRisk)
+minRiskAtr    = input.float(0.80, "Min Risk (ATR×)", step=0.05, group=grpRisk,
+     tooltip="Reject micro raids. Goal setups ~10pts on Gold M1.")
+minRiskPts    = input.float(8.0, "Min Risk (price)", step=0.5, group=grpRisk,
+     tooltip="Hard floor so RR boxes are not 0.4–0.8pt scalps. Your drawings ~10pts.")
+maxRiskAtr    = input.float(1.80, "Max Risk (ATR×) — reject wider", step=0.05, group=grpRisk,
+     tooltip="Rejects huge hunted stops.")
+maxRiskPts    = input.float(18.0, "Max Risk (price)", step=0.5, group=grpRisk)
+minRr         = input.float(2.0, "Minimum RR", minval=2.0, step=0.1, group=grpRisk)
+useOpposingLiq = input.bool(true, "TP = Opposing Liquidity (BSL/SSL)", group=grpRisk,
+     tooltip="Allows 1:4–1:6 when liquidity is far — like your drawings.")
+liqMinAtr     = input.float(1.5, "Min Dist To Opposing Liq (ATR×)", step=0.1, group=grpRisk)
+fallbackRr    = input.float(4.0, "Fallback RR If No Liquidity", minval=2.0, step=0.5, group=grpRisk)
+
+grpDisp = "Display"
+showBoxes  = input.bool(true, "Show Setup Boxes", group=grpDisp)
+showLabels = input.bool(true, "Show ENTRY/SL/TP", group=grpDisp)
+showPanel  = input.bool(true, "Info Panel", group=grpDisp)
+onlyLast   = input.bool(true, "Only Last Setup", group=grpDisp)
+boxBars    = input.int(60, "Box Width (bars)", minval=10, group=grpDisp)
+longCol    = input.color(color.new(#26A69A, 82), "Long", group=grpDisp)
+shortCol   = input.color(color.new(#EF5350, 82), "Short", group=grpDisp)
+entryCol   = input.color(#CFD8DC, "Entry", group=grpDisp)
+raidCol    = input.color(#FFB74D, "Raid", group=grpDisp)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PIVOTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+atr = ta.atr(14)
+ph = ta.pivothigh(high, pivotLen, pivotLen)
+pl = ta.pivotlow(low, pivotLen, pivotLen)
+
+var float[] pivHi = array.new_float()
+var int[]   pivHiBar = array.new_int()
+var float[] pivLo = array.new_float()
+var int[]   pivLoBar = array.new_int()
+
+f_push(float[] px, int[] br, float p, int b) =>
+    array.push(px, p)
+    array.push(br, b)
+    if array.size(px) > 40
+        array.shift(px)
+        array.shift(br)
+
+if not na(ph)
+    f_push(pivHi, pivHiBar, ph, bar_index - pivotLen)
+if not na(pl)
+    f_push(pivLo, pivLoBar, pl, bar_index - pivotLen)
+
+f_lastPivot(float[] px, int[] br, int before, int lookback, int minAge) =>
+    float out = na
+    bool done = false
+    int n = array.size(px)
+    if n > 0
+        for i = n - 1 to 0
+            if not done
+                int b = array.get(br, i)
+                int age = before - b
+                if b < before and age >= minAge
+                    if age > lookback
+                        done := true
+                    else
+                        out := array.get(px, i)
+                        done := true
+    out
+
+f_nextHi(float from, float minDist) =>
+    float out = na
+    int n = array.size(pivHi)
+    if n > 0
+        for i = 0 to n - 1
+            float p = array.get(pivHi, i)
+            if p > from + minDist
+                out := na(out) ? p : math.min(out, p)
+    out
+
+f_nextLo(float from, float minDist) =>
+    float out = na
+    int n = array.size(pivLo)
+    if n > 0
+        for i = 0 to n - 1
+            float p = array.get(pivLo, i)
+            if p < from - minDist
+                out := na(out) ? p : math.max(out, p)
+    out
+
+huntLo = f_lastPivot(pivLo, pivLoBar, bar_index, 100, pivotLen)
+huntHi = f_lastPivot(pivHi, pivHiBar, bar_index, 100, pivotLen)
+priorHigh = ta.highest(high[1], 40)
+priorLow  = ta.lowest(low[1], 40)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LEVELS: SL under raid · TP opposing liq (wide RR OK)
+// ═══════════════════════════════════════════════════════════════════════════
+
+f_buildLevels(int dir, float entryHint, float raidExt) =>
+    float pad = atr * slPadAtr
+    float entry = entryHint
+    float sl = dir == 1 ? raidExt - pad : raidExt + pad
+    float risk = math.abs(entry - sl)
+    // Hard floors/ceilings in ATR and price — never invent entry by nudging.
+    // Old bug: entry glued to raid → risk 0.4–0.8 → “6R” TP only ~5pts (micro boxes).
+    float minRisk = math.max(atr * minRiskAtr, minRiskPts)
+    float maxRisk = math.min(atr * maxRiskAtr, maxRiskPts)
+    if risk < minRisk or risk > maxRisk
+        [false, entry, sl, entry]
+    else
+        float tp = dir == 1 ? entry + risk * fallbackRr : entry - risk * fallbackRr
+        if useOpposingLiq
+            float liq = dir == 1 ? f_nextHi(entry, atr * liqMinAtr) : f_nextLo(entry, atr * liqMinAtr)
+            if not na(liq)
+                // Take liquidity target if it clears min RR (allows 4–6R)
+                float dist = math.abs(liq - entry)
+                if dist >= risk * minRr
+                    tp := liq
+        // Enforce floor RR
+        float minTp = dir == 1 ? entry + risk * minRr : entry - risk * minRr
+        tp := dir == 1 ? math.max(tp, minTp) : math.min(tp, minTp)
+        bool ok = dir == 1 ? (entry > sl and tp > entry) : (sl > entry and tp < entry)
+        [ok, entry, sl, tp]
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STATE: 0 idle · 1 wait CISD · 2 wait MSS · 3 wait FVG/entry
+// ═══════════════════════════════════════════════════════════════════════════
+
+var int phase = 0
+var int pendDir = 0
+var float raidPx = na
+var float raidExt = na
+var float cisdPx = na
+var float mssPx = na
+var float fvgTop = na
+var float fvgBot = na
+var int raidBar = na
+var int cisdBar = na
+var int mssBar = na
+var int lastSetupBar = na
+
+var int signalDir = 0
+var float signalEntry = na
+var float signalSl = na
+var float signalTp = na
+var float signalRaid = na
+var float signalRaidExt = na
+var float signalCisd = na
+var float signalMss = na
+var float signalFvgTop = na
+var float signalFvgBot = na
+
+signalDir := 0
+
+coolOk = na(lastSetupBar) or bar_index - lastSetupBar >= cooldownBars
+
+if barstate.isconfirmed
+    if phase == 1 and not na(raidBar) and bar_index - raidBar > maxCisdBars
+        phase := 0
+        pendDir := 0
+    if phase == 2 and not na(cisdBar) and bar_index - cisdBar > maxMssBars
+        phase := 0
+        pendDir := 0
+    if phase == 3 and not na(mssBar) and bar_index - mssBar > maxFvgBars
+        phase := 0
+        pendDir := 0
+
+    float a = atr
+    bool canStart = phase == 0 and coolOk
+    bool sslRaid = canStart and allowLong and not na(huntLo) and low < huntLo - a * minSweepAtr and close > huntLo and (priorHigh - low) >= a * minContextAtr
+    bool bslRaid = canStart and allowShort and not na(huntHi) and high > huntHi + a * minSweepAtr and close < huntHi and (high - priorLow) >= a * minContextAtr
+
+    if sslRaid
+        phase := requireCisd ? 1 : 2
+        pendDir := 1
+        raidPx := huntLo
+        raidExt := low
+        raidBar := bar_index
+        cisdPx := open
+        cisdBar := requireCisd ? na : bar_index
+        mssPx := huntHi
+        mssBar := na
+    else if bslRaid
+        phase := requireCisd ? 1 : 2
+        pendDir := -1
+        raidPx := huntHi
+        raidExt := high
+        raidBar := bar_index
+        cisdPx := open
+        cisdBar := requireCisd ? na : bar_index
+        mssPx := huntLo
+        mssBar := na
+
+    if phase != 0
+        raidExt := pendDir == 1 ? math.min(raidExt, low) : math.max(raidExt, high)
+        float body = math.abs(close - open)
+
+        // CISD — delivery flips
+        if phase == 1
+            bool cisdOk = pendDir == 1 ? close > cisdPx and close > open : close < cisdPx and close < open
+            if cisdOk
+                cisdBar := bar_index
+                phase := 2
+
+        // MSS / displacement — expansion start
+        if phase == 2 and (na(cisdBar) ? bar_index > raidBar : bar_index > cisdBar)
+            bool hit = false
+            float ref = mssPx
+            if pendDir == 1
+                if na(ref)
+                    ref := ta.highest(high, math.min(bar_index - raidBar + 1, 30))
+                hit := close > ref and close > open and body >= a * minDispAtr and close > raidPx
+            else
+                if na(ref)
+                    ref := ta.lowest(low, math.min(bar_index - raidBar + 1, 30))
+                hit := close < ref and close < open and body >= a * minDispAtr and close < raidPx
+            if hit
+                mssPx := ref
+                mssBar := bar_index
+                if entryMode == "MSS Close"
+                    float entryHint = close
+                    [ok, e, s, t] = f_buildLevels(pendDir, entryHint, raidExt)
+                    if ok
+                        signalDir := pendDir
+                        signalEntry := e
+                        signalSl := s
+                        signalTp := t
+                        signalRaid := raidPx
+                        signalRaidExt := raidExt
+                        signalCisd := cisdPx
+                        signalMss := mssPx
+                        signalFvgTop := na
+                        signalFvgBot := na
+                        lastSetupBar := bar_index
+                    phase := 0
+                    pendDir := 0
+                else
+                    phase := 3
+
+        // Entry at expansion BASE: CISD inside first FVG, else FVG mid / CISD
+        // Reject when base is glued to the raid (that produced the micro 0.8pt boxes).
+        if phase == 3 and bar_index >= mssBar and bar_index >= 2
+            bool found = false
+            float ft = na
+            float fb = na
+            if pendDir == 1
+                float bot = high[2]
+                float top = low
+                if top - bot >= a * minFvgAtr and top - bot >= minFvgPoints
+                    fb := bot
+                    ft := top
+                    found := true
+            else
+                float top2 = low[2]
+                float bot2 = high
+                if top2 - bot2 >= a * minFvgAtr and top2 - bot2 >= minFvgPoints
+                    fb := bot2
+                    ft := top2
+                    found := true
+            float minRisk = math.max(a * minRiskAtr, minRiskPts)
+            float pad = a * slPadAtr
+            float slProbe = pendDir == 1 ? raidExt - pad : raidExt + pad
+            if found or bar_index == mssBar
+                if not found
+                    ft := na
+                    fb := na
+                // Candidate entries from structure only (no synthetic nudge)
+                float eCisd = cisdPx
+                float eFvg = na
+                if found
+                    eFvg := (cisdPx >= fb and cisdPx <= ft) ? cisdPx : (ft + fb) * 0.5
+                    if pendDir == 1 and not (cisdPx >= fb and cisdPx <= ft)
+                        eFvg := fb + (ft - fb) * 0.35
+                    if pendDir == -1 and not (cisdPx >= fb and cisdPx <= ft)
+                        eFvg := ft - (ft - fb) * 0.35
+                float entryHint = na
+                // Prefer first structural level that clears min risk vs raid SL
+                if not na(eFvg) and math.abs(eFvg - slProbe) >= minRisk
+                    entryHint := eFvg
+                else if math.abs(eCisd - slProbe) >= minRisk
+                    entryHint := eCisd
+                else if found and pendDir == 1 and math.abs(ft - slProbe) >= minRisk
+                    entryHint := ft
+                else if found and pendDir == -1 and math.abs(fb - slProbe) >= minRisk
+                    entryHint := fb
+
+                if not na(entryHint)
+                    [ok, e, s, t] = f_buildLevels(pendDir, entryHint, raidExt)
+                    if ok
+                        signalDir := pendDir
+                        signalEntry := e
+                        signalSl := s
+                        signalTp := t
+                        signalRaid := raidPx
+                        signalRaidExt := raidExt
+                        signalCisd := cisdPx
+                        signalMss := mssPx
+                        signalFvgTop := ft
+                        signalFvgBot := fb
+                        lastSetupBar := bar_index
+                        phase := 0
+                        pendDir := 0
+                    else if bar_index - mssBar >= maxFvgBars
+                        phase := 0
+                        pendDir := 0
+                    // else keep phase 3 — hunt next FVG
+                else if bar_index - mssBar >= maxFvgBars
+                    phase := 0
+                    pendDir := 0
+                // else keep waiting for a base far enough from the raid
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ORDERS + DRAWINGS
+// ═══════════════════════════════════════════════════════════════════════════
+
+var box[] bZone = array.new_box()
+var box[] bTp = array.new_box()
+var box[] bSl = array.new_box()
+var line[] lEntry = array.new_line()
+var label[] labE = array.new_label()
+var label[] labS = array.new_label()
+var label[] labT = array.new_label()
+var label[] labTag = array.new_label()
+var line[] lRaid = array.new_line()
+
+var float activeE = na
+var float activeS = na
+var float activeT = na
+var int activeDir = 0
+var int activeStat = 0
+
+f_clear() =>
+    if array.size(bZone) > 0
+        for i = 0 to array.size(bZone) - 1
+            box.delete(array.get(bZone, i))
+            box.delete(array.get(bTp, i))
+            box.delete(array.get(bSl, i))
+            line.delete(array.get(lEntry, i))
+            label.delete(array.get(labE, i))
+            label.delete(array.get(labS, i))
+            label.delete(array.get(labT, i))
+            label.delete(array.get(labTag, i))
+        array.clear(bZone)
+        array.clear(bTp)
+        array.clear(bSl)
+        array.clear(lEntry)
+        array.clear(labE)
+        array.clear(labS)
+        array.clear(labT)
+        array.clear(labTag)
+    if array.size(lRaid) > 0
+        for i = 0 to array.size(lRaid) - 1
+            line.delete(array.get(lRaid, i))
+        array.clear(lRaid)
+
+if signalDir != 0
+    if onlyLast
+        f_clear()
+    float risk = math.abs(signalEntry - signalSl)
+    float rr = risk > 0 ? math.abs(signalTp - signalEntry) / risk : 0.0
+    color zc = signalDir == 1 ? longCol : shortCol
+    int right = bar_index + boxBars
+    if showBoxes
+        array.push(bSl, box.new(bar_index, math.max(signalEntry, signalSl), right, math.min(signalEntry, signalSl), bgcolor=color.new(#EF5350, 85), border_color=#EF5350))
+        array.push(bTp, box.new(bar_index, math.max(signalEntry, signalTp), right, math.min(signalEntry, signalTp), bgcolor=color.new(#26A69A, 88), border_color=#26A69A))
+        array.push(lEntry, line.new(bar_index, signalEntry, right, signalEntry, color=entryCol, width=2))
+        if not na(signalRaidExt)
+            array.push(lRaid, line.new(bar_index - 5, signalRaidExt, right, signalRaidExt, color=raidCol, style=line.style_dotted, width=1))
+        if not na(signalFvgTop) and not na(signalFvgBot)
+            array.push(bZone, box.new(bar_index, signalFvgTop, right, signalFvgBot, bgcolor=color.new(zc, 80), border_color=zc))
+    if showLabels
+        array.push(labE, label.new(right, signalEntry, "ENTRY " + str.tostring(signalEntry, format.mintick), style=label.style_label_left, color=entryCol, textcolor=color.black, size=size.normal))
+        array.push(labS, label.new(right, signalSl, "SL " + str.tostring(signalSl, format.mintick), style=label.style_label_left, color=#EF5350, textcolor=color.white, size=size.normal))
+        array.push(labT, label.new(right, signalTp, "TP " + str.tostring(signalTp, format.mintick) + " (" + str.tostring(rr, "#.0") + "R)", style=label.style_label_left, color=#26A69A, textcolor=color.white, size=size.normal))
+        array.push(labTag, label.new(bar_index, signalDir == 1 ? signalEntry : signalEntry, "TRH " + (signalDir == 1 ? "LONG" : "SHORT") + " · EXP\nRAID→CISD→MSS  R:R " + str.tostring(rr, "#.0"), style=signalDir == 1 ? label.style_label_down : label.style_label_up, color=zc, textcolor=color.white, size=size.normal))
+
+    if signalDir == 1
+        strategy.entry("XH Long", strategy.long, limit=signalEntry, comment="EXP LONG")
+        strategy.exit("XH L Exit", from_entry="XH Long", stop=signalSl, limit=signalTp)
+    else
+        strategy.entry("XH Short", strategy.short, limit=signalEntry, comment="EXP SHORT")
+        strategy.exit("XH S Exit", from_entry="XH Short", stop=signalSl, limit=signalTp)
+
+    activeE := signalEntry
+    activeS := signalSl
+    activeT := signalTp
+    activeDir := signalDir
+    activeStat := 1
+    alert("TRH Expansion " + (signalDir == 1 ? "LONG" : "SHORT") + " | E " + str.tostring(signalEntry, format.mintick) + " | SL " + str.tostring(signalSl, format.mintick) + " | TP " + str.tostring(signalTp, format.mintick), alert.freq_once_per_bar_close)
+
+if activeDir != 0 and activeStat == 1
+    if activeDir == 1
+        if low <= activeS
+            activeStat := 3
+        else if high >= activeT
+            activeStat := 2
+    else
+        if high >= activeS
+            activeStat := 3
+        else if low <= activeT
+            activeStat := 2
+
+plotshape(signalDir == 1, title="Long", style=shape.triangleup, location=location.belowbar, color=#26A69A, size=size.small)
+plotshape(signalDir == -1, title="Short", style=shape.triangledown, location=location.abovebar, color=#EF5350, size=size.small)
+
+if showPanel and barstate.islast
+    var table info = table.new(position.top_right, 2, 9, bgcolor=color.new(#0D1117, 10), border_width=1, border_color=#30363D)
+    string st = activeDir == 0 ? "SCANNING" : activeStat == 2 ? "TP HIT" : activeStat == 3 ? "SL HIT" : activeDir == 1 ? "LONG LIVE" : "SHORT LIVE"
+    color stc = activeStat == 2 ? #26A69A : activeStat == 3 ? #EF5350 : activeDir == 0 ? color.gray : #42A5F5
+    float risk = na(activeE) or na(activeS) ? na : math.abs(activeE - activeS)
+    float rr = na(risk) or risk == 0 or na(activeT) ? na : math.abs(activeT - activeE) / risk
+    table.cell(info, 0, 0, "TRH Expansion Hunter", text_color=color.white, text_size=size.small)
+    table.cell(info, 1, 0, st, text_color=stc, text_size=size.small)
+    table.cell(info, 0, 1, "PATH", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 1, "RAID → CISD → MSS → BASE", text_color=#90CAF9, text_size=size.tiny)
+    table.cell(info, 0, 2, "ENTRY", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 2, na(activeE) ? "—" : str.tostring(activeE, format.mintick), text_color=color.white, text_size=size.tiny)
+    table.cell(info, 0, 3, "SL", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 3, na(activeS) ? "—" : str.tostring(activeS, format.mintick), text_color=#EF5350, text_size=size.tiny)
+    table.cell(info, 0, 4, "TP", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 4, na(activeT) ? "—" : str.tostring(activeT, format.mintick), text_color=#26A69A, text_size=size.tiny)
+    table.cell(info, 0, 5, "Risk / RR", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 5, (na(risk) ? "—" : str.tostring(risk, format.mintick)) + " / " + (na(rr) ? "—" : str.tostring(rr, "#.0") + "R"), text_color=color.white, text_size=size.tiny)
+    table.cell(info, 0, 6, "Goal", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 6, "Expansion legs · min risk 8pts", text_color=#FFB74D, text_size=size.tiny)
+    table.cell(info, 0, 7, "Phase", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 7, str.tostring(phase) + (pendDir == 1 ? " L" : pendDir == -1 ? " S" : ""), text_color=color.white, text_size=size.tiny)
+    table.cell(info, 0, 8, "Note", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 8, "Skip micro SL · TP opposing liq", text_color=color.new(color.gray, 20), text_size=size.tiny)

@@ -2,6 +2,13 @@
 
 Classic **SWEEP** model from the real XAUUSD sample: Tue 25 Aug 2026 **04:19 UTC-4**.
 
+## Also: Expansion Hunter (strategy)
+
+For sharp squeeze / displacement days (long + short with ENTRY/SL/TP), see:
+
+- [`TRH_Expansion_Hunter.pine`](./TRH_Expansion_Hunter.pine) — TradingView **strategy**
+- [`TRH_Expansion_Hunter.md`](./TRH_Expansion_Hunter.md) — model notes
+
 ## Sample geometry (FxPro)
 
 | Level | Price | Meaning |
