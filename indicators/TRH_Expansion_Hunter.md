@@ -17,7 +17,11 @@ HTF bias (discount/premium + 1H FVG/CISD magnet)
 |-------|------|
 | **ENTRY** | FVG midpoint |
 | **SL** | Beyond sweep extreme & FVG outer + pad (min risk floor) |
-| **TP** | R×R (default 2.4), optionally pulled to HTF FVG/CISD or opposing pivot |
+| **TP** | **Hard-capped at RR** (default 2.0). Opposing pivot / HTF magnet may only take profit *earlier*, never stretch past RR. |
+
+## TP fix (why old TPs never hit)
+
+Earlier builds used `math.max(tp, HTF FVG)` which stretched gold M1 targets to **10–20R** (e.g. ENTRY 4318 → TP 4395 while label still said 2.4R). That is fixed.
 
 ## When to use
 

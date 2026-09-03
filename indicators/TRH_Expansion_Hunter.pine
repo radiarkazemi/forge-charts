@@ -46,9 +46,12 @@ grpRisk = "Entry / SL / TP"
 slPadAtr       = input.float(0.02, "SL Pad (ATR×)", step=0.01, group=grpRisk)
 fvgSlExtraAtr  = input.float(0.35, "Extra SL Beyond Sweep/FVG (ATR×)", step=0.05, group=grpRisk)
 minRiskAtr     = input.float(1.20, "Min Risk Size (ATR×)", step=0.05, group=grpRisk)
-riskReward     = input.float(2.4, "Risk-Reward", minval=1.0, maxval=6.0, step=0.1, group=grpRisk)
-useHtfMagnetTP = input.bool(true, "Prefer HTF FVG/CISD As TP Magnet", group=grpRisk)
-useLiqTP       = input.bool(true, "Prefer Opposing Pivot As TP", group=grpRisk)
+riskReward     = input.float(2.0, "Risk-Reward (hard cap)", minval=1.0, maxval=6.0, step=0.1, group=grpRisk,
+     tooltip="TP is always ≤ this R. Magnets may only take profit EARLIER, never stretch beyond.")
+useLiqTP       = input.bool(true, "Early TP at closer opposing pivot", group=grpRisk,
+     tooltip="If an opposing pivot sits BETWEEN entry and RR target, take that earlier TP. Never widen past RR.")
+useHtfMagnetTP = input.bool(false, "Early TP at closer HTF FVG (OFF default)", group=grpRisk,
+     tooltip="Was stretching gold M1 TPs to 10–20R. Off by default — only shortens TP if magnet is closer than RR.")
 
 grpDisp = "Display"
 showBoxes   = input.bool(true, "Show Setup Boxes", group=grpDisp)
@@ -195,6 +198,31 @@ bool inPremium  = htfPos >= premiumMin
 bool longBiasOk  = not useHtfFilter or inDiscount or (not na(htfCisdBull) and close >= htfCisdBull)
 bool shortBiasOk = not useHtfFilter or inPremium  or (not na(htfBearBot) and close >= htfBearBot and close <= htfBearTop)
 
+// TP hard-capped at RR. Magnets may only SHORTEN (earlier exit), never widen past RR.
+f_buildTp(int dir, float entry, float sl) =>
+    float risk = math.abs(entry - sl)
+    float tpRR = dir == 1 ? entry + risk * riskReward : entry - risk * riskReward
+    float tp = tpRR
+    if useLiqTP and risk > 0
+        if dir == 1
+            float liq = f_nextLiqHigh(entry, risk * 0.5)
+            if not na(liq) and liq > entry and liq < tp
+                tp := liq
+        else
+            float liq2 = f_nextLiqLow(entry, risk * 0.5)
+            if not na(liq2) and liq2 < entry and liq2 > tp
+                tp := liq2
+    if useHtfMagnetTP
+        if dir == 1 and not na(htfBearBot)
+            float mag = (htfBearBot + nz(htfBearTop, htfBearBot)) * 0.5
+            if mag > entry and mag < tp
+                tp := mag
+        if dir == -1 and not na(htfBullTop)
+            float mag2 = (htfBullTop + nz(htfBullBot, htfBullTop)) * 0.5
+            if mag2 < entry and mag2 > tp
+                tp := mag2
+    tp
+
 // HTF visual levels
 var line htfBullLn = na
 var line htfBearLn = na
@@ -338,21 +366,7 @@ if phase != 0
                     sl := pendDir == 1 ? entry - minRisk : entry + minRisk
                     risk := minRisk
                 if risk > syminfo.mintick and (pendDir == 1 ? entry > sl : sl > entry)
-                    float tp = pendDir == 1 ? entry + risk * riskReward : entry - risk * riskReward
-                    if useLiqTP
-                        if pendDir == 1
-                            float liq = f_nextLiqHigh(entry, risk * 1.5)
-                            if not na(liq)
-                                tp := math.max(tp, liq)
-                        else
-                            float liq2 = f_nextLiqLow(entry, risk * 1.5)
-                            if not na(liq2)
-                                tp := math.min(tp, liq2)
-                    if useHtfMagnetTP
-                        if pendDir == 1 and not na(htfBearBot)
-                            tp := math.max(tp, (htfBearBot + nz(htfBearTop, htfBearBot)) * 0.5)
-                        if pendDir == -1 and not na(htfBullTop)
-                            tp := math.min(tp, (htfBullTop + nz(htfBullBot, htfBullTop)) * 0.5)
+                    float tp = f_buildTp(pendDir, entry, sl)
                     signalDir := pendDir
                     signalEntry := entry
                     signalSl := sl
@@ -404,21 +418,7 @@ if phase != 0
                 sl := pendDir == 1 ? entry - minRisk : entry + minRisk
                 risk := minRisk
             if risk > syminfo.mintick and (pendDir == 1 ? entry > sl : sl > entry)
-                float tp = pendDir == 1 ? entry + risk * riskReward : entry - risk * riskReward
-                if useLiqTP
-                    if pendDir == 1
-                        float liq = f_nextLiqHigh(entry, risk * 1.5)
-                        if not na(liq)
-                            tp := math.max(tp, liq)
-                    else
-                        float liq2 = f_nextLiqLow(entry, risk * 1.5)
-                        if not na(liq2)
-                            tp := math.min(tp, liq2)
-                if useHtfMagnetTP
-                    if pendDir == 1 and not na(htfBearBot)
-                        tp := math.max(tp, (htfBearBot + nz(htfBearTop, htfBearBot)) * 0.5)
-                    if pendDir == -1 and not na(htfBullTop)
-                        tp := math.min(tp, (htfBullTop + nz(htfBullBot, htfBullTop)) * 0.5)
+                float tp = f_buildTp(pendDir, entry, sl)
                 signalDir := pendDir
                 signalEntry := entry
                 signalSl := sl
