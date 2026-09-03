@@ -285,8 +285,8 @@ export const TOOL_GROUPS: ToolGroup[] = [
           { id: "cross", label: "Cross", draw: "crosshair" },
           { id: "dot", label: "Dot", draw: "dot" },
           { id: "arrowCursor", label: "Arrow", draw: "cursor" },
-          { id: "demonstration", label: "Demonstration", draw: "cursor" },
-          { id: "magic", label: "Magic", draw: "cursor" },
+          { id: "demonstration", label: "Demonstration", draw: "demonstration" },
+          { id: "magic", label: "Magic", draw: "magic" },
         ],
       },
       {

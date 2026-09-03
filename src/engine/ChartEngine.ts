@@ -72,6 +72,19 @@ export class ChartEngine {
   private glyph = "★";
   private theme: Theme = "dark";
   private chartStyle: ChartStyle = defaultChartStyle("dark");
+  private canvasSettings: import("./types").CanvasSettings = {
+    showOhlc: true,
+    showVolumeLegend: true,
+    showBarChange: true,
+    showWatermark: true,
+    showCountdown: true,
+    showHighLow: false,
+    showNavButtons: true,
+    bgColor: "",
+    gridColor: "",
+    crosshairColor: "",
+    watermarkOpacity: 0.07,
+  };
   private logScale = false;
   private percentScale = false;
   private magnet: MagnetMode = "weak";
@@ -95,6 +108,7 @@ export class ChartEngine {
   private dragLastY = 0;
   private priceSpan: number | null = null;
   private priceMid: number | null = null;
+  private demoTrail: Array<{ x: number; y: number; t: number }> = [];
   private replay = false;
   private replaySelecting = false;
   private replayPlaying = false;
@@ -170,6 +184,7 @@ export class ChartEngine {
       rangePreset: this.rangePreset,
       autoScale: this.priceSpan == null,
       chartStyle: this.chartStyle,
+      canvas: { ...this.canvasSettings },
     };
   }
 
@@ -222,6 +237,17 @@ export class ChartEngine {
     this.chartStyle = { ...style };
     this.emit();
     this.draw();
+  }
+
+  setCanvasSettings(next: Partial<import("./types").CanvasSettings>): void {
+    this.canvasSettings = { ...this.canvasSettings, ...next };
+    this.emit();
+    this.draw();
+  }
+
+  /** Get a PNG data URL for snapshot operations. */
+  toDataUrl(type = "image/png"): string {
+    return this.canvas.toDataURL(type);
   }
 
   setTool(tool: Tool, extra?: { text?: string }): void {
@@ -649,10 +675,20 @@ export class ChartEngine {
     if (!bar) return [];
     const p = this.symbol.pricePrecision;
     const chg = ((bar.close - bar.open) / bar.open) * 100;
+    const parts: string[] = [`${this.symbol.ticker}  ${this.interval}`];
+    if (this.canvasSettings.showOhlc) {
+      parts.push(`O${formatPrice(bar.open, p)} H${formatPrice(bar.high, p)} L${formatPrice(bar.low, p)} C${formatPrice(bar.close, p)}`);
+    }
+    if (this.canvasSettings.showBarChange) {
+      parts.push(`${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%`);
+    }
+    if (this.canvasSettings.showVolumeLegend && bar.volume > 0) {
+      parts.push(`V ${formatVolume(bar.volume)}`);
+    }
     const lines: LegendLine[] = [
       {
         id: "sym",
-        text: `${this.symbol.ticker}  ${this.interval}  O${formatPrice(bar.open, p)} H${formatPrice(bar.high, p)} L${formatPrice(bar.low, p)} C${formatPrice(bar.close, p)}  ${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%`,
+        text: parts.join("  "),
         color: chg >= 0 ? palettes[this.theme].up : palettes[this.theme].down,
       },
     ];
@@ -1055,6 +1091,7 @@ export class ChartEngine {
     this.paintAxes(layout, bars, range, pal);
     this.paintCrosshair(layout, bars, range, pal);
     this.paintReplaySelectLine(layout.main);
+    this.paintDemoTrail();
     this.paintLegend(layout.main, pal);
   }
 
@@ -1092,9 +1129,43 @@ export class ChartEngine {
     ctx.restore();
   }
 
-  private paintWatermark(rect: Rect, color: string): void {
+  private paintDemoTrail(): void {
+    if (this.tool !== "demonstration" || !this.demoTrail.length) return;
+    const now = Date.now();
+    this.demoTrail = this.demoTrail.filter((p) => now - p.t < 1200);
+    if (!this.demoTrail.length) return;
     const ctx = this.ctx;
     ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (let i = 1; i < this.demoTrail.length; i++) {
+      const p0 = this.demoTrail[i - 1];
+      const p1 = this.demoTrail[i];
+      const age = (now - p1.t) / 1200;
+      ctx.globalAlpha = Math.max(0, 1 - age);
+      ctx.strokeStyle = "#ff6d00";
+      ctx.lineWidth = Math.max(1, 4 * (1 - age));
+      ctx.beginPath();
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+      ctx.stroke();
+    }
+    const last = this.demoTrail[this.demoTrail.length - 1];
+    const dotAge = (now - last.t) / 1200;
+    ctx.globalAlpha = Math.max(0, 1 - dotAge);
+    ctx.fillStyle = "#ff6d00";
+    ctx.beginPath();
+    ctx.arc(last.x, last.y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    if (this.demoTrail.length) requestAnimationFrame(() => this.draw());
+  }
+
+  private paintWatermark(rect: Rect, color: string): void {
+    if (!this.canvasSettings.showWatermark) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = this.canvasSettings.watermarkOpacity;
     ctx.fillStyle = color;
     ctx.font = "bold 92px Trebuchet MS, Arial, sans-serif";
     ctx.textAlign = "center";
@@ -1574,7 +1645,7 @@ export class ChartEngine {
     range: { min: number; max: number },
     pal: (typeof palettes)["dark"],
   ): void {
-    if (!this.mouse || this.tool === "cursor") return;
+    if (!this.mouse || this.tool === "cursor" || this.tool === "magic") return;
     const ctx = this.ctx;
     const { x, y } = this.mouse;
     if (x > layout.chart.w || y > layout.chart.h) return;
@@ -1694,7 +1765,8 @@ export class ChartEngine {
     const zone = this.hitZone(x, y);
     if (zone === "price") this.canvas.style.cursor = "ns-resize";
     else if (zone === "time") this.canvas.style.cursor = "ew-resize";
-    else if (this.tool === "cursor") this.canvas.style.cursor = "default";
+    else if (this.tool === "cursor" || this.tool === "magic") this.canvas.style.cursor = "default";
+    else if (this.tool === "demonstration") this.canvas.style.cursor = "cell";
     else {
       const hit = this.hideDrawings || this.lockDrawings ? null : this.hitDrawing(x, y);
       if (hit) {
@@ -1747,7 +1819,7 @@ export class ChartEngine {
       this.draft = { id: uid("dr"), kind: this.tool, points: [p], color: palettes[this.theme].overlay };
       return;
     }
-    const pickMode = this.tool === "cursor" || this.tool === "crosshair" || this.tool === "dot" || (!this.draft && !!hit);
+    const pickMode = this.tool === "cursor" || this.tool === "crosshair" || this.tool === "dot" || this.tool === "magic" || (!this.draft && !!hit);
     if (pickMode && hit && !this.draft) {
       this.selectedId = hit.id;
       this.selectedIndicatorId = null;
@@ -1760,7 +1832,24 @@ export class ChartEngine {
       this.draw();
       return;
     }
-    if (this.tool === "cursor" || this.tool === "crosshair" || this.tool === "dot") {
+    if (this.tool === "cursor" || this.tool === "crosshair" || this.tool === "dot" || this.tool === "magic") {
+      if (this.tool === "magic" && hit) {
+        this.selectedId = hit.id;
+        this.selectedIndicatorId = null;
+        this.emit();
+        this.draw();
+        return;
+      }
+      this.selectedId = null;
+      this.dragging = "pan";
+      this.dragLastX = x;
+      this.dragLastY = y;
+      this.emit();
+      this.draw();
+      return;
+    }
+    if (this.tool === "demonstration") {
+      this.demoTrail.push({ x, y, t: Date.now() });
       this.selectedId = null;
       this.dragging = "pan";
       this.dragLastX = x;
@@ -1802,6 +1891,21 @@ export class ChartEngine {
       return;
     }
     if (!this.dragging) this.updateCursor(x, y);
+    if (this.tool === "demonstration") {
+      const now = Date.now();
+      this.demoTrail.push({ x, y, t: now });
+      this.demoTrail = this.demoTrail.filter((p) => now - p.t < 1200);
+    }
+    if (this.tool === "magic" && !this.dragging) {
+      const nearHit = this.hitDrawing(x, y);
+      if (nearHit && this.selectedId !== nearHit.id) {
+        this.selectedId = nearHit.id;
+        this.emit();
+      } else if (!nearHit && this.selectedId) {
+        this.selectedId = null;
+        this.emit();
+      }
+    }
     if (this.dragging === "priceAxis" && this.priceSpan != null && this.priceMid != null) {
       const dy = y - this.dragLastY;
       this.dragLastY = y;

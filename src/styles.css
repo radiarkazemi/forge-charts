@@ -1336,3 +1336,18 @@ button { cursor: pointer; }
   padding-top: 8px;
 }
 .quick-search-modal footer .link { margin-left: auto; color: var(--accent); border: 0; background: transparent; }
+
+/* —— T-16 Settings dialog —— */
+.settings-modal { width: min(520px, 94vw); }
+.settings-modal h2 { margin: 0 0 8px; }
+.settings-modal h3 { margin: 16px 0 6px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.settings-tab-body { min-height: 200px; }
+.settings-tab-body .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.settings-tab-body .check-row { justify-content: flex-start; gap: 8px; border-bottom: 0; }
+.settings-tab-body input[type="color"] { width: 32px; height: 24px; border: 0; background: transparent; padding: 0; }
+.settings-tab-body input[type="range"] { flex: 1; }
+.settings-tab-body select { height: 28px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); }
+
+/* —— T-18 Snapshot —— */
+.snapshot-menu { min-width: 180px; right: 0; left: auto; }
+.snapshot-menu button { width: 100%; }

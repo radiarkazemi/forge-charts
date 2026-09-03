@@ -525,71 +525,100 @@ export function SettingsModal({
   engine: ChartEngine | null;
   snap: EngineSnapshot | null;
 }) {
+  const [tab, setTab] = useState<"symbol" | "status" | "scales" | "canvas">("symbol");
   if (!open) return null;
   const style = snap?.chartStyle;
+  const cv = snap?.canvas;
   const sourceOptions: ChartSource[] = ["open", "high", "low", "close", "hl2", "hlc3", "ohlc4"];
   const currentType = CHART_TYPES.find((item) => item.id === snap?.chartType);
+  const TABS: Array<{ id: typeof tab; label: string }> = [
+    { id: "symbol", label: "Symbol" },
+    { id: "status", label: "Status line" },
+    { id: "scales", label: "Scales" },
+    { id: "canvas", label: "Canvas" },
+  ];
   return (
     <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal tall settings-modal" onClick={(e) => e.stopPropagation()}>
         <h2>Chart settings</h2>
-        <label className="row">
-          Theme
-          <select value={theme} onChange={(e) => onTheme(e.target.value as "dark" | "light")}>
-            <option value="dark">Dark</option>
-            <option value="light">Light</option>
-          </select>
-        </label>
-        <div className="settings-block">
-          <h3>Chart Type</h3>
-          <p className="hint">{currentType?.label ?? "Chart"} style</p>
-          <label className="row">
-            Source
-            <select value={style?.source ?? "close"} onChange={(e) => engine?.setChartStyle({ source: e.target.value as ChartSource })}>
-              {sourceOptions.map((source) => (
-                <option key={source} value={source}>
-                  {source.toUpperCase()}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="row">
-            Up color
-            <input type="color" value={style?.upColor ?? "#26a69a"} onChange={(e) => engine?.setChartStyle({ upColor: e.target.value })} />
-          </label>
-          <label className="row">
-            Down color
-            <input type="color" value={style?.downColor ?? "#ef5350"} onChange={(e) => engine?.setChartStyle({ downColor: e.target.value })} />
-          </label>
-          <label className="row">
-            Wick up
-            <input type="color" value={style?.wickUpColor ?? "#26a69a"} onChange={(e) => engine?.setChartStyle({ wickUpColor: e.target.value })} />
-          </label>
-          <label className="row">
-            Wick down
-            <input type="color" value={style?.wickDownColor ?? "#ef5350"} onChange={(e) => engine?.setChartStyle({ wickDownColor: e.target.value })} />
-          </label>
-          <label className="row">
-            Border up
-            <input type="color" value={style?.borderUpColor ?? "#26a69a"} onChange={(e) => engine?.setChartStyle({ borderUpColor: e.target.value })} />
-          </label>
-          <label className="row">
-            Border down
-            <input type="color" value={style?.borderDownColor ?? "#ef5350"} onChange={(e) => engine?.setChartStyle({ borderDownColor: e.target.value })} />
-          </label>
-          <label className="row">
-            Show wick
-            <input type="checkbox" checked={style?.showWick ?? true} onChange={(e) => engine?.setChartStyle({ showWick: e.target.checked })} />
-          </label>
-          <label className="row">
-            Show border
-            <input type="checkbox" checked={style?.showBorder ?? true} onChange={(e) => engine?.setChartStyle({ showBorder: e.target.checked })} />
-          </label>
+        <div className="ind-tab-row">
+          {TABS.map((t) => (
+            <button key={t.id} type="button" className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)}>
+              {t.label}
+            </button>
+          ))}
         </div>
-        <p className="hint">Scale, magnet, and grid are also on the chart overlays and drawing toolbar.</p>
-        <button className="primary" onClick={onClose}>
-          Done
-        </button>
+
+        {tab === "symbol" ? (
+          <div className="settings-tab-body">
+            <label className="row">
+              Theme
+              <select value={theme} onChange={(e) => onTheme(e.target.value as "dark" | "light")}>
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+              </select>
+            </label>
+            <h3>{currentType?.label ?? "Chart"} style</h3>
+            <label className="row">
+              Source
+              <select value={style?.source ?? "close"} onChange={(e) => engine?.setChartStyle({ source: e.target.value as ChartSource })}>
+                {sourceOptions.map((source) => (
+                  <option key={source} value={source}>{source.toUpperCase()}</option>
+                ))}
+              </select>
+            </label>
+            <label className="row">Up color <input type="color" value={style?.upColor ?? "#26a69a"} onChange={(e) => engine?.setChartStyle({ upColor: e.target.value })} /></label>
+            <label className="row">Down color <input type="color" value={style?.downColor ?? "#ef5350"} onChange={(e) => engine?.setChartStyle({ downColor: e.target.value })} /></label>
+            <label className="row">Wick up <input type="color" value={style?.wickUpColor ?? "#26a69a"} onChange={(e) => engine?.setChartStyle({ wickUpColor: e.target.value })} /></label>
+            <label className="row">Wick down <input type="color" value={style?.wickDownColor ?? "#ef5350"} onChange={(e) => engine?.setChartStyle({ wickDownColor: e.target.value })} /></label>
+            <label className="row">Border up <input type="color" value={style?.borderUpColor ?? "#26a69a"} onChange={(e) => engine?.setChartStyle({ borderUpColor: e.target.value })} /></label>
+            <label className="row">Border down <input type="color" value={style?.borderDownColor ?? "#ef5350"} onChange={(e) => engine?.setChartStyle({ borderDownColor: e.target.value })} /></label>
+            <label className="row check-row"><input type="checkbox" checked={style?.showWick ?? true} onChange={(e) => engine?.setChartStyle({ showWick: e.target.checked })} /> Show wicks</label>
+            <label className="row check-row"><input type="checkbox" checked={style?.showBorder ?? true} onChange={(e) => engine?.setChartStyle({ showBorder: e.target.checked })} /> Show borders</label>
+          </div>
+        ) : null}
+
+        {tab === "status" ? (
+          <div className="settings-tab-body">
+            <h3>Status line</h3>
+            <label className="row check-row"><input type="checkbox" checked={cv?.showOhlc ?? true} onChange={(e) => engine?.setCanvasSettings({ showOhlc: e.target.checked })} /> Show OHLC values</label>
+            <label className="row check-row"><input type="checkbox" checked={cv?.showBarChange ?? true} onChange={(e) => engine?.setCanvasSettings({ showBarChange: e.target.checked })} /> Show bar change %</label>
+            <label className="row check-row"><input type="checkbox" checked={cv?.showVolumeLegend ?? true} onChange={(e) => engine?.setCanvasSettings({ showVolumeLegend: e.target.checked })} /> Show volume</label>
+          </div>
+        ) : null}
+
+        {tab === "scales" ? (
+          <div className="settings-tab-body">
+            <h3>Price scale</h3>
+            <label className="row check-row"><input type="checkbox" checked={snap?.logScale ?? false} onChange={() => engine?.toggle("logScale")} /> Logarithmic</label>
+            <label className="row check-row"><input type="checkbox" checked={snap?.percentScale ?? false} onChange={() => engine?.toggle("percentScale")} /> Percent</label>
+            <h3>Labels</h3>
+            <label className="row check-row"><input type="checkbox" checked={cv?.showCountdown ?? true} onChange={(e) => engine?.setCanvasSettings({ showCountdown: e.target.checked })} /> Countdown to bar close</label>
+            <label className="row check-row"><input type="checkbox" checked={cv?.showHighLow ?? false} onChange={(e) => engine?.setCanvasSettings({ showHighLow: e.target.checked })} /> High/low price labels</label>
+          </div>
+        ) : null}
+
+        {tab === "canvas" ? (
+          <div className="settings-tab-body">
+            <h3>Background</h3>
+            <label className="row">Background <input type="color" value={cv?.bgColor || (theme === "dark" ? "#131722" : "#ffffff")} onChange={(e) => engine?.setCanvasSettings({ bgColor: e.target.value })} /></label>
+            <h3>Grid</h3>
+            <label className="row check-row"><input type="checkbox" checked={snap?.showGrid ?? true} onChange={() => engine?.toggle("showGrid")} /> Show grid lines</label>
+            <label className="row">Grid color <input type="color" value={cv?.gridColor || (theme === "dark" ? "#2a2e39" : "#e0e3eb")} onChange={(e) => engine?.setCanvasSettings({ gridColor: e.target.value })} /></label>
+            <h3>Crosshair</h3>
+            <label className="row">Crosshair color <input type="color" value={cv?.crosshairColor || (theme === "dark" ? "#758696" : "#9598a1")} onChange={(e) => engine?.setCanvasSettings({ crosshairColor: e.target.value })} /></label>
+            <h3>Watermark</h3>
+            <label className="row check-row"><input type="checkbox" checked={cv?.showWatermark ?? true} onChange={(e) => engine?.setCanvasSettings({ showWatermark: e.target.checked })} /> Show symbol watermark</label>
+            <label className="row">
+              Opacity
+              <input type="range" min="0" max="0.3" step="0.01" value={cv?.watermarkOpacity ?? 0.07} onChange={(e) => engine?.setCanvasSettings({ watermarkOpacity: Number(e.target.value) })} />
+            </label>
+            <h3>Navigation</h3>
+            <label className="row check-row"><input type="checkbox" checked={cv?.showNavButtons ?? true} onChange={(e) => engine?.setCanvasSettings({ showNavButtons: e.target.checked })} /> Show zoom / scale buttons</label>
+          </div>
+        ) : null}
+
+        <button className="primary" onClick={onClose}>Done</button>
       </div>
     </div>
   );

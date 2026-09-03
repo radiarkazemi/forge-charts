@@ -368,14 +368,88 @@ export function ChartToolbar({
       <button className="tb-icon" title="Settings" onClick={onOpenSettings}>
         ⚙
       </button>
-      {!compact ? (
-        <button className="tb-icon" title="Fullscreen" onClick={() => document.documentElement.requestFullscreen?.()}>
-          ⛶
-        </button>
-      ) : null}
-      <button className="tb-icon" title="Take a snapshot" onClick={() => engine?.screenshot()}>
+      <FullscreenToggle />
+      <SnapshotMenu engine={engine} />
+    </div>
+  );
+}
+
+function FullscreenToggle() {
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    const onChange = () => setFull(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+  const toggle = () => {
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    else document.documentElement.requestFullscreen?.();
+  };
+  return (
+    <button className={full ? "tb-icon on" : "tb-icon"} title={full ? "Exit fullscreen" : "Fullscreen"} onClick={toggle}>
+      {full ? "⊡" : "⛶"}
+    </button>
+  );
+}
+
+function SnapshotMenu({ engine }: { engine: ChartEngine | null }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const download = () => {
+    engine?.screenshot();
+    setOpen(false);
+  };
+  const copyToClipboard = async () => {
+    if (!engine) return;
+    try {
+      const url = engine.toDataUrl("image/png");
+      const blob = await (await fetch(url)).blob();
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    } catch {
+      /* fallback: just download */
+      engine.screenshot();
+    }
+    setOpen(false);
+  };
+  const openInTab = () => {
+    if (!engine) return;
+    const url = engine.toDataUrl("image/png");
+    window.open(url, "_blank");
+    setOpen(false);
+  };
+  const tweet = () => {
+    const ticker = engine?.getSnapshot().symbol.ticker ?? "chart";
+    const text = encodeURIComponent(`${ticker} chart — Forge Superchart`);
+    window.open(`https://twitter.com/intent/tweet?text=${text}`, "_blank");
+    setOpen(false);
+  };
+
+  return (
+    <div className="menu-wrap" ref={ref}>
+      <button
+        className={open ? "tb-icon on" : "tb-icon"}
+        title="Take a snapshot"
+        onClick={() => setOpen((v) => !v)}
+      >
         ⌗
       </button>
+      {open ? (
+        <div className="menu snapshot-menu" style={{ right: 0, left: "auto" }}>
+          <button type="button" onClick={download}>Download image</button>
+          <button type="button" onClick={copyToClipboard}>Copy to clipboard</button>
+          <button type="button" onClick={openInTab}>Open in new tab</button>
+          <button type="button" onClick={tweet}>Tweet chart</button>
+        </div>
+      ) : null}
     </div>
   );
 }

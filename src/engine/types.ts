@@ -23,7 +23,7 @@ export type ChartType =
   | "tpo"
   | "sessionvp";
 
-export type CursorTool = "cursor" | "crosshair" | "dot" | "eraser" | "zoom";
+export type CursorTool = "cursor" | "crosshair" | "dot" | "eraser" | "zoom" | "demonstration" | "magic";
 
 export type DrawingKind =
   | "trend"
@@ -192,6 +192,20 @@ export type ChartStyle = {
   source: ChartSource;
 };
 
+export type CanvasSettings = {
+  showOhlc: boolean;
+  showVolumeLegend: boolean;
+  showBarChange: boolean;
+  showWatermark: boolean;
+  showCountdown: boolean;
+  showHighLow: boolean;
+  showNavButtons: boolean;
+  bgColor: string;
+  gridColor: string;
+  crosshairColor: string;
+  watermarkOpacity: number;
+};
+
 export type RangePreset = "1D" | "5D" | "1M" | "3M" | "6M" | "YTD" | "1Y" | "5Y" | "ALL";
 
 export type LegendLine = {
@@ -235,4 +249,5 @@ export type EngineSnapshot = {
   rangePreset: RangePreset;
   autoScale: boolean;
   chartStyle: ChartStyle;
+  canvas: CanvasSettings;
 };

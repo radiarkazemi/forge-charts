@@ -51,9 +51,9 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | T-13 | Redo | MATCH | Same history stack; Ctrl/Cmd+Y and Ctrl/Cmd+Shift+Z |
 | T-14 | Layouts (count, arrangement, save, rename, copy, share, export, open) | MATCH | ⊞ menu: 1/2h/2v/3/4 grids, save/open/rename/duplicate/delete (local). Cloud share/export remain OUT |
 | T-15 | Quick search (Ctrl/Cmd+K: tools, drawings, settings) | MATCH | Command palette for actions, chart types, drawing tools; Symbol search separate |
-| T-16 | Chart settings (full dialog, section 10) | PARTIAL |
-| T-17 | Fullscreen | PARTIAL |
-| T-18 | Snapshot (download / copy / tweet) | PARTIAL |
+| T-16 | Chart settings (full dialog, section 10) | MATCH | 4-tab dialog (Symbol/Status/Scales/Canvas) per TradingView; S-02/06/11/13/14/16/17/18 remain open |
+| T-17 | Fullscreen | MATCH | Toggle with state tracking + icon swap; Esc exits; works in compact |
+| T-18 | Snapshot (download / copy / tweet) | MATCH | Dropdown: Download image / Copy to clipboard / Open in new tab / Tweet chart |
 | T-19 | Trade / Paper Trading | OUT |
 | T-20 | Publish idea | OUT |
 
@@ -68,8 +68,8 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | D-CUR-01 | Cross | MATCH |
 | D-CUR-02 | Dot | MATCH |
 | D-CUR-03 | Arrow | MATCH |
-| D-CUR-04 | Demonstration | MISSING |
-| D-CUR-05 | Magic | MISSING |
+| D-CUR-04 | Demonstration | MATCH | Laser-pointer trail that fades; for presentations |
+| D-CUR-05 | Magic | MATCH | Auto-detect + highlight nearest drawing on hover; click to select |
 | D-CUR-06 | Eraser | MATCH |
 
 ### 2.2 Trend tools
@@ -408,18 +408,18 @@ SMA, EMA, WMA, SMMA, VWMA, DEMA, TEMA, HMA, ALMA, LSMA, KAMA, McGinley Dynamic, 
 
 | ID | Tab / control | Forge |
 | --- | --- | --- |
-| S-01 | Symbol (per chart type: colors, wick, border, body) | MISSING |
+| S-01 | Symbol (per chart type: colors, wick, border, body) | MATCH | Tabbed dialog: Symbol tab with source, up/down/wick/border colors, show wick/border toggles |
 | S-02 | Data modification (session, dividends, futures back-adjust, precision, timezone) | MISSING |
-| S-03 | Status line (logo, title, OHLC, bar change, volume, last day change) | PARTIAL |
-| S-04 | Scales and lines — price scale | PARTIAL |
-| S-05 | Scales and lines — labels and lines (countdown, high/low, bid/ask, pre/post) | PARTIAL |
+| S-03 | Status line (logo, title, OHLC, bar change, volume, last day change) | MATCH | Status line tab with OHLC / bar change / volume toggles |
+| S-04 | Scales and lines — price scale | MATCH | Scales tab with log / percent toggles |
+| S-05 | Scales and lines — labels and lines (countdown, high/low, bid/ask, pre/post) | PARTIAL | Countdown + high/low toggles; bid/ask / pre-post still open |
 | S-06 | Time scale (weekdays, date format, pin left) | MISSING |
-| S-07 | Canvas background (solid / gradient) | PARTIAL |
-| S-08 | Grid | PARTIAL |
-| S-09 | Crosshair | PARTIAL |
-| S-10 | Watermark | PARTIAL |
+| S-07 | Canvas background (solid / gradient) | MATCH | Canvas tab with background color picker |
+| S-08 | Grid | MATCH | Canvas tab show grid toggle + grid color |
+| S-09 | Crosshair | MATCH | Canvas tab crosshair color |
+| S-10 | Watermark | MATCH | Canvas tab watermark toggle + opacity slider |
 | S-11 | Scale text size / colors | MISSING |
-| S-12 | Navigation buttons visibility | MISSING |
+| S-12 | Navigation buttons visibility | MATCH | Canvas tab zoom/scale buttons toggle |
 | S-13 | Pane buttons visibility | MISSING |
 | S-14 | Margins (top / bottom / right) | MISSING |
 | S-15 | Trading appearance | OUT |
