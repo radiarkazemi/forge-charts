@@ -475,17 +475,15 @@ if barstate.islast
         Setup s = array.get(history, nHist - 1)
         color sideCol = s.dir == 1 ? longCol : shortCol
         string sideTxt = s.dir == 1 ? "LONG" : "SHORT"
-        // Clip setup drawings at TP/SL bar — do not keep extending after the trade ends
-        bool resolved = setupStatus >= 2 and not na(setupExitBar)
-        int endBar = resolved ? math.max(setupExitBar, xSetup) : bar_index + 8
-        int labelX = resolved ? endBar : bar_index + 2
         int minX = math.max(0, bar_index - SAFE_DRAW)
         int xRaid = math.max(nz(s.raidBar, minX), minX)
         int xCisd = math.max(nz(s.cisdBar, xRaid), minX)
         int xMss = math.max(nz(s.mssBar, xCisd), minX)
         int xSetup = math.max(nz(s.bar, xMss), minX)
-        endBar := resolved ? math.max(nz(setupExitBar, xSetup), xSetup) : bar_index + 8
-        labelX := resolved ? endBar : bar_index + 2
+        // Clip setup drawings at TP/SL bar — do not keep extending after the trade ends
+        bool resolved = setupStatus >= 2 and not na(setupExitBar)
+        int endBar = resolved ? math.max(setupExitBar, xSetup) : bar_index + 8
+        int labelX = resolved ? endBar : bar_index + 2
         float risk = math.abs(s.entry - s.sl)
         float rr = risk > 0 ? math.abs(s.tp - s.entry) / risk : 0.0
 
