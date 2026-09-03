@@ -18,10 +18,21 @@ Exact Pine parity of `indicators/LH_Liquidity_Hunter.pine`.
 
 | File | Role |
 |------|------|
-| `LH_Engine.mqh` | Shared engine **v120** |
-| `LH_Liquidity_Hunter.mq5` | Indicator **v1.20** |
-| `LH_AutoTrade.mq5` | EA **v1.20** |
+| `LH_Engine.mqh` | Shared engine **v121** (fast ATR, lookback) |
+| `LH_Liquidity_Hunter.mq5` | Indicator **v1.21** |
+| `LH_AutoTrade.mq5` | EA **v1.21** |
 | `LH_Liquidity_Hunter.pine` | Pine source of truth (copy) |
+
+## Performance (v1.21)
+
+v1.20 froze MT5 on GOLD M1 because ATR was rebuilt as **O(n²)** across the full chart and objects were redrawn **every tick**.
+
+v1.21:
+- ATR is **O(n)** (Wilder, one pass)
+- Scan last **2500 bars** only (input `InpLookbackBars`)
+- Indicator scans/draws on **new bar**; ticks only update LIVE R / STATUS
+
+Panel must say **`LH · Liquidity Hunter  v121`**.
 
 ## Defaults (must match Pine)
 
@@ -34,7 +45,7 @@ Exact Pine parity of `indicators/LH_Liquidity_Hunter.pine`.
 
 1. Copy the three `.mqh`/`.mq5` files into one MT5 folder
 2. Compile **indicator** and **EA** (F7)
-3. Attach indicator — panel must say **`LH · Liquidity Hunter  v120`**
+3. Attach indicator — panel must say **`v121`**
 4. Attach EA with Algo Trading ON if you want auto orders
 
 Zip: `mt5/LH_Liquidity_Hunter_MT5.zip`

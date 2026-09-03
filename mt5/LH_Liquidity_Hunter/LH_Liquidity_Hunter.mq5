@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "LH Liquidity Hunter"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "1.20"
-#property description "LH v1.20 exact Pine: RAID→CISD→MSS→FVG · ENTRY/SL/TP"
+#property version   "1.21"
+#property description "LH v1.21 fast: O(n) ATR · lookback cap · no per-tick redraw"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -17,8 +17,8 @@
 #define LH_ENGINE_VERSION 0
 #endif
 
-#define LH_IND_BUILD 120
-#define LH_MIN_ENGINE 120
+#define LH_IND_BUILD 121
+#define LH_MIN_ENGINE 121
 
 input group "Detection (exact Pine)"
 input int    InpPivotPeriod      = 5;
@@ -43,6 +43,7 @@ input double InpLiqExtendAtr     = 1.2;
 input double InpMinTpR           = 1.5;
 
 input group "Display"
+input int    InpLookbackBars     = 2500; // Scan last N bars (keeps MT5 fast on GOLD M1)
 input bool   InpOnlyLast         = true;
 input int    InpHistoryCount     = 3;
 input bool   InpShowAnatomy      = true;
@@ -65,17 +66,24 @@ input color  InpCisdCol          = C'100,181,246';
 input color  InpMssCol           = C'186,104,200';
 input color  InpPanelBg          = C'13,17,23';
 
-string   OBJ_PREFIX = "LH120_";
+string   OBJ_PREFIX = "LH121_";
 LhSetup  g_setups[];
 int      g_nSetups = 0;
 datetime g_lastAlertTime = 0;
 datetime g_lastTpAlert = 0;
 datetime g_lastSlAlert = 0;
+datetime g_t[];
+double   g_o[], g_h[], g_l[], g_c[];
+int      g_used = 0;
+int      g_st = 0;
+int      g_exitBar = -1;
+string   g_stTxt = "";
 
 int OnInit()
 {
    ObjectsDeleteAll(0, "LH1_");
    ObjectsDeleteAll(0, "LH120_");
+   ObjectsDeleteAll(0, "LH121_");
    if(LH_ENGINE_VERSION < LH_MIN_ENGINE)
    {
       Alert("LH v", IntegerToString(LH_IND_BUILD),
@@ -87,7 +95,7 @@ int OnInit()
       "LH v" + IntegerToString(LH_IND_BUILD) + " Eng" + IntegerToString(LH_ENGINE_VERSION));
    Print("LH Liquidity Hunter build ", LH_IND_BUILD,
          " | Eng ", LH_ENGINE_VERSION,
-         " | RAID→CISD→MSS→FVG exact Pine");
+         " | fast lookback | RAID→CISD→MSS→FVG");
    return INIT_SUCCEEDED;
 }
 
@@ -337,6 +345,12 @@ void DrawPanel(const LhSetup &s, const string stTxt, const int st, const double 
    SetLabel(OBJ_PREFIX + "P11", 20, y + 8 + dy * 11, "Liquidity first — don't become liquidity", clrDimGray, 7);
 }
 
+void SetLabelText(const string name, const string txt, const color col)
+{
+   ObjectSetString(0, name, OBJPROP_TEXT, txt);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, col);
+}
+
 int OnCalculate(const int rates_total,
                 const int prev_calculated,
                 const datetime &time[],
@@ -351,23 +365,27 @@ int OnCalculate(const int rates_total,
    if(rates_total < 120) return 0;
 
    static datetime lastBar = 0;
-   datetime curBar = time[rates_total - 1];
    bool asSeries = (rates_total > 1 && time[0] > time[rates_total - 1]);
-   if(asSeries) curBar = time[0];
+   datetime curBar = asSeries ? time[0] : time[rates_total - 1];
    bool newBar = (prev_calculated == 0 || curBar != lastBar);
-   if(newBar) lastBar = curBar;
 
-   datetime t[];
-   double o[], h[], l[], c[];
-   LhNormalizeBars(rates_total, time, open, high, low, close, t, o, h, l, c);
+   int lookback = InpLookbackBars;
+   if(lookback < 500) lookback = 500;
+   if(lookback > 8000) lookback = 8000;
 
    if(newBar)
    {
+      lastBar = curBar;
+      g_used = LhCopyWindow(rates_total, time, open, high, low, close, lookback,
+                            g_t, g_o, g_h, g_l, g_c);
+      if(g_used < 120) return rates_total;
+
       LhConfig cfg;
       BuildConfig(cfg);
       datetime prevTime = (g_nSetups > 0) ? g_setups[g_nSetups - 1].barTime : 0;
-      g_nSetups = LhScanSetups(rates_total, t, o, h, l, c, cfg, g_setups);
+      g_nSetups = LhScanSetups(g_used, g_t, g_o, g_h, g_l, g_c, cfg, g_setups);
       ClearDrawings();
+      g_st = 0; g_exitBar = -1; g_stTxt = "";
 
       if(g_nSetups <= 0)
       {
@@ -382,9 +400,12 @@ int OnCalculate(const int rates_total,
 
       int from = InpOnlyLast ? g_nSetups - 1 : MathMax(0, g_nSetups - MathMax(1, InpHistoryCount));
       for(int i = from; i < g_nSetups; i++)
-         DrawOne(g_setups[i], t, h, l, c, rates_total, (i == g_nSetups - 1));
+         DrawOne(g_setups[i], g_t, g_h, g_l, g_c, g_used, (i == g_nSetups - 1));
 
       LhSetup last = g_setups[g_nSetups - 1];
+      g_stTxt = StatusText(last, g_h, g_l, g_c, g_used, g_st, g_exitBar);
+      DrawPanel(last, g_stTxt, g_st, SymbolInfoDouble(_Symbol, SYMBOL_BID));
+
       if(last.barTime != prevTime && last.barTime != g_lastAlertTime)
       {
          g_lastAlertTime = last.barTime;
@@ -397,35 +418,76 @@ int OnCalculate(const int rates_total,
          if(InpAlertSound) PlaySound(InpAlertSoundFile);
          Print(msg);
       }
+      return rates_total;
    }
-   else if(g_nSetups > 0)
+
+   // Tick path: do NOT rescan or recreate objects. Update live R / status only.
+   if(g_nSetups <= 0 || g_used < 2) return rates_total;
+
+   LhSetup panel = g_setups[g_nSetups - 1];
+   int iLast = g_used - 1;
+   double liveH = asSeries ? high[0] : high[rates_total - 1];
+   double liveL = asSeries ? low[0]  : low[rates_total - 1];
+   double liveC = asSeries ? close[0]: close[rates_total - 1];
+   g_h[iLast] = liveH;
+   g_l[iLast] = liveL;
+   g_c[iLast] = liveC;
+
+   int prevSt = g_st;
+   if(g_st == 0)
    {
+      bool touch = (panel.dir == 1) ? (liveL <= panel.entry) : (liveH >= panel.entry);
+      bool thru  = (panel.dir == 1) ? (liveC >= panel.entry) : (liveC <= panel.entry);
+      if(touch || thru) { g_st = 1; g_stTxt = "IN TRADE"; }
+   }
+   if(g_st == 1)
+   {
+      bool hitT = (panel.dir == 1) ? (liveH >= panel.tp) : (liveL <= panel.tp);
+      bool hitS = (panel.dir == 1) ? (liveL <= panel.sl) : (liveH >= panel.sl);
+      if(hitS) { g_st = 3; g_exitBar = iLast; g_stTxt = "SL HIT"; }
+      else if(hitT) { g_st = 2; g_exitBar = iLast; g_stTxt = "TP HIT"; }
+   }
+
+   if(g_st != prevSt && g_st >= 2)
+   {
+      ClearDrawings();
       int from = InpOnlyLast ? g_nSetups - 1 : MathMax(0, g_nSetups - MathMax(1, InpHistoryCount));
       for(int i = from; i < g_nSetups; i++)
-         DrawOne(g_setups[i], t, h, l, c, rates_total, (i == g_nSetups - 1));
+         DrawOne(g_setups[i], g_t, g_h, g_l, g_c, g_used, (i == g_nSetups - 1));
    }
 
-   if(g_nSetups > 0)
+   if(InpShowPanel)
    {
-      LhSetup panel = g_setups[g_nSetups - 1];
-      int st = 0, xb = -1;
-      string stTxt = StatusText(panel, h, l, c, rates_total, st, xb);
-      DrawPanel(panel, stTxt, st, SymbolInfoDouble(_Symbol, SYMBOL_BID));
-
-      if(InpAlertOnTpSl)
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      double risk = MathAbs(panel.entry - panel.sl);
+      double rr = (risk > 0) ? MathAbs(panel.tp - panel.entry) / risk : 0.0;
+      double liveR = 0;
+      if(risk > 0)
       {
-         if(st == 2 && panel.barTime != g_lastTpAlert)
-         {
-            g_lastTpAlert = panel.barTime;
-            if(InpAlertPopup) Alert("LH TP HIT @ ", DoubleToString(panel.tp, _Digits));
-            if(InpAlertSound) PlaySound(InpAlertSoundFile);
-         }
-         if(st == 3 && panel.barTime != g_lastSlAlert)
-         {
-            g_lastSlAlert = panel.barTime;
-            if(InpAlertPopup) Alert("LH SL HIT @ ", DoubleToString(panel.sl, _Digits));
-            if(InpAlertSound) PlaySound(InpAlertSoundFile);
-         }
+         if(g_st == 2) liveR = rr;
+         else if(g_st == 3) liveR = -1.0;
+         else liveR = (panel.dir == 1) ? (bid - panel.entry) / risk : (panel.entry - bid) / risk;
+      }
+      color stc = (g_st == 0) ? clrGray : (g_st == 1) ? clrOrange : (g_st == 2) ? InpLongCol : InpShortCol;
+      SetLabelText(OBJ_PREFIX + "P2", "STATUS    " + g_stTxt, stc);
+      SetLabelText(OBJ_PREFIX + "P10",
+         ((g_st >= 2) ? "RESULT   " : "LIVE     ") + DoubleToString(liveR, 2) + "R",
+         (liveR >= 0 ? InpLongCol : InpShortCol));
+   }
+
+   if(InpAlertOnTpSl)
+   {
+      if(g_st == 2 && panel.barTime != g_lastTpAlert)
+      {
+         g_lastTpAlert = panel.barTime;
+         if(InpAlertPopup) Alert("LH TP HIT @ ", DoubleToString(panel.tp, _Digits));
+         if(InpAlertSound) PlaySound(InpAlertSoundFile);
+      }
+      if(g_st == 3 && panel.barTime != g_lastSlAlert)
+      {
+         g_lastSlAlert = panel.barTime;
+         if(InpAlertPopup) Alert("LH SL HIT @ ", DoubleToString(panel.sl, _Digits));
+         if(InpAlertSound) PlaySound(InpAlertSoundFile);
       }
    }
    return rates_total;

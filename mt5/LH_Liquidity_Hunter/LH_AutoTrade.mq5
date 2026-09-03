@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "LH Liquidity Hunter"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "1.20"
-#property description "LH EA v1.20 exact Pine: RAID→CISD→MSS→FVG"
+#property version   "1.21"
+#property description "LH EA v1.21 fast: O(n) ATR · capped lookback"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -22,7 +22,7 @@ input bool   InpAlertOnSetup      = false;
 input ulong  InpMagic             = 270827;
 input int    InpMaxSlippagePts    = 30;
 input int    InpPendingExpiryBars = 40;
-input int    InpLookbackBars      = 2000;
+input int    InpLookbackBars      = 2500;
 input int    InpFreshMaxAgeBars   = 3;
 input int    InpMaxOpenTrades     = 1;
 
@@ -375,19 +375,19 @@ void ManageBreakEven()
 
 int OnInit()
 {
-   if(LH_ENGINE_VERSION < 120)
+   if(LH_ENGINE_VERSION < 121)
    {
-      Alert("LH EA v1.20: Engine outdated (v", IntegerToString(LH_ENGINE_VERSION),
-            "). Copy NEW LH_Engine.mqh into THIS folder and recompile. Need >= 120.");
+      Alert("LH EA v1.21: Engine outdated (v", IntegerToString(LH_ENGINE_VERSION),
+            "). Copy NEW LH_Engine.mqh into THIS folder and recompile. Need >= 121.");
       return INIT_FAILED;
    }
    g_trade.SetExpertMagicNumber(InpMagic);
    g_trade.SetDeviationInPoints(InpMaxSlippagePts);
    g_trade.SetTypeFillingBySymbol(_Symbol);
    ResetDayIfNeeded();
-   PrintFormat("LH AutoTrade v1.20 Eng%d | AutoTrade=%s | %s %s | exact Pine RAID→CISD→MSS→FVG",
+   PrintFormat("LH AutoTrade v1.21 Eng%d | AutoTrade=%s | %s %s | fast lookback",
       LH_ENGINE_VERSION, InpAutoTrade ? "ON" : "OFF", _Symbol, EnumToString(_Period));
-   Comment("LH EA v1.20 Eng" + IntegerToString(LH_ENGINE_VERSION) +
+   Comment("LH EA v1.21 Eng" + IntegerToString(LH_ENGINE_VERSION) +
            "\n1 RAID → 2 CISD → 3 MSS → 4 FVG");
    return INIT_SUCCEEDED;
 }
@@ -405,9 +405,13 @@ void OnTick()
    if(barTime == g_lastBarTime) return;
    g_lastBarTime = barTime;
 
+   int lookback = InpLookbackBars;
+   if(lookback < 500) lookback = 500;
+   if(lookback > 8000) lookback = 8000;
+
    MqlRates rates[];
    ArraySetAsSeries(rates, false);
-   int copied = CopyRates(_Symbol, _Period, 0, InpLookbackBars, rates);
+   int copied = CopyRates(_Symbol, _Period, 0, lookback, rates);
    if(copied < 120) return;
 
    datetime t[];
@@ -432,7 +436,7 @@ void OnTick()
    int n = LhScanSetups(copied, t, o, h, l, c, cfg, setups);
    if(n <= 0)
    {
-      Comment(StringFormat("LH EA v1.20 %s — scanning...\nday %d",
+      Comment(StringFormat("LH EA v1.21 %s — scanning...\nday %d",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades));
       return;
    }
@@ -443,7 +447,7 @@ void OnTick()
    int openNow = CountOurOrders();
 
    Comment(StringFormat(
-      "LH EA v1.20 | %s · %s\nENTRY %s  SL %s  TP %s\nBar %s (age %d) | orders %d\n1 RAID → 2 CISD → 3 %s → 4 FVG",
+      "LH EA v1.21 | %s · %s\nENTRY %s  SL %s  TP %s\nBar %s (age %d) | orders %d\n1 RAID → 2 CISD → 3 %s → 4 FVG",
       last.dir == 1 ? "LONG" : "SHORT", last.tag,
       DoubleToString(last.entry, _Digits),
       DoubleToString(last.sl, _Digits),

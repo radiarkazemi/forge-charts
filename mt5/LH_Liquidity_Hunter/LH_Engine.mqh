@@ -1,15 +1,17 @@
 //+------------------------------------------------------------------+
 //| LH_Engine.mqh                                                    |
 //| Exact Pine parity: LH · Liquidity Hunter                         |
+//| v121: O(n) Wilder ATR + lookback copy (v120 froze GOLD M1)       |
 //| 1 RAID → 2 CISD → 3 MSS → 4 FVG → ENTRY / SL / TP                 |
 //@version source: indicators/LH_Liquidity_Hunter.pine               |
 //+------------------------------------------------------------------+
 #ifndef LH_ENGINE_MQH
 #define LH_ENGINE_MQH
 
-#define LH_ENGINE_VERSION 120
+#define LH_ENGINE_VERSION 121
 #define LH_MAX_PIVOTS 40
 #define LH_ATR_LEN    14
+#define LH_DEFAULT_LOOKBACK 2500
 
 #define LH_DIR_LONG  1
 #define LH_DIR_SHORT -1
@@ -88,50 +90,46 @@ void LhDefaultConfig(LhConfig &cfg)
    cfg.minTpR           = 1.5;
 }
 
-// Pine ta.atr(14) = Wilder RMA
-double LhCalcATR(const int i, const double &h[], const double &l[], const double &c[])
+double LhTrueRange(const int i, const double &h[], const double &l[], const double &c[])
 {
-   if(i < 1)
-      return MathMax(h[i] - l[i], 0.0001);
-
-   if(i < LH_ATR_LEN)
-   {
-      double sum = 0.0;
-      int n = 0;
-      for(int j = 1; j <= i; j++)
-      {
-         double tr = MathMax(h[j] - l[j],
-                      MathMax(MathAbs(h[j] - c[j - 1]), MathAbs(l[j] - c[j - 1])));
-         sum += tr;
-         n++;
-      }
-      return (n > 0) ? (sum / n) : MathMax(h[i] - l[i], 0.0001);
-   }
-
-   double sum = 0.0;
-   for(int j = 1; j <= LH_ATR_LEN; j++)
-   {
-      double tr = MathMax(h[j] - l[j],
-                   MathMax(MathAbs(h[j] - c[j - 1]), MathAbs(l[j] - c[j - 1])));
-      sum += tr;
-   }
-   double atr = sum / LH_ATR_LEN;
-   for(int j = LH_ATR_LEN + 1; j <= i; j++)
-   {
-      double tr = MathMax(h[j] - l[j],
-                   MathMax(MathAbs(h[j] - c[j - 1]), MathAbs(l[j] - c[j - 1])));
-      atr = (atr * (LH_ATR_LEN - 1) + tr) / LH_ATR_LEN;
-   }
-   return atr;
+   if(i < 1) return MathMax(h[i] - l[i], 0.0001);
+   return MathMax(h[i] - l[i],
+            MathMax(MathAbs(h[i] - c[i - 1]), MathAbs(l[i] - c[i - 1])));
 }
 
+// Pine ta.atr(14) = Wilder RMA — O(n) series, never O(n²)
 void LhBuildAtrSeries(const int rates,
                       const double &h[], const double &l[], const double &c[],
                       double &atr[])
 {
    ArrayResize(atr, rates);
-   for(int i = 0; i < rates; i++)
-      atr[i] = LhCalcATR(i, h, l, c);
+   if(rates < 1) return;
+   atr[0] = MathMax(h[0] - l[0], 0.0001);
+   double sum = 0.0;
+   for(int i = 1; i < rates; i++)
+   {
+      double tr = LhTrueRange(i, h, l, c);
+      if(i < LH_ATR_LEN)
+      {
+         sum += tr;
+         atr[i] = sum / i;
+      }
+      else if(i == LH_ATR_LEN)
+      {
+         sum += tr;
+         atr[i] = sum / LH_ATR_LEN;
+      }
+      else
+         atr[i] = (atr[i - 1] * (LH_ATR_LEN - 1) + tr) / LH_ATR_LEN;
+   }
+}
+
+double LhCalcATR(const int i, const double &h[], const double &l[], const double &c[])
+{
+   if(i < 0) return 0.0001;
+   double series[];
+   LhBuildAtrSeries(i + 1, h, l, c, series);
+   return series[i];
 }
 
 bool LhIsPivotLow(const int i, const int p, const double &l[], const int rates)
@@ -306,7 +304,7 @@ int LhScanSetups(const int rates,
    for(int i = 0; i <= lastClosed; i++)
    {
       double a = atrSeries[i];
-      if(a <= 0) a = LhCalcATR(i, high, low, close);
+      if(a <= 0) a = 0.0001;
 
       int pivI = i - p;
       if(pivI >= p && LhIsPivotLow(pivI, p, low, rates))
@@ -525,26 +523,51 @@ int LhScanSetups(const int rates,
    return nSetups;
 }
 
+// Copy the last `lookback` bars into chronological (oldest→newest) arrays.
+// Returns the number of bars copied. Caps history so GOLD M1 does not freeze MT5.
+int LhCopyWindow(const int rates,
+                 const datetime &time[],
+                 const double &open[], const double &high[],
+                 const double &low[], const double &close[],
+                 const int lookback,
+                 datetime &t[], double &o[], double &h[], double &l[], double &c[])
+{
+   int used = rates;
+   if(lookback > 0 && lookback < rates)
+      used = lookback;
+   if(used < 1) return 0;
+
+   ArrayResize(t, used); ArrayResize(o, used); ArrayResize(h, used);
+   ArrayResize(l, used); ArrayResize(c, used);
+
+   bool asSeries = (rates > 1 && time[0] > time[rates - 1]);
+   if(!asSeries)
+   {
+      int src0 = rates - used;
+      for(int i = 0; i < used; i++)
+      {
+         int s = src0 + i;
+         t[i] = time[s]; o[i] = open[s]; h[i] = high[s];
+         l[i] = low[s]; c[i] = close[s];
+      }
+      return used;
+   }
+   for(int i = 0; i < used; i++)
+   {
+      int src = used - 1 - i;
+      t[i] = time[src]; o[i] = open[src]; h[i] = high[src];
+      l[i] = low[src]; c[i] = close[src];
+   }
+   return used;
+}
+
 void LhNormalizeBars(const int rates,
                      const datetime &time[],
                      const double &open[], const double &high[],
                      const double &low[], const double &close[],
                      datetime &t[], double &o[], double &h[], double &l[], double &c[])
 {
-   ArrayResize(t, rates); ArrayResize(o, rates); ArrayResize(h, rates);
-   ArrayResize(l, rates); ArrayResize(c, rates);
-   bool asSeries = (rates > 1 && time[0] > time[rates - 1]);
-   if(!asSeries)
-   {
-      for(int i = 0; i < rates; i++)
-      { t[i]=time[i]; o[i]=open[i]; h[i]=high[i]; l[i]=low[i]; c[i]=close[i]; }
-      return;
-   }
-   for(int i = 0; i < rates; i++)
-   {
-      int src = rates - 1 - i;
-      t[i]=time[src]; o[i]=open[src]; h[i]=high[src]; l[i]=low[src]; c[i]=close[src];
-   }
+   LhCopyWindow(rates, time, open, high, low, close, rates, t, o, h, l, c);
 }
 
 #endif
