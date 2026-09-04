@@ -1,6 +1,6 @@
 import { distToLine, distToSegment, formatPrice } from "./math";
 import { AXIS_FONT, CHART_FONT, CHART_FONT_BOLD } from "./theme";
-import type { Bar, Drawing, DrawingKind, Tool } from "./types";
+import type { Bar, Drawing, DrawingKind, FibLevelStyle, FibRetraceStyle, LineStyle, Tool } from "./types";
 
 export type Pt = { x: number; y: number };
 export type ViewRect = { x: number; y: number; w: number; h: number };
@@ -82,33 +82,109 @@ export function neededPoints(kind: DrawingKind): number {
   }
 }
 
+/** Supercharts default Fib Retracement levels (D-FI-01). */
+const DEFAULT_FIB_LEVELS: FibLevelStyle[] = [
+  { ratio: 0, visible: true, color: "#787b86", fill: "rgba(120,123,134,0.12)" },
+  { ratio: 0.236, visible: true, color: "#f23645", fill: "rgba(242,54,69,0.10)" },
+  { ratio: 0.382, visible: true, color: "#81c784", fill: "rgba(129,199,132,0.10)" },
+  { ratio: 0.5, visible: true, color: "#4caf50", fill: "rgba(76,175,80,0.10)" },
+  { ratio: 0.618, visible: true, color: "#089981", fill: "rgba(8,153,129,0.14)" },
+  { ratio: 0.786, visible: true, color: "#26a69a", fill: "rgba(38,166,154,0.10)" },
+  { ratio: 1, visible: true, color: "#2962ff", fill: "rgba(41,98,255,0.10)" },
+  { ratio: 1.618, visible: true, color: "#2962ff", fill: "rgba(41,98,255,0.06)" },
+  { ratio: 2.618, visible: true, color: "#f57c00", fill: "rgba(245,124,0,0.06)" },
+  { ratio: 3.618, visible: true, color: "#ab47bc", fill: "rgba(171,71,188,0.06)" },
+  { ratio: 4.236, visible: true, color: "#e91e63", fill: "rgba(233,30,99,0.06)" },
+];
+
+export function defaultFibRetraceStyle(): FibRetraceStyle {
+  return {
+    levels: DEFAULT_FIB_LEVELS.map((l) => ({ ...l })),
+    showTrendLine: true,
+    trendColor: "#5b9cf6",
+    trendWidth: 1,
+    trendStyle: "dashed",
+    extendLeft: false,
+    extendRight: true,
+    reverse: false,
+    showBackground: true,
+    showPrices: true,
+    showLevels: true,
+    levelsWidth: 1,
+    levelsStyle: "solid",
+  };
+}
+
+export function resolveFibStyle(d: Drawing): FibRetraceStyle {
+  const base = defaultFibRetraceStyle();
+  if (!d.fib) return base;
+  return {
+    ...base,
+    ...d.fib,
+    levels: (d.fib.levels?.length ? d.fib.levels : base.levels).map((l) => ({ ...l })),
+  };
+}
+
+/** Supercharts default Trend-Based Fib Extension levels (D-FI-02). */
+const DEFAULT_FIB_EXT_LEVELS: FibLevelStyle[] = [
+  { ratio: 0, visible: true, color: "#787b86", fill: "rgba(120,123,134,0.10)" },
+  { ratio: 0.618, visible: true, color: "#089981", fill: "rgba(8,153,129,0.12)" },
+  { ratio: 1, visible: true, color: "#2962ff", fill: "rgba(41,98,255,0.12)" },
+  { ratio: 1.272, visible: true, color: "#26a69a", fill: "rgba(38,166,154,0.10)" },
+  { ratio: 1.618, visible: true, color: "#ab47bc", fill: "rgba(171,71,188,0.12)" },
+  { ratio: 2, visible: true, color: "#42a5f5", fill: "rgba(66,165,245,0.08)" },
+  { ratio: 2.618, visible: true, color: "#f57c00", fill: "rgba(245,124,0,0.10)" },
+  { ratio: 3.618, visible: true, color: "#ef5350", fill: "rgba(239,83,80,0.08)" },
+  { ratio: 4.236, visible: true, color: "#e91e63", fill: "rgba(233,30,99,0.06)" },
+];
+
+export function defaultFibExtensionStyle(): FibRetraceStyle {
+  return {
+    levels: DEFAULT_FIB_EXT_LEVELS.map((l) => ({ ...l })),
+    showTrendLine: true,
+    trendColor: "#5b9cf6",
+    trendWidth: 1,
+    trendStyle: "dashed",
+    extendLeft: false,
+    extendRight: true,
+    reverse: false,
+    showBackground: true,
+    showPrices: true,
+    showLevels: true,
+    levelsWidth: 1,
+    levelsStyle: "solid",
+  };
+}
+
+export function resolveFibExtStyle(d: Drawing): FibRetraceStyle {
+  const base = defaultFibExtensionStyle();
+  if (!d.fib) return base;
+  return {
+    ...base,
+    ...d.fib,
+    levels: (d.fib.levels?.length ? d.fib.levels : base.levels).map((l) => ({ ...l })),
+  };
+}
+
+export function defaultFibStyleForKind(kind: DrawingKind): FibRetraceStyle | undefined {
+  if (kind === "fib") return defaultFibRetraceStyle();
+  if (kind === "fibext") return defaultFibExtensionStyle();
+  return undefined;
+}
+
+export function formatFibRatio(ratio: number): string {
+  if (Number.isInteger(ratio)) return String(ratio);
+  const fixed = ratio.toFixed(3).replace(/\.?0+$/, "");
+  return fixed || "0";
+}
+
 type FibLvl = { ratio: number; color: string; fill: string };
 
-const FIB_RETRACE: FibLvl[] = [
-  { ratio: 0, color: "#787b86", fill: "rgba(120,123,134,0.10)" },
-  { ratio: 0.236, color: "#f23645", fill: "rgba(242,54,69,0.08)" },
-  { ratio: 0.382, color: "#81c784", fill: "rgba(129,199,132,0.08)" },
-  { ratio: 0.5, color: "#4caf50", fill: "rgba(76,175,80,0.08)" },
-  { ratio: 0.618, color: "#089981", fill: "rgba(8,153,129,0.12)" },
-  { ratio: 0.786, color: "#26a69a", fill: "rgba(38,166,154,0.08)" },
-  { ratio: 1, color: "#2962ff", fill: "rgba(41,98,255,0.08)" },
-  { ratio: 1.618, color: "#2962ff", fill: "rgba(41,98,255,0.05)" },
-  { ratio: 2.618, color: "#f57c00", fill: "rgba(245,124,0,0.05)" },
-  { ratio: 3.618, color: "#ab47bc", fill: "rgba(171,71,188,0.05)" },
-  { ratio: 4.236, color: "#e91e63", fill: "rgba(233,30,99,0.05)" },
-];
-
-const FIB_EXT: FibLvl[] = [
-  { ratio: 0, color: "#787b86", fill: "rgba(120,123,134,0.08)" },
-  { ratio: 0.618, color: "#089981", fill: "rgba(8,153,129,0.10)" },
-  { ratio: 1, color: "#2962ff", fill: "rgba(41,98,255,0.10)" },
-  { ratio: 1.272, color: "#26a69a", fill: "rgba(38,166,154,0.08)" },
-  { ratio: 1.618, color: "#ab47bc", fill: "rgba(171,71,188,0.08)" },
-  { ratio: 2, color: "#42a5f5", fill: "rgba(66,165,245,0.06)" },
-  { ratio: 2.618, color: "#f57c00", fill: "rgba(245,124,0,0.08)" },
-  { ratio: 3.618, color: "#ef5350", fill: "rgba(239,83,80,0.06)" },
-  { ratio: 4.236, color: "#e91e63", fill: "rgba(233,30,99,0.05)" },
-];
+const FIB_RETRACE: FibLvl[] = DEFAULT_FIB_LEVELS.map((l) => ({
+  ratio: l.ratio,
+  color: l.color,
+  fill: l.fill,
+}));
 
 const FIB_TIME = [0, 1, 2, 3, 5, 8, 13, 21, 34, 55];
 const GANN_RATIOS = [1 / 8, 1 / 4, 1 / 3, 1 / 2, 1, 2, 3, 4, 8];
@@ -116,6 +192,12 @@ const GANN_LABELS = ["1/8", "1/4", "1/3", "1/2", "1/1", "2/1", "3/1", "4/1", "8/
 const FAN_RATIOS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
 const BOX_RATIOS = [0, 0.25, 0.382, 0.5, 0.618, 0.75, 1];
 const HIT = 9;
+
+function applyLineStyle(ctx: CanvasRenderingContext2D, style: LineStyle | undefined): void {
+  if (style === "dashed") ctx.setLineDash([6, 4]);
+  else if (style === "dotted") ctx.setLineDash([2, 3]);
+  else ctx.setLineDash([]);
+}
 
 export function paintDrawing(
   ctx: CanvasRenderingContext2D,
@@ -230,20 +312,39 @@ export function hitTestDrawing(d: Drawing, pts: Pt[], x: number, y: number, rect
   if (kind === "vline") return Math.abs(x - pts[0].x) < HIT;
   if (kind === "crossline") return Math.abs(y - pts[0].y) < HIT || Math.abs(x - pts[0].x) < HIT;
   if (kind === "fib" && pts.length >= 2) {
+    const style = resolveFibStyle(d);
+    const a = style.reverse ? pts[1] : pts[0];
+    const b = style.reverse ? pts[0] : pts[1];
     const xL = Math.min(pts[0].x, pts[1].x);
-    const xR = rect.x + rect.w;
-    if (distToSegment(x, y, pts[0].x, pts[0].y, pts[1].x, pts[1].y) < HIT) return true;
-    return FIB_RETRACE.some((lvl) => {
-      const ly = pts[0].y + (pts[1].y - pts[0].y) * lvl.ratio;
-      return distToSegment(x, y, xL, ly, xR, ly) < HIT;
+    const xBox = Math.max(pts[0].x, pts[1].x);
+    const x0 = style.extendLeft ? rect.x : xL;
+    const x1 = style.extendRight ? rect.x + rect.w : xBox;
+    if (style.showTrendLine && distToSegment(x, y, pts[0].x, pts[0].y, pts[1].x, pts[1].y) < HIT) return true;
+    return style.levels.some((lvl) => {
+      if (!lvl.visible) return false;
+      const ly = a.y + (b.y - a.y) * lvl.ratio;
+      return distToSegment(x, y, x0, ly, x1, ly) < HIT;
     });
   }
   if (kind === "fibext" && pts.length >= 3) {
-    const xL = Math.min(pts[0].x, pts[1].x, pts[2].x);
-    const dy = pts[1].y - pts[0].y;
-    return FIB_EXT.some((lvl) => {
-      const ly = pts[2].y + dy * lvl.ratio;
-      return distToSegment(x, y, xL, ly, rect.x + rect.w, ly) < HIT;
+    const style = resolveFibExtStyle(d);
+    const a = pts[0];
+    const b = pts[1];
+    const c = pts[2];
+    const sign = style.reverse ? -1 : 1;
+    const dy = (b.y - a.y) * sign;
+    const xL = Math.min(a.x, b.x, c.x);
+    const xBox = Math.max(a.x, b.x, c.x);
+    const x0 = style.extendLeft ? rect.x : xL;
+    const x1 = style.extendRight ? rect.x + rect.w : xBox;
+    if (style.showTrendLine) {
+      if (distToSegment(x, y, a.x, a.y, b.x, b.y) < HIT) return true;
+      if (distToSegment(x, y, b.x, b.y, c.x, c.y) < HIT) return true;
+    }
+    return style.levels.some((lvl) => {
+      if (!lvl.visible) return false;
+      const ly = c.y + dy * lvl.ratio;
+      return distToSegment(x, y, x0, ly, x1, ly) < HIT;
     });
   }
   if (kind === "fibtimezone" && pts.length >= 2) {
@@ -326,69 +427,119 @@ function paintFibRetrace(
   selected: boolean,
 ): void {
   if (pts.length < 2) return;
-  const a = pts[0];
-  const b = pts[1];
-  const xL = Math.min(a.x, b.x);
-  const xBox = Math.max(a.x, b.x);
-  const xR = rect.x + rect.w;
-  const p0 = d.points[0].price;
-  const p1 = d.points[1].price;
-  for (let i = 0; i < FIB_RETRACE.length - 1; i++) {
-    const y0 = a.y + (b.y - a.y) * FIB_RETRACE[i].ratio;
-    const y1 = a.y + (b.y - a.y) * FIB_RETRACE[i + 1].ratio;
-    ctx.fillStyle = FIB_RETRACE[i].fill;
-    ctx.fillRect(xL, Math.min(y0, y1), xR - xL, Math.abs(y1 - y0) || 1);
+  const style = resolveFibStyle(d);
+  const aPt = style.reverse ? pts[1] : pts[0];
+  const bPt = style.reverse ? pts[0] : pts[1];
+  const p0 = style.reverse ? d.points[1].price : d.points[0].price;
+  const p1 = style.reverse ? d.points[0].price : d.points[1].price;
+  const xL = Math.min(pts[0].x, pts[1].x);
+  const xBox = Math.max(pts[0].x, pts[1].x);
+  const x0 = style.extendLeft ? rect.x : xL;
+  const x1 = style.extendRight ? rect.x + rect.w : xBox;
+  const visible = style.levels.filter((l) => l.visible).sort((u, v) => u.ratio - v.ratio);
+
+  if (style.showBackground && visible.length >= 2) {
+    for (let i = 0; i < visible.length - 1; i++) {
+      const y0 = aPt.y + (bPt.y - aPt.y) * visible[i].ratio;
+      const y1 = aPt.y + (bPt.y - aPt.y) * visible[i + 1].ratio;
+      ctx.fillStyle = visible[i].fill;
+      ctx.fillRect(x0, Math.min(y0, y1), Math.max(1, x1 - x0), Math.abs(y1 - y0) || 1);
+    }
   }
-  ctx.save();
-  ctx.setLineDash([5, 4]);
-  ctx.strokeStyle = selected ? "#2962ff" : "#5b9cf6";
-  ctx.lineWidth = 1;
-  stroke(ctx, a, b);
-  ctx.restore();
+
+  if (style.showTrendLine) {
+    ctx.save();
+    applyLineStyle(ctx, style.trendStyle);
+    ctx.strokeStyle = selected ? "#2962ff" : style.trendColor;
+    ctx.lineWidth = style.trendWidth;
+    stroke(ctx, pts[0], pts[1]);
+    ctx.restore();
+  }
+
   ctx.font = AXIS_FONT;
   ctx.textAlign = "left";
-  for (const lvl of FIB_RETRACE) {
-    const y = a.y + (b.y - a.y) * lvl.ratio;
+  for (const lvl of visible) {
+    const y = aPt.y + (bPt.y - aPt.y) * lvl.ratio;
     const price = p0 + (p1 - p0) * lvl.ratio;
+    ctx.save();
+    applyLineStyle(ctx, style.levelsStyle);
     ctx.strokeStyle = lvl.color;
-    ctx.lineWidth = lvl.ratio === 0 || lvl.ratio === 1 || lvl.ratio === 0.618 ? 1.4 : 1;
-    stroke(ctx, { x: xL, y }, { x: xR, y });
+    ctx.lineWidth =
+      style.levelsWidth * (lvl.ratio === 0 || lvl.ratio === 1 || Math.abs(lvl.ratio - 0.618) < 1e-6 ? 1.35 : 1);
+    stroke(ctx, { x: x0, y }, { x: x1, y });
+    ctx.restore();
+
+    if (!style.showLevels && !style.showPrices) continue;
+    const parts: string[] = [];
+    if (style.showLevels) parts.push(formatFibRatio(lvl.ratio));
+    if (style.showPrices) parts.push(`(${formatPrice(price, precision)})`);
+    const tag = parts.length === 2 ? `${parts[0]} ${parts[1]}` : parts[0];
     ctx.fillStyle = lvl.color;
-    const tag = `${lvl.ratio.toFixed(3)} (${formatPrice(price, precision)})`;
-    ctx.fillText(tag, xBox + 6 > xR - 90 ? xL + 6 : xBox + 6, y - 3);
+    const labelX = xBox + 6 > x1 - 80 ? x0 + 6 : xBox + 6;
+    ctx.fillText(tag, labelX, y - 3);
   }
 }
 
 function paintFibExtension(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rect: ViewRect, precision: number, selected: boolean): void {
   if (pts.length < 2) return;
+  const style = resolveFibExtStyle(d);
   const a = pts[0];
   const b = pts[1];
   const c = pts[2] ?? b;
-  ctx.save();
-  ctx.setLineDash([4, 3]);
-  ctx.strokeStyle = selected ? "#2962ff" : "#5b9cf6";
-  stroke(ctx, a, b);
-  if (pts.length >= 3) stroke(ctx, b, c);
-  ctx.restore();
-  if (pts.length < 3) return;
-  const xL = Math.min(a.x, b.x, c.x);
-  const xR = rect.x + rect.w;
-  const range = d.points[1].price - d.points[0].price;
-  const base = d.points[2].price;
-  const dy = b.y - a.y;
-  ctx.font = AXIS_FONT;
-  for (let i = 0; i < FIB_EXT.length - 1; i++) {
-    const y0 = c.y + dy * FIB_EXT[i].ratio;
-    const y1 = c.y + dy * FIB_EXT[i + 1].ratio;
-    ctx.fillStyle = FIB_EXT[i].fill;
-    ctx.fillRect(xL, Math.min(y0, y1), xR - xL, Math.abs(y1 - y0) || 1);
+
+  if (style.showTrendLine) {
+    ctx.save();
+    applyLineStyle(ctx, style.trendStyle);
+    ctx.strokeStyle = selected ? "#2962ff" : style.trendColor;
+    ctx.lineWidth = style.trendWidth;
+    stroke(ctx, a, b);
+    if (pts.length >= 3) stroke(ctx, b, c);
+    ctx.restore();
   }
-  for (const lvl of FIB_EXT) {
+
+  if (pts.length < 3 || d.points.length < 3) return;
+
+  const sign = style.reverse ? -1 : 1;
+  const range = (d.points[1].price - d.points[0].price) * sign;
+  const base = d.points[2].price;
+  const dy = (b.y - a.y) * sign;
+  const xL = Math.min(a.x, b.x, c.x);
+  const xBox = Math.max(a.x, b.x, c.x);
+  const x0 = style.extendLeft ? rect.x : xL;
+  const x1 = style.extendRight ? rect.x + rect.w : xBox;
+  const visible = style.levels.filter((l) => l.visible).sort((u, v) => u.ratio - v.ratio);
+
+  if (style.showBackground && visible.length >= 2) {
+    for (let i = 0; i < visible.length - 1; i++) {
+      const y0 = c.y + dy * visible[i].ratio;
+      const y1 = c.y + dy * visible[i + 1].ratio;
+      ctx.fillStyle = visible[i].fill;
+      ctx.fillRect(x0, Math.min(y0, y1), Math.max(1, x1 - x0), Math.abs(y1 - y0) || 1);
+    }
+  }
+
+  ctx.font = AXIS_FONT;
+  ctx.textAlign = "left";
+  for (const lvl of visible) {
     const y = c.y + dy * lvl.ratio;
+    const price = base + range * lvl.ratio;
+    ctx.save();
+    applyLineStyle(ctx, style.levelsStyle);
     ctx.strokeStyle = lvl.color;
-    stroke(ctx, { x: xL, y }, { x: xR, y });
+    ctx.lineWidth =
+      style.levelsWidth *
+      (lvl.ratio === 0 || lvl.ratio === 1 || Math.abs(lvl.ratio - 1.618) < 1e-6 ? 1.35 : 1);
+    stroke(ctx, { x: x0, y }, { x: x1, y });
+    ctx.restore();
+
+    if (!style.showLevels && !style.showPrices) continue;
+    const parts: string[] = [];
+    if (style.showLevels) parts.push(formatFibRatio(lvl.ratio));
+    if (style.showPrices) parts.push(`(${formatPrice(price, precision)})`);
+    const tag = parts.length === 2 ? `${parts[0]} ${parts[1]}` : parts[0];
     ctx.fillStyle = lvl.color;
-    ctx.fillText(`${lvl.ratio.toFixed(3)} (${formatPrice(base + range * lvl.ratio, precision)})`, xL + 6, y - 3);
+    const labelX = xBox + 6 > x1 - 80 ? x0 + 6 : xBox + 6;
+    ctx.fillText(tag, labelX, y - 3);
   }
 }
 

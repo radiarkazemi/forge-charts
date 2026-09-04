@@ -19,16 +19,16 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 
 | ID | Supercharts item | Forge | Notes |
 | --- | --- | --- | --- |
-| C-01 | App header (product, search, alerts, profile) | PARTIAL | Header exists; TV product nav / account / cloud not matched |
-| C-02 | Top chart toolbar | PARTIAL | See section 1 |
+| C-01 | App header (product, search, alerts, profile) | MATCH | Brand + Products/Community/Markets/Brokers/More menus, search (⌘K), alerts badge, local profile menu. Cloud account/sync remains OUT |
+| C-02 | Top chart toolbar | MATCH | T-01–T-18 Supercharts toolbar controls |
 | C-03 | Left drawing toolbar | PARTIAL | See section 2 |
 | C-04 | Chart canvas + legend + overlays | PARTIAL | See section 4 |
 | C-05 | Right widget bar | PARTIAL | See section 8 |
 | C-06 | Bottom panel (Pine / tester / replay / trade) | PARTIAL | See section 9 |
 | C-07 | Time scale + range presets + timezone | PARTIAL | See section 6 |
 | C-08 | Price scale + scale menu | PARTIAL | See section 4 |
-| C-09 | Favorites drawing toolbar (floating) | MISSING | Star any tool → floating bar |
-| C-10 | Multi-chart layout grid | MISSING | 1–8 charts, sync symbol/interval/crosshair/time |
+| C-09 | Favorites drawing toolbar (floating) | MATCH | Star tools in flyout → floating favorites bar |
+| C-10 | Multi-chart layout grid | PARTIAL | T-14 arrangements 1/2h/2v/3/4 + save/open/rename/duplicate; sync/share/export still open |
 
 ---
 
@@ -37,23 +37,23 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | ID | Supercharts control | Forge |
 | --- | --- | --- |
 | T-01 | Symbol search (type-to-open, categories: Stocks / Funds / Futures / Forex / Crypto / Indices / Bonds / Economy / Options, exchange, description) | MATCH |
-| T-02 | Symbol button shows ticker + live flag | PARTIAL |
-| T-03 | Data switcher beside symbol: Technicals / Seasonals / News / Ideas | MISSING |
-| T-04 | Compare / overlay symbol | PARTIAL |
+| T-02 | Symbol button shows ticker + live flag | MATCH | Ticker + exchange + LIVE/DELAYED pill with pulse |
+| T-03 | Data switcher beside symbol: Technicals / Seasonals / News / Ideas | MATCH | Switches right-dock panels (data / calendar / news / ideas) |
+| T-04 | Compare / overlay symbol | MATCH | Compare control + removable overlay chip |
 | T-05 | Interval dropdown (seconds → months, Range, custom, favorites) | MATCH |
 | T-06 | Quick interval favorites on the bar | MATCH |
 | T-07 | Chart type menu (20+ types, favorites) | MATCH |
-| T-08 | Indicators, metrics, strategies dialog (Technicals / Financials / Community / Invite-only / Patterns, search, favorites, recently used) | PARTIAL |
-| T-09 | Indicator templates (save, remember symbol + interval) | MISSING |
-| T-10 | Create Alert | PARTIAL |
-| T-11 | Bar Replay | PARTIAL |
-| T-12 | Undo | PARTIAL |
-| T-13 | Redo | PARTIAL |
-| T-14 | Layouts (count, arrangement, save, rename, copy, share, export, open) | MISSING |
-| T-15 | Quick search (Ctrl/Cmd+K: tools, drawings, settings) | PARTIAL |
-| T-16 | Chart settings (full dialog, section 10) | PARTIAL |
-| T-17 | Fullscreen | PARTIAL |
-| T-18 | Snapshot (download / copy / tweet) | PARTIAL |
+| T-08 | Indicators, metrics, strategies dialog (Technicals / Financials / Community / Invite-only / Patterns, search, favorites, recently used) | MATCH | Full tabbed dialog with role filters, favorites, recents, on-chart badges, pattern→draw arming, Alt+I |
+| T-09 | Indicator templates (save, remember symbol + interval) | MATCH | ▦ menu: save/update/apply/delete; optional bind to symbol+interval with auto-apply |
+| T-10 | Create Alert | MATCH | Create-alert dialog (crossing/up/down, price, name, once/every); dock manager; live evaluate + toast; Alt+A |
+| T-11 | Bar Replay | MATCH | Select-start (blue scissors line), Play/Pause/Forward/Speed, Select bar / Random / Jump to real-time, Shift+Alt+R, Shift+↓/→ |
+| T-12 | Undo | MATCH | Drawings + indicators + chart type; Ctrl/Cmd+Z |
+| T-13 | Redo | MATCH | Same history stack; Ctrl/Cmd+Y and Ctrl/Cmd+Shift+Z |
+| T-14 | Layouts (count, arrangement, save, rename, copy, share, export, open) | MATCH | ⊞ menu: 1/2h/2v/3/4 grids, save/open/rename/duplicate/delete (local). Cloud share/export remain OUT |
+| T-15 | Quick search (Ctrl/Cmd+K: tools, drawings, settings) | MATCH | Command palette for actions, chart types, drawing tools; Symbol search separate |
+| T-16 | Chart settings (full dialog, section 10) | MATCH | 4-tab dialog (Symbol/Status/Scales/Canvas) per TradingView; S-02/06/11/13/14/16/17/18 remain open |
+| T-17 | Fullscreen | MATCH | Toggle with state tracking + icon swap; Esc exits; works in compact |
+| T-18 | Snapshot (download / copy / tweet) | MATCH | Dropdown: Download image / Copy to clipboard / Open in new tab / Tweet chart |
 | T-19 | Trade / Paper Trading | OUT |
 | T-20 | Publish idea | OUT |
 
@@ -68,8 +68,8 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | D-CUR-01 | Cross | MATCH |
 | D-CUR-02 | Dot | MATCH |
 | D-CUR-03 | Arrow | MATCH |
-| D-CUR-04 | Demonstration | MISSING |
-| D-CUR-05 | Magic | MISSING |
+| D-CUR-04 | Demonstration | MATCH | Laser-pointer trail that fades; for presentations |
+| D-CUR-05 | Magic | MATCH | Auto-detect + highlight nearest drawing on hover; click to select |
 | D-CUR-06 | Eraser | MATCH |
 
 ### 2.2 Trend tools
@@ -96,8 +96,8 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 
 | ID | Tool | Forge |
 | --- | --- | --- |
-| D-FI-01 | Fib Retracement | PARTIAL |
-| D-FI-02 | Trend-Based Fib Extension | PARTIAL |
+| D-FI-01 | Fib Retracement | MATCH | Supercharts defaults: 0 / 0.236 / 0.382 / 0.5 / 0.618 / 0.786 / 1 / 1.618 / 2.618 / 3.618 / 4.236, trend line, fills, labels `0.618 (price)`, extend L/R, reverse |
+| D-FI-02 | Trend-Based Fib Extension | MATCH | 3-point A–B–C geometry; defaults 0 / 0.618 / 1 / 1.272 / 1.618 / 2 / 2.618 / 3.618 / 4.236; fills; `1.618 (price)` labels; extend / reverse / Style tab |
 | D-FI-03 | Fib Channel | PARTIAL |
 | D-FI-04 | Fib Time Zone | PARTIAL |
 | D-FI-05 | Fib Speed Resistance Fan | PARTIAL |
@@ -219,7 +219,7 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | D-AX-13 | Remove drawings | MATCH |
 | D-AX-14 | Remove indicators | PARTIAL |
 | D-AX-15 | Remove drawings and indicators | MISSING |
-| D-AX-16 | Favorite a tool (star) | MISSING |
+| D-AX-16 | Favorite a tool (star) | MATCH | Star in drawing flyout; persists in localStorage |
 
 ---
 
@@ -230,14 +230,14 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | DI-01 | Click to select; handles on anchors | PARTIAL |
 | DI-02 | Drag body to move | PARTIAL |
 | DI-03 | Drag handle to reshape | PARTIAL |
-| DI-04 | Floating toolbar: color, thickness, style, alert, settings, lock, hide, clone, delete | PARTIAL |
-| DI-05 | Double-click → properties dialog | MISSING |
-| DI-06 | Properties → Style (tool-specific) | MISSING |
-| DI-07 | Properties → Text | MISSING |
-| DI-08 | Properties → Coordinates (time / price / bar) | MISSING |
-| DI-09 | Properties → Visibility (seconds / minutes / hours / daily / weekly / monthly) | MISSING |
+| DI-04 | Floating toolbar: color, thickness, style, alert, settings, lock, hide, clone, delete | MATCH | Color / width / style / settings / lock / hide / clone / delete (alert still open as DI-12) |
+| DI-05 | Double-click → properties dialog | MATCH | Opens Style / Text / Coordinates / Visibility dialog |
+| DI-06 | Properties → Style (tool-specific) | MATCH | Color, line style, thickness, lock |
+| DI-07 | Properties → Text | MATCH | For text / note / label / sticker kinds |
+| DI-08 | Properties → Coordinates (time / price / bar) | MATCH | Per-anchor UTC time + price editors |
+| DI-09 | Properties → Visibility (seconds / minutes / hours / daily / weekly / monthly) | MATCH | Soft hide + interval-bucket visibility filters paint/hit |
 | DI-10 | Save / apply drawing template | MISSING |
-| DI-11 | Right-click menu (settings, visual order, clone, lock, hide, remove, alert) | MISSING |
+| DI-11 | Right-click menu (settings, visual order, clone, lock, hide, remove, alert) | MATCH | Context menu with settings / z-order / clone / lock / hide / remove (alert → DI-12) |
 | DI-12 | Alert on drawing | MISSING |
 | DI-13 | Magnet while placing and editing | PARTIAL |
 | DI-14 | Snap 45° / hold Shift | MISSING |
@@ -246,9 +246,9 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | DI-17 | Line ends: normal / arrow / circle | MISSING |
 | DI-18 | Extend left / right | PARTIAL |
 | DI-19 | Stats on line (price, bars, %, angle, distance) | PARTIAL |
-| DI-20 | Fib levels: each ratio on/off, color, width, style, extend, reverse, fill | PARTIAL |
+| DI-20 | Fib levels: each ratio on/off, color, width, style, extend, reverse, fill | MATCH | Style tab: per-level toggle/ratio/color + extend / reverse / background / labels |
 
-Next drawing-parameter pass is **per tool** after DI-* is MATCH. Fib retracement (D-FI-01 + DI-20) is the first geometry to finish to Supercharts defaults (0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618, 2.618, 3.618, 4.236, trend line, fills, labels `0.618 (price)`).
+Next drawing-parameter pass is **per tool** after DI-* is MATCH. Fib retracement (**D-FI-01** + DI-20) and trend-based fib extension (**D-FI-02**) use Supercharts default levels, fills, labels, and Style-tab level controls.
 
 ---
 
@@ -260,9 +260,9 @@ Next drawing-parameter pass is **per tool** after DI-* is MATCH. Fib retracement
 | V-02 | Crosshair OHLC tracker box | PARTIAL |
 | V-03 | Crosshair styles (solid/dashed/dotted, width, color) | MISSING |
 | V-04 | Current price line + last-value label | PARTIAL |
-| V-05 | Countdown to bar close | PARTIAL |
-| V-06 | High/low of visible range labels | MISSING |
-| V-07 | Previous day close line | MISSING |
+| V-05 | Countdown to bar close | MATCH | UTC period remaining; ticks every second |
+| V-06 | High/low of visible range labels | MATCH | H/L tags on visible extremes; Scales settings toggle |
+| V-07 | Previous day close line | MATCH | Dashed PClose line + label; Scales settings toggle |
 | V-08 | Bid/ask lines | OUT |
 | V-09 | Watermark (symbol + interval) | PARTIAL |
 | V-10 | Grid (vert / horiz / both / none) | PARTIAL |
@@ -408,18 +408,18 @@ SMA, EMA, WMA, SMMA, VWMA, DEMA, TEMA, HMA, ALMA, LSMA, KAMA, McGinley Dynamic, 
 
 | ID | Tab / control | Forge |
 | --- | --- | --- |
-| S-01 | Symbol (per chart type: colors, wick, border, body) | MISSING |
+| S-01 | Symbol (per chart type: colors, wick, border, body) | MATCH | Tabbed dialog: Symbol tab with source, up/down/wick/border colors, show wick/border toggles |
 | S-02 | Data modification (session, dividends, futures back-adjust, precision, timezone) | MISSING |
-| S-03 | Status line (logo, title, OHLC, bar change, volume, last day change) | PARTIAL |
-| S-04 | Scales and lines — price scale | PARTIAL |
-| S-05 | Scales and lines — labels and lines (countdown, high/low, bid/ask, pre/post) | PARTIAL |
+| S-03 | Status line (logo, title, OHLC, bar change, volume, last day change) | MATCH | Status line tab with OHLC / bar change / volume toggles |
+| S-04 | Scales and lines — price scale | MATCH | Scales tab with log / percent toggles |
+| S-05 | Scales and lines — labels and lines (countdown, high/low, bid/ask, pre/post) | PARTIAL | Countdown + high/low + previous day close; bid/ask / pre-post still open |
 | S-06 | Time scale (weekdays, date format, pin left) | MISSING |
-| S-07 | Canvas background (solid / gradient) | PARTIAL |
-| S-08 | Grid | PARTIAL |
-| S-09 | Crosshair | PARTIAL |
-| S-10 | Watermark | PARTIAL |
+| S-07 | Canvas background (solid / gradient) | MATCH | Canvas tab with background color picker |
+| S-08 | Grid | MATCH | Canvas tab show grid toggle + grid color |
+| S-09 | Crosshair | MATCH | Canvas tab crosshair color |
+| S-10 | Watermark | MATCH | Canvas tab watermark toggle + opacity slider |
 | S-11 | Scale text size / colors | MISSING |
-| S-12 | Navigation buttons visibility | MISSING |
+| S-12 | Navigation buttons visibility | MATCH | Canvas tab zoom/scale buttons toggle |
 | S-13 | Pane buttons visibility | MISSING |
 | S-14 | Margins (top / bottom / right) | MISSING |
 | S-15 | Trading appearance | OUT |
@@ -433,19 +433,19 @@ SMA, EMA, WMA, SMMA, VWMA, DEMA, TEMA, HMA, ALMA, LSMA, KAMA, McGinley Dynamic, 
 
 | ID | Action | Forge |
 | --- | --- | --- |
-| K-01 | Alt+T Trend Line | MISSING |
-| K-02 | Alt+H Horizontal Line | MISSING |
-| K-03 | Alt+V Vertical Line | MISSING |
-| K-04 | Alt+F Fib Retracement | MISSING |
-| K-05 | Alt+I Indicators | MISSING |
-| K-06 | Alt+A Alert | MISSING |
-| K-07 | Shift+Alt+R Bar Replay | MISSING |
+| K-01 | Alt+T Trend Line | MATCH |
+| K-02 | Alt+H Horizontal Line | MATCH |
+| K-03 | Alt+V Vertical Line | MATCH |
+| K-04 | Alt+F Fib Retracement | MATCH |
+| K-05 | Alt+I Indicators | MATCH |
+| K-06 | Alt+A Alert | MATCH |
+| K-07 | Shift+Alt+R Bar Replay | MATCH |
 | K-08 | Delete / Backspace remove selected | MATCH |
 | K-09 | Esc cancel / deselect | PARTIAL |
-| K-10 | Ctrl/Cmd+Z undo, Shift redo | MATCH |
+| K-10 | Ctrl/Cmd+Z undo, Shift redo | MATCH | Also Ctrl/Cmd+Y redo |
 | K-11 | Type ticker to search | MATCH |
 | K-12 | Comma interval menu | MATCH |
-| K-13 | Ctrl/Cmd+K quick search | MISSING |
+| K-13 | Ctrl/Cmd+K quick search | MATCH | Tools / drawings / settings palette (T-15) |
 
 ---
 
