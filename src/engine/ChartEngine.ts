@@ -1,6 +1,6 @@
 import { intervalSeconds } from "../data/interval";
 import { chartStyleMatchesTheme, defaultChartStyle } from "../chartStyle";
-import { hitHandle, hitTestDrawing, isDrawingTool, isOpenEnded, neededPoints, paintDrawing } from "./drawings";
+import { hitHandle, hitTestDrawing, isDrawingTool, isOpenEnded, neededPoints, paintDrawing, defaultFibRetraceStyle } from "./drawings";
 import { bollinger, ema, heikinAshi, macd, rsi, sma } from "./indicators";
 import { clamp, formatPrice, formatTime, formatVolume, niceTicks, uid } from "./math";
 import { atr, stoch, vwap, wma } from "./studies";
@@ -54,6 +54,12 @@ function cloneDrawings(rows: Drawing[]): Drawing[] {
     ...d,
     points: d.points.map((p) => ({ ...p })),
     visibility: d.visibility ? { ...d.visibility } : undefined,
+    fib: d.fib
+      ? {
+          ...d.fib,
+          levels: d.fib.levels.map((l) => ({ ...l })),
+        }
+      : undefined,
   }));
 }
 
@@ -497,7 +503,7 @@ export class ChartEngine {
   updateDrawing(
     id: string,
     patch: Partial<
-      Pick<Drawing, "color" | "lineWidth" | "lineStyle" | "text" | "locked" | "visible" | "visibility" | "points">
+      Pick<Drawing, "color" | "lineWidth" | "lineStyle" | "text" | "locked" | "visible" | "visibility" | "points" | "fib">
     >,
   ): void {
     this.pushUndo();
@@ -506,6 +512,14 @@ export class ChartEngine {
       const next: Drawing = { ...d, ...patch };
       if (patch.points) next.points = patch.points.map((p) => ({ ...p }));
       if (patch.visibility) next.visibility = { ...DEFAULT_DRAWING_VISIBILITY, ...d.visibility, ...patch.visibility };
+      if (patch.fib) {
+        const prev = d.fib ?? defaultFibRetraceStyle();
+        next.fib = {
+          ...prev,
+          ...patch.fib,
+          levels: (patch.fib.levels ?? prev.levels).map((l) => ({ ...l })),
+        };
+      }
       return next;
     });
     this.emit();
@@ -532,6 +546,12 @@ export class ChartEngine {
       visible: true,
       points: src.points.map((p) => ({ time: p.time + step * 3, price: p.price })),
       visibility: src.visibility ? { ...src.visibility } : undefined,
+      fib: src.fib
+        ? {
+            ...src.fib,
+            levels: src.fib.levels.map((l) => ({ ...l })),
+          }
+        : undefined,
     };
     this.drawings = [...this.drawings, copy];
     this.selectedId = copy.id;
@@ -2230,7 +2250,16 @@ export class ChartEngine {
           : needsText
             ? window.prompt("Text", kind === "note" ? "Note" : "Text") || "Text"
             : undefined;
-      this.draft = { id: uid("dr"), kind, points: [point], color: palettes[this.theme].overlay, text, lineWidth: 1, lineStyle: "solid" };
+      this.draft = {
+        id: uid("dr"),
+        kind,
+        points: [point],
+        color: palettes[this.theme].overlay,
+        text,
+        lineWidth: 1,
+        lineStyle: "solid",
+        fib: kind === "fib" ? defaultFibRetraceStyle() : undefined,
+      };
       if (neededPoints(kind) === 1) this.finishDraft();
     } else {
       this.draft.points[this.draft.points.length - 1] = point;

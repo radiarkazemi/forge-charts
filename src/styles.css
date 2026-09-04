@@ -651,6 +651,22 @@ button { cursor: pointer; }
 .draw-ctx-menu button:hover { background: var(--hover); }
 .draw-ctx-menu .ctx-sep { height: 1px; background: var(--border); margin: 3px 4px; }
 
+.fib-style-panel { display: flex; flex-direction: column; gap: 6px; max-height: min(58vh, 420px); overflow: auto; }
+.fib-level-list { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 8px; }
+.fib-level-row { display: flex; align-items: center; gap: 6px; }
+.fib-level-row input[type="checkbox"] { width: auto !important; }
+.fib-ratio { width: 72px !important; height: 26px; }
+.fib-color { width: 28px !important; height: 26px; padding: 0; border: 1px solid var(--border); background: transparent; }
+.fib-reset {
+  align-self: stretch;
+  height: 28px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--hover);
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
 .legend {
   position: absolute;
   left: 10px;

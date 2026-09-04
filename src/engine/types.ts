@@ -165,6 +165,32 @@ export type ChartPoint = {
 
 export type LineStyle = "solid" | "dashed" | "dotted";
 
+/** Per-level Fib Retracement style (DI-20 / D-FI-01). */
+export type FibLevelStyle = {
+  ratio: number;
+  visible: boolean;
+  color: string;
+  /** Fill toward the next visible level. */
+  fill: string;
+};
+
+/** Supercharts-style Fib Retracement options. */
+export type FibRetraceStyle = {
+  levels: FibLevelStyle[];
+  showTrendLine: boolean;
+  trendColor: string;
+  trendWidth: number;
+  trendStyle: LineStyle;
+  extendLeft: boolean;
+  extendRight: boolean;
+  reverse: boolean;
+  showBackground: boolean;
+  showPrices: boolean;
+  showLevels: boolean;
+  levelsWidth: number;
+  levelsStyle: LineStyle;
+};
+
 /** Per-timeframe visibility (DI-09), matching Supercharts Visibility tab buckets. */
 export type DrawingVisibility = {
   seconds: boolean;
@@ -197,6 +223,8 @@ export type Drawing = {
   lineStyle?: LineStyle;
   /** Interval-bucket visibility; omitted means all on. */
   visibility?: DrawingVisibility;
+  /** Fib Retracement style (D-FI-01); omitted uses Supercharts defaults. */
+  fib?: FibRetraceStyle;
 };
 
 export type DrawingContextMenu = {

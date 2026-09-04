@@ -96,7 +96,7 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 
 | ID | Tool | Forge |
 | --- | --- | --- |
-| D-FI-01 | Fib Retracement | PARTIAL |
+| D-FI-01 | Fib Retracement | MATCH | Supercharts defaults: 0 / 0.236 / 0.382 / 0.5 / 0.618 / 0.786 / 1 / 1.618 / 2.618 / 3.618 / 4.236, trend line, fills, labels `0.618 (price)`, extend L/R, reverse |
 | D-FI-02 | Trend-Based Fib Extension | PARTIAL |
 | D-FI-03 | Fib Channel | PARTIAL |
 | D-FI-04 | Fib Time Zone | PARTIAL |
@@ -246,7 +246,7 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | DI-17 | Line ends: normal / arrow / circle | MISSING |
 | DI-18 | Extend left / right | PARTIAL |
 | DI-19 | Stats on line (price, bars, %, angle, distance) | PARTIAL |
-| DI-20 | Fib levels: each ratio on/off, color, width, style, extend, reverse, fill | PARTIAL |
+| DI-20 | Fib levels: each ratio on/off, color, width, style, extend, reverse, fill | MATCH | Style tab: per-level toggle/ratio/color + extend / reverse / background / labels |
 
 Next drawing-parameter pass is **per tool** after DI-* is MATCH. Fib retracement (D-FI-01 + DI-20) is the first geometry to finish to Supercharts defaults (0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618, 2.618, 3.618, 4.236, trend line, fills, labels `0.618 (price)`).
 

@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { indicatorInputs, indicatorTitle, toolLabelForDraw } from "../catalog";
 import type { ChartEngine } from "../engine/ChartEngine";
+import { defaultFibRetraceStyle, formatFibRatio, resolveFibStyle } from "../engine/drawings";
 import type {
   ChartSource,
   Drawing,
   DrawingVisibility,
+  FibLevelStyle,
+  FibRetraceStyle,
   IndicatorInstance,
   LineStyle,
 } from "../engine/types";
@@ -231,56 +234,62 @@ function DrawingPropertiesDialog({ engine, drawing }: { engine: ChartEngine | nu
       </div>
       {tab === "Style" ? (
         <div className="ind-tab-panel">
-          <label className="row">
-            Color
-            <span className="swatch-row">
-              {PALETTE.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  className={drawing.color === c ? "swatch on" : "swatch"}
-                  style={{ background: c }}
-                  onClick={() => engine?.updateDrawing(drawing.id, { color: c })}
-                />
-              ))}
-            </span>
-          </label>
-          <label className="row">
-            Line style
-            <span className="style-row">
-              {STYLES.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  className={(drawing.lineStyle ?? "solid") === s.id ? "on" : ""}
-                  onClick={() => engine?.updateDrawing(drawing.id, { lineStyle: s.id })}
+          {drawing.kind === "fib" ? (
+            <FibRetraceStylePanel engine={engine} drawing={drawing} />
+          ) : (
+            <>
+              <label className="row">
+                Color
+                <span className="swatch-row">
+                  {PALETTE.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      className={drawing.color === c ? "swatch on" : "swatch"}
+                      style={{ background: c }}
+                      onClick={() => engine?.updateDrawing(drawing.id, { color: c })}
+                    />
+                  ))}
+                </span>
+              </label>
+              <label className="row">
+                Line style
+                <span className="style-row">
+                  {STYLES.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className={(drawing.lineStyle ?? "solid") === s.id ? "on" : ""}
+                      onClick={() => engine?.updateDrawing(drawing.id, { lineStyle: s.id })}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </span>
+              </label>
+              <label className="row">
+                Thickness
+                <select
+                  value={drawing.lineWidth ?? 1}
+                  onChange={(e) => engine?.updateDrawing(drawing.id, { lineWidth: Number(e.target.value) })}
                 >
-                  {s.label}
-                </button>
-              ))}
-            </span>
-          </label>
-          <label className="row">
-            Thickness
-            <select
-              value={drawing.lineWidth ?? 1}
-              onChange={(e) => engine?.updateDrawing(drawing.id, { lineWidth: Number(e.target.value) })}
-            >
-              {WIDTHS.map((w) => (
-                <option key={w} value={w}>
-                  {w}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="row check-row">
-            <input
-              type="checkbox"
-              checked={!!drawing.locked}
-              onChange={() => engine?.updateDrawing(drawing.id, { locked: !drawing.locked })}
-            />
-            Locked
-          </label>
+                  {WIDTHS.map((w) => (
+                    <option key={w} value={w}>
+                      {w}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="row check-row">
+                <input
+                  type="checkbox"
+                  checked={!!drawing.locked}
+                  onChange={() => engine?.updateDrawing(drawing.id, { locked: !drawing.locked })}
+                />
+                Locked
+              </label>
+            </>
+          )}
         </div>
       ) : null}
       {tab === "Text" && textOk ? (
@@ -373,6 +382,147 @@ function DrawingPropertiesDialog({ engine, drawing }: { engine: ChartEngine | nu
           Remove
         </button>
       </div>
+    </div>
+  );
+}
+
+function FibRetraceStylePanel({ engine, drawing }: { engine: ChartEngine | null; drawing: Drawing }) {
+  const fib = resolveFibStyle(drawing);
+
+  const patchFib = (next: Partial<FibRetraceStyle>) => {
+    engine?.updateDrawing(drawing.id, { fib: { ...fib, ...next } });
+  };
+
+  const patchLevel = (index: number, patch: Partial<FibLevelStyle>) => {
+    const levels = fib.levels.map((l, i) => (i === index ? { ...l, ...patch } : { ...l }));
+    patchFib({ levels });
+  };
+
+  return (
+    <div className="fib-style-panel">
+      <label className="row check-row">
+        <input
+          type="checkbox"
+          checked={fib.showTrendLine}
+          onChange={() => patchFib({ showTrendLine: !fib.showTrendLine })}
+        />
+        Trend line
+      </label>
+      <label className="row">
+        Trend style
+        <span className="style-row">
+          {STYLES.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className={fib.trendStyle === s.id ? "on" : ""}
+              onClick={() => patchFib({ trendStyle: s.id })}
+            >
+              {s.label}
+            </button>
+          ))}
+        </span>
+      </label>
+      <label className="row check-row">
+        <input type="checkbox" checked={fib.extendLeft} onChange={() => patchFib({ extendLeft: !fib.extendLeft })} />
+        Extend left
+      </label>
+      <label className="row check-row">
+        <input type="checkbox" checked={fib.extendRight} onChange={() => patchFib({ extendRight: !fib.extendRight })} />
+        Extend right
+      </label>
+      <label className="row check-row">
+        <input type="checkbox" checked={fib.reverse} onChange={() => patchFib({ reverse: !fib.reverse })} />
+        Reverse
+      </label>
+      <label className="row check-row">
+        <input
+          type="checkbox"
+          checked={fib.showBackground}
+          onChange={() => patchFib({ showBackground: !fib.showBackground })}
+        />
+        Background fill
+      </label>
+      <label className="row check-row">
+        <input type="checkbox" checked={fib.showLevels} onChange={() => patchFib({ showLevels: !fib.showLevels })} />
+        Level values
+      </label>
+      <label className="row check-row">
+        <input type="checkbox" checked={fib.showPrices} onChange={() => patchFib({ showPrices: !fib.showPrices })} />
+        Prices
+      </label>
+      <label className="row">
+        Levels width
+        <select value={fib.levelsWidth} onChange={(e) => patchFib({ levelsWidth: Number(e.target.value) })}>
+          {WIDTHS.map((w) => (
+            <option key={w} value={w}>
+              {w}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="row">
+        Levels style
+        <span className="style-row">
+          {STYLES.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className={fib.levelsStyle === s.id ? "on" : ""}
+              onClick={() => patchFib({ levelsStyle: s.id })}
+            >
+              {s.label}
+            </button>
+          ))}
+        </span>
+      </label>
+      <div className="fly-title">Levels</div>
+      <div className="fib-level-list">
+        {fib.levels.map((lvl, index) => (
+          <div key={`${lvl.ratio}-${index}`} className="fib-level-row">
+            <input
+              type="checkbox"
+              checked={lvl.visible}
+              onChange={() => patchLevel(index, { visible: !lvl.visible })}
+              title="Toggle level"
+            />
+            <input
+              type="number"
+              step="0.001"
+              className="fib-ratio"
+              value={lvl.ratio}
+              onChange={(e) => {
+                const ratio = Number(e.target.value);
+                if (!Number.isFinite(ratio)) return;
+                patchLevel(index, { ratio });
+              }}
+              title={formatFibRatio(lvl.ratio)}
+            />
+            <input
+              type="color"
+              className="fib-color"
+              value={lvl.color.length === 7 ? lvl.color : "#2962ff"}
+              onChange={(e) => patchLevel(index, { color: e.target.value })}
+              title="Level color"
+            />
+          </div>
+        ))}
+      </div>
+      <button
+        type="button"
+        className="fib-reset"
+        onClick={() => engine?.updateDrawing(drawing.id, { fib: defaultFibRetraceStyle() })}
+      >
+        Reset to Supercharts defaults
+      </button>
+      <label className="row check-row">
+        <input
+          type="checkbox"
+          checked={!!drawing.locked}
+          onChange={() => engine?.updateDrawing(drawing.id, { locked: !drawing.locked })}
+        />
+        Locked
+      </label>
     </div>
   );
 }
