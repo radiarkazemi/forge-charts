@@ -27,7 +27,7 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | C-06 | Bottom panel (Pine / tester / replay / trade) | PARTIAL | See section 9 |
 | C-07 | Time scale + range presets + timezone | PARTIAL | See section 6 |
 | C-08 | Price scale + scale menu | PARTIAL | See section 4 |
-| C-09 | Favorites drawing toolbar (floating) | MISSING | Star any tool → floating bar |
+| C-09 | Favorites drawing toolbar (floating) | MATCH | Star tools in flyout → floating favorites bar |
 | C-10 | Multi-chart layout grid | PARTIAL | T-14 arrangements 1/2h/2v/3/4 + save/open/rename/duplicate; sync/share/export still open |
 
 ---
@@ -219,7 +219,7 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | D-AX-13 | Remove drawings | MATCH |
 | D-AX-14 | Remove indicators | PARTIAL |
 | D-AX-15 | Remove drawings and indicators | MISSING |
-| D-AX-16 | Favorite a tool (star) | MISSING |
+| D-AX-16 | Favorite a tool (star) | MATCH | Star in drawing flyout; persists in localStorage |
 
 ---
 
@@ -230,14 +230,14 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | DI-01 | Click to select; handles on anchors | PARTIAL |
 | DI-02 | Drag body to move | PARTIAL |
 | DI-03 | Drag handle to reshape | PARTIAL |
-| DI-04 | Floating toolbar: color, thickness, style, alert, settings, lock, hide, clone, delete | PARTIAL |
-| DI-05 | Double-click → properties dialog | MISSING |
-| DI-06 | Properties → Style (tool-specific) | MISSING |
-| DI-07 | Properties → Text | MISSING |
-| DI-08 | Properties → Coordinates (time / price / bar) | MISSING |
-| DI-09 | Properties → Visibility (seconds / minutes / hours / daily / weekly / monthly) | MISSING |
+| DI-04 | Floating toolbar: color, thickness, style, alert, settings, lock, hide, clone, delete | MATCH | Color / width / style / settings / lock / hide / clone / delete (alert still open as DI-12) |
+| DI-05 | Double-click → properties dialog | MATCH | Opens Style / Text / Coordinates / Visibility dialog |
+| DI-06 | Properties → Style (tool-specific) | MATCH | Color, line style, thickness, lock |
+| DI-07 | Properties → Text | MATCH | For text / note / label / sticker kinds |
+| DI-08 | Properties → Coordinates (time / price / bar) | MATCH | Per-anchor UTC time + price editors |
+| DI-09 | Properties → Visibility (seconds / minutes / hours / daily / weekly / monthly) | MATCH | Soft hide + interval-bucket visibility filters paint/hit |
 | DI-10 | Save / apply drawing template | MISSING |
-| DI-11 | Right-click menu (settings, visual order, clone, lock, hide, remove, alert) | MISSING |
+| DI-11 | Right-click menu (settings, visual order, clone, lock, hide, remove, alert) | MATCH | Context menu with settings / z-order / clone / lock / hide / remove (alert → DI-12) |
 | DI-12 | Alert on drawing | MISSING |
 | DI-13 | Magnet while placing and editing | PARTIAL |
 | DI-14 | Snap 45° / hold Shift | MISSING |

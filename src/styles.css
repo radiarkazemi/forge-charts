@@ -552,6 +552,104 @@ button { cursor: pointer; }
 .flyout button.on svg, .flyout button:hover svg { color: var(--text); }
 .tool-emoji { width: 18px; text-align: center; font-size: 14px; line-height: 1; }
 .flyout button.on, .flyout button:hover { background: var(--hover); }
+.fly-tool-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.fly-tool-row > button:first-child { flex: 1; min-width: 0; }
+.fly-star {
+  flex: none !important;
+  width: 28px !important;
+  min-width: 28px !important;
+  padding: 0 !important;
+  justify-content: center;
+  color: var(--muted) !important;
+  background: transparent !important;
+}
+.fly-star.on, .fly-star:hover { color: #e1a218 !important; background: var(--hover) !important; }
+
+.draw-rail-wrap {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  overflow: visible;
+}
+.draw-rail-wrap .draw-rail {
+  border-right: 0;
+}
+.draw-fav-bar {
+  position: absolute;
+  left: calc(100% + 8px);
+  bottom: 42px;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+}
+.draw-fav-bar button {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+}
+.draw-fav-bar button.on,
+.draw-fav-bar button:hover { background: var(--hover); }
+
+.draw-props-card { left: 50%; top: 56px; transform: translateX(-50%); width: min(340px, 92vw); }
+.draw-props-card .stack-row { flex-direction: column; align-items: stretch; gap: 6px; }
+.draw-props-card .stack-row input,
+.draw-props-card .stack-row textarea { width: 100%; }
+.draw-props-card textarea {
+  resize: vertical;
+  min-height: 64px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 6px 8px;
+  font: inherit;
+}
+.coord-block { margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.coord-block:last-child { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }
+.check-row { justify-content: flex-start !important; gap: 8px; }
+.check-row input { width: auto !important; }
+
+.draw-ctx-menu {
+  position: fixed;
+  z-index: 40;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.45);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.draw-ctx-menu button {
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  padding: 7px 10px;
+  border-radius: 4px;
+  font: inherit;
+}
+.draw-ctx-menu button:hover { background: var(--hover); }
+.draw-ctx-menu .ctx-sep { height: 1px; background: var(--border); margin: 3px 4px; }
 
 .legend {
   position: absolute;

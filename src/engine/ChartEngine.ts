@@ -11,6 +11,8 @@ import type {
   ChartStyle,
   ChartType,
   Drawing,
+  DrawingContextMenu,
+  DrawingVisibility,
   EngineSnapshot,
   IndicatorInstance,
   Interval,
@@ -22,6 +24,7 @@ import type {
   Theme,
   Tool,
 } from "./types";
+import { DEFAULT_DRAWING_VISIBILITY } from "./types";
 
 const PRICE_AXIS = 78;
 const TIME_AXIS = 28;
@@ -47,7 +50,31 @@ type HistoryState = {
 };
 
 function cloneDrawings(rows: Drawing[]): Drawing[] {
-  return rows.map((d) => ({ ...d, points: d.points.map((p) => ({ ...p })) }));
+  return rows.map((d) => ({
+    ...d,
+    points: d.points.map((p) => ({ ...p })),
+    visibility: d.visibility ? { ...d.visibility } : undefined,
+  }));
+}
+
+function visibilityBucket(interval: Interval): keyof DrawingVisibility {
+  if (/^\d+S$/i.test(interval)) return "seconds";
+  if (/^\d+W$/i.test(interval)) return "weekly";
+  if (/^\d+M$/i.test(interval)) return "monthly";
+  if (/^\d+D$/i.test(interval)) return "daily";
+  if (/^\d+R$/i.test(interval)) return "daily";
+  const n = Number(interval);
+  if (Number.isFinite(n)) {
+    if (n >= 60) return "hours";
+    return "minutes";
+  }
+  return "daily";
+}
+
+function drawingShownOnInterval(d: Drawing, interval: Interval): boolean {
+  if (d.visible === false) return false;
+  const vis = d.visibility ?? DEFAULT_DRAWING_VISIBILITY;
+  return vis[visibilityBucket(interval)] !== false;
 }
 
 function cloneIndicators(rows: IndicatorInstance[]): IndicatorInstance[] {
@@ -101,6 +128,8 @@ export class ChartEngine {
   private draft: Drawing | null = null;
   private selectedId: string | null = null;
   private selectedIndicatorId: string | null = null;
+  private drawingPropsId: string | null = null;
+  private drawingMenu: DrawingContextMenu | null = null;
   private dragging: "pan" | "drawing" | "zoom" | "brush" | "priceAxis" | "timeAxis" | "pinch" | null = null;
   private dragHandle: number | null = null;
   private dragFrom: ChartPoint | null = null;
@@ -197,6 +226,8 @@ export class ChartEngine {
       drawings: this.drawings,
       selectedId: this.selectedId,
       selectedIndicatorId: this.selectedIndicatorId,
+      drawingPropsId: this.drawingPropsId,
+      drawingMenu: this.drawingMenu,
       replay: this.replay,
       replaySelecting: this.replaySelecting,
       replayPlaying: this.replayPlaying,
@@ -248,6 +279,8 @@ export class ChartEngine {
     this.draft = null;
     this.selectedId = null;
     this.selectedIndicatorId = null;
+    this.drawingPropsId = null;
+    this.drawingMenu = null;
     this.compareBars = null;
     this.compareTicker = null;
     this.setBars(bars);
@@ -423,16 +456,103 @@ export class ChartEngine {
   selectDrawing(id: string | null): void {
     this.selectedId = id;
     if (id) this.selectedIndicatorId = null;
+    if (!id) {
+      this.drawingPropsId = null;
+      this.drawingMenu = null;
+    }
     this.emit();
     this.draw();
   }
 
+  openDrawingProperties(id: string): void {
+    this.selectedId = id;
+    this.selectedIndicatorId = null;
+    this.drawingPropsId = id;
+    this.drawingMenu = null;
+    this.emit();
+    this.draw();
+  }
+
+  closeDrawingProperties(): void {
+    if (!this.drawingPropsId) return;
+    this.drawingPropsId = null;
+    this.emit();
+  }
+
+  openDrawingMenu(id: string, x: number, y: number): void {
+    this.selectedId = id;
+    this.selectedIndicatorId = null;
+    this.drawingMenu = { id, x, y };
+    this.drawingPropsId = null;
+    this.emit();
+    this.draw();
+  }
+
+  closeDrawingMenu(): void {
+    if (!this.drawingMenu) return;
+    this.drawingMenu = null;
+    this.emit();
+  }
+
   updateDrawing(
     id: string,
-    patch: Partial<Pick<Drawing, "color" | "lineWidth" | "lineStyle" | "text" | "locked">>,
+    patch: Partial<
+      Pick<Drawing, "color" | "lineWidth" | "lineStyle" | "text" | "locked" | "visible" | "visibility" | "points">
+    >,
   ): void {
     this.pushUndo();
-    this.drawings = this.drawings.map((d) => (d.id === id ? { ...d, ...patch } : d));
+    this.drawings = this.drawings.map((d) => {
+      if (d.id !== id) return d;
+      const next: Drawing = { ...d, ...patch };
+      if (patch.points) next.points = patch.points.map((p) => ({ ...p }));
+      if (patch.visibility) next.visibility = { ...DEFAULT_DRAWING_VISIBILITY, ...d.visibility, ...patch.visibility };
+      return next;
+    });
+    this.emit();
+    this.draw();
+  }
+
+  setDrawingPoint(id: string, index: number, point: ChartPoint): void {
+    const d = this.drawings.find((item) => item.id === id);
+    if (!d || d.locked || index < 0 || index >= d.points.length) return;
+    const points = d.points.map((p, i) => (i === index ? { ...point } : { ...p }));
+    this.updateDrawing(id, { points });
+  }
+
+  cloneDrawing(id: string): string | null {
+    if (this.lockDrawings) return null;
+    const src = this.drawings.find((d) => d.id === id);
+    if (!src) return null;
+    this.pushUndo();
+    const step = intervalSeconds(this.interval) || 60;
+    const copy: Drawing = {
+      ...src,
+      id: uid("dr"),
+      locked: false,
+      visible: true,
+      points: src.points.map((p) => ({ time: p.time + step * 3, price: p.price })),
+      visibility: src.visibility ? { ...src.visibility } : undefined,
+    };
+    this.drawings = [...this.drawings, copy];
+    this.selectedId = copy.id;
+    this.selectedIndicatorId = null;
+    this.drawingMenu = null;
+    this.emit();
+    this.draw();
+    return copy.id;
+  }
+
+  reorderDrawing(id: string, mode: "front" | "back" | "forward" | "backward"): void {
+    const idx = this.drawings.findIndex((d) => d.id === id);
+    if (idx < 0) return;
+    this.pushUndo();
+    const next = [...this.drawings];
+    const [item] = next.splice(idx, 1);
+    if (mode === "front") next.push(item);
+    else if (mode === "back") next.unshift(item);
+    else if (mode === "forward") next.splice(Math.min(next.length, idx + 1), 0, item);
+    else next.splice(Math.max(0, idx - 1), 0, item);
+    this.drawings = next;
     this.emit();
     this.draw();
   }
@@ -449,6 +569,8 @@ export class ChartEngine {
     this.pushUndo();
     this.drawings = this.drawings.filter((d) => d.id !== id);
     if (this.selectedId === id) this.selectedId = null;
+    if (this.drawingPropsId === id) this.drawingPropsId = null;
+    if (this.drawingMenu?.id === id) this.drawingMenu = null;
     this.emit();
     this.draw();
   }
@@ -459,6 +581,8 @@ export class ChartEngine {
     this.drawings = [];
     this.draft = null;
     this.selectedId = null;
+    this.drawingPropsId = null;
+    this.drawingMenu = null;
     this.emit();
     this.draw();
   }
@@ -476,6 +600,8 @@ export class ChartEngine {
     this.chartType = prev.chartType;
     this.selectedId = null;
     this.selectedIndicatorId = null;
+    this.drawingPropsId = null;
+    this.drawingMenu = null;
     this.emit();
     this.draw();
   }
@@ -493,6 +619,8 @@ export class ChartEngine {
     this.chartType = next.chartType;
     this.selectedId = null;
     this.selectedIndicatorId = null;
+    this.drawingPropsId = null;
+    this.drawingMenu = null;
     this.emit();
     this.draw();
   }
@@ -780,7 +908,7 @@ export class ChartEngine {
     this.canvas.addEventListener("wheel", this.onWheel, { passive: false });
     this.canvas.addEventListener("dblclick", this.onDbl);
     this.canvas.addEventListener("keydown", this.onKey);
-    this.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+    this.canvas.addEventListener("contextmenu", this.onContextMenu);
     // iOS/Android: block page scroll/bounce while dragging the chart
     this.canvas.addEventListener("touchstart", this.onTouchGuard, { passive: false });
     this.canvas.addEventListener("touchmove", this.onTouchGuard, { passive: false });
@@ -1764,6 +1892,7 @@ export class ChartEngine {
   private paintDrawings(rect: Rect, bars: Bar[], range: { min: number; max: number }): void {
     const all = this.draft ? [...this.drawings, this.draft] : this.drawings;
     for (const d of all) {
+      if (d !== this.draft && !drawingShownOnInterval(d, this.interval)) continue;
       const pts = d.points.map((p) => this.locate(p, bars, range, rect));
       paintDrawing(this.ctx, d, pts, rect, this.symbol.pricePrecision, d.id === this.selectedId, bars, (price) =>
         this.yOf(this.scaled(price, bars), range.min, range.max, rect),
@@ -1910,6 +2039,7 @@ export class ChartEngine {
     const range = this.priceRange(rangeBars);
     for (let i = this.drawings.length - 1; i >= 0; i--) {
       const d = this.drawings[i];
+      if (!drawingShownOnInterval(d, this.interval)) continue;
       const pts = d.points.map((p) => this.locate(p, rangeBars, range, layout.main));
       if (hitHandle(pts, x, y) != null || hitTestDrawing(d, pts, x, y, layout.main)) return d;
     }
@@ -1991,6 +2121,11 @@ export class ChartEngine {
 
   private onDown = (e: PointerEvent): void => {
     e.preventDefault();
+    if (e.button === 2) return;
+    if (this.drawingMenu) {
+      this.drawingMenu = null;
+      this.emit();
+    }
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     try {
       this.canvas.setPointerCapture(e.pointerId);
@@ -2323,6 +2458,17 @@ export class ChartEngine {
     this.draw();
   };
 
+  private onContextMenu = (e: MouseEvent): void => {
+    e.preventDefault();
+    const { x, y } = this.local(e as unknown as PointerEvent);
+    const hit = this.hideDrawings || this.lockDrawings ? null : this.hitDrawing(x, y);
+    if (hit) {
+      this.openDrawingMenu(hit.id, e.clientX, e.clientY);
+      return;
+    }
+    this.closeDrawingMenu();
+  };
+
   private onDbl = (e?: MouseEvent): void => {
     if (this.draft && isOpenEnded(this.draft.kind)) {
       if (this.draft.points.length > 2) this.draft.points = this.draft.points.slice(0, -1);
@@ -2349,10 +2495,7 @@ export class ChartEngine {
     }
     const hit = this.hitDrawing(x, y);
     if (hit) {
-      this.selectedId = hit.id;
-      this.selectedIndicatorId = null;
-      this.emit();
-      this.draw();
+      this.openDrawingProperties(hit.id);
       return;
     }
     this.fitContent();
@@ -2401,6 +2544,12 @@ export class ChartEngine {
     if (e.key === "Escape") {
       if (this.replaySelecting) {
         this.jumpToRealtime();
+        return;
+      }
+      if (this.drawingPropsId || this.drawingMenu) {
+        this.drawingPropsId = null;
+        this.drawingMenu = null;
+        this.emit();
         return;
       }
       this.draft = null;

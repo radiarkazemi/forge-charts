@@ -165,6 +165,25 @@ export type ChartPoint = {
 
 export type LineStyle = "solid" | "dashed" | "dotted";
 
+/** Per-timeframe visibility (DI-09), matching Supercharts Visibility tab buckets. */
+export type DrawingVisibility = {
+  seconds: boolean;
+  minutes: boolean;
+  hours: boolean;
+  daily: boolean;
+  weekly: boolean;
+  monthly: boolean;
+};
+
+export const DEFAULT_DRAWING_VISIBILITY: DrawingVisibility = {
+  seconds: true,
+  minutes: true,
+  hours: true,
+  daily: true,
+  weekly: true,
+  monthly: true,
+};
+
 export type Drawing = {
   id: string;
   kind: DrawingKind;
@@ -172,8 +191,18 @@ export type Drawing = {
   color: string;
   text?: string;
   locked?: boolean;
+  /** Soft-hide one object without removing it (DI-04 / DI-11). */
+  visible?: boolean;
   lineWidth?: number;
   lineStyle?: LineStyle;
+  /** Interval-bucket visibility; omitted means all on. */
+  visibility?: DrawingVisibility;
+};
+
+export type DrawingContextMenu = {
+  id: string;
+  x: number;
+  y: number;
 };
 
 export type Theme = "dark" | "light";
@@ -231,6 +260,10 @@ export type EngineSnapshot = {
   drawings: Drawing[];
   selectedId: string | null;
   selectedIndicatorId: string | null;
+  /** When set, UI opens the drawing properties dialog (DI-05). */
+  drawingPropsId: string | null;
+  /** Right-click menu anchor (DI-11). */
+  drawingMenu: DrawingContextMenu | null;
   replay: boolean;
   /** Choosing start bar (blue scissors line) before / during replay. */
   replaySelecting: boolean;

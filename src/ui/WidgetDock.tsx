@@ -94,9 +94,20 @@ export function WidgetDock({
               {snap?.drawings.map((d) => (
                 <li key={d.id} className={snap.selectedId === d.id ? "on" : ""}>
                   <button className="link" onClick={() => engine?.selectDrawing(d.id)}>
-                    {d.kind}
+                    {d.visible === false ? "○" : "●"} {d.kind}
                   </button>
-                  <button onClick={() => engine?.removeDrawing(d.id)}>×</button>
+                  <span>
+                    <button
+                      title="Hide/show"
+                      onClick={() => engine?.updateDrawing(d.id, { visible: d.visible === false })}
+                    >
+                      👁
+                    </button>
+                    <button title="Settings" onClick={() => engine?.openDrawingProperties(d.id)}>
+                      ⚙
+                    </button>
+                    <button onClick={() => engine?.removeDrawing(d.id)}>×</button>
+                  </span>
                 </li>
               ))}
             </ul>

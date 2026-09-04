@@ -274,6 +274,15 @@ export type ToolGroup = {
   sections: ToolSection[];
 };
 
+export function allToolItems(): ToolItem[] {
+  return TOOL_GROUPS.flatMap((g) => g.sections.flatMap((s) => s.tools));
+}
+
+export function toolLabelForDraw(draw: Tool): string {
+  const hit = allToolItems().find((t) => t.draw === draw);
+  return hit?.label ?? String(draw);
+}
+
 export const TOOL_GROUPS: ToolGroup[] = [
   {
     id: "cursors",
