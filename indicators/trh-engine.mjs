@@ -10,18 +10,26 @@ const DEFAULT_TRH_CONFIG = {
   slPadAtr: 0.02,
   riskReward: 2.4
 };
+function trueRange(bars, j) {
+  return Math.max(
+    bars[j].high - bars[j].low,
+    Math.abs(bars[j].high - bars[j - 1].close),
+    Math.abs(bars[j].low - bars[j - 1].close)
+  );
+}
+/** Pine ta.atr(len) = Wilder RMA of TR (not SMA of last len). */
 function atr(bars, i, len = 14) {
-  if (i < 1) return bars[i].high - bars[i].low;
-  let sum = 0;
-  const start = Math.max(1, i - len + 1);
-  for (let j = start; j <= i; j++) {
-    sum += Math.max(
-      bars[j].high - bars[j].low,
-      Math.abs(bars[j].high - bars[j - 1].close),
-      Math.abs(bars[j].low - bars[j - 1].close)
-    );
+  if (i < 1) return Math.max(bars[i].high - bars[i].low, 1e-8);
+  if (i < len) {
+    let sum = 0, n = 0;
+    for (let j = 1; j <= i; j++) { sum += trueRange(bars, j); n++; }
+    return n > 0 ? sum / n : Math.max(bars[i].high - bars[i].low, 1e-8);
   }
-  return sum / (i - start + 1);
+  let sum = 0;
+  for (let j = 1; j <= len; j++) sum += trueRange(bars, j);
+  let a = sum / len;
+  for (let j = len + 1; j <= i; j++) a = (a * (len - 1) + trueRange(bars, j)) / len;
+  return a;
 }
 function pivotLow(bars, i, p) {
   if (i < p || i >= bars.length - p) return null;
