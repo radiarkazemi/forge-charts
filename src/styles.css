@@ -608,6 +608,7 @@ button { cursor: pointer; }
 .draw-fav-bar button:hover { background: var(--hover); }
 
 .draw-props-card { left: 50%; top: 56px; transform: translateX(-50%); width: min(340px, 92vw); }
+.draw-props-card:has(.fib-style-panel) { width: min(380px, 94vw); left: 12px; transform: none; }
 .draw-props-card .stack-row { flex-direction: column; align-items: stretch; gap: 6px; }
 .draw-props-card .stack-row input,
 .draw-props-card .stack-row textarea { width: 100%; }
