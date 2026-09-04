@@ -301,7 +301,7 @@ export function subscribeChartApi(
 
   const startPoll = () => {
     window.clearInterval(poll);
-    poll = window.setInterval(async () => {
+    const tick = async () => {
       if (closed) return;
       try {
         const json = (await getApiJson(
@@ -323,7 +323,9 @@ export function subscribeChartApi(
       } catch {
         /* ignore */
       }
-    }, 2000);
+    };
+    poll = window.setInterval(tick, 1000);
+    void tick();
   };
 
   const connect = () => {
@@ -331,7 +333,6 @@ export function subscribeChartApi(
     try {
       ws = new WebSocket(chartApiWsUrl());
     } catch {
-      startPoll();
       return;
     }
     ws.onopen = () => {
@@ -359,11 +360,12 @@ export function subscribeChartApi(
       if (closed) return;
       const wait = Math.min(10000, 500 * 2 ** retry++);
       timer = window.setTimeout(connect, wait);
-      if (retry >= 2) startPoll();
     };
     ws.onerror = () => ws?.close();
   };
 
+  // Always poll at 1s so the last candle stays fresh even when the WS is quiet.
+  startPoll();
   connect();
   return () => {
     closed = true;

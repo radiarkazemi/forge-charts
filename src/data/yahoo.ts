@@ -115,7 +115,8 @@ export function subscribeYahooBar(
       /* keep previous */
     }
   };
-  const id = window.setInterval(poll, 5000);
+  const id = window.setInterval(poll, 1000);
+  void poll();
   return () => {
     closed = true;
     window.clearInterval(id);

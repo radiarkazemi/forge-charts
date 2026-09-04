@@ -110,6 +110,10 @@ export class ChartEngine {
   private pinchStartDist = 0;
   private pinchStartCount = 0;
   private pinchAnchor = 0;
+  private gestureMoved = false;
+  private lastTapAt = 0;
+  private lastTapX = 0;
+  private lastTapY = 0;
   private priceSpan: number | null = null;
   private priceMid: number | null = null;
   private demoTrail: Array<{ x: number; y: number; t: number }> = [];
@@ -495,6 +499,25 @@ export class ChartEngine {
     this.priceMid = null;
     this.emit();
     this.draw();
+  }
+
+  /** TradingView-style: fit time scale to recent bars and scroll to latest. */
+  fitTimeScale(): void {
+    this.fitMode = true;
+    this.applyMobileDefaultView();
+    if (this.container.clientWidth >= 520) {
+      this.viewCount = this.clampViewCount(140);
+    }
+    this.snapToLatest();
+    this.emit();
+    this.draw();
+  }
+
+  /** Fit both price (auto) and time scales — double-click empty chart. */
+  fitContent(): void {
+    this.rangePreset = "1M";
+    this.fitTimeScale();
+    this.resetPriceScale();
   }
 
   upsertBar(bar: Bar): void {
@@ -1863,6 +1886,7 @@ export class ChartEngine {
     }
     const { x, y } = this.local(e);
     this.mouse = { x, y };
+    this.gestureMoved = false;
 
     if (this.pointers.size >= 2) {
       this.beginPinch();
@@ -1878,17 +1902,14 @@ export class ChartEngine {
     }
     const zone = this.hitZone(x, y);
     if (zone === "price") {
-      this.ensurePriceSpan();
       this.dragging = "priceAxis";
       this.dragLastY = y;
-      this.fitMode = false;
       this.emit();
       return;
     }
     if (zone === "time") {
       this.dragging = "timeAxis";
       this.dragLastX = x;
-      this.fitMode = false;
       this.emit();
       return;
     }
@@ -2016,23 +2037,33 @@ export class ChartEngine {
         this.emit();
       }
     }
-    if (this.dragging === "priceAxis" && this.priceSpan != null && this.priceMid != null) {
+    if (this.dragging === "priceAxis") {
       const dy = y - this.dragLastY;
       this.dragLastY = y;
-      this.priceSpan = clamp(this.priceSpan * Math.exp(dy / 160), 1e-8, 1e12);
-      this.fitMode = false;
+      if (Math.abs(dy) > 2) {
+        this.gestureMoved = true;
+        this.ensurePriceSpan();
+        if (this.priceSpan != null && this.priceMid != null) {
+          this.priceSpan = clamp(this.priceSpan * Math.exp(dy / 160), 1e-8, 1e12);
+          this.fitMode = false;
+        }
+      }
     }
     if (this.dragging === "timeAxis") {
       const dx = x - this.dragLastX;
       this.dragLastX = x;
-      this.setViewCount(this.viewCount * Math.exp(-dx / 200));
-      this.fitMode = false;
+      if (Math.abs(dx) > 2) {
+        this.gestureMoved = true;
+        this.setViewCount(this.viewCount * Math.exp(-dx / 200));
+        this.fitMode = false;
+      }
     }
     if (this.dragging === "pan") {
       const dx = x - this.dragLastX;
       const dy = y - this.dragLastY;
       this.dragLastX = x;
       this.dragLastY = y;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) this.gestureMoved = true;
       const slot = this.slotWidth(this.layout().main);
       this.viewEnd -= dx / Math.max(0.001, slot);
       this.clampPan();
@@ -2103,6 +2134,21 @@ export class ChartEngine {
       this.pointers.clear();
     }
 
+    const tapX = e ? this.local(e).x : this.mouse?.x;
+    const tapY = e ? this.local(e).y : this.mouse?.y;
+    const wasAxisOrPan =
+      this.dragging === "pan" || this.dragging === "priceAxis" || this.dragging === "timeAxis" || this.dragging == null;
+    const canDoubleTap =
+      !this.gestureMoved &&
+      this.pointers.size === 0 &&
+      wasAxisOrPan &&
+      this.tool !== "brush" &&
+      this.tool !== "highlighter" &&
+      this.tool !== "zoom" &&
+      !isDrawingTool(this.tool) &&
+      tapX != null &&
+      tapY != null;
+
     if (this.dragging === "zoom" && this.draft && this.draft.points.length >= 2) {
       this.viewCount = this.clampViewCount(this.viewCount * 0.55);
       this.draft = null;
@@ -2113,6 +2159,21 @@ export class ChartEngine {
     this.dragFrom = null;
     this.dragDirty = false;
     this.pinchStartDist = 0;
+
+    if (canDoubleTap && tapX != null && tapY != null) {
+      const now = performance.now();
+      const dt = now - this.lastTapAt;
+      const dist = Math.hypot(tapX - this.lastTapX, tapY - this.lastTapY);
+      if (dt > 0 && dt < 350 && dist < 28) {
+        this.lastTapAt = 0;
+        this.handleAxisOrChartDoubleActivate(tapX, tapY);
+        return;
+      }
+      this.lastTapAt = now;
+      this.lastTapX = tapX;
+      this.lastTapY = tapY;
+    }
+
     this.emit();
     this.draw();
   };
@@ -2157,34 +2218,32 @@ export class ChartEngine {
     }
     if (e) {
       const { x, y } = this.local(e as unknown as PointerEvent);
-      const zone = this.hitZone(x, y);
-      if (zone === "price") {
-        this.resetPriceScale();
-        return;
-      }
-      if (zone === "time") {
-        this.viewCount = 140;
-        this.snapToLatest();
-        this.fitMode = true;
-        this.emit();
-        this.draw();
-        return;
-      }
-      const hit = this.hitDrawing(x, y);
-      if (hit) {
-        this.selectedId = hit.id;
-        this.selectedIndicatorId = null;
-        this.emit();
-        this.draw();
-        return;
-      }
+      this.handleAxisOrChartDoubleActivate(x, y);
+      return;
     }
-    this.viewCount = 140;
-    this.snapToLatest();
-    this.fitMode = true;
-    this.rangePreset = "1M";
-    this.resetPriceScale();
+    this.fitContent();
   };
+
+  private handleAxisOrChartDoubleActivate(x: number, y: number): void {
+    const zone = this.hitZone(x, y);
+    if (zone === "price") {
+      this.resetPriceScale();
+      return;
+    }
+    if (zone === "time") {
+      this.fitTimeScale();
+      return;
+    }
+    const hit = this.hitDrawing(x, y);
+    if (hit) {
+      this.selectedId = hit.id;
+      this.selectedIndicatorId = null;
+      this.emit();
+      this.draw();
+      return;
+    }
+    this.fitContent();
+  }
 
   private onKey = (e: KeyboardEvent): void => {
     const target = e.target as HTMLElement | null;

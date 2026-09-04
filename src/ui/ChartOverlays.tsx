@@ -13,7 +13,7 @@ export function ChartOverlays({ engine }: { engine: ChartEngine | null }) {
       <div className="scale-btns">
         <button type="button" onClick={() => engine?.zoom(1)} aria-label="Zoom in">+</button>
         <button type="button" onClick={() => engine?.zoom(-1)} aria-label="Zoom out">−</button>
-        <button type="button" className={snap.autoScale ? "on" : ""} onClick={() => engine?.resetPriceScale()} title="Auto scale (double-click price axis)">
+        <button type="button" className={snap.autoScale ? "on" : ""} onClick={() => engine?.resetPriceScale()} title="Auto scale — double-click / double-tap price axis">
           A
         </button>
         <button type="button" className={snap.logScale ? "on" : ""} onClick={() => engine?.toggle("logScale")}>
