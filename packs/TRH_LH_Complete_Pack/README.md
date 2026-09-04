@@ -4,7 +4,7 @@ One folder with the **latest** MetaTrader 5 bots and TradingView Pine scripts.
 
 | Product | MT5 indicator | MT5 EA | Magic | What it trades |
 |---------|---------------|--------|-------|----------------|
-| **TRH · Trading Room Hunter** | v2.35 / Eng **233** | **v3.51** | `260825` | Mode A sweep + Mode B FVG |
+| **TRH · Trading Room Hunter** | **v2.36** / Eng **234** | **v3.52** | `260825` | Mode A sweep + Mode B FVG |
 | **LH · Liquidity Hunter** | v1.21 / Eng **121** | **v1.21** | `270827` | RAID → CISD → MSS → FVG |
 | **TRH · Expansion Hunter** | — | — | — | TradingView strategy only |
 
@@ -12,10 +12,14 @@ One folder with the **latest** MetaTrader 5 bots and TradingView Pine scripts.
 
 After compile + attach:
 
-- TRH chart comment / panel → **EA v3.51** · indicator **v235 Eng233**
+- TRH chart comment / panel → **EA v3.52** · indicator **v236 Eng234**
 - LH panel → **v121** (not v120)
 
-If you still see v3.50, **delete the old `.ex5`**, recompile, reattach. v3.50 opened extra hedge positions on pullback.
+If you still see **v2.33 / v3.50 / v3.51**, delete the old `.ex5`, recompile, reattach.
+
+### Mode B missing on MT5 (fixed in v236)
+Old engines **dropped Mode B** when Mode A fired inside cooldown. TradingView kept both.  
+v236 **keeps Mode B** so TV shorts like ENTRY 4473.60 / SL 4476.25 / TP 4467.25 can appear on MT5.
 
 ---
 
