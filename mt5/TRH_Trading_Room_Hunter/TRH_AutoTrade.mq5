@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.51"
-#property description "TRH EA v3.51: trailing TP locks SAME ticket at TP1 — never opens new orders"
+#property version   "3.52"
+#property description "TRH EA v3.52: Mode B kept with Mode A (TV parity) · Eng234"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -38,7 +38,7 @@ input bool   InpAlertOnSetup      = false;
 input ulong  InpMagic             = 260825;
 input int    InpMaxSlippagePts    = 50;
 input int    InpPendingExpiryBars = 20;
-input int    InpLookbackBars      = 2000;
+input int    InpLookbackBars      = 2500;
 
 input group "Strategy mode"
 input ENUM_TRH_TRADE_MODE InpTradeMode = TRH_TM_BOTH; // A · SWEEP + B · FVG (autotrade both)
@@ -1162,7 +1162,7 @@ void UpdateComment(const TrhSetup &last, const int ageBars, const double lots)
    else if(InpSLProtectStyle == TRH_BE_STEP) beName = "BE-STEP";
 
    Comment(StringFormat(
-      "TRH EA v3.51 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
+      "TRH EA v3.52 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
       InpAutoTrade ? "ON" : "OFF",
       beName,
       last.dir == 1 ? "LONG" : "SHORT",
@@ -1178,10 +1178,10 @@ void UpdateComment(const TrhSetup &last, const int ageBars, const double lots)
 
 int OnInit()
 {
-   if(TRH_ENGINE_VERSION < 233)
+   if(TRH_ENGINE_VERSION < 234)
    {
-      Alert("TRH EA v3.51: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
-            "). Copy NEW TRH_Engine.mqh into THIS EA folder and recompile. Need Engine >= 233.");
+      Alert("TRH EA v3.52: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
+            "). Copy NEW TRH_Engine.mqh into THIS EA folder and recompile. Need Engine >= 234.");
       return INIT_FAILED;
    }
 
@@ -1196,7 +1196,7 @@ int OnInit()
    if(!TradeAllowedOk())
       PrintFormat("TRH WARN: trading blocked — %s", g_workStatus);
 
-   PrintFormat("TRH AutoTrade v3.51 | Eng%d | Mode B mid-FVG | BE=%d | trailTP=%s | farMarket=%s | session=%s | adoptAge<=%d | %s %s",
+   PrintFormat("TRH AutoTrade v3.52 | Eng%d | Mode B kept with A | BE=%d | trailTP=%s | farMarket=%s | session=%s | adoptAge<=%d | %s %s",
       TRH_ENGINE_VERSION,
       (int)InpSLProtectStyle,
       InpTrailingTP ? "Y" : "N",
@@ -1205,8 +1205,8 @@ int OnInit()
       InpAdoptMaxAgeBars,
       _Symbol, EnumToString(_Period));
 
-   Comment("TRH EA v3.51 Eng" + IntegerToString(TRH_ENGINE_VERSION) +
-           "\nTrail TP: lock SAME ticket @ TP1 — never opens");
+   Comment("TRH EA v3.52 Eng" + IntegerToString(TRH_ENGINE_VERSION) +
+           "\nMode B kept with A · trail TP same ticket");
    return INIT_SUCCEEDED;
 }
 
@@ -1271,7 +1271,7 @@ void OnTick()
    int n = TrhScanByMode(copied, t, o, h, l, c, cfg, (int)InpTradeMode, setups);
    if(n <= 0)
    {
-      Comment(StringFormat("TRH EA v3.51 %s — scanning...\nday %d | %s",
+      Comment(StringFormat("TRH EA v3.52 %s — scanning...\nday %d | %s",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades, g_workStatus));
       return;
    }

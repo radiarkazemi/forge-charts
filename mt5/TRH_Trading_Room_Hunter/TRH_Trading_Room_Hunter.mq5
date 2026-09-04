@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "2.35"
-#property description "TRH v2.35: force-skip micro-FVG even with stale inputs · history always on"
+#property version   "2.36"
+#property description "TRH v2.36: Mode B kept with Mode A (Pine parity) · lookback cap"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -17,8 +17,8 @@
 #define TRH_ENGINE_VERSION 0
 #endif
 
-#define TRH_IND_BUILD 235
-#define TRH_MIN_ENGINE 233
+#define TRH_IND_BUILD 236
+#define TRH_MIN_ENGINE 234
 
 enum ENUM_TRH_PANEL_CORNER
 {
@@ -37,6 +37,7 @@ enum ENUM_TRH_TRADE_MODE
 
 input group "Strategy mode"
 input ENUM_TRH_TRADE_MODE InpTradeMode = TRH_TM_BOTH; // Detection Mode (A+B)
+input int    InpLookbackBars    = 2500;   // Scan last N bars (keeps GOLD M1 fast)
 
 input group "TRH Detection"
 input int    InpPivotPeriod     = 5;      // Pivot Period
@@ -162,17 +163,17 @@ int OnInit()
    // Stale chart inputs from v233 caused micro-FVG + hidden history. Warn loudly.
    if(InpMinFvgPoints < 1.50 || InpOnlyLast || InpFvgMinRiskAtr < 1.55)
    {
-      Alert("TRH v235: chart had stale inputs (OnlyLast / weak FVG). ",
-            "Engine now FORCE-clamps Min FVG≥1.50pt and always draws history. ",
-            "Panel MUST read: TRH v235 · Eng233 · Q-FVG");
+      Alert("TRH v236: chart had stale inputs (OnlyLast / weak FVG). ",
+            "Engine FORCE-clamps Min FVG≥1.50pt, keeps Mode B with Mode A, draws history. ",
+            "Panel MUST read: TRH v236 · Eng234 · Q-FVG");
    }
    else
    {
-      Print("TRH v235 Eng233 ready — panel must show TRH v235 · Eng233 · Q-FVG");
+      Print("TRH v236 Eng234 ready — panel must show TRH v236 · Eng234 · Q-FVG");
    }
    Print("TRH indicator build ", TRH_IND_BUILD,
          " | Engine ", TRH_ENGINE_VERSION,
-         " | Mode B clamp min1.5pt | minRisk=1.55ATR | history FORCED ON");
+         " | Mode B kept with A | lookback | history ON");
    return INIT_SUCCEEDED;
 }
 
@@ -778,14 +779,18 @@ int OnCalculate(const int rates_total,
 
    datetime t[];
    double o[], h[], l[], c[];
-   TrhNormalizeBars(rates_total, time, open, high, low, close, t, o, h, l, c);
+   int lookback = InpLookbackBars;
+   if(lookback < 500) lookback = 500;
+   if(lookback > 8000) lookback = 8000;
+   int used = TrhCopyWindow(rates_total, time, open, high, low, close, lookback, t, o, h, l, c);
+   if(used < 120) return rates_total;
 
    if(newBar)
    {
       TrhConfig cfg;
       BuildConfig(cfg);
       datetime prevTime = (g_nSetups > 0) ? g_setups[g_nSetups - 1].barTime : 0;
-      int nNew = TrhScanByMode(rates_total, t, o, h, l, c, cfg, (int)InpTradeMode, g_setups);
+      int nNew = TrhScanByMode(used, t, o, h, l, c, cfg, (int)InpTradeMode, g_setups);
       g_nSetups = nNew;
 
       // Hold only while WAIT/IN TRADE. Dead SL/TP must release so multi-PC
@@ -794,7 +799,7 @@ int OnCalculate(const int rates_total,
       if(g_holdValid)
       {
          int hs = 0, heb = -1;
-         StatusText(g_holdSetup, h, l, c, rates_total, hs, heb);
+         StatusText(g_holdSetup, h, l, c, used, hs, heb);
          if(hs == 2 || hs == 3)
             g_holdValid = false; // release dead hold
          else
@@ -805,7 +810,7 @@ int OnCalculate(const int rates_total,
       {
          TrhSetup newest = g_setups[g_nSetups - 1]; // chronological last = latest bar
          TrhSetup activePick;
-         bool haveActive = PickNewestActiveSetup(h, l, c, rates_total, activePick);
+         bool haveActive = PickNewestActiveSetup(h, l, c, used, activePick);
          // Prefer later bar always; among same-time, active WAIT/IN TRADE
          TrhSetup choose = newest;
          if(haveActive && activePick.barTime >= newest.barTime)
@@ -827,7 +832,7 @@ int OnCalculate(const int rates_total,
          {
             // alert only for fresh non-closed setups
             int ast = 0, aeb = -1;
-            StatusText(g_holdSetup, h, l, c, rates_total, ast, aeb);
+            StatusText(g_holdSetup, h, l, c, used, ast, aeb);
             if(ast <= 1)
             {
                g_lastAlertTime = g_holdSetup.barTime;
@@ -863,13 +868,13 @@ int OnCalculate(const int rates_total,
          for(int i = from; i < g_nSetups; i++)
          {
             if(g_holdValid && g_setups[i].barTime == g_holdSetup.barTime) continue;
-            DrawOneSetup(g_setups[i], t, h, l, c, rates_total, false);
+            DrawOneSetup(g_setups[i], t, h, l, c, used, false);
          }
       }
       if(g_holdValid)
-         DrawOneSetup(g_holdSetup, t, h, l, c, rates_total, true);
+         DrawOneSetup(g_holdSetup, t, h, l, c, used, true);
       else if(g_nSetups > 0)
-         DrawOneSetup(g_setups[g_nSetups - 1], t, h, l, c, rates_total, true);
+         DrawOneSetup(g_setups[g_nSetups - 1], t, h, l, c, used, true);
    }
    else if(g_holdValid)
    {
@@ -880,16 +885,16 @@ int OnCalculate(const int rates_total,
          for(int i = from; i < g_nSetups; i++)
          {
             if(g_setups[i].barTime == g_holdSetup.barTime) continue;
-            DrawOneSetup(g_setups[i], t, h, l, c, rates_total, false);
+            DrawOneSetup(g_setups[i], t, h, l, c, used, false);
          }
       }
-      DrawOneSetup(g_holdSetup, t, h, l, c, rates_total, true);
+      DrawOneSetup(g_holdSetup, t, h, l, c, used, true);
    }
    else if(g_nSetups > 0)
    {
       int from = MathMax(0, g_nSetups - MathMax(1, InpHistoryCount));
       for(int i = from; i < g_nSetups; i++)
-         DrawOneSetup(g_setups[i], t, h, l, c, rates_total, (i == g_nSetups - 1));
+         DrawOneSetup(g_setups[i], t, h, l, c, used, (i == g_nSetups - 1));
    }
 
    // Always refresh live broker position (same account on other PCs)
@@ -933,7 +938,7 @@ int OnCalculate(const int rates_total,
       {
          int stCode = 0;
          int exitBar = -1;
-         string stTxt = StatusText(panelSetup, h, l, c, rates_total, stCode, exitBar);
+         string stTxt = StatusText(panelSetup, h, l, c, used, stCode, exitBar);
          DrawInfoPanel(panelSetup, stTxt, stCode, bid);
 
          // Release dead holds immediately

@@ -2,38 +2,34 @@
 
 | File | Role |
 |------|------|
-| `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.35 (build 235) |
-| `TRH_AutoTrade.mq5` | **EA** v3.40 |
-| `TRH_Engine.mqh` | Shared Engine v233 |
+| `TRH_Trading_Room_Hunter.mq5` | **Indicator** v2.36 (build **236**) |
+| `TRH_AutoTrade.mq5` | **EA** **v3.52** |
+| `TRH_Engine.mqh` | Shared Engine **v234** |
 
-## Why your chart still showed the bad setup
+## Why Mode B showed on TradingView but not MT5
 
-Your screenshot panel says **`TRH v233 · Eng231`** — that is the **old** build. It accepted the **0.81pt micro FVG** (ENTRY 4327.01 / SL 4330.43 → SL HIT).
+Your MT5 panel still said **`TRH V2.33`** while EA was v3.51 — old indicator binary.
 
-TradingView used the quality gap (ENTRY **4328.01** / SL **4331.99** → TP HIT).
+Worse: Engine **dropped Mode B** when Mode A confirmed inside the 50-bar cooldown (or killed an in-progress B path). TradingView **keeps both**. Result: TV SHORT **B · FVG** (e.g. 4473.60 / 4476.25 / 4467.25) while MT5 only showed an old **A · SWEEP**.
 
-MT5 also **keeps old input values** after recompile. Even with newer source, a chart that once had `OnlyLast=true` or a weak Min FVG will keep those values unless you remove/re-add the indicator — or the engine force-clamps them (v235).
-
-## v235 / Eng233 fixes
+## v236 / Eng234 / EA 3.52
 
 | Fix | Effect |
 |-----|--------|
-| **Force-clamp** Min FVG ≥ **1.50pt** | Stale inputs cannot recreate the 0.81pt trap |
-| Clamp minRisk ≥ **1.55 ATR**, SL pad ≥ **0.45 ATR** | Survive the ~4330.5–4331 wick |
-| **History always drawn** | Ignores stale `OnlyLast=true` |
-| Upgrade FVG while waiting retest | Prefer larger quality gap |
-| Panel must read | **`TRH v235 · Eng233 · Q-FVG`** |
+| **Keep Mode B with Mode A** | Confirmed B·FVG is never replaced/dropped by A |
+| Don’t kill in-progress Mode B when A fires | Pine parity |
+| Lookback **2500** bars | GOLD M1 stays fast |
+| Trailing TP (from 3.51) | Same-ticket close/lock only — no hedge opens |
+| Panel must read | **`TRH v236 · Eng234 · Q-FVG`** |
 
 ## Fresh install (required)
 
-1. **Remove** TRH indicator + EA from the chart
-2. Delete old `TRH_Trading_Room_Hunter.ex5` / `TRH_AutoTrade.ex5` in `MQL5/Indicators` and `MQL5/Experts`
-3. Copy these three files from the zip into the same folder:
-   - `TRH_Engine.mqh`
-   - `TRH_Trading_Room_Hunter.mq5`
-   - `TRH_AutoTrade.mq5`
-4. Compile **both** mq5 files in MetaEditor (F7)
-5. Re-attach indicator — panel **must** say **`TRH v235 · Eng233 · Q-FVG`**
-6. If panel still says v233 / Eng231 → wrong folder / old `.ex5` still loaded
+1. **Remove** TRH indicator + EA from the chart  
+2. Delete old `.ex5` files  
+3. Copy `TRH_Engine.mqh` + both `.mq5` into the **same** folder  
+4. Compile both (F7)  
+5. Re-attach — panel **must** say **`TRH v236 · Eng234`**  
+6. Detection Mode = **A + B (Both)**  
+7. EA comment must say **v3.52**
 
-That `FVG 4326.61→4327.42` setup must **not** appear anymore.
+If panel still says v233 / v235 → wrong folder / old `.ex5`.

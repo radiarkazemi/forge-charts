@@ -5,7 +5,7 @@
 #ifndef TRH_ENGINE_MQH
 #define TRH_ENGINE_MQH
 
-#define TRH_ENGINE_VERSION 233
+#define TRH_ENGINE_VERSION 234
 #define TRH_MAX_PIVOTS 30
 #define TRH_ATR_LEN    14
 
@@ -1065,9 +1065,16 @@ int TrhMergeScans(TrhSetup &a[], const int na,
    {
       if(merged[i].barIndex - lastBar < cfg.cooldownBars && lastBar >= 0)
       {
-         // Inside cooldown: keep / upgrade to higher priority (A > B > C).
-         // Lets a later Mode A replace an earlier Mode C (BTB confirms faster).
-         if(nOut > 0 && TrhModePreferred(merged[i].setupMode, outSetups[nOut - 1].setupMode))
+         // Pine keeps both modes; append when the newer bar is strictly later,
+         // otherwise skip exact-same-bar duplicates of a weaker mode.
+         if(merged[i].barIndex > lastBar)
+         {
+            ArrayResize(outSetups, nOut + 1);
+            outSetups[nOut] = merged[i];
+            lastBar = merged[i].barIndex;
+            nOut++;
+         }
+         else if(nOut > 0 && TrhModePreferred(merged[i].setupMode, outSetups[nOut - 1].setupMode))
          {
             outSetups[nOut - 1] = merged[i];
             lastBar = merged[i].barIndex;
@@ -1384,29 +1391,22 @@ int TrhScanABUnified(const int rates,
 
       if(newDir != 0)
       {
-         bool kept = false;
-         // If replacing weaker setup inside cooldown window, overwrite last out
-         if(nSetups > 0 && (i - lastSetupBar) < cfg.cooldownBars &&
-            TrhModePreferred(s.setupMode, outSetups[nSetups - 1].setupMode))
-         {
-            outSetups[nSetups - 1] = s;
-            kept = true;
-         }
-         else if(nSetups == 0 || (i - lastSetupBar) >= cfg.cooldownBars)
-         {
-            ArrayResize(outSetups, nSetups + 1);
-            outSetups[nSetups] = s;
-            nSetups++;
-            kept = true;
-         }
-         // else: weaker/equal inside cooldown — drop (Pine keeps stronger/first)
-
-         if(kept)
-         {
-            lastSetupBar = i;
-            lastModeId = s.setupMode;
+         // Pine parity: cooldown only gates STARTING a new A/B path (coolA/coolB).
+         // Once a path confirms, ALWAYS keep the setup — do NOT drop Mode B when
+         // Mode A fires later inside cooldown, and do NOT kill an in-progress Mode B.
+         // Old bug: Mode A replaced/dropped Mode B → TV showed B·FVG, MT5 only A·SWEEP.
+         ArrayResize(outSetups, nSetups + 1);
+         outSetups[nSetups] = s;
+         nSetups++;
+         lastSetupBar = i;
+         lastModeId = s.setupMode;
+         // Clear only the mode that just fired; leave the other path running
+         if(s.setupMode == TRH_MODE_CLASSIC)
             pendDir = 0;
-            if(s.setupMode == TRH_MODE_CLASSIC) { bPhase = 0; bDir = 0; }
+         else if(s.setupMode == TRH_MODE_FVG)
+         {
+            bPhase = 0;
+            bDir = 0;
          }
       }
    }
@@ -1444,6 +1444,43 @@ int TrhScanByMode(const int rates,
    return 0;
 }
 
+// Copy the last `lookback` bars into chronological (oldest→newest) arrays.
+int TrhCopyWindow(const int rates,
+                  const datetime &time[],
+                  const double &open[], const double &high[],
+                  const double &low[], const double &close[],
+                  const int lookback,
+                  datetime &t[], double &o[], double &h[], double &l[], double &c[])
+{
+   int used = rates;
+   if(lookback > 0 && lookback < rates)
+      used = lookback;
+   if(used < 1) return 0;
+
+   ArrayResize(t, used); ArrayResize(o, used); ArrayResize(h, used);
+   ArrayResize(l, used); ArrayResize(c, used);
+
+   bool asSeries = (rates > 1 && time[0] > time[rates - 1]);
+   if(!asSeries)
+   {
+      int src0 = rates - used;
+      for(int i = 0; i < used; i++)
+      {
+         int s = src0 + i;
+         t[i] = time[s]; o[i] = open[s]; h[i] = high[s];
+         l[i] = low[s]; c[i] = close[s];
+      }
+      return used;
+   }
+   for(int i = 0; i < used; i++)
+   {
+      int src = used - 1 - i;
+      t[i] = time[src]; o[i] = open[src]; h[i] = high[src];
+      l[i] = low[src]; c[i] = close[src];
+   }
+   return used;
+}
+
 // Copy MT5 series (newest-first or oldest-first) into oldest->newest buffers.
 void TrhNormalizeBars(const int rates,
                       const datetime &time[],
@@ -1457,22 +1494,7 @@ void TrhNormalizeBars(const int rates,
                       double &l[],
                       double &c[])
 {
-   ArrayResize(t, rates);
-   ArrayResize(o, rates);
-   ArrayResize(h, rates);
-   ArrayResize(l, rates);
-   ArrayResize(c, rates);
-
-   bool asSeries = (rates > 1 && time[0] > time[rates - 1]);
-   for(int i = 0; i < rates; i++)
-   {
-      int src = asSeries ? (rates - 1 - i) : i;
-      t[i] = time[src];
-      o[i] = open[src];
-      h[i] = high[src];
-      l[i] = low[src];
-      c[i] = close[src];
-   }
+   TrhCopyWindow(rates, time, open, high, low, close, rates, t, o, h, l, c);
 }
 
 #endif
