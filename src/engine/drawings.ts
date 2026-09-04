@@ -169,7 +169,49 @@ export function resolveFibExtStyle(d: Drawing): FibRetraceStyle {
 export function defaultFibStyleForKind(kind: DrawingKind): FibRetraceStyle | undefined {
   if (kind === "fib") return defaultFibRetraceStyle();
   if (kind === "fibext") return defaultFibExtensionStyle();
+  if (kind === "fibchannel") return defaultFibChannelStyle();
   return undefined;
+}
+
+/** Supercharts default Fib Channel levels (D-FI-03). */
+const DEFAULT_FIB_CHANNEL_LEVELS: FibLevelStyle[] = [
+  { ratio: 0, visible: true, color: "#787b86", fill: "rgba(120,123,134,0.10)" },
+  { ratio: 0.236, visible: true, color: "#f23645", fill: "rgba(242,54,69,0.08)" },
+  { ratio: 0.382, visible: true, color: "#81c784", fill: "rgba(129,199,132,0.10)" },
+  { ratio: 0.5, visible: true, color: "#4caf50", fill: "rgba(76,175,80,0.10)" },
+  { ratio: 0.618, visible: true, color: "#089981", fill: "rgba(8,153,129,0.12)" },
+  { ratio: 0.786, visible: true, color: "#26a69a", fill: "rgba(38,166,154,0.08)" },
+  { ratio: 1, visible: true, color: "#2962ff", fill: "rgba(41,98,255,0.10)" },
+  { ratio: 1.618, visible: true, color: "#ab47bc", fill: "rgba(171,71,188,0.08)" },
+  { ratio: 2.618, visible: true, color: "#f57c00", fill: "rgba(245,124,0,0.06)" },
+];
+
+export function defaultFibChannelStyle(): FibRetraceStyle {
+  return {
+    levels: DEFAULT_FIB_CHANNEL_LEVELS.map((l) => ({ ...l })),
+    showTrendLine: true,
+    trendColor: "#5b9cf6",
+    trendWidth: 1,
+    trendStyle: "dashed",
+    extendLeft: false,
+    extendRight: true,
+    reverse: false,
+    showBackground: true,
+    showPrices: true,
+    showLevels: true,
+    levelsWidth: 1,
+    levelsStyle: "solid",
+  };
+}
+
+export function resolveFibChannelStyle(d: Drawing): FibRetraceStyle {
+  const base = defaultFibChannelStyle();
+  if (!d.fib) return base;
+  return {
+    ...base,
+    ...d.fib,
+    levels: (d.fib.levels?.length ? d.fib.levels : base.levels).map((l) => ({ ...l })),
+  };
 }
 
 export function formatFibRatio(ratio: number): string {
@@ -224,7 +266,7 @@ export function paintDrawing(
   const kind = d.kind;
   if (kind === "fib") paintFibRetrace(ctx, d, pts, rect, precision, selected);
   else if (kind === "fibext") paintFibExtension(ctx, d, pts, rect, precision, selected);
-  else if (kind === "fibchannel") paintFibChannel(ctx, pts, rect, selected);
+  else if (kind === "fibchannel") paintFibChannel(ctx, d, pts, rect, precision, selected);
   else if (kind === "fibtimezone") paintFibTimeZone(ctx, pts, rect);
   else if (kind === "fibfan") paintFibFan(ctx, pts, rect);
   else if (kind === "fibtime") paintFibTime(ctx, pts, rect);
@@ -311,6 +353,26 @@ export function hitTestDrawing(d: Drawing, pts: Pt[], x: number, y: number, rect
   if (kind === "hline" || kind === "horzray") return Math.abs(y - pts[0].y) < HIT && (kind === "hline" || x >= pts[0].x - HIT);
   if (kind === "vline") return Math.abs(x - pts[0].x) < HIT;
   if (kind === "crossline") return Math.abs(y - pts[0].y) < HIT || Math.abs(x - pts[0].x) < HIT;
+  if (kind === "fibchannel" && pts.length >= 2) {
+    const style = resolveFibChannelStyle(d);
+    const a = pts[0];
+    const b = pts[1];
+    const c = pts[2];
+    let ox = c ? c.x - a.x : 0;
+    let oy = c ? c.y - a.y : (b.y - a.y) * 0.25;
+    if (style.reverse) {
+      ox = -ox;
+      oy = -oy;
+    }
+    if (style.showTrendLine && distToSegment(x, y, a.x, a.y, b.x, b.y) < HIT) return true;
+    return style.levels.some((lvl) => {
+      if (!lvl.visible) return false;
+      const p = { x: a.x + ox * lvl.ratio, y: a.y + oy * lvl.ratio };
+      const q = { x: b.x + ox * lvl.ratio, y: b.y + oy * lvl.ratio };
+      const { s, e } = extendedEnds(p, q, rect, style.extendLeft, style.extendRight);
+      return distToSegment(x, y, s.x, s.y, e.x, e.y) < HIT;
+    });
+  }
   if (kind === "fib" && pts.length >= 2) {
     const style = resolveFibStyle(d);
     const a = style.reverse ? pts[1] : pts[0];
@@ -396,15 +458,21 @@ function handle(ctx: CanvasRenderingContext2D, p: Pt): void {
   ctx.restore();
 }
 
-function extend(ctx: CanvasRenderingContext2D, a: Pt, b: Pt, rect: ViewRect, left: boolean, right: boolean): void {
+function extendedEnds(a: Pt, b: Pt, rect: ViewRect, left: boolean, right: boolean): { s: Pt; e: Pt } {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const len = Math.hypot(dx, dy) || 1;
   const ux = dx / len;
   const uy = dy / len;
   const reach = Math.hypot(rect.w, rect.h) * 2;
-  const s = left ? { x: a.x - ux * reach, y: a.y - uy * reach } : a;
-  const e = right ? { x: b.x + ux * reach, y: b.y + uy * reach } : b;
+  return {
+    s: left ? { x: a.x - ux * reach, y: a.y - uy * reach } : { ...a },
+    e: right ? { x: b.x + ux * reach, y: b.y + uy * reach } : { ...b },
+  };
+}
+
+function extend(ctx: CanvasRenderingContext2D, a: Pt, b: Pt, rect: ViewRect, left: boolean, right: boolean): void {
+  const { s, e } = extendedEnds(a, b, rect, left, right);
   stroke(ctx, s, e);
 }
 
@@ -543,23 +611,83 @@ function paintFibExtension(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[],
   }
 }
 
-function paintFibChannel(ctx: CanvasRenderingContext2D, pts: Pt[], rect: ViewRect, selected: boolean): void {
+function paintFibChannel(
+  ctx: CanvasRenderingContext2D,
+  d: Drawing,
+  pts: Pt[],
+  rect: ViewRect,
+  precision: number,
+  selected: boolean,
+): void {
   if (pts.length < 2) return;
+  const style = resolveFibChannelStyle(d);
   const a = pts[0];
   const b = pts[1];
   const c = pts[2];
-  const ox = c ? c.x - a.x : 0;
-  const oy = c ? c.y - a.y : (b.y - a.y) * 0.25;
-  ctx.save();
-  ctx.setLineDash([4, 3]);
-  ctx.strokeStyle = selected ? "#2962ff" : "#5b9cf6";
-  stroke(ctx, a, b);
-  ctx.restore();
-  for (const lvl of FAN_RATIOS) {
-    const p = { x: a.x + ox * lvl, y: a.y + oy * lvl };
-    const q = { x: b.x + ox * lvl, y: b.y + oy * lvl };
-    ctx.strokeStyle = FIB_RETRACE[Math.min(FIB_RETRACE.length - 1, Math.round(lvl * 6))].color;
-    extend(ctx, p, q, rect, false, true);
+  let ox = c ? c.x - a.x : 0;
+  let oy = c ? c.y - a.y : (b.y - a.y) * 0.25;
+  if (style.reverse) {
+    ox = -ox;
+    oy = -oy;
+  }
+
+  if (style.showTrendLine) {
+    ctx.save();
+    applyLineStyle(ctx, style.trendStyle);
+    ctx.strokeStyle = selected ? "#2962ff" : style.trendColor;
+    ctx.lineWidth = style.trendWidth;
+    stroke(ctx, a, b);
+    ctx.restore();
+  }
+
+  const visible = style.levels.filter((l) => l.visible).sort((u, v) => u.ratio - v.ratio);
+  const p0 = d.points[0]?.price ?? 0;
+  const pC = d.points[2]?.price ?? p0;
+  const priceDelta = style.reverse ? p0 - pC : pC - p0;
+
+  if (style.showBackground && visible.length >= 2) {
+    for (let i = 0; i < visible.length - 1; i++) {
+      const r0 = visible[i].ratio;
+      const r1 = visible[i + 1].ratio;
+      const p0pt = { x: a.x + ox * r0, y: a.y + oy * r0 };
+      const q0pt = { x: b.x + ox * r0, y: b.y + oy * r0 };
+      const p1pt = { x: a.x + ox * r1, y: a.y + oy * r1 };
+      const q1pt = { x: b.x + ox * r1, y: b.y + oy * r1 };
+      const e0 = extendedEnds(p0pt, q0pt, rect, style.extendLeft, style.extendRight);
+      const e1 = extendedEnds(p1pt, q1pt, rect, style.extendLeft, style.extendRight);
+      ctx.fillStyle = visible[i].fill;
+      ctx.beginPath();
+      ctx.moveTo(e0.s.x, e0.s.y);
+      ctx.lineTo(e0.e.x, e0.e.y);
+      ctx.lineTo(e1.e.x, e1.e.y);
+      ctx.lineTo(e1.s.x, e1.s.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  ctx.font = AXIS_FONT;
+  ctx.textAlign = "left";
+  for (const lvl of visible) {
+    const p = { x: a.x + ox * lvl.ratio, y: a.y + oy * lvl.ratio };
+    const q = { x: b.x + ox * lvl.ratio, y: b.y + oy * lvl.ratio };
+    const { s, e } = extendedEnds(p, q, rect, style.extendLeft, style.extendRight);
+    ctx.save();
+    applyLineStyle(ctx, style.levelsStyle);
+    ctx.strokeStyle = lvl.color;
+    ctx.lineWidth =
+      style.levelsWidth * (lvl.ratio === 0 || lvl.ratio === 1 || Math.abs(lvl.ratio - 0.618) < 1e-6 ? 1.35 : 1);
+    stroke(ctx, s, e);
+    ctx.restore();
+
+    if (!style.showLevels && !style.showPrices) continue;
+    const price = p0 + priceDelta * lvl.ratio;
+    const parts: string[] = [];
+    if (style.showLevels) parts.push(formatFibRatio(lvl.ratio));
+    if (style.showPrices) parts.push(`(${formatPrice(price, precision)})`);
+    const tag = parts.length === 2 ? `${parts[0]} ${parts[1]}` : parts[0];
+    ctx.fillStyle = lvl.color;
+    ctx.fillText(tag, e.x + 6, e.y - 3);
   }
 }
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { indicatorInputs, indicatorTitle, toolLabelForDraw } from "../catalog";
 import type { ChartEngine } from "../engine/ChartEngine";
-import { defaultFibExtensionStyle, defaultFibRetraceStyle, formatFibRatio, resolveFibExtStyle, resolveFibStyle } from "../engine/drawings";
+import { defaultFibChannelStyle, defaultFibExtensionStyle, defaultFibRetraceStyle, formatFibRatio, resolveFibChannelStyle, resolveFibExtStyle, resolveFibStyle } from "../engine/drawings";
 import type {
   ChartSource,
   Drawing,
@@ -234,7 +234,7 @@ function DrawingPropertiesDialog({ engine, drawing }: { engine: ChartEngine | nu
       </div>
       {tab === "Style" ? (
         <div className="ind-tab-panel">
-          {drawing.kind === "fib" || drawing.kind === "fibext" ? (
+          {drawing.kind === "fib" || drawing.kind === "fibext" || drawing.kind === "fibchannel" ? (
             <FibRetraceStylePanel engine={engine} drawing={drawing} />
           ) : (
             <>
@@ -388,8 +388,14 @@ function DrawingPropertiesDialog({ engine, drawing }: { engine: ChartEngine | nu
 
 function FibRetraceStylePanel({ engine, drawing }: { engine: ChartEngine | null; drawing: Drawing }) {
   const isExt = drawing.kind === "fibext";
-  const fib = isExt ? resolveFibExtStyle(drawing) : resolveFibStyle(drawing);
-  const resetDefaults = () => (isExt ? defaultFibExtensionStyle() : defaultFibRetraceStyle());
+  const isChannel = drawing.kind === "fibchannel";
+  const fib = isExt
+    ? resolveFibExtStyle(drawing)
+    : isChannel
+      ? resolveFibChannelStyle(drawing)
+      : resolveFibStyle(drawing);
+  const resetDefaults = () =>
+    isExt ? defaultFibExtensionStyle() : isChannel ? defaultFibChannelStyle() : defaultFibRetraceStyle();
 
   const patchFib = (next: Partial<FibRetraceStyle>) => {
     engine?.updateDrawing(drawing.id, { fib: { ...fib, ...next } });
@@ -400,6 +406,8 @@ function FibRetraceStylePanel({ engine, drawing }: { engine: ChartEngine | null;
     patchFib({ levels });
   };
 
+  const trendLabel = isExt ? "Trend lines (A–B / B–C)" : isChannel ? "Base trend line (A–B)" : "Trend line";
+
   return (
     <div className="fib-style-panel">
       <label className="row check-row">
@@ -408,7 +416,7 @@ function FibRetraceStylePanel({ engine, drawing }: { engine: ChartEngine | null;
           checked={fib.showTrendLine}
           onChange={() => patchFib({ showTrendLine: !fib.showTrendLine })}
         />
-        {isExt ? "Trend lines (A–B / B–C)" : "Trend line"}
+        {trendLabel}
       </label>
       <label className="row">
         Trend style
