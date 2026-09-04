@@ -223,7 +223,7 @@ export type Drawing = {
   lineStyle?: LineStyle;
   /** Interval-bucket visibility; omitted means all on. */
   visibility?: DrawingVisibility;
-  /** Fib Retracement style (D-FI-01); omitted uses Supercharts defaults. */
+  /** Fib Retracement / Extension style (D-FI-01 / D-FI-02); omitted uses Supercharts defaults. */
   fib?: FibRetraceStyle;
 };
 

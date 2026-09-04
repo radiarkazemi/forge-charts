@@ -1,6 +1,6 @@
 import { intervalSeconds } from "../data/interval";
 import { chartStyleMatchesTheme, defaultChartStyle } from "../chartStyle";
-import { hitHandle, hitTestDrawing, isDrawingTool, isOpenEnded, neededPoints, paintDrawing, defaultFibRetraceStyle } from "./drawings";
+import { hitHandle, hitTestDrawing, isDrawingTool, isOpenEnded, neededPoints, paintDrawing, defaultFibStyleForKind } from "./drawings";
 import { bollinger, ema, heikinAshi, macd, rsi, sma } from "./indicators";
 import { clamp, formatPrice, formatTime, formatVolume, niceTicks, uid } from "./math";
 import { atr, stoch, vwap, wma } from "./studies";
@@ -513,7 +513,7 @@ export class ChartEngine {
       if (patch.points) next.points = patch.points.map((p) => ({ ...p }));
       if (patch.visibility) next.visibility = { ...DEFAULT_DRAWING_VISIBILITY, ...d.visibility, ...patch.visibility };
       if (patch.fib) {
-        const prev = d.fib ?? defaultFibRetraceStyle();
+        const prev = d.fib ?? defaultFibStyleForKind(d.kind) ?? defaultFibStyleForKind("fib")!;
         next.fib = {
           ...prev,
           ...patch.fib,
@@ -2258,7 +2258,7 @@ export class ChartEngine {
         text,
         lineWidth: 1,
         lineStyle: "solid",
-        fib: kind === "fib" ? defaultFibRetraceStyle() : undefined,
+        fib: defaultFibStyleForKind(kind),
       };
       if (neededPoints(kind) === 1) this.finishDraft();
     } else {
