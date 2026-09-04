@@ -100,12 +100,16 @@ export class ChartEngine {
   private draft: Drawing | null = null;
   private selectedId: string | null = null;
   private selectedIndicatorId: string | null = null;
-  private dragging: "pan" | "drawing" | "zoom" | "brush" | "priceAxis" | "timeAxis" | null = null;
+  private dragging: "pan" | "drawing" | "zoom" | "brush" | "priceAxis" | "timeAxis" | "pinch" | null = null;
   private dragHandle: number | null = null;
   private dragFrom: ChartPoint | null = null;
   private dragDirty = false;
   private dragLastX = 0;
   private dragLastY = 0;
+  private pointers = new Map<number, { x: number; y: number }>();
+  private pinchStartDist = 0;
+  private pinchStartCount = 0;
+  private pinchAnchor = 0;
   private priceSpan: number | null = null;
   private priceMid: number | null = null;
   private demoTrail: Array<{ x: number; y: number; t: number }> = [];
@@ -132,6 +136,7 @@ export class ChartEngine {
     this.canvas = document.createElement("canvas");
     this.canvas.className = "forge-canvas";
     this.canvas.tabIndex = 0;
+    this.canvas.style.touchAction = "none";
     container.appendChild(this.canvas);
     const ctx = this.canvas.getContext("2d");
     if (!ctx) throw new Error("Canvas 2D is not available");
@@ -149,6 +154,17 @@ export class ChartEngine {
   };
 
   getSnapshot = (): EngineSnapshot => this.snapshot;
+
+  /** View metrics for diagnostics / embed hosts. */
+  getViewMetrics(): { viewCount: number; viewEnd: number; fitMode: boolean; bars: number; tool: Tool } {
+    return {
+      viewCount: this.viewCount,
+      viewEnd: this.viewEnd,
+      fitMode: this.fitMode,
+      bars: this.bars.length,
+      tool: this.tool,
+    };
+  }
 
   private buildSnapshot(): EngineSnapshot {
     return {
@@ -197,10 +213,19 @@ export class ChartEngine {
     } else {
       this.bars = bars;
     }
+    this.applyMobileDefaultView();
     this.snapToLatest();
     this.hover = this.bars.at(-1) ?? null;
     this.emit();
     this.draw();
+  }
+
+  private applyMobileDefaultView(): void {
+    if (!this.fitMode) return;
+    const w = this.container.clientWidth;
+    if (w <= 0 || w >= 520) return;
+    const target = Math.round((w - this.priceAxisWidth()) / 3.4);
+    this.viewCount = this.clampViewCount(clamp(target, 48, 120));
   }
 
   setSymbol(symbol: SymbolInfo, bars: Bar[]): void {
@@ -468,7 +493,6 @@ export class ChartEngine {
   resetPriceScale(): void {
     this.priceSpan = null;
     this.priceMid = null;
-    this.fitMode = true;
     this.emit();
     this.draw();
   }
@@ -714,12 +738,20 @@ export class ChartEngine {
     this.canvas.addEventListener("pointerdown", this.onDown);
     this.canvas.addEventListener("pointermove", this.onMove);
     this.canvas.addEventListener("pointerup", this.onUp);
+    this.canvas.addEventListener("pointercancel", this.onUp);
     this.canvas.addEventListener("pointerleave", this.onLeave);
     this.canvas.addEventListener("wheel", this.onWheel, { passive: false });
     this.canvas.addEventListener("dblclick", this.onDbl);
     this.canvas.addEventListener("keydown", this.onKey);
     this.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+    // iOS/Android: block page scroll/bounce while dragging the chart
+    this.canvas.addEventListener("touchstart", this.onTouchGuard, { passive: false });
+    this.canvas.addEventListener("touchmove", this.onTouchGuard, { passive: false });
   }
+
+  private onTouchGuard = (e: TouchEvent): void => {
+    if (e.touches.length >= 1) e.preventDefault();
+  };
 
   private resize(): void {
     const dpr = window.devicePixelRatio || 1;
@@ -730,11 +762,8 @@ export class ChartEngine {
     this.canvas.style.width = `${w}px`;
     this.canvas.style.height = `${h}px`;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (this.fitMode && w > 0 && w < 520) {
-      const target = Math.round((w - this.priceAxisWidth()) / 3.4);
-      this.viewCount = this.clampViewCount(clamp(target, 48, 120));
-      this.snapToLatest();
-    }
+    // Do NOT reset viewCount on every resize — mobile browser chrome
+    // show/hide fires ResizeObserver constantly and would undo pan/zoom.
     this.draw();
   }
 
@@ -1763,9 +1792,39 @@ export class ChartEngine {
 
   private hitZone(x: number, y: number): "price" | "time" | "chart" {
     const { chart } = this.layout();
-    if (x >= chart.w) return "price";
-    if (y >= chart.h) return "time";
+    // Widen price/time hit targets on phones so scale gestures are usable.
+    const pricePad = this.container.clientWidth < 520 ? 12 : 0;
+    const timePad = this.container.clientWidth < 520 ? 10 : 0;
+    if (x >= chart.w - pricePad) return "price";
+    if (y >= chart.h - timePad) return "time";
     return "chart";
+  }
+
+  private pointerDistance(): number {
+    const pts = [...this.pointers.values()];
+    if (pts.length < 2) return 0;
+    const dx = pts[0].x - pts[1].x;
+    const dy = pts[0].y - pts[1].y;
+    return Math.hypot(dx, dy);
+  }
+
+  private pointerMidpoint(): { x: number; y: number } {
+    const pts = [...this.pointers.values()];
+    if (pts.length < 2) return pts[0] ?? { x: 0, y: 0 };
+    return { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+  }
+
+  private beginPinch(): void {
+    const dist = this.pointerDistance();
+    if (dist < 8) return;
+    this.dragging = "pinch";
+    this.pinchStartDist = dist;
+    this.pinchStartCount = this.viewCount;
+    const mid = this.pointerMidpoint();
+    const main = this.layout().main;
+    const frac = clamp((mid.x - main.x) / Math.max(1, main.w), 0, 1);
+    this.pinchAnchor = this.viewStart() + frac * this.viewCount;
+    this.fitMode = false;
   }
 
   private ensurePriceSpan(): void {
@@ -1795,9 +1854,23 @@ export class ChartEngine {
   }
 
   private onDown = (e: PointerEvent): void => {
-    this.canvas.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try {
+      this.canvas.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
     const { x, y } = this.local(e);
     this.mouse = { x, y };
+
+    if (this.pointers.size >= 2) {
+      this.beginPinch();
+      this.emit();
+      this.draw();
+      return;
+    }
+
     if (this.replaySelecting) {
       const idx = this.replayIndexAtClient(e.clientX, e.clientY);
       if (idx != null) this.selectReplayStart(idx);
@@ -1900,8 +1973,27 @@ export class ChartEngine {
   };
 
   private onMove = (e: PointerEvent): void => {
+    if (this.pointers.has(e.pointerId)) {
+      this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
     const { x, y } = this.local(e);
     this.mouse = { x, y };
+
+    if (this.pointers.size >= 2 || this.dragging === "pinch") {
+      if (this.dragging !== "pinch") this.beginPinch();
+      if (this.dragging === "pinch" && this.pinchStartDist > 0) {
+        const dist = this.pointerDistance();
+        if (dist > 8) {
+          const ratio = this.pinchStartDist / dist;
+          this.setViewCount(this.pinchStartCount * ratio, this.pinchAnchor);
+          this.fitMode = false;
+        }
+      }
+      this.draw();
+      this.emit();
+      return;
+    }
+
     if (this.replaySelecting) {
       const idx = this.replayIndexAtClient(e.clientX, e.clientY);
       this.setReplayHoverIndex(idx);
@@ -1942,7 +2034,7 @@ export class ChartEngine {
       this.dragLastX = x;
       this.dragLastY = y;
       const slot = this.slotWidth(this.layout().main);
-      this.viewEnd -= dx / slot;
+      this.viewEnd -= dx / Math.max(0.001, slot);
       this.clampPan();
       this.fitMode = false;
       if (Math.abs(dy) > 0) {
@@ -1984,7 +2076,33 @@ export class ChartEngine {
     this.emit();
   };
 
-  private onUp = (): void => {
+  private onUp = (e?: PointerEvent): void => {
+    if (e) {
+      this.pointers.delete(e.pointerId);
+      try {
+        this.canvas.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      if (this.pointers.size >= 2) {
+        this.beginPinch();
+        return;
+      }
+      if (this.pointers.size === 1 && this.dragging === "pinch") {
+        // Drop back to pan with the remaining finger
+        const rem = [...this.pointers.entries()][0];
+        const r = this.canvas.getBoundingClientRect();
+        this.dragging = "pan";
+        this.dragLastX = rem[1].x - r.left;
+        this.dragLastY = rem[1].y - r.top;
+        this.emit();
+        this.draw();
+        return;
+      }
+    } else {
+      this.pointers.clear();
+    }
+
     if (this.dragging === "zoom" && this.draft && this.draft.points.length >= 2) {
       this.viewCount = this.clampViewCount(this.viewCount * 0.55);
       this.draft = null;
@@ -1994,11 +2112,15 @@ export class ChartEngine {
     this.dragHandle = null;
     this.dragFrom = null;
     this.dragDirty = false;
+    this.pinchStartDist = 0;
     this.emit();
     this.draw();
   };
 
-  private onLeave = (): void => {
+  private onLeave = (e: PointerEvent): void => {
+    // Keep active drag alive while pointer is captured (mobile finger slides).
+    if (this.dragging && this.pointers.has(e.pointerId)) return;
+    if (this.dragging) return;
     this.mouse = null;
     this.canvas.style.cursor = "crosshair";
     this.draw();

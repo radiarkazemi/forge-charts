@@ -240,6 +240,7 @@ export default function App() {
     const eng = new ChartEngine(host, symbol);
     engineRef.current = eng;
     setEngine(eng);
+    (window as unknown as { __forgeEngine?: ChartEngine }).__forgeEngine = eng;
     if (boot.theme) eng.setTheme(boot.theme);
     void attachFeed(symbol, boot.interval, "interval");
     postToParent(
@@ -256,6 +257,8 @@ export default function App() {
       unsubRef.current();
       eng.destroy();
       engineRef.current = null;
+      const w = window as unknown as { __forgeEngine?: ChartEngine };
+      if (w.__forgeEngine === eng) delete w.__forgeEngine;
       setEngine(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

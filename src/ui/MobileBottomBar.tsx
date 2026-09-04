@@ -155,6 +155,15 @@ export function MobileMoreSheet({
           <button type="button" onClick={() => run(() => engine?.redo())}>
             <span>↻</span>Redo
           </button>
+          <button type="button" onClick={() => run(() => engine?.zoom(1))}>
+            <span>＋</span>Zoom in
+          </button>
+          <button type="button" onClick={() => run(() => engine?.zoom(-1))}>
+            <span>－</span>Zoom out
+          </button>
+          <button type="button" onClick={() => run(() => engine?.resetPriceScale())}>
+            <span>A</span>Auto scale
+          </button>
           <button
             type="button"
             onClick={() =>
