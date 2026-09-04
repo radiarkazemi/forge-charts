@@ -78,7 +78,8 @@ export class ChartEngine {
     showBarChange: true,
     showWatermark: true,
     showCountdown: true,
-    showHighLow: false,
+    showHighLow: true,
+    showPrevDayClose: true,
     showNavButtons: true,
     bgColor: "",
     gridColor: "",
@@ -1166,7 +1167,9 @@ export class ChartEngine {
       this.paintSeries(layout.main, bars, range, pal);
       this.paintMainIndicators(layout.main, bars, range);
       this.paintCompare(layout.main, bars, pal);
+      this.paintPrevDayClose(layout.main, bars, range, pal);
       this.paintPriceLine(layout.main, bars, range, pal);
+      this.paintHighLowLabels(layout.main, bars, range, pal);
     }
     for (const extra of layout.extras) this.paintPane(extra.rect, extra.ind, pal);
     if (!this.hideDrawings) this.paintDrawings(layout.main, bars.length ? bars : this.bars.slice(-40), range);
@@ -1578,6 +1581,103 @@ export class ChartEngine {
     ctx.lineTo(rect.x + rect.w, y);
     ctx.stroke();
     ctx.setLineDash([]);
+  }
+
+  /** V-07 — previous trading day close line (TradingView-style). */
+  private paintPrevDayClose(
+    rect: Rect,
+    bars: Bar[],
+    range: { min: number; max: number },
+    pal: (typeof palettes)["dark"],
+  ): void {
+    if (!this.canvasSettings.showPrevDayClose) return;
+    const px = this.previousDayClose();
+    if (px == null || !Number.isFinite(px)) return;
+    const y = this.yOf(this.scaled(px, bars), range.min, range.max, rect);
+    if (y < rect.y - 2 || y > rect.y + rect.h + 2) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.setLineDash([2, 4]);
+    ctx.strokeStyle = pal.muted;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(rect.x, y + 0.5);
+    ctx.lineTo(rect.x + rect.w, y + 0.5);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const label = `PClose ${formatPrice(px, this.symbol.pricePrecision)}`;
+    ctx.font = AXIS_FONT;
+    const tw = ctx.measureText(label).width + 8;
+    const lx = rect.x + 6;
+    const ly = Math.max(rect.y + 12, Math.min(rect.y + rect.h - 4, y - 4));
+    ctx.fillStyle = this.theme === "dark" ? "rgba(30,34,45,0.92)" : "rgba(248,249,253,0.94)";
+    ctx.fillRect(lx, ly - 11, tw, 14);
+    ctx.fillStyle = pal.muted;
+    ctx.textAlign = "left";
+    ctx.fillText(label, lx + 4, ly);
+    ctx.restore();
+  }
+
+  private previousDayClose(): number | null {
+    if (this.bars.length < 2) return null;
+    const last = this.bars[this.bars.length - 1]!;
+    const lastDay = Math.floor(last.time / 86400);
+    for (let i = this.bars.length - 2; i >= 0; i--) {
+      const bar = this.bars[i]!;
+      if (Math.floor(bar.time / 86400) < lastDay) return bar.close;
+    }
+    return null;
+  }
+
+  /** V-06 — high / low of the visible range. */
+  private paintHighLowLabels(
+    rect: Rect,
+    bars: Bar[],
+    range: { min: number; max: number },
+    pal: (typeof palettes)["dark"],
+  ): void {
+    if (!this.canvasSettings.showHighLow || bars.length < 2) return;
+    let hi = -Infinity;
+    let lo = Infinity;
+    let hiI = 0;
+    let loI = 0;
+    bars.forEach((b, i) => {
+      if (b.high >= hi) {
+        hi = b.high;
+        hiI = i;
+      }
+      if (b.low <= lo) {
+        lo = b.low;
+        loI = i;
+      }
+    });
+    if (!Number.isFinite(hi) || !Number.isFinite(lo)) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.font = AXIS_FONT;
+    const drawTag = (price: number, index: number, kind: "H" | "L") => {
+      const x = this.xOf(index, bars.length, rect);
+      const y = this.yOf(this.scaled(price, bars), range.min, range.max, rect);
+      const text = `${kind} ${formatPrice(price, this.symbol.pricePrecision)}`;
+      const tw = ctx.measureText(text).width + 8;
+      const above = kind === "H";
+      const ty = above ? y - 6 : y + 12;
+      const lx = Math.max(rect.x + 2, Math.min(rect.x + rect.w - tw - 2, x - tw / 2));
+      ctx.fillStyle = this.theme === "dark" ? "rgba(30,34,45,0.9)" : "rgba(248,249,253,0.94)";
+      ctx.fillRect(lx, ty - 10, tw, 14);
+      ctx.strokeStyle = kind === "H" ? pal.up : pal.down;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x + 0.5, y);
+      ctx.lineTo(x + 0.5, above ? ty : ty - 10);
+      ctx.stroke();
+      ctx.fillStyle = kind === "H" ? pal.up : pal.down;
+      ctx.textAlign = "left";
+      ctx.fillText(text, lx + 4, ty);
+    };
+    drawTag(hi, hiI, "H");
+    drawTag(lo, loI, "L");
+    ctx.restore();
   }
 
   private paintPane(rect: Rect, ind: IndicatorInstance, pal: (typeof palettes)["dark"]): void {
@@ -2313,7 +2413,32 @@ export class ChartEngine {
     if (e.key === "+" || e.key === "=") this.zoom(1);
     if (e.key === "-") this.zoom(-1);
     if (e.key.toLowerCase() === "l") this.toggle("logScale");
-    if (e.key.toLowerCase() === "a") this.onDbl();
+    if (e.key.toLowerCase() === "a" && !e.altKey) this.onDbl();
+
+    // Supercharts drawing hotkeys (K-01…K-04)
+    if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      const k = e.key.toLowerCase();
+      if (k === "t") {
+        e.preventDefault();
+        this.setTool("trend");
+        return;
+      }
+      if (k === "h") {
+        e.preventDefault();
+        this.setTool("hline");
+        return;
+      }
+      if (k === "v") {
+        e.preventDefault();
+        this.setTool("vline");
+        return;
+      }
+      if (k === "f") {
+        e.preventDefault();
+        this.setTool("fib");
+        return;
+      }
+    }
   };
 
   private local(e: PointerEvent): { x: number; y: number } {

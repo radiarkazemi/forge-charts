@@ -398,6 +398,17 @@ export default function App() {
         setAlertOpen(true);
         return;
       }
+      // K-01…K-04 drawing tools (work without canvas focus)
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && !typing) {
+        const k = e.key.toLowerCase();
+        const tool =
+          k === "t" ? "trend" : k === "h" ? "hline" : k === "v" ? "vline" : k === "f" ? "fib" : null;
+        if (tool) {
+          e.preventDefault();
+          toolbarEngine?.setTool(tool);
+          return;
+        }
+      }
       if (boot.source === "external") return;
       if (symbolOpen || compareOpen || indOpen || alertOpen || settingsOpen || searchOpen) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -409,7 +420,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [alertOpen, boot.source, compareOpen, indOpen, searchOpen, settingsOpen, symbolOpen]);
+  }, [alertOpen, boot.source, compareOpen, indOpen, searchOpen, settingsOpen, symbolOpen, toolbarEngine]);
 
   useEffect(() => {
     if (!toast) return;

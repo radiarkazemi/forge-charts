@@ -20,7 +20,7 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | ID | Supercharts item | Forge | Notes |
 | --- | --- | --- | --- |
 | C-01 | App header (product, search, alerts, profile) | MATCH | Brand + Products/Community/Markets/Brokers/More menus, search (⌘K), alerts badge, local profile menu. Cloud account/sync remains OUT |
-| C-02 | Top chart toolbar | PARTIAL | T-02–T-15 advanced; remaining T-16+ still open |
+| C-02 | Top chart toolbar | MATCH | T-01–T-18 Supercharts toolbar controls |
 | C-03 | Left drawing toolbar | PARTIAL | See section 2 |
 | C-04 | Chart canvas + legend + overlays | PARTIAL | See section 4 |
 | C-05 | Right widget bar | PARTIAL | See section 8 |
@@ -260,9 +260,9 @@ Next drawing-parameter pass is **per tool** after DI-* is MATCH. Fib retracement
 | V-02 | Crosshair OHLC tracker box | PARTIAL |
 | V-03 | Crosshair styles (solid/dashed/dotted, width, color) | MISSING |
 | V-04 | Current price line + last-value label | PARTIAL |
-| V-05 | Countdown to bar close | PARTIAL |
-| V-06 | High/low of visible range labels | MISSING |
-| V-07 | Previous day close line | MISSING |
+| V-05 | Countdown to bar close | MATCH | UTC period remaining; ticks every second |
+| V-06 | High/low of visible range labels | MATCH | H/L tags on visible extremes; Scales settings toggle |
+| V-07 | Previous day close line | MATCH | Dashed PClose line + label; Scales settings toggle |
 | V-08 | Bid/ask lines | OUT |
 | V-09 | Watermark (symbol + interval) | PARTIAL |
 | V-10 | Grid (vert / horiz / both / none) | PARTIAL |
@@ -412,7 +412,7 @@ SMA, EMA, WMA, SMMA, VWMA, DEMA, TEMA, HMA, ALMA, LSMA, KAMA, McGinley Dynamic, 
 | S-02 | Data modification (session, dividends, futures back-adjust, precision, timezone) | MISSING |
 | S-03 | Status line (logo, title, OHLC, bar change, volume, last day change) | MATCH | Status line tab with OHLC / bar change / volume toggles |
 | S-04 | Scales and lines — price scale | MATCH | Scales tab with log / percent toggles |
-| S-05 | Scales and lines — labels and lines (countdown, high/low, bid/ask, pre/post) | PARTIAL | Countdown + high/low toggles; bid/ask / pre-post still open |
+| S-05 | Scales and lines — labels and lines (countdown, high/low, bid/ask, pre/post) | PARTIAL | Countdown + high/low + previous day close; bid/ask / pre-post still open |
 | S-06 | Time scale (weekdays, date format, pin left) | MISSING |
 | S-07 | Canvas background (solid / gradient) | MATCH | Canvas tab with background color picker |
 | S-08 | Grid | MATCH | Canvas tab show grid toggle + grid color |
@@ -433,12 +433,12 @@ SMA, EMA, WMA, SMMA, VWMA, DEMA, TEMA, HMA, ALMA, LSMA, KAMA, McGinley Dynamic, 
 
 | ID | Action | Forge |
 | --- | --- | --- |
-| K-01 | Alt+T Trend Line | MISSING |
-| K-02 | Alt+H Horizontal Line | MISSING |
-| K-03 | Alt+V Vertical Line | MISSING |
-| K-04 | Alt+F Fib Retracement | MISSING |
-| K-05 | Alt+I Indicators | MISSING |
-| K-06 | Alt+A Alert | MISSING |
+| K-01 | Alt+T Trend Line | MATCH |
+| K-02 | Alt+H Horizontal Line | MATCH |
+| K-03 | Alt+V Vertical Line | MATCH |
+| K-04 | Alt+F Fib Retracement | MATCH |
+| K-05 | Alt+I Indicators | MATCH |
+| K-06 | Alt+A Alert | MATCH |
 | K-07 | Shift+Alt+R Bar Replay | MATCH |
 | K-08 | Delete / Backspace remove selected | MATCH |
 | K-09 | Esc cancel / deselect | PARTIAL |

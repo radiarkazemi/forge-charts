@@ -199,6 +199,7 @@ export type CanvasSettings = {
   showWatermark: boolean;
   showCountdown: boolean;
   showHighLow: boolean;
+  showPrevDayClose: boolean;
   showNavButtons: boolean;
   bgColor: string;
   gridColor: string;
