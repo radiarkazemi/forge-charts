@@ -1,7 +1,17 @@
-import { useState } from "react";
-import { indicatorInputs, indicatorTitle } from "../catalog";
+import { useEffect, useState } from "react";
+import { indicatorInputs, indicatorTitle, toolLabelForDraw } from "../catalog";
 import type { ChartEngine } from "../engine/ChartEngine";
-import type { ChartSource, Drawing, IndicatorInstance, LineStyle } from "../engine/types";
+import { defaultFibRetraceStyle, formatFibRatio, resolveFibStyle } from "../engine/drawings";
+import type {
+  ChartSource,
+  Drawing,
+  DrawingVisibility,
+  FibLevelStyle,
+  FibRetraceStyle,
+  IndicatorInstance,
+  LineStyle,
+} from "../engine/types";
+import { DEFAULT_DRAWING_VISIBILITY } from "../engine/types";
 import { useEngine } from "./useEngine";
 
 const PALETTE = ["#2962ff", "#f23645", "#089981", "#ff9800", "#ab47bc", "#e1a218", "#26a69a", "#d1d4dc"];
@@ -14,11 +24,51 @@ const STYLES: { id: LineStyle; label: string }[] = [
 const SOURCES: ChartSource[] = ["open", "high", "low", "close", "hl2", "hlc3", "ohlc4"];
 const EDITOR_TABS = ["Inputs", "Style", "Visibility"] as const;
 type EditorTab = (typeof EDITOR_TABS)[number];
+const DRAW_TABS = ["Style", "Text", "Coordinates", "Visibility"] as const;
+type DrawTab = (typeof DRAW_TABS)[number];
+
+const VIS_ROWS: { key: keyof DrawingVisibility; label: string }[] = [
+  { key: "seconds", label: "Seconds" },
+  { key: "minutes", label: "Minutes" },
+  { key: "hours", label: "Hours" },
+  { key: "daily", label: "Daily" },
+  { key: "weekly", label: "Weekly" },
+  { key: "monthly", label: "Monthly" },
+];
+
+function hasTextField(kind: Drawing["kind"]): boolean {
+  return (
+    kind === "text" ||
+    kind === "anchoredtext" ||
+    kind === "note" ||
+    kind === "signpost" ||
+    kind === "callout" ||
+    kind === "comment" ||
+    kind === "pricenote" ||
+    kind === "pricelabel" ||
+    kind === "sticker" ||
+    kind === "flagmark"
+  );
+}
+
+function toLocalInput(sec: number): string {
+  const d = new Date(sec * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+}
+
+function fromLocalInput(value: string): number | null {
+  if (!value) return null;
+  const ms = Date.parse(value.endsWith("Z") ? value : `${value}Z`);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+}
 
 export function ChartInspectors({ engine }: { engine: ChartEngine | null }) {
   const snap = useEngine(engine);
   const [indOpen, setIndOpen] = useState<string | null>(null);
   const selected = snap?.drawings.find((d) => d.id === snap.selectedId) ?? null;
+  const propsDrawing = snap?.drawings.find((d) => d.id === snap.drawingPropsId) ?? null;
+  const menuDrawing = snap?.drawings.find((d) => d.id === snap.drawingMenu?.id) ?? null;
   const editingInd = snap?.indicators.find((i) => i.id === (indOpen ?? snap.selectedIndicatorId)) ?? null;
 
   if (!snap) return null;
@@ -64,7 +114,16 @@ export function ChartInspectors({ engine }: { engine: ChartEngine | null }) {
             );
           })}
       </div>
-      {selected ? <DrawingEditor engine={engine} drawing={selected} /> : null}
+      {selected && !propsDrawing ? <DrawingEditor engine={engine} drawing={selected} /> : null}
+      {propsDrawing ? <DrawingPropertiesDialog engine={engine} drawing={propsDrawing} /> : null}
+      {menuDrawing && snap.drawingMenu ? (
+        <DrawingContextMenu
+          engine={engine}
+          drawing={menuDrawing}
+          x={snap.drawingMenu.x}
+          y={snap.drawingMenu.y}
+        />
+      ) : null}
       {editingInd && indOpen === editingInd.id ? (
         <IndicatorEditor
           engine={engine}
@@ -111,6 +170,9 @@ function DrawingEditor({ engine, drawing }: { engine: ChartEngine | null; drawin
         </button>
       ))}
       <span className="obj-sep" />
+      <button title="Settings" onClick={() => engine?.openDrawingProperties(drawing.id)}>
+        ⚙
+      </button>
       <button
         className={drawing.locked ? "on" : ""}
         title={drawing.locked ? "Unlock" : "Lock"}
@@ -118,8 +180,439 @@ function DrawingEditor({ engine, drawing }: { engine: ChartEngine | null; drawin
       >
         {drawing.locked ? "🔒" : "🔓"}
       </button>
+      <button
+        className={drawing.visible === false ? "on" : ""}
+        title={drawing.visible === false ? "Show" : "Hide"}
+        onClick={() => engine?.updateDrawing(drawing.id, { visible: drawing.visible === false })}
+      >
+        {drawing.visible === false ? "○" : "◉"}
+      </button>
+      <button title="Clone" onClick={() => engine?.cloneDrawing(drawing.id)}>
+        ⎘
+      </button>
       <button title="Remove" onClick={() => engine?.removeDrawing(drawing.id)}>
         ⌫
+      </button>
+    </div>
+  );
+}
+
+function DrawingPropertiesDialog({ engine, drawing }: { engine: ChartEngine | null; drawing: Drawing }) {
+  const [tab, setTab] = useState<DrawTab>("Style");
+  const vis = { ...DEFAULT_DRAWING_VISIBILITY, ...drawing.visibility };
+  const textOk = hasTextField(drawing.kind);
+
+  useEffect(() => {
+    if (tab === "Text" && !textOk) setTab("Style");
+  }, [tab, textOk]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        engine?.closeDrawingProperties();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [engine]);
+
+  return (
+    <div className="ind-card ind-card-tabs draw-props-card" onPointerDown={(e) => e.stopPropagation()}>
+      <header>
+        <b>{toolLabelForDraw(drawing.kind)}</b>
+        <button type="button" onClick={() => engine?.closeDrawingProperties()} aria-label="Close">
+          ×
+        </button>
+      </header>
+      <div className="ind-tab-row">
+        {DRAW_TABS.filter((item) => item !== "Text" || textOk).map((item) => (
+          <button key={item} type="button" className={tab === item ? "on" : ""} onClick={() => setTab(item)}>
+            {item}
+          </button>
+        ))}
+      </div>
+      {tab === "Style" ? (
+        <div className="ind-tab-panel">
+          {drawing.kind === "fib" ? (
+            <FibRetraceStylePanel engine={engine} drawing={drawing} />
+          ) : (
+            <>
+              <label className="row">
+                Color
+                <span className="swatch-row">
+                  {PALETTE.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      className={drawing.color === c ? "swatch on" : "swatch"}
+                      style={{ background: c }}
+                      onClick={() => engine?.updateDrawing(drawing.id, { color: c })}
+                    />
+                  ))}
+                </span>
+              </label>
+              <label className="row">
+                Line style
+                <span className="style-row">
+                  {STYLES.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className={(drawing.lineStyle ?? "solid") === s.id ? "on" : ""}
+                      onClick={() => engine?.updateDrawing(drawing.id, { lineStyle: s.id })}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </span>
+              </label>
+              <label className="row">
+                Thickness
+                <select
+                  value={drawing.lineWidth ?? 1}
+                  onChange={(e) => engine?.updateDrawing(drawing.id, { lineWidth: Number(e.target.value) })}
+                >
+                  {WIDTHS.map((w) => (
+                    <option key={w} value={w}>
+                      {w}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="row check-row">
+                <input
+                  type="checkbox"
+                  checked={!!drawing.locked}
+                  onChange={() => engine?.updateDrawing(drawing.id, { locked: !drawing.locked })}
+                />
+                Locked
+              </label>
+            </>
+          )}
+        </div>
+      ) : null}
+      {tab === "Text" && textOk ? (
+        <div className="ind-tab-panel">
+          <label className="row stack-row">
+            Text
+            <textarea
+              rows={3}
+              value={drawing.text ?? ""}
+              onChange={(e) => engine?.updateDrawing(drawing.id, { text: e.target.value })}
+            />
+          </label>
+        </div>
+      ) : null}
+      {tab === "Coordinates" ? (
+        <div className="ind-tab-panel">
+          {drawing.points.map((pt, index) => (
+            <div key={index} className="coord-block">
+              <div className="fly-title">Point {index + 1}</div>
+              <label className="row stack-row">
+                Time (UTC)
+                <input
+                  type="datetime-local"
+                  step={1}
+                  value={toLocalInput(pt.time)}
+                  onChange={(e) => {
+                    const time = fromLocalInput(e.target.value);
+                    if (time == null) return;
+                    engine?.setDrawingPoint(drawing.id, index, { time, price: pt.price });
+                  }}
+                />
+              </label>
+              <label className="row">
+                Price
+                <input
+                  type="number"
+                  step="any"
+                  value={pt.price}
+                  onChange={(e) => {
+                    const price = Number(e.target.value);
+                    if (!Number.isFinite(price)) return;
+                    engine?.setDrawingPoint(drawing.id, index, { time: pt.time, price });
+                  }}
+                />
+              </label>
+            </div>
+          ))}
+          {!drawing.points.length ? <p className="hint">No anchors on this drawing.</p> : null}
+        </div>
+      ) : null}
+      {tab === "Visibility" ? (
+        <div className="ind-tab-panel">
+          <label className="row check-row">
+            <input
+              type="checkbox"
+              checked={drawing.visible !== false}
+              onChange={() => engine?.updateDrawing(drawing.id, { visible: drawing.visible === false })}
+            />
+            Visible on chart
+          </label>
+          <p className="hint">Show on these chart intervals</p>
+          {VIS_ROWS.map((row) => (
+            <label key={row.key} className="row check-row">
+              <input
+                type="checkbox"
+                checked={vis[row.key]}
+                onChange={() =>
+                  engine?.updateDrawing(drawing.id, {
+                    visibility: { ...vis, [row.key]: !vis[row.key] },
+                  })
+                }
+              />
+              {row.label}
+            </label>
+          ))}
+        </div>
+      ) : null}
+      <div className="ind-actions">
+        <button type="button" onClick={() => engine?.cloneDrawing(drawing.id)}>
+          Clone
+        </button>
+        <button
+          type="button"
+          className="danger"
+          onClick={() => {
+            engine?.removeDrawing(drawing.id);
+            engine?.closeDrawingProperties();
+          }}
+        >
+          Remove
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FibRetraceStylePanel({ engine, drawing }: { engine: ChartEngine | null; drawing: Drawing }) {
+  const fib = resolveFibStyle(drawing);
+
+  const patchFib = (next: Partial<FibRetraceStyle>) => {
+    engine?.updateDrawing(drawing.id, { fib: { ...fib, ...next } });
+  };
+
+  const patchLevel = (index: number, patch: Partial<FibLevelStyle>) => {
+    const levels = fib.levels.map((l, i) => (i === index ? { ...l, ...patch } : { ...l }));
+    patchFib({ levels });
+  };
+
+  return (
+    <div className="fib-style-panel">
+      <label className="row check-row">
+        <input
+          type="checkbox"
+          checked={fib.showTrendLine}
+          onChange={() => patchFib({ showTrendLine: !fib.showTrendLine })}
+        />
+        Trend line
+      </label>
+      <label className="row">
+        Trend style
+        <span className="style-row">
+          {STYLES.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className={fib.trendStyle === s.id ? "on" : ""}
+              onClick={() => patchFib({ trendStyle: s.id })}
+            >
+              {s.label}
+            </button>
+          ))}
+        </span>
+      </label>
+      <label className="row check-row">
+        <input type="checkbox" checked={fib.extendLeft} onChange={() => patchFib({ extendLeft: !fib.extendLeft })} />
+        Extend left
+      </label>
+      <label className="row check-row">
+        <input type="checkbox" checked={fib.extendRight} onChange={() => patchFib({ extendRight: !fib.extendRight })} />
+        Extend right
+      </label>
+      <label className="row check-row">
+        <input type="checkbox" checked={fib.reverse} onChange={() => patchFib({ reverse: !fib.reverse })} />
+        Reverse
+      </label>
+      <label className="row check-row">
+        <input
+          type="checkbox"
+          checked={fib.showBackground}
+          onChange={() => patchFib({ showBackground: !fib.showBackground })}
+        />
+        Background fill
+      </label>
+      <label className="row check-row">
+        <input type="checkbox" checked={fib.showLevels} onChange={() => patchFib({ showLevels: !fib.showLevels })} />
+        Level values
+      </label>
+      <label className="row check-row">
+        <input type="checkbox" checked={fib.showPrices} onChange={() => patchFib({ showPrices: !fib.showPrices })} />
+        Prices
+      </label>
+      <label className="row">
+        Levels width
+        <select value={fib.levelsWidth} onChange={(e) => patchFib({ levelsWidth: Number(e.target.value) })}>
+          {WIDTHS.map((w) => (
+            <option key={w} value={w}>
+              {w}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="row">
+        Levels style
+        <span className="style-row">
+          {STYLES.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className={fib.levelsStyle === s.id ? "on" : ""}
+              onClick={() => patchFib({ levelsStyle: s.id })}
+            >
+              {s.label}
+            </button>
+          ))}
+        </span>
+      </label>
+      <div className="fly-title">Levels</div>
+      <div className="fib-level-list">
+        {fib.levels.map((lvl, index) => (
+          <div key={`${lvl.ratio}-${index}`} className="fib-level-row">
+            <input
+              type="checkbox"
+              checked={lvl.visible}
+              onChange={() => patchLevel(index, { visible: !lvl.visible })}
+              title="Toggle level"
+            />
+            <input
+              type="number"
+              step="0.001"
+              className="fib-ratio"
+              value={lvl.ratio}
+              onChange={(e) => {
+                const ratio = Number(e.target.value);
+                if (!Number.isFinite(ratio)) return;
+                patchLevel(index, { ratio });
+              }}
+              title={formatFibRatio(lvl.ratio)}
+            />
+            <input
+              type="color"
+              className="fib-color"
+              value={lvl.color.length === 7 ? lvl.color : "#2962ff"}
+              onChange={(e) => patchLevel(index, { color: e.target.value })}
+              title="Level color"
+            />
+          </div>
+        ))}
+      </div>
+      <button
+        type="button"
+        className="fib-reset"
+        onClick={() => engine?.updateDrawing(drawing.id, { fib: defaultFibRetraceStyle() })}
+      >
+        Reset to Supercharts defaults
+      </button>
+      <label className="row check-row">
+        <input
+          type="checkbox"
+          checked={!!drawing.locked}
+          onChange={() => engine?.updateDrawing(drawing.id, { locked: !drawing.locked })}
+        />
+        Locked
+      </label>
+    </div>
+  );
+}
+
+function DrawingContextMenu({
+  engine,
+  drawing,
+  x,
+  y,
+}: {
+  engine: ChartEngine | null;
+  drawing: Drawing;
+  x: number;
+  y: number;
+}) {
+  useEffect(() => {
+    const close = () => engine?.closeDrawingMenu();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [engine]);
+
+  const left = Math.min(x, window.innerWidth - 220);
+  const top = Math.min(y, window.innerHeight - 280);
+
+  return (
+    <div
+      className="draw-ctx-menu"
+      style={{ left, top }}
+      onMouseDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      <button
+        type="button"
+        onClick={() => {
+          engine?.openDrawingProperties(drawing.id);
+        }}
+      >
+        Settings…
+      </button>
+      <div className="ctx-sep" />
+      <button type="button" onClick={() => { engine?.reorderDrawing(drawing.id, "front"); engine?.closeDrawingMenu(); }}>
+        Bring to front
+      </button>
+      <button type="button" onClick={() => { engine?.reorderDrawing(drawing.id, "forward"); engine?.closeDrawingMenu(); }}>
+        Bring forward
+      </button>
+      <button type="button" onClick={() => { engine?.reorderDrawing(drawing.id, "backward"); engine?.closeDrawingMenu(); }}>
+        Send backward
+      </button>
+      <button type="button" onClick={() => { engine?.reorderDrawing(drawing.id, "back"); engine?.closeDrawingMenu(); }}>
+        Send to back
+      </button>
+      <div className="ctx-sep" />
+      <button type="button" onClick={() => { engine?.cloneDrawing(drawing.id); }}>
+        Clone
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          engine?.updateDrawing(drawing.id, { locked: !drawing.locked });
+          engine?.closeDrawingMenu();
+        }}
+      >
+        {drawing.locked ? "Unlock" : "Lock"}
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          engine?.updateDrawing(drawing.id, { visible: drawing.visible === false });
+          engine?.closeDrawingMenu();
+        }}
+      >
+        {drawing.visible === false ? "Show" : "Hide"}
+      </button>
+      <div className="ctx-sep" />
+      <button
+        type="button"
+        className="danger"
+        onClick={() => {
+          engine?.removeDrawing(drawing.id);
+        }}
+      >
+        Remove
       </button>
     </div>
   );
