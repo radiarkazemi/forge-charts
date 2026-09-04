@@ -203,6 +203,17 @@ function DrawingPropertiesDialog({ engine, drawing }: { engine: ChartEngine | nu
     if (tab === "Text" && !textOk) setTab("Style");
   }, [tab, textOk]);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        engine?.closeDrawingProperties();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [engine]);
+
   return (
     <div className="ind-card ind-card-tabs draw-props-card" onPointerDown={(e) => e.stopPropagation()}>
       <header>
