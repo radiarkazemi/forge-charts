@@ -11,15 +11,15 @@ export function ChartOverlays({ engine }: { engine: ChartEngine | null }) {
   return (
     <>
       <div className="scale-btns">
-        <button onClick={() => engine?.zoom(1)}>+</button>
-        <button onClick={() => engine?.zoom(-1)}>−</button>
-        <button className={snap.autoScale ? "on" : ""} onClick={() => engine?.resetPriceScale()} title="Auto scale (double-click price axis)">
+        <button type="button" onClick={() => engine?.zoom(1)} aria-label="Zoom in">+</button>
+        <button type="button" onClick={() => engine?.zoom(-1)} aria-label="Zoom out">−</button>
+        <button type="button" className={snap.autoScale ? "on" : ""} onClick={() => engine?.resetPriceScale()} title="Auto scale — double-click / double-tap price axis">
           A
         </button>
-        <button className={snap.logScale ? "on" : ""} onClick={() => engine?.toggle("logScale")}>
+        <button type="button" className={snap.logScale ? "on" : ""} onClick={() => engine?.toggle("logScale")}>
           L
         </button>
-        <button className={snap.percentScale ? "on" : ""} onClick={() => engine?.toggle("percentScale")}>
+        <button type="button" className={snap.percentScale ? "on" : ""} onClick={() => engine?.toggle("percentScale")}>
           %
         </button>
       </div>
@@ -32,18 +32,7 @@ export function ChartOverlays({ engine }: { engine: ChartEngine | null }) {
         <span className="tz">UTC</span>
       </div>
       <ChartInspectors engine={engine} />
-      {snap.replay ? (
-        <div className="replay-bar">
-          <button onClick={() => engine?.setReplayPlaying(!snap.replayPlaying)}>{snap.replayPlaying ? "Pause" : "Play"}</button>
-          <button onClick={() => engine?.stepReplay()}>Step</button>
-          {[1, 2, 5, 10].map((s) => (
-            <button key={s} className={snap.replaySpeed === s ? "on" : ""} onClick={() => engine?.setReplaySpeed(s)}>
-              {s}x
-            </button>
-          ))}
-          <button onClick={() => engine?.setReplay(false)}>Exit</button>
-        </div>
-      ) : null}
+      {snap.replay ? <div className="replay-banner">{snap.replaySelecting ? "Bar Replay · select starting point" : "Bar Replay"}</div> : null}
     </>
   );
 }
