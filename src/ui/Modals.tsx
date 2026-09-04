@@ -594,7 +594,8 @@ export function SettingsModal({
             <label className="row check-row"><input type="checkbox" checked={snap?.percentScale ?? false} onChange={() => engine?.toggle("percentScale")} /> Percent</label>
             <h3>Labels</h3>
             <label className="row check-row"><input type="checkbox" checked={cv?.showCountdown ?? true} onChange={(e) => engine?.setCanvasSettings({ showCountdown: e.target.checked })} /> Countdown to bar close</label>
-            <label className="row check-row"><input type="checkbox" checked={cv?.showHighLow ?? false} onChange={(e) => engine?.setCanvasSettings({ showHighLow: e.target.checked })} /> High/low price labels</label>
+            <label className="row check-row"><input type="checkbox" checked={cv?.showHighLow ?? true} onChange={(e) => engine?.setCanvasSettings({ showHighLow: e.target.checked })} /> High/low price labels</label>
+            <label className="row check-row"><input type="checkbox" checked={cv?.showPrevDayClose ?? true} onChange={(e) => engine?.setCanvasSettings({ showPrevDayClose: e.target.checked })} /> Previous day close line</label>
           </div>
         ) : null}
 
