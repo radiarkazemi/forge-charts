@@ -51,14 +51,14 @@ Simplest: copy **each product folder as-is** into **both** `Indicators` and `Exp
 Yes — two charts, one EA each. Magics differ (`260825` vs `270827`).  
 Watch opposite signals and stacked risk. Do not attach two EAs to the same chart.
 
-### TRH EA v3.51 (important)
+### TRH EA v3.52 (important)
 
 On pullback from TP2 the EA **only touches the same ticket**:
 
 - moves **SL to the first TP line**, or
 - `PositionClose` that ticket if price already came back through TP1
 
-It does **not** open a new Buy/Sell to “close”. That v3.50 bug stacked positions.
+It does **not** open a new Buy/Sell to “close”. Mode B setups are kept alongside Mode A (TV parity).
 
 ### LH v1.21 (important)
 
