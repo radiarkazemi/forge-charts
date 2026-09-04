@@ -132,6 +132,7 @@ export class ChartEngine {
   private redoStack: HistoryState[] = [];
   private listeners = new Set<Listener>();
   private raf = 0;
+  private countdownTimer = 0;
   private snapshot: EngineSnapshot;
 
   constructor(container: HTMLElement, symbol: SymbolInfo) {
@@ -150,6 +151,14 @@ export class ChartEngine {
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(container);
     this.resize();
+    this.countdownTimer = window.setInterval(() => {
+      if (!this.canvasSettings.showCountdown) return;
+      const next = this.countdown();
+      if (next !== this.snapshot.countdown) {
+        this.emit();
+        this.draw();
+      }
+    }, 1000);
   }
 
   subscribe = (listener: Listener): (() => void) => {
@@ -686,6 +695,7 @@ export class ChartEngine {
 
   destroy(): void {
     cancelAnimationFrame(this.raf);
+    window.clearInterval(this.countdownTimer);
     this.ro.disconnect();
     this.canvas.remove();
     this.listeners.clear();
@@ -707,10 +717,13 @@ export class ChartEngine {
   }
 
   private countdown(): string {
-    const step = intervalSeconds(this.interval);
-    const last = this.bars.at(-1);
-    if (!last) return "--:--";
-    const remain = Math.max(0, last.time + step - Math.floor(Date.now() / 1000));
+    const step = intervalSeconds(this.interval) || 60;
+    const now = Math.floor(Date.now() / 1000);
+    // Remaining time in the current UTC-aligned period (TradingView-style).
+    // Do not use last.time + step — live feeds often stamp bar_close_time, which
+    // would make a 1m countdown show ~2 minutes.
+    const closeAt = Math.floor(now / step) * step + step;
+    const remain = Math.max(0, closeAt - now);
     const m = Math.floor(remain / 60);
     const s = remain % 60;
     if (m > 99) return `${Math.floor(m / 60)}h`;

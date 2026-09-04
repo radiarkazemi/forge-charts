@@ -1,5 +1,6 @@
 import type { Bar, Interval, SymbolInfo } from "../engine/types";
 import { chartApiBase, chartApiWsUrl, chartFastBase } from "./config";
+import { intervalSeconds } from "./interval";
 
 export type Quote = { price: number; change: number };
 
@@ -308,10 +309,13 @@ export function subscribeChartApi(
           `/prices/${encodeURIComponent(symbol.ticker.toLowerCase())}/?timeframe=${tf}`,
           4000,
         )) as Record<string, unknown>;
-        const time = num(json.bar_close_time);
+        const closeTime = num(json.bar_close_time);
         const close = num(json.price);
-        if (!Number.isFinite(time) || !Number.isFinite(close)) return;
+        if (!Number.isFinite(closeTime) || !Number.isFinite(close)) return;
         const open = num(json.open);
+        // API stamps bar_close_time; chart bars use period open time.
+        const step = intervalSeconds(interval) || 60;
+        const time = Math.floor((closeTime - 1) / step) * step;
         onBar({
           time,
           open: Number.isFinite(open) ? open : close,
