@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { CHART_TYPES, INDICATOR_CATALOG, INDICATOR_TABS, type IndicatorTab } from "../catalog";
+import { CHART_TYPES, INDICATOR_CATALOG, INDICATOR_ROLE_FILTERS, INDICATOR_TABS, type IndicatorTab } from "../catalog";
 import { UNIVERSE } from "../data/feed";
-import type { ChartSource, EngineSnapshot, IndicatorKind, SymbolInfo } from "../engine/types";
+import type { ChartSource, EngineSnapshot, IndicatorKind, SymbolInfo, Tool } from "../engine/types";
 import type { ChartEngine } from "../engine/ChartEngine";
 
 const SYMBOL_FILTERS = [
@@ -206,19 +206,24 @@ export function IndicatorModal({
   open,
   onClose,
   onPick,
+  onPickTool,
   favorites = [],
   onToggleFavorite,
   recent = [],
+  activeKinds = [],
 }: {
   open: boolean;
   onClose: () => void;
   onPick: (kind: IndicatorKind) => void;
+  onPickTool?: (tool: Tool) => void;
   favorites?: string[];
   onToggleFavorite?: (id: string) => void;
   recent?: IndicatorKind[];
+  activeKinds?: IndicatorKind[];
 }) {
   const [q, setQ] = useState("");
   const [tab, setTab] = useState<IndicatorTab>("technicals");
+  const [role, setRole] = useState<(typeof INDICATOR_ROLE_FILTERS)[number]["id"]>("all");
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
@@ -227,65 +232,91 @@ export function IndicatorModal({
     if (!open) return;
     setQ("");
     setTab("technicals");
+    setRole("all");
     setActive(0);
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [open]);
 
   const needle = q.trim().toLowerCase();
   const favSet = useMemo(() => new Set(favorites), [favorites]);
+  const onChart = useMemo(() => new Set(activeKinds), [activeKinds]);
 
-  const matches = (item: (typeof INDICATOR_CATALOG)[number]) => {
+  const tabCounts = useMemo(() => {
+    const counts: Record<IndicatorTab, number> = {
+      technicals: 0,
+      financials: 0,
+      community: 0,
+      invite: 0,
+      patterns: 0,
+    };
+    for (const item of INDICATOR_CATALOG) counts[item.tab] += 1;
+    return counts;
+  }, []);
+
+  const roleFilters = useMemo(() => {
+    if (tab === "technicals") {
+      return INDICATOR_ROLE_FILTERS.filter((item) => item.id === "all" || item.id === "indicator" || item.id === "strategy");
+    }
+    if (tab === "financials") {
+      return INDICATOR_ROLE_FILTERS.filter((item) => item.id === "all" || item.id === "metric");
+    }
+    if (tab === "patterns") {
+      return INDICATOR_ROLE_FILTERS.filter((item) => item.id === "all" || item.id === "pattern");
+    }
+    return INDICATOR_ROLE_FILTERS.filter((item) => item.id === "all" || item.id === "script");
+  }, [tab]);
+
+  useEffect(() => {
+    if (!roleFilters.some((item) => item.id === role)) setRole("all");
+  }, [role, roleFilters]);
+
+  const matchesItem = (item: (typeof INDICATOR_CATALOG)[number]) => {
     if (!needle && item.tab !== tab) return false;
+    if (role !== "all" && item.role !== role) return false;
     if (!needle) return true;
-    const hay = `${item.label} ${item.group} ${item.author ?? ""} ${item.kind ?? ""} ${item.tab}`.toLowerCase();
+    const hay = `${item.label} ${item.group} ${item.author ?? ""} ${item.kind ?? ""} ${item.tab} ${item.role}`.toLowerCase();
     return hay.includes(needle);
   };
 
   const favoriteRows = useMemo(
-    () => INDICATOR_CATALOG.filter((item) => item.tab === tab && item.kind && favSet.has(item.id) && matches(item)),
-    [favSet, needle, tab],
+    () => INDICATOR_CATALOG.filter((item) => favSet.has(item.id) && matchesItem(item)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [favSet, needle, role, tab],
   );
 
   const recentRows = useMemo(() => {
+    if (tab !== "technicals" && !needle) return [];
     const seen = new Set<string>();
     return recent
-      .map((kind) => INDICATOR_CATALOG.find((item) => item.kind === kind && item.tab === "technicals"))
+      .map((kind) => INDICATOR_CATALOG.find((item) => item.kind === kind))
       .filter((item): item is (typeof INDICATOR_CATALOG)[number] => !!item)
       .filter((item) => {
         if (seen.has(item.id)) return false;
         seen.add(item.id);
-        return matches(item);
+        return matchesItem(item);
       })
       .slice(0, 8);
-  }, [needle, recent, tab]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needle, recent, role, tab]);
 
   const catalogRows = useMemo(() => {
-    const items = INDICATOR_CATALOG.filter((item) => matches(item) && !favSet.has(item.id));
-    const recentIds = new Set(recentRows.map((item) => item.id));
+    const items = INDICATOR_CATALOG.filter((item) => matchesItem(item) && !favSet.has(item.id));
     if (!needle && tab === "technicals") {
+      const recentIds = new Set(recentRows.map((item) => item.id));
       return items.filter((item) => !recentIds.has(item.id));
     }
     return items;
-  }, [favSet, matches, needle, recentRows, tab]);
-
-  const rows = useMemo(() => {
-    if (needle) return INDICATOR_CATALOG.filter((item) => matches(item));
-    const out: (typeof INDICATOR_CATALOG)[number][] = [];
-    if (favoriteRows.length) out.push(...favoriteRows);
-    if (tab === "technicals" && recentRows.length) out.push(...recentRows.filter((item) => !favSet.has(item.id)));
-    const used = new Set(out.map((item) => item.id));
-    out.push(...catalogRows.filter((item) => !used.has(item.id)));
-    return out;
-  }, [catalogRows, favoriteRows, favSet, matches, needle, recentRows, tab]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [favSet, needle, recentRows, role, tab]);
 
   const sections = useMemo(() => {
     if (needle) {
-      return [...new Set(rows.map((item) => item.group))].map((group) => ({
+      return [...new Set(INDICATOR_CATALOG.filter(matchesItem).map((item) => item.group))].map((group) => ({
         title: group,
-        items: rows.filter((item) => item.group === group),
+        items: INDICATOR_CATALOG.filter((item) => matchesItem(item) && item.group === group),
       }));
     }
-    const chunks: { title: string; items: typeof rows }[] = [];
+    const chunks: { title: string; items: (typeof INDICATOR_CATALOG)[number][] }[] = [];
     if (favoriteRows.length) chunks.push({ title: "Favorites", items: favoriteRows });
     if (tab === "technicals" && recentRows.length) {
       chunks.push({
@@ -298,13 +329,14 @@ export function IndicatorModal({
       chunks.push({ title: group, items: rest.filter((item) => item.group === group) });
     }
     return chunks.filter((chunk) => chunk.items.length);
-  }, [catalogRows, favoriteRows, favSet, needle, recentRows, rows, tab]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalogRows, favoriteRows, favSet, needle, recentRows, role, tab]);
 
   const flatRows = useMemo(() => sections.flatMap((section) => section.items), [sections]);
 
   useEffect(() => {
     setActive(0);
-  }, [q, tab]);
+  }, [q, tab, role]);
 
   useEffect(() => {
     const row = flatRows[active];
@@ -312,9 +344,16 @@ export function IndicatorModal({
     rowRefs.current[row.id]?.scrollIntoView({ block: "nearest" });
   }, [active, flatRows]);
 
+  const actionable = (item: (typeof INDICATOR_CATALOG)[number]) => !!(item.kind || item.tool);
+
   const tryPick = (item: (typeof INDICATOR_CATALOG)[number]) => {
-    if (!item.kind) return;
-    onPick(item.kind);
+    if (item.kind) {
+      onPick(item.kind);
+      return;
+    }
+    if (item.tool) {
+      onPickTool?.(item.tool);
+    }
   };
 
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -336,31 +375,59 @@ export function IndicatorModal({
     if (e.key === "Enter") {
       e.preventDefault();
       const hit = flatRows[active];
-      if (hit?.kind) tryPick(hit);
+      if (hit && actionable(hit)) tryPick(hit);
     }
   };
 
   if (!open) return null;
 
   let rowIndex = -1;
+  const emptyHint =
+    tab === "invite"
+      ? "Invite-only scripts require an access grant. Preview entries stay listed until unlocked."
+      : tab === "financials"
+        ? "Financial metrics are listed for Supercharts parity. Symbol fundamentals wire-up comes later."
+        : tab === "community"
+          ? "Community scripts are catalogued here. Publishing/sync remains OUT."
+          : "No indicators found.";
 
   return (
     <div className="modal-bg" onClick={onClose}>
-      <div className="modal symbol-modal indicator-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="symbol-head">
-          <h2>Indicators, metrics, and strategies</h2>
-          <input
-            ref={inputRef}
-            autoFocus
-            placeholder="Search"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={onKey}
-          />
+      <div className="modal symbol-modal indicator-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Indicators">
+        <div className="symbol-head ind-head">
+          <div className="ind-head-row">
+            <h2>Indicators, metrics, and strategies</h2>
+            <button type="button" className="ind-close" onClick={onClose} title="Close">
+              ✕
+            </button>
+          </div>
+          <div className="ind-search">
+            <input
+              ref={inputRef}
+              autoFocus
+              placeholder="Search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={onKey}
+            />
+            {q ? (
+              <button type="button" className="ind-clear" onClick={() => setQ("")} title="Clear search">
+                Clear
+              </button>
+            ) : null}
+          </div>
         </div>
         <div className="symbol-tabs">
           {INDICATOR_TABS.map((item) => (
             <button key={item.id} type="button" className={tab === item.id ? "on" : ""} onClick={() => setTab(item.id)}>
+              {item.label}
+              <span className="ind-tab-count">{tabCounts[item.id]}</span>
+            </button>
+          ))}
+        </div>
+        <div className="ind-role-row">
+          {roleFilters.map((item) => (
+            <button key={item.id} type="button" className={role === item.id ? "on" : ""} onClick={() => setRole(item.id)}>
               {item.label}
             </button>
           ))}
@@ -384,38 +451,42 @@ export function IndicatorModal({
                   {section.items.map((item) => {
                     rowIndex += 1;
                     const idx = rowIndex;
+                    const canAct = actionable(item);
+                    const alreadyOn = !!(item.kind && onChart.has(item.kind));
                     return (
                       <tr
                         key={item.id}
                         ref={(node) => {
                           rowRefs.current[item.id] = node;
                         }}
-                        className={`${idx === active ? "on" : ""}${item.kind ? "" : " ind-disabled"}`}
+                        className={`${idx === active ? "on" : ""}${canAct ? "" : " ind-disabled"}`}
                         onMouseEnter={() => setActive(idx)}
                         onMouseDown={(e) => {
                           if ((e.target as HTMLElement).closest(".ind-star")) return;
                           e.preventDefault();
-                          if (item.kind) tryPick(item);
+                          if (canAct) tryPick(item);
                         }}
                       >
                         <td>
                           <strong>{highlight(item.label, q.trim())}</strong>
-                          {!item.kind ? <span className="ind-badge">Preview</span> : null}
+                          {alreadyOn ? <span className="ind-badge on-chart">On chart</span> : null}
+                          {!canAct ? <span className="ind-badge">Preview</span> : null}
+                          {item.tool && !item.kind ? <span className="ind-badge arm">Draw</span> : null}
+                          {item.role === "strategy" ? <span className="ind-badge strat">Strategy</span> : null}
+                          {item.role === "metric" ? <span className="ind-badge metric">Metric</span> : null}
                         </td>
                         <td>{highlight(item.group, q.trim())}</td>
-                        <td>{item.author ?? (item.tab === "technicals" ? "Built-in" : "—")}</td>
+                        <td>{item.author ?? (item.tab === "technicals" ? "Built-in" : item.tab === "patterns" ? "Built-in" : "—")}</td>
                         <td className="ind-fav-col">
-                          {item.kind ? (
-                            <button
-                              type="button"
-                              className={`ind-star${favSet.has(item.id) ? " on" : ""}`}
-                              title={favSet.has(item.id) ? "Remove from favorites" : "Add to favorites"}
-                              onMouseDown={(e) => e.stopPropagation()}
-                              onClick={() => onToggleFavorite?.(item.id)}
-                            >
-                              {favSet.has(item.id) ? "★" : "☆"}
-                            </button>
-                          ) : null}
+                          <button
+                            type="button"
+                            className={`ind-star${favSet.has(item.id) ? " on" : ""}`}
+                            title={favSet.has(item.id) ? "Remove from favorites" : "Add to favorites"}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={() => onToggleFavorite?.(item.id)}
+                          >
+                            {favSet.has(item.id) ? "★" : "☆"}
+                          </button>
                         </td>
                       </tr>
                     );
@@ -424,13 +495,15 @@ export function IndicatorModal({
               ))}
               {!flatRows.length ? (
                 <tr className="empty-symbols">
-                  <td colSpan={4}>
-                    {tab === "invite" ? "No invite-only scripts on this account." : "No indicators found."}
-                  </td>
+                  <td colSpan={4}>{emptyHint}</td>
                 </tr>
               ) : null}
             </tbody>
           </table>
+        </div>
+        <div className="ind-footer">
+          <span>Click to add · ★ favorite · Alt+I open · Esc close</span>
+          <span>{flatRows.length} shown</span>
         </div>
       </div>
     </div>
@@ -452,71 +525,100 @@ export function SettingsModal({
   engine: ChartEngine | null;
   snap: EngineSnapshot | null;
 }) {
+  const [tab, setTab] = useState<"symbol" | "status" | "scales" | "canvas">("symbol");
   if (!open) return null;
   const style = snap?.chartStyle;
+  const cv = snap?.canvas;
   const sourceOptions: ChartSource[] = ["open", "high", "low", "close", "hl2", "hlc3", "ohlc4"];
   const currentType = CHART_TYPES.find((item) => item.id === snap?.chartType);
+  const TABS: Array<{ id: typeof tab; label: string }> = [
+    { id: "symbol", label: "Symbol" },
+    { id: "status", label: "Status line" },
+    { id: "scales", label: "Scales" },
+    { id: "canvas", label: "Canvas" },
+  ];
   return (
     <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal tall settings-modal" onClick={(e) => e.stopPropagation()}>
         <h2>Chart settings</h2>
-        <label className="row">
-          Theme
-          <select value={theme} onChange={(e) => onTheme(e.target.value as "dark" | "light")}>
-            <option value="dark">Dark</option>
-            <option value="light">Light</option>
-          </select>
-        </label>
-        <div className="settings-block">
-          <h3>Chart Type</h3>
-          <p className="hint">{currentType?.label ?? "Chart"} style</p>
-          <label className="row">
-            Source
-            <select value={style?.source ?? "close"} onChange={(e) => engine?.setChartStyle({ source: e.target.value as ChartSource })}>
-              {sourceOptions.map((source) => (
-                <option key={source} value={source}>
-                  {source.toUpperCase()}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="row">
-            Up color
-            <input type="color" value={style?.upColor ?? "#26a69a"} onChange={(e) => engine?.setChartStyle({ upColor: e.target.value })} />
-          </label>
-          <label className="row">
-            Down color
-            <input type="color" value={style?.downColor ?? "#ef5350"} onChange={(e) => engine?.setChartStyle({ downColor: e.target.value })} />
-          </label>
-          <label className="row">
-            Wick up
-            <input type="color" value={style?.wickUpColor ?? "#26a69a"} onChange={(e) => engine?.setChartStyle({ wickUpColor: e.target.value })} />
-          </label>
-          <label className="row">
-            Wick down
-            <input type="color" value={style?.wickDownColor ?? "#ef5350"} onChange={(e) => engine?.setChartStyle({ wickDownColor: e.target.value })} />
-          </label>
-          <label className="row">
-            Border up
-            <input type="color" value={style?.borderUpColor ?? "#26a69a"} onChange={(e) => engine?.setChartStyle({ borderUpColor: e.target.value })} />
-          </label>
-          <label className="row">
-            Border down
-            <input type="color" value={style?.borderDownColor ?? "#ef5350"} onChange={(e) => engine?.setChartStyle({ borderDownColor: e.target.value })} />
-          </label>
-          <label className="row">
-            Show wick
-            <input type="checkbox" checked={style?.showWick ?? true} onChange={(e) => engine?.setChartStyle({ showWick: e.target.checked })} />
-          </label>
-          <label className="row">
-            Show border
-            <input type="checkbox" checked={style?.showBorder ?? true} onChange={(e) => engine?.setChartStyle({ showBorder: e.target.checked })} />
-          </label>
+        <div className="ind-tab-row">
+          {TABS.map((t) => (
+            <button key={t.id} type="button" className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)}>
+              {t.label}
+            </button>
+          ))}
         </div>
-        <p className="hint">Scale, magnet, and grid are also on the chart overlays and drawing toolbar.</p>
-        <button className="primary" onClick={onClose}>
-          Done
-        </button>
+
+        {tab === "symbol" ? (
+          <div className="settings-tab-body">
+            <label className="row">
+              Theme
+              <select value={theme} onChange={(e) => onTheme(e.target.value as "dark" | "light")}>
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+              </select>
+            </label>
+            <h3>{currentType?.label ?? "Chart"} style</h3>
+            <label className="row">
+              Source
+              <select value={style?.source ?? "close"} onChange={(e) => engine?.setChartStyle({ source: e.target.value as ChartSource })}>
+                {sourceOptions.map((source) => (
+                  <option key={source} value={source}>{source.toUpperCase()}</option>
+                ))}
+              </select>
+            </label>
+            <label className="row">Up color <input type="color" value={style?.upColor ?? "#26a69a"} onChange={(e) => engine?.setChartStyle({ upColor: e.target.value })} /></label>
+            <label className="row">Down color <input type="color" value={style?.downColor ?? "#ef5350"} onChange={(e) => engine?.setChartStyle({ downColor: e.target.value })} /></label>
+            <label className="row">Wick up <input type="color" value={style?.wickUpColor ?? "#26a69a"} onChange={(e) => engine?.setChartStyle({ wickUpColor: e.target.value })} /></label>
+            <label className="row">Wick down <input type="color" value={style?.wickDownColor ?? "#ef5350"} onChange={(e) => engine?.setChartStyle({ wickDownColor: e.target.value })} /></label>
+            <label className="row">Border up <input type="color" value={style?.borderUpColor ?? "#26a69a"} onChange={(e) => engine?.setChartStyle({ borderUpColor: e.target.value })} /></label>
+            <label className="row">Border down <input type="color" value={style?.borderDownColor ?? "#ef5350"} onChange={(e) => engine?.setChartStyle({ borderDownColor: e.target.value })} /></label>
+            <label className="row check-row"><input type="checkbox" checked={style?.showWick ?? true} onChange={(e) => engine?.setChartStyle({ showWick: e.target.checked })} /> Show wicks</label>
+            <label className="row check-row"><input type="checkbox" checked={style?.showBorder ?? true} onChange={(e) => engine?.setChartStyle({ showBorder: e.target.checked })} /> Show borders</label>
+          </div>
+        ) : null}
+
+        {tab === "status" ? (
+          <div className="settings-tab-body">
+            <h3>Status line</h3>
+            <label className="row check-row"><input type="checkbox" checked={cv?.showOhlc ?? true} onChange={(e) => engine?.setCanvasSettings({ showOhlc: e.target.checked })} /> Show OHLC values</label>
+            <label className="row check-row"><input type="checkbox" checked={cv?.showBarChange ?? true} onChange={(e) => engine?.setCanvasSettings({ showBarChange: e.target.checked })} /> Show bar change %</label>
+            <label className="row check-row"><input type="checkbox" checked={cv?.showVolumeLegend ?? true} onChange={(e) => engine?.setCanvasSettings({ showVolumeLegend: e.target.checked })} /> Show volume</label>
+          </div>
+        ) : null}
+
+        {tab === "scales" ? (
+          <div className="settings-tab-body">
+            <h3>Price scale</h3>
+            <label className="row check-row"><input type="checkbox" checked={snap?.logScale ?? false} onChange={() => engine?.toggle("logScale")} /> Logarithmic</label>
+            <label className="row check-row"><input type="checkbox" checked={snap?.percentScale ?? false} onChange={() => engine?.toggle("percentScale")} /> Percent</label>
+            <h3>Labels</h3>
+            <label className="row check-row"><input type="checkbox" checked={cv?.showCountdown ?? true} onChange={(e) => engine?.setCanvasSettings({ showCountdown: e.target.checked })} /> Countdown to bar close</label>
+            <label className="row check-row"><input type="checkbox" checked={cv?.showHighLow ?? false} onChange={(e) => engine?.setCanvasSettings({ showHighLow: e.target.checked })} /> High/low price labels</label>
+          </div>
+        ) : null}
+
+        {tab === "canvas" ? (
+          <div className="settings-tab-body">
+            <h3>Background</h3>
+            <label className="row">Background <input type="color" value={cv?.bgColor || (theme === "dark" ? "#131722" : "#ffffff")} onChange={(e) => engine?.setCanvasSettings({ bgColor: e.target.value })} /></label>
+            <h3>Grid</h3>
+            <label className="row check-row"><input type="checkbox" checked={snap?.showGrid ?? true} onChange={() => engine?.toggle("showGrid")} /> Show grid lines</label>
+            <label className="row">Grid color <input type="color" value={cv?.gridColor || (theme === "dark" ? "#2a2e39" : "#e0e3eb")} onChange={(e) => engine?.setCanvasSettings({ gridColor: e.target.value })} /></label>
+            <h3>Crosshair</h3>
+            <label className="row">Crosshair color <input type="color" value={cv?.crosshairColor || (theme === "dark" ? "#758696" : "#9598a1")} onChange={(e) => engine?.setCanvasSettings({ crosshairColor: e.target.value })} /></label>
+            <h3>Watermark</h3>
+            <label className="row check-row"><input type="checkbox" checked={cv?.showWatermark ?? true} onChange={(e) => engine?.setCanvasSettings({ showWatermark: e.target.checked })} /> Show symbol watermark</label>
+            <label className="row">
+              Opacity
+              <input type="range" min="0" max="0.3" step="0.01" value={cv?.watermarkOpacity ?? 0.07} onChange={(e) => engine?.setCanvasSettings({ watermarkOpacity: Number(e.target.value) })} />
+            </label>
+            <h3>Navigation</h3>
+            <label className="row check-row"><input type="checkbox" checked={cv?.showNavButtons ?? true} onChange={(e) => engine?.setCanvasSettings({ showNavButtons: e.target.checked })} /> Show zoom / scale buttons</label>
+          </div>
+        ) : null}
+
+        <button className="primary" onClick={onClose}>Done</button>
       </div>
     </div>
   );

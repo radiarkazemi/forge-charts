@@ -40,6 +40,19 @@ const RANGE_SEC: Record<RangePreset, number> = {
 
 type Rect = { x: number; y: number; w: number; h: number };
 type Listener = () => void;
+type HistoryState = {
+  drawings: Drawing[];
+  indicators: IndicatorInstance[];
+  chartType: ChartType;
+};
+
+function cloneDrawings(rows: Drawing[]): Drawing[] {
+  return rows.map((d) => ({ ...d, points: d.points.map((p) => ({ ...p })) }));
+}
+
+function cloneIndicators(rows: IndicatorInstance[]): IndicatorInstance[] {
+  return rows.map((i) => ({ ...i, params: [...i.params] }));
+}
 
 export class ChartEngine {
   private container: HTMLElement;
@@ -59,6 +72,19 @@ export class ChartEngine {
   private glyph = "★";
   private theme: Theme = "dark";
   private chartStyle: ChartStyle = defaultChartStyle("dark");
+  private canvasSettings: import("./types").CanvasSettings = {
+    showOhlc: true,
+    showVolumeLegend: true,
+    showBarChange: true,
+    showWatermark: true,
+    showCountdown: true,
+    showHighLow: false,
+    showNavButtons: true,
+    bgColor: "",
+    gridColor: "",
+    crosshairColor: "",
+    watermarkOpacity: 0.07,
+  };
   private logScale = false;
   private percentScale = false;
   private magnet: MagnetMode = "weak";
@@ -74,26 +100,39 @@ export class ChartEngine {
   private draft: Drawing | null = null;
   private selectedId: string | null = null;
   private selectedIndicatorId: string | null = null;
-  private dragging: "pan" | "drawing" | "zoom" | "brush" | "priceAxis" | "timeAxis" | null = null;
+  private dragging: "pan" | "drawing" | "zoom" | "brush" | "priceAxis" | "timeAxis" | "pinch" | null = null;
   private dragHandle: number | null = null;
   private dragFrom: ChartPoint | null = null;
   private dragDirty = false;
   private dragLastX = 0;
   private dragLastY = 0;
+  private pointers = new Map<number, { x: number; y: number }>();
+  private pinchStartDist = 0;
+  private pinchStartCount = 0;
+  private pinchAnchor = 0;
+  private gestureMoved = false;
+  private lastTapAt = 0;
+  private lastTapX = 0;
+  private lastTapY = 0;
   private priceSpan: number | null = null;
   private priceMid: number | null = null;
+  private demoTrail: Array<{ x: number; y: number; t: number }> = [];
   private replay = false;
+  private replaySelecting = false;
   private replayPlaying = false;
   private replaySpeed = 1;
+  private replayStartIndex: number | null = null;
+  private replayHoverIndex: number | null = null;
   private stayMode = false;
   private hideDrawings = false;
   private lockDrawings = false;
   private fitMode = true;
   private rangePreset: RangePreset = "1M";
-  private undoStack: Drawing[][] = [];
-  private redoStack: Drawing[][] = [];
+  private undoStack: HistoryState[] = [];
+  private redoStack: HistoryState[] = [];
   private listeners = new Set<Listener>();
   private raf = 0;
+  private countdownTimer = 0;
   private snapshot: EngineSnapshot;
 
   constructor(container: HTMLElement, symbol: SymbolInfo) {
@@ -102,6 +141,7 @@ export class ChartEngine {
     this.canvas = document.createElement("canvas");
     this.canvas.className = "forge-canvas";
     this.canvas.tabIndex = 0;
+    this.canvas.style.touchAction = "none";
     container.appendChild(this.canvas);
     const ctx = this.canvas.getContext("2d");
     if (!ctx) throw new Error("Canvas 2D is not available");
@@ -111,6 +151,14 @@ export class ChartEngine {
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(container);
     this.resize();
+    this.countdownTimer = window.setInterval(() => {
+      if (!this.canvasSettings.showCountdown) return;
+      const next = this.countdown();
+      if (next !== this.snapshot.countdown) {
+        this.emit();
+        this.draw();
+      }
+    }, 1000);
   }
 
   subscribe = (listener: Listener): (() => void) => {
@@ -119,6 +167,17 @@ export class ChartEngine {
   };
 
   getSnapshot = (): EngineSnapshot => this.snapshot;
+
+  /** View metrics for diagnostics / embed hosts. */
+  getViewMetrics(): { viewCount: number; viewEnd: number; fitMode: boolean; bars: number; tool: Tool } {
+    return {
+      viewCount: this.viewCount,
+      viewEnd: this.viewEnd,
+      fitMode: this.fitMode,
+      bars: this.bars.length,
+      tool: this.tool,
+    };
+  }
 
   private buildSnapshot(): EngineSnapshot {
     return {
@@ -138,8 +197,10 @@ export class ChartEngine {
       selectedId: this.selectedId,
       selectedIndicatorId: this.selectedIndicatorId,
       replay: this.replay,
+      replaySelecting: this.replaySelecting,
       replayPlaying: this.replayPlaying,
       replaySpeed: this.replaySpeed,
+      replayStartIndex: this.replayStartIndex,
       stayMode: this.stayMode,
       hideDrawings: this.hideDrawings,
       lockDrawings: this.lockDrawings,
@@ -152,16 +213,32 @@ export class ChartEngine {
       rangePreset: this.rangePreset,
       autoScale: this.priceSpan == null,
       chartStyle: this.chartStyle,
+      canvas: { ...this.canvasSettings },
     };
   }
 
   setBars(bars: Bar[]): void {
     this.fullBars = bars;
-    this.bars = this.replay ? bars.slice(0, Math.max(30, Math.floor(bars.length * 0.7))) : bars;
+    if (this.replay && this.replayStartIndex != null) {
+      this.bars = bars.slice(0, Math.min(bars.length, Math.max(this.bars.length, this.replayStartIndex + 1)));
+    } else if (this.replay) {
+      this.bars = bars.slice(0, Math.max(30, Math.floor(bars.length * 0.7)));
+    } else {
+      this.bars = bars;
+    }
+    this.applyMobileDefaultView();
     this.snapToLatest();
     this.hover = this.bars.at(-1) ?? null;
     this.emit();
     this.draw();
+  }
+
+  private applyMobileDefaultView(): void {
+    if (!this.fitMode) return;
+    const w = this.container.clientWidth;
+    if (w <= 0 || w >= 520) return;
+    const target = Math.round((w - this.priceAxisWidth()) / 3.4);
+    this.viewCount = this.clampViewCount(clamp(target, 48, 120));
   }
 
   setSymbol(symbol: SymbolInfo, bars: Bar[]): void {
@@ -181,6 +258,8 @@ export class ChartEngine {
   }
 
   setChartType(type: ChartType): void {
+    if (type === this.chartType) return;
+    this.pushUndo();
     this.chartType = type;
     this.emit();
     this.draw();
@@ -196,6 +275,17 @@ export class ChartEngine {
     this.chartStyle = { ...style };
     this.emit();
     this.draw();
+  }
+
+  setCanvasSettings(next: Partial<import("./types").CanvasSettings>): void {
+    this.canvasSettings = { ...this.canvasSettings, ...next };
+    this.emit();
+    this.draw();
+  }
+
+  /** Get a PNG data URL for snapshot operations. */
+  toDataUrl(type = "image/png"): string {
+    return this.canvas.toDataURL(type);
   }
 
   setTool(tool: Tool, extra?: { text?: string }): void {
@@ -244,7 +334,10 @@ export class ChartEngine {
             ? [14]
             : kind === "stoch"
               ? [14, 3]
-              : [12, 26, 9];
+              : kind === "vol"
+                ? []
+                : [12, 26, 9];
+    this.pushUndo();
     this.indicators.push({
       id: uid("ind"),
       kind,
@@ -257,15 +350,54 @@ export class ChartEngine {
     this.draw();
   }
 
-  removeIndicator(id: string): void {
-    this.indicators = this.indicators.filter((i) => i.id !== id);
-    if (this.selectedIndicatorId === id) this.selectedIndicatorId = null;
+  setIndicatorsFromTemplate(
+    items: Array<{
+      kind: IndicatorInstance["kind"];
+      params: number[];
+      visible: boolean;
+      color: string;
+      lineWidth?: number;
+      lineStyle?: IndicatorInstance["lineStyle"];
+      source?: IndicatorInstance["source"];
+      pane?: IndicatorInstance["pane"];
+    }>,
+  ): void {
+    this.pushUndo();
+    this.indicators = items.map((item, index) => {
+      const pane =
+        item.pane ??
+        (item.kind === "rsi"
+          ? "rsi"
+          : item.kind === "macd"
+            ? "macd"
+            : item.kind === "stoch"
+              ? "stoch"
+              : item.kind === "atr"
+                ? "atr"
+                : item.kind === "vol"
+                  ? "volume"
+                  : "main");
+      return {
+        id: uid("ind"),
+        kind: item.kind,
+        pane,
+        params: [...item.params],
+        visible: item.visible,
+        color: item.color || COLORS[index % COLORS.length],
+        lineWidth: item.lineWidth,
+        lineStyle: item.lineStyle,
+        source: item.source,
+      };
+    });
+    this.selectedIndicatorId = null;
     this.emit();
     this.draw();
   }
 
-  toggleIndicator(id: string): void {
-    this.indicators = this.indicators.map((i) => (i.id === id ? { ...i, visible: !i.visible } : i));
+  removeIndicator(id: string): void {
+    this.pushUndo();
+    this.indicators = this.indicators.filter((i) => i.id !== id);
+    if (this.selectedIndicatorId === id) this.selectedIndicatorId = null;
     this.emit();
     this.draw();
   }
@@ -281,6 +413,7 @@ export class ChartEngine {
     id: string,
     patch: Partial<Pick<IndicatorInstance, "params" | "color" | "visible" | "lineWidth" | "lineStyle" | "source">>,
   ): void {
+    this.pushUndo();
     this.indicators = this.indicators.map((i) => (i.id === id ? { ...i, ...patch, params: patch.params ? [...patch.params] : i.params } : i));
     this.emit();
     this.draw();
@@ -297,7 +430,15 @@ export class ChartEngine {
     id: string,
     patch: Partial<Pick<Drawing, "color" | "lineWidth" | "lineStyle" | "text" | "locked">>,
   ): void {
+    this.pushUndo();
     this.drawings = this.drawings.map((d) => (d.id === id ? { ...d, ...patch } : d));
+    this.emit();
+    this.draw();
+  }
+
+  toggleIndicator(id: string): void {
+    this.pushUndo();
+    this.indicators = this.indicators.map((i) => (i.id === id ? { ...i, visible: !i.visible } : i));
     this.emit();
     this.draw();
   }
@@ -324,8 +465,16 @@ export class ChartEngine {
   undo(): void {
     const prev = this.undoStack.pop();
     if (!prev) return;
-    this.redoStack.push(this.drawings);
-    this.drawings = prev;
+    this.redoStack.push({
+      drawings: cloneDrawings(this.drawings),
+      indicators: cloneIndicators(this.indicators),
+      chartType: this.chartType,
+    });
+    this.drawings = cloneDrawings(prev.drawings);
+    this.indicators = cloneIndicators(prev.indicators);
+    this.chartType = prev.chartType;
+    this.selectedId = null;
+    this.selectedIndicatorId = null;
     this.emit();
     this.draw();
   }
@@ -333,8 +482,16 @@ export class ChartEngine {
   redo(): void {
     const next = this.redoStack.pop();
     if (!next) return;
-    this.undoStack.push(this.drawings);
-    this.drawings = next;
+    this.undoStack.push({
+      drawings: cloneDrawings(this.drawings),
+      indicators: cloneIndicators(this.indicators),
+      chartType: this.chartType,
+    });
+    this.drawings = cloneDrawings(next.drawings);
+    this.indicators = cloneIndicators(next.indicators);
+    this.chartType = next.chartType;
+    this.selectedId = null;
+    this.selectedIndicatorId = null;
     this.emit();
     this.draw();
   }
@@ -349,9 +506,27 @@ export class ChartEngine {
   resetPriceScale(): void {
     this.priceSpan = null;
     this.priceMid = null;
-    this.fitMode = true;
     this.emit();
     this.draw();
+  }
+
+  /** TradingView-style: fit time scale to recent bars and scroll to latest. */
+  fitTimeScale(): void {
+    this.fitMode = true;
+    this.applyMobileDefaultView();
+    if (this.container.clientWidth >= 520) {
+      this.viewCount = this.clampViewCount(140);
+    }
+    this.snapToLatest();
+    this.emit();
+    this.draw();
+  }
+
+  /** Fit both price (auto) and time scales — double-click empty chart. */
+  fitContent(): void {
+    this.rangePreset = "1M";
+    this.fitTimeScale();
+    this.resetPriceScale();
   }
 
   upsertBar(bar: Bar): void {
@@ -392,16 +567,74 @@ export class ChartEngine {
   }
 
   setReplay(on: boolean): void {
-    this.replay = on;
-    this.replayPlaying = on;
-    if (on) this.bars = this.fullBars.slice(0, Math.max(40, Math.floor(this.fullBars.length * 0.55)));
-    else this.bars = this.fullBars;
+    if (on) {
+      this.replay = true;
+      this.replaySelecting = true;
+      this.replayPlaying = false;
+      this.replayStartIndex = null;
+      this.replayHoverIndex = null;
+      this.bars = this.fullBars;
+      this.snapToLatest();
+    } else {
+      this.jumpToRealtime();
+      return;
+    }
+    this.emit();
+    this.draw();
+  }
+
+  /** Re-enter start-bar picker while already in replay (TV “Go to…” / Select bar). */
+  beginReplaySelect(): void {
+    if (!this.replay) {
+      this.setReplay(true);
+      return;
+    }
+    this.replaySelecting = true;
+    this.replayPlaying = false;
+    this.bars = this.fullBars;
+    this.snapToLatest();
+    this.emit();
+    this.draw();
+  }
+
+  selectReplayStart(index: number): void {
+    if (!this.fullBars.length) return;
+    const idx = clamp(Math.floor(index), 0, this.fullBars.length - 1);
+    this.replay = true;
+    this.replaySelecting = false;
+    this.replayPlaying = false;
+    this.replayStartIndex = idx;
+    this.replayHoverIndex = null;
+    this.bars = this.fullBars.slice(0, idx + 1);
+    this.snapToLatest();
+    this.emit();
+    this.draw();
+  }
+
+  pickRandomReplayStart(): void {
+    if (this.fullBars.length < 50) {
+      this.selectReplayStart(Math.max(0, this.fullBars.length - 1));
+      return;
+    }
+    const min = Math.floor(this.fullBars.length * 0.15);
+    const max = Math.floor(this.fullBars.length * 0.85);
+    this.selectReplayStart(min + Math.floor(Math.random() * Math.max(1, max - min)));
+  }
+
+  jumpToRealtime(): void {
+    this.replay = false;
+    this.replaySelecting = false;
+    this.replayPlaying = false;
+    this.replayStartIndex = null;
+    this.replayHoverIndex = null;
+    this.bars = this.fullBars;
     this.snapToLatest();
     this.emit();
     this.draw();
   }
 
   setReplayPlaying(on: boolean): void {
+    if (!this.replay || this.replaySelecting) return;
     this.replayPlaying = on;
     this.emit();
   }
@@ -412,7 +645,7 @@ export class ChartEngine {
   }
 
   stepReplay(): void {
-    if (!this.replay) return;
+    if (!this.replay || this.replaySelecting) return;
     const next = this.fullBars[this.bars.length];
     if (!next) {
       this.replayPlaying = false;
@@ -421,6 +654,24 @@ export class ChartEngine {
     }
     this.bars = [...this.bars, next];
     this.snapToLatest();
+    this.emit();
+    this.draw();
+  }
+
+  /** Logical bar index under pointer for replay selection. */
+  replayIndexAtClient(clientX: number, clientY: number): number | null {
+    const rect = this.canvas.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    if (this.hitZone(x, y) !== "chart") return null;
+    const layout = this.layout();
+    const logical = this.indexAtX(x, this.bars.length, layout.main);
+    return clamp(Math.round(logical), 0, Math.max(0, this.fullBars.length - 1));
+  }
+
+  setReplayHoverIndex(index: number | null): void {
+    if (this.replayHoverIndex === index) return;
+    this.replayHoverIndex = index;
     this.emit();
     this.draw();
   }
@@ -444,13 +695,19 @@ export class ChartEngine {
 
   destroy(): void {
     cancelAnimationFrame(this.raf);
+    window.clearInterval(this.countdownTimer);
     this.ro.disconnect();
     this.canvas.remove();
     this.listeners.clear();
   }
 
   private pushUndo(): void {
-    this.undoStack.push(this.drawings.map((d) => ({ ...d, points: [...d.points] })));
+    this.undoStack.push({
+      drawings: cloneDrawings(this.drawings),
+      indicators: cloneIndicators(this.indicators),
+      chartType: this.chartType,
+    });
+    if (this.undoStack.length > 100) this.undoStack.shift();
     this.redoStack = [];
   }
 
@@ -460,10 +717,13 @@ export class ChartEngine {
   }
 
   private countdown(): string {
-    const step = intervalSeconds(this.interval);
-    const last = this.bars.at(-1);
-    if (!last) return "--:--";
-    const remain = Math.max(0, last.time + step - Math.floor(Date.now() / 1000));
+    const step = intervalSeconds(this.interval) || 60;
+    const now = Math.floor(Date.now() / 1000);
+    // Remaining time in the current UTC-aligned period (TradingView-style).
+    // Do not use last.time + step — live feeds often stamp bar_close_time, which
+    // would make a 1m countdown show ~2 minutes.
+    const closeAt = Math.floor(now / step) * step + step;
+    const remain = Math.max(0, closeAt - now);
     const m = Math.floor(remain / 60);
     const s = remain % 60;
     if (m > 99) return `${Math.floor(m / 60)}h`;
@@ -475,10 +735,20 @@ export class ChartEngine {
     if (!bar) return [];
     const p = this.symbol.pricePrecision;
     const chg = ((bar.close - bar.open) / bar.open) * 100;
+    const parts: string[] = [`${this.symbol.ticker}  ${this.interval}`];
+    if (this.canvasSettings.showOhlc) {
+      parts.push(`O${formatPrice(bar.open, p)} H${formatPrice(bar.high, p)} L${formatPrice(bar.low, p)} C${formatPrice(bar.close, p)}`);
+    }
+    if (this.canvasSettings.showBarChange) {
+      parts.push(`${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%`);
+    }
+    if (this.canvasSettings.showVolumeLegend && bar.volume > 0) {
+      parts.push(`V ${formatVolume(bar.volume)}`);
+    }
     const lines: LegendLine[] = [
       {
         id: "sym",
-        text: `${this.symbol.ticker}  ${this.interval}  O${formatPrice(bar.open, p)} H${formatPrice(bar.high, p)} L${formatPrice(bar.low, p)} C${formatPrice(bar.close, p)}  ${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%`,
+        text: parts.join("  "),
         color: chg >= 0 ? palettes[this.theme].up : palettes[this.theme].down,
       },
     ];
@@ -504,12 +774,20 @@ export class ChartEngine {
     this.canvas.addEventListener("pointerdown", this.onDown);
     this.canvas.addEventListener("pointermove", this.onMove);
     this.canvas.addEventListener("pointerup", this.onUp);
+    this.canvas.addEventListener("pointercancel", this.onUp);
     this.canvas.addEventListener("pointerleave", this.onLeave);
     this.canvas.addEventListener("wheel", this.onWheel, { passive: false });
     this.canvas.addEventListener("dblclick", this.onDbl);
     this.canvas.addEventListener("keydown", this.onKey);
     this.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+    // iOS/Android: block page scroll/bounce while dragging the chart
+    this.canvas.addEventListener("touchstart", this.onTouchGuard, { passive: false });
+    this.canvas.addEventListener("touchmove", this.onTouchGuard, { passive: false });
   }
+
+  private onTouchGuard = (e: TouchEvent): void => {
+    if (e.touches.length >= 1) e.preventDefault();
+  };
 
   private resize(): void {
     const dpr = window.devicePixelRatio || 1;
@@ -520,6 +798,8 @@ export class ChartEngine {
     this.canvas.style.width = `${w}px`;
     this.canvas.style.height = `${h}px`;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Do NOT reset viewCount on every resize — mobile browser chrome
+    // show/hide fires ResizeObserver constantly and would undo pan/zoom.
     this.draw();
   }
 
@@ -530,7 +810,7 @@ export class ChartEngine {
   private layout(): { main: Rect; extras: { rect: Rect; ind: IndicatorInstance }[]; chart: Rect } {
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
-    const chart: Rect = { x: 0, y: 0, w: Math.max(0, w - PRICE_AXIS), h: Math.max(0, h - TIME_AXIS) };
+    const chart: Rect = { x: 0, y: 0, w: Math.max(0, w - this.priceAxisWidth()), h: Math.max(0, h - TIME_AXIS) };
     const extrasInd = this.extraIndicators();
     const extraH = extrasInd.length ? Math.min(120, chart.h * 0.18) : 0;
     const mainH = chart.h - extraH * extrasInd.length;
@@ -541,8 +821,14 @@ export class ChartEngine {
     return { main: { x: 0, y: 0, w: chart.w, h: mainH }, extras, chart };
   }
 
+  private priceAxisWidth(): number {
+    const w = this.container.clientWidth;
+    return w > 0 && w < 520 ? 54 : PRICE_AXIS;
+  }
+
   private rightPad(): number {
-    return Math.max(8, this.viewCount * 0.18);
+    const narrow = this.container.clientWidth > 0 && this.container.clientWidth < 520;
+    return Math.max(narrow ? 4 : 8, this.viewCount * (narrow ? 0.08 : 0.18));
   }
 
   private clampViewCount(count: number): number {
@@ -552,6 +838,12 @@ export class ChartEngine {
 
   private snapToLatest(): void {
     this.viewEnd = this.bars.length + this.rightPad();
+    // If history is shorter than the window, shrink so candles fill the plot
+    // instead of sitting in one half of an empty viewport.
+    if (this.fitMode && this.bars.length > 0 && this.viewStart() < -this.viewCount * 0.08) {
+      this.viewCount = this.clampViewCount(this.bars.length + this.rightPad());
+      this.viewEnd = this.bars.length + this.rightPad();
+    }
   }
 
   private isFollowing(): boolean {
@@ -880,12 +1172,82 @@ export class ChartEngine {
     if (!this.hideDrawings) this.paintDrawings(layout.main, bars.length ? bars : this.bars.slice(-40), range);
     this.paintAxes(layout, bars, range, pal);
     this.paintCrosshair(layout, bars, range, pal);
+    this.paintReplaySelectLine(layout.main);
+    this.paintDemoTrail();
     this.paintLegend(layout.main, pal);
   }
 
-  private paintWatermark(rect: Rect, color: string): void {
+  private paintReplaySelectLine(rect: Rect): void {
+    if (!this.replaySelecting || this.replayHoverIndex == null) return;
+    const x = this.xOfIndex(this.replayHoverIndex, rect);
     const ctx = this.ctx;
     ctx.save();
+    ctx.strokeStyle = "#2962ff";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(x + 0.5, rect.y);
+    ctx.lineTo(x + 0.5, rect.y + rect.h);
+    ctx.stroke();
+    // Scissors marker (TV-style start picker)
+    const cy = rect.y + 18;
+    ctx.fillStyle = "#2962ff";
+    ctx.beginPath();
+    ctx.arc(x, cy, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.font = "10px Trebuchet MS, Arial, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("✂", x, cy + 0.5);
+    const bar = this.fullBars[this.replayHoverIndex];
+    if (bar) {
+      ctx.fillStyle = "#2962ff";
+      ctx.fillRect(x - 54, rect.y + rect.h + 2, 108, 16);
+      ctx.fillStyle = "#fff";
+      ctx.font = AXIS_FONT;
+      ctx.fillText(formatTime(bar.time, this.interval), x, rect.y + rect.h + 14);
+    }
+    ctx.restore();
+  }
+
+  private paintDemoTrail(): void {
+    if (this.tool !== "demonstration" || !this.demoTrail.length) return;
+    const now = Date.now();
+    this.demoTrail = this.demoTrail.filter((p) => now - p.t < 1200);
+    if (!this.demoTrail.length) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (let i = 1; i < this.demoTrail.length; i++) {
+      const p0 = this.demoTrail[i - 1];
+      const p1 = this.demoTrail[i];
+      const age = (now - p1.t) / 1200;
+      ctx.globalAlpha = Math.max(0, 1 - age);
+      ctx.strokeStyle = "#ff6d00";
+      ctx.lineWidth = Math.max(1, 4 * (1 - age));
+      ctx.beginPath();
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+      ctx.stroke();
+    }
+    const last = this.demoTrail[this.demoTrail.length - 1];
+    const dotAge = (now - last.t) / 1200;
+    ctx.globalAlpha = Math.max(0, 1 - dotAge);
+    ctx.fillStyle = "#ff6d00";
+    ctx.beginPath();
+    ctx.arc(last.x, last.y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    if (this.demoTrail.length) requestAnimationFrame(() => this.draw());
+  }
+
+  private paintWatermark(rect: Rect, color: string): void {
+    if (!this.canvasSettings.showWatermark) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = this.canvasSettings.watermarkOpacity;
     ctx.fillStyle = color;
     ctx.font = "bold 92px Trebuchet MS, Arial, sans-serif";
     ctx.textAlign = "center";
@@ -1326,7 +1688,8 @@ export class ChartEngine {
       const label = this.percentScale ? `${tick.toFixed(2)}%` : formatPrice(tick, this.symbol.pricePrecision);
       ctx.fillText(label, layout.chart.w + 8, y + 3);
     }
-    const step = Math.max(1, Math.floor(this.viewCount / 6));
+    const labelCount = w < 400 ? 3 : w < 720 ? 4 : 6;
+    const step = Math.max(1, Math.floor(this.viewCount / labelCount));
     ctx.textAlign = "center";
     const axisStart = Math.floor(this.viewStart());
     const axisEnd = Math.ceil(this.viewEnd);
@@ -1338,7 +1701,7 @@ export class ChartEngine {
     if (last) {
       const y = this.yOf(this.scaled(last.close, bars.length ? bars : [last]), range.min, range.max, layout.main);
       ctx.fillStyle = last.close >= last.open ? pal.up : pal.down;
-      ctx.fillRect(layout.chart.w, y - 9, PRICE_AXIS, 18);
+      ctx.fillRect(layout.chart.w, y - 9, this.priceAxisWidth(), 18);
       ctx.fillStyle = "#fff";
       ctx.fillText(
         this.percentScale ? `${this.scaled(last.close, bars).toFixed(2)}%` : formatPrice(last.close, this.symbol.pricePrecision),
@@ -1346,7 +1709,7 @@ export class ChartEngine {
         y + 4,
       );
       ctx.fillStyle = pal.panel;
-      ctx.fillRect(layout.chart.w, y + 10, PRICE_AXIS, 16);
+      ctx.fillRect(layout.chart.w, y + 10, this.priceAxisWidth(), 16);
       ctx.fillStyle = pal.muted;
       ctx.fillText(this.countdown(), layout.chart.w + 16, y + 22);
     }
@@ -1365,7 +1728,7 @@ export class ChartEngine {
     range: { min: number; max: number },
     pal: (typeof palettes)["dark"],
   ): void {
-    if (!this.mouse || this.tool === "cursor") return;
+    if (!this.mouse || this.tool === "cursor" || this.tool === "magic") return;
     const ctx = this.ctx;
     const { x, y } = this.mouse;
     if (x > layout.chart.w || y > layout.chart.h) return;
@@ -1384,7 +1747,7 @@ export class ChartEngine {
     if (bar) this.hover = bar;
     const price = this.priceAtY(y, range.min, range.max, layout.main);
     ctx.fillStyle = "#2962ff";
-    ctx.fillRect(layout.chart.w, y - 8, PRICE_AXIS, 16);
+    ctx.fillRect(layout.chart.w, y - 8, this.priceAxisWidth(), 16);
     ctx.fillStyle = "#fff";
     ctx.font = AXIS_FONT;
     ctx.fillText(this.percentScale ? `${price.toFixed(2)}%` : formatPrice(price, this.symbol.pricePrecision), layout.chart.w + 8, y + 4);
@@ -1465,9 +1828,39 @@ export class ChartEngine {
 
   private hitZone(x: number, y: number): "price" | "time" | "chart" {
     const { chart } = this.layout();
-    if (x >= chart.w) return "price";
-    if (y >= chart.h) return "time";
+    // Widen price/time hit targets on phones so scale gestures are usable.
+    const pricePad = this.container.clientWidth < 520 ? 12 : 0;
+    const timePad = this.container.clientWidth < 520 ? 10 : 0;
+    if (x >= chart.w - pricePad) return "price";
+    if (y >= chart.h - timePad) return "time";
     return "chart";
+  }
+
+  private pointerDistance(): number {
+    const pts = [...this.pointers.values()];
+    if (pts.length < 2) return 0;
+    const dx = pts[0].x - pts[1].x;
+    const dy = pts[0].y - pts[1].y;
+    return Math.hypot(dx, dy);
+  }
+
+  private pointerMidpoint(): { x: number; y: number } {
+    const pts = [...this.pointers.values()];
+    if (pts.length < 2) return pts[0] ?? { x: 0, y: 0 };
+    return { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+  }
+
+  private beginPinch(): void {
+    const dist = this.pointerDistance();
+    if (dist < 8) return;
+    this.dragging = "pinch";
+    this.pinchStartDist = dist;
+    this.pinchStartCount = this.viewCount;
+    const mid = this.pointerMidpoint();
+    const main = this.layout().main;
+    const frac = clamp((mid.x - main.x) / Math.max(1, main.w), 0, 1);
+    this.pinchAnchor = this.viewStart() + frac * this.viewCount;
+    this.fitMode = false;
   }
 
   private ensurePriceSpan(): void {
@@ -1478,10 +1871,15 @@ export class ChartEngine {
   }
 
   private updateCursor(x: number, y: number): void {
+    if (this.replaySelecting) {
+      this.canvas.style.cursor = this.hitZone(x, y) === "chart" ? "col-resize" : "default";
+      return;
+    }
     const zone = this.hitZone(x, y);
     if (zone === "price") this.canvas.style.cursor = "ns-resize";
     else if (zone === "time") this.canvas.style.cursor = "ew-resize";
-    else if (this.tool === "cursor") this.canvas.style.cursor = "default";
+    else if (this.tool === "cursor" || this.tool === "magic") this.canvas.style.cursor = "default";
+    else if (this.tool === "demonstration") this.canvas.style.cursor = "cell";
     else {
       const hit = this.hideDrawings || this.lockDrawings ? null : this.hitDrawing(x, y);
       if (hit) {
@@ -1492,22 +1890,39 @@ export class ChartEngine {
   }
 
   private onDown = (e: PointerEvent): void => {
-    this.canvas.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try {
+      this.canvas.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
     const { x, y } = this.local(e);
     this.mouse = { x, y };
+    this.gestureMoved = false;
+
+    if (this.pointers.size >= 2) {
+      this.beginPinch();
+      this.emit();
+      this.draw();
+      return;
+    }
+
+    if (this.replaySelecting) {
+      const idx = this.replayIndexAtClient(e.clientX, e.clientY);
+      if (idx != null) this.selectReplayStart(idx);
+      return;
+    }
     const zone = this.hitZone(x, y);
     if (zone === "price") {
-      this.ensurePriceSpan();
       this.dragging = "priceAxis";
       this.dragLastY = y;
-      this.fitMode = false;
       this.emit();
       return;
     }
     if (zone === "time") {
       this.dragging = "timeAxis";
       this.dragLastX = x;
-      this.fitMode = false;
       this.emit();
       return;
     }
@@ -1529,7 +1944,7 @@ export class ChartEngine {
       this.draft = { id: uid("dr"), kind: this.tool, points: [p], color: palettes[this.theme].overlay };
       return;
     }
-    const pickMode = this.tool === "cursor" || this.tool === "crosshair" || this.tool === "dot" || (!this.draft && !!hit);
+    const pickMode = this.tool === "cursor" || this.tool === "crosshair" || this.tool === "dot" || this.tool === "magic" || (!this.draft && !!hit);
     if (pickMode && hit && !this.draft) {
       this.selectedId = hit.id;
       this.selectedIndicatorId = null;
@@ -1542,7 +1957,24 @@ export class ChartEngine {
       this.draw();
       return;
     }
-    if (this.tool === "cursor" || this.tool === "crosshair" || this.tool === "dot") {
+    if (this.tool === "cursor" || this.tool === "crosshair" || this.tool === "dot" || this.tool === "magic") {
+      if (this.tool === "magic" && hit) {
+        this.selectedId = hit.id;
+        this.selectedIndicatorId = null;
+        this.emit();
+        this.draw();
+        return;
+      }
+      this.selectedId = null;
+      this.dragging = "pan";
+      this.dragLastX = x;
+      this.dragLastY = y;
+      this.emit();
+      this.draw();
+      return;
+    }
+    if (this.tool === "demonstration") {
+      this.demoTrail.push({ x, y, t: Date.now() });
       this.selectedId = null;
       this.dragging = "pan";
       this.dragLastX = x;
@@ -1575,28 +2007,78 @@ export class ChartEngine {
   };
 
   private onMove = (e: PointerEvent): void => {
+    if (this.pointers.has(e.pointerId)) {
+      this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
     const { x, y } = this.local(e);
     this.mouse = { x, y };
+
+    if (this.pointers.size >= 2 || this.dragging === "pinch") {
+      if (this.dragging !== "pinch") this.beginPinch();
+      if (this.dragging === "pinch" && this.pinchStartDist > 0) {
+        const dist = this.pointerDistance();
+        if (dist > 8) {
+          const ratio = this.pinchStartDist / dist;
+          this.setViewCount(this.pinchStartCount * ratio, this.pinchAnchor);
+          this.fitMode = false;
+        }
+      }
+      this.draw();
+      this.emit();
+      return;
+    }
+
+    if (this.replaySelecting) {
+      const idx = this.replayIndexAtClient(e.clientX, e.clientY);
+      this.setReplayHoverIndex(idx);
+      this.updateCursor(x, y);
+      return;
+    }
     if (!this.dragging) this.updateCursor(x, y);
-    if (this.dragging === "priceAxis" && this.priceSpan != null && this.priceMid != null) {
+    if (this.tool === "demonstration") {
+      const now = Date.now();
+      this.demoTrail.push({ x, y, t: now });
+      this.demoTrail = this.demoTrail.filter((p) => now - p.t < 1200);
+    }
+    if (this.tool === "magic" && !this.dragging) {
+      const nearHit = this.hitDrawing(x, y);
+      if (nearHit && this.selectedId !== nearHit.id) {
+        this.selectedId = nearHit.id;
+        this.emit();
+      } else if (!nearHit && this.selectedId) {
+        this.selectedId = null;
+        this.emit();
+      }
+    }
+    if (this.dragging === "priceAxis") {
       const dy = y - this.dragLastY;
       this.dragLastY = y;
-      this.priceSpan = clamp(this.priceSpan * Math.exp(dy / 160), 1e-8, 1e12);
-      this.fitMode = false;
+      if (Math.abs(dy) > 2) {
+        this.gestureMoved = true;
+        this.ensurePriceSpan();
+        if (this.priceSpan != null && this.priceMid != null) {
+          this.priceSpan = clamp(this.priceSpan * Math.exp(dy / 160), 1e-8, 1e12);
+          this.fitMode = false;
+        }
+      }
     }
     if (this.dragging === "timeAxis") {
       const dx = x - this.dragLastX;
       this.dragLastX = x;
-      this.setViewCount(this.viewCount * Math.exp(-dx / 200));
-      this.fitMode = false;
+      if (Math.abs(dx) > 2) {
+        this.gestureMoved = true;
+        this.setViewCount(this.viewCount * Math.exp(-dx / 200));
+        this.fitMode = false;
+      }
     }
     if (this.dragging === "pan") {
       const dx = x - this.dragLastX;
       const dy = y - this.dragLastY;
       this.dragLastX = x;
       this.dragLastY = y;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) this.gestureMoved = true;
       const slot = this.slotWidth(this.layout().main);
-      this.viewEnd -= dx / slot;
+      this.viewEnd -= dx / Math.max(0.001, slot);
       this.clampPan();
       this.fitMode = false;
       if (Math.abs(dy) > 0) {
@@ -1638,7 +2120,48 @@ export class ChartEngine {
     this.emit();
   };
 
-  private onUp = (): void => {
+  private onUp = (e?: PointerEvent): void => {
+    if (e) {
+      this.pointers.delete(e.pointerId);
+      try {
+        this.canvas.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      if (this.pointers.size >= 2) {
+        this.beginPinch();
+        return;
+      }
+      if (this.pointers.size === 1 && this.dragging === "pinch") {
+        // Drop back to pan with the remaining finger
+        const rem = [...this.pointers.entries()][0];
+        const r = this.canvas.getBoundingClientRect();
+        this.dragging = "pan";
+        this.dragLastX = rem[1].x - r.left;
+        this.dragLastY = rem[1].y - r.top;
+        this.emit();
+        this.draw();
+        return;
+      }
+    } else {
+      this.pointers.clear();
+    }
+
+    const tapX = e ? this.local(e).x : this.mouse?.x;
+    const tapY = e ? this.local(e).y : this.mouse?.y;
+    const wasAxisOrPan =
+      this.dragging === "pan" || this.dragging === "priceAxis" || this.dragging === "timeAxis" || this.dragging == null;
+    const canDoubleTap =
+      !this.gestureMoved &&
+      this.pointers.size === 0 &&
+      wasAxisOrPan &&
+      this.tool !== "brush" &&
+      this.tool !== "highlighter" &&
+      this.tool !== "zoom" &&
+      !isDrawingTool(this.tool) &&
+      tapX != null &&
+      tapY != null;
+
     if (this.dragging === "zoom" && this.draft && this.draft.points.length >= 2) {
       this.viewCount = this.clampViewCount(this.viewCount * 0.55);
       this.draft = null;
@@ -1648,11 +2171,30 @@ export class ChartEngine {
     this.dragHandle = null;
     this.dragFrom = null;
     this.dragDirty = false;
+    this.pinchStartDist = 0;
+
+    if (canDoubleTap && tapX != null && tapY != null) {
+      const now = performance.now();
+      const dt = now - this.lastTapAt;
+      const dist = Math.hypot(tapX - this.lastTapX, tapY - this.lastTapY);
+      if (dt > 0 && dt < 350 && dist < 28) {
+        this.lastTapAt = 0;
+        this.handleAxisOrChartDoubleActivate(tapX, tapY);
+        return;
+      }
+      this.lastTapAt = now;
+      this.lastTapX = tapX;
+      this.lastTapY = tapY;
+    }
+
     this.emit();
     this.draw();
   };
 
-  private onLeave = (): void => {
+  private onLeave = (e: PointerEvent): void => {
+    // Keep active drag alive while pointer is captured (mobile finger slides).
+    if (this.dragging && this.pointers.has(e.pointerId)) return;
+    if (this.dragging) return;
     this.mouse = null;
     this.canvas.style.cursor = "crosshair";
     this.draw();
@@ -1689,40 +2231,63 @@ export class ChartEngine {
     }
     if (e) {
       const { x, y } = this.local(e as unknown as PointerEvent);
-      const zone = this.hitZone(x, y);
-      if (zone === "price") {
-        this.resetPriceScale();
-        return;
-      }
-      if (zone === "time") {
-        this.viewCount = 140;
-        this.snapToLatest();
-        this.fitMode = true;
-        this.emit();
-        this.draw();
-        return;
-      }
-      const hit = this.hitDrawing(x, y);
-      if (hit) {
-        this.selectedId = hit.id;
-        this.selectedIndicatorId = null;
-        this.emit();
-        this.draw();
-        return;
-      }
+      this.handleAxisOrChartDoubleActivate(x, y);
+      return;
     }
-    this.viewCount = 140;
-    this.snapToLatest();
-    this.fitMode = true;
-    this.rangePreset = "1M";
-    this.resetPriceScale();
+    this.fitContent();
   };
 
+  private handleAxisOrChartDoubleActivate(x: number, y: number): void {
+    const zone = this.hitZone(x, y);
+    if (zone === "price") {
+      this.resetPriceScale();
+      return;
+    }
+    if (zone === "time") {
+      this.fitTimeScale();
+      return;
+    }
+    const hit = this.hitDrawing(x, y);
+    if (hit) {
+      this.selectedId = hit.id;
+      this.selectedIndicatorId = null;
+      this.emit();
+      this.draw();
+      return;
+    }
+    this.fitContent();
+  }
+
   private onKey = (e: KeyboardEvent): void => {
+    const target = e.target as HTMLElement | null;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+
+    if (e.shiftKey && e.altKey && e.key.toLowerCase() === "r") {
+      e.preventDefault();
+      this.setReplay(!this.replay);
+      return;
+    }
+    if (this.replay && e.shiftKey && e.key === "ArrowDown") {
+      e.preventDefault();
+      this.setReplayPlaying(!this.replayPlaying);
+      return;
+    }
+    if (this.replay && e.shiftKey && e.key === "ArrowRight") {
+      e.preventDefault();
+      this.stepReplay();
+      return;
+    }
+
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
       e.preventDefault();
       if (e.shiftKey) this.redo();
       else this.undo();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+      e.preventDefault();
+      this.redo();
+      return;
     }
     if (e.key === "Delete" || e.key === "Backspace") {
       if (this.selectedId) this.removeDrawing(this.selectedId);
@@ -1734,6 +2299,10 @@ export class ChartEngine {
       return;
     }
     if (e.key === "Escape") {
+      if (this.replaySelecting) {
+        this.jumpToRealtime();
+        return;
+      }
       this.draft = null;
       this.selectedId = null;
       this.selectedIndicatorId = null;
