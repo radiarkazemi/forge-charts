@@ -473,6 +473,21 @@ const PATTERN_STYLE_KINDS = new Set([
   "sticker",
   "table",
   "image",
+  "trend",
+  "arrow",
+  "ray",
+  "info",
+  "extended",
+  "trendangle",
+  "hline",
+  "horzray",
+  "vline",
+  "crossline",
+  "parallel",
+  "regression",
+  "flattop",
+  "disjoint",
+  "anchoredvwap",
 ]);
 
 function PatternStylePanel({ engine, drawing }: { engine: ChartEngine | null; drawing: Drawing }) {
@@ -483,6 +498,20 @@ function PatternStylePanel({ engine, drawing }: { engine: ChartEngine | null; dr
   };
   const isPosition = drawing.kind === "long" || drawing.kind === "short";
   const isCycle = drawing.kind === "cycliclines" || drawing.kind === "timecycles" || drawing.kind === "sineline";
+  const isTrendLine =
+    drawing.kind === "trend" ||
+    drawing.kind === "arrow" ||
+    drawing.kind === "ray" ||
+    drawing.kind === "info" ||
+    drawing.kind === "extended" ||
+    drawing.kind === "trendangle" ||
+    drawing.kind === "hline" ||
+    drawing.kind === "horzray" ||
+    drawing.kind === "vline" ||
+    drawing.kind === "crossline";
+  const isChannel =
+    drawing.kind === "parallel" || drawing.kind === "regression" || drawing.kind === "flattop" || drawing.kind === "disjoint";
+  const isAvwap = drawing.kind === "anchoredvwap";
   return (
     <div className="fib-style-panel">
       <label className="row check-row">
@@ -491,15 +520,37 @@ function PatternStylePanel({ engine, drawing }: { engine: ChartEngine | null; dr
           checked={fib.showBackground}
           onChange={() => patchFib({ showBackground: !fib.showBackground })}
         />
-        {isPosition ? "Risk / reward fill" : "Background fill"}
+        {isPosition
+          ? "Risk / reward fill"
+          : isChannel || isAvwap
+            ? "Channel / band fill"
+            : isTrendLine
+              ? "Label background"
+              : "Background fill"}
       </label>
       <label className="row check-row">
         <input type="checkbox" checked={fib.showLevels} onChange={() => patchFib({ showLevels: !fib.showLevels })} />
-        {isPosition ? "Entry labels" : isCycle ? "Cycle / phase labels" : "Point labels"}
+        {isPosition
+          ? "Entry labels"
+          : isCycle
+            ? "Cycle / phase labels"
+            : isAvwap || drawing.kind === "regression"
+              ? "Band / σ labels"
+              : isChannel
+                ? "Middle line / labels"
+                : isTrendLine
+                  ? "Angle / axis labels"
+                  : "Point labels"}
       </label>
       <label className="row check-row">
         <input type="checkbox" checked={fib.showPrices} onChange={() => patchFib({ showPrices: !fib.showPrices })} />
-        {isPosition ? "Prices & RR" : isCycle ? "Period readout" : "Leg ratios"}
+        {isPosition
+          ? "Prices & RR"
+          : isCycle
+            ? "Period readout"
+            : isTrendLine || isChannel
+              ? "Price / % stats"
+              : "Leg ratios"}
       </label>
       {(drawing.kind.startsWith("elliott") || drawing.kind === "sineline") && (
         <label className="row check-row">
@@ -511,7 +562,7 @@ function PatternStylePanel({ engine, drawing }: { engine: ChartEngine | null; dr
           {drawing.kind === "sineline" ? "Baseline" : "Guide / channel"}
         </label>
       )}
-      {isCycle && (
+      {(isCycle || isTrendLine || isChannel || isAvwap) && (
         <>
           <label className="row check-row">
             <input

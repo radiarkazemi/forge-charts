@@ -76,21 +76,21 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 
 | ID | Tool | Forge |
 | --- | --- | --- |
-| D-TR-01 | Trend Line | PARTIAL |
-| D-TR-02 | Arrow | PARTIAL |
-| D-TR-03 | Ray | PARTIAL |
-| D-TR-04 | Info Line | PARTIAL |
-| D-TR-05 | Extended Line | PARTIAL |
-| D-TR-06 | Trend Angle | PARTIAL |
-| D-TR-07 | Horizontal Line | PARTIAL |
-| D-TR-08 | Horizontal Ray | PARTIAL |
-| D-TR-09 | Vertical Line | PARTIAL |
-| D-TR-10 | Cross Line | PARTIAL |
-| D-TR-11 | Parallel Channel | PARTIAL |
-| D-TR-12 | Regression Trend | PARTIAL |
-| D-TR-13 | Flat Top/Bottom | PARTIAL |
-| D-TR-14 | Disjoint Channel | PARTIAL |
-| D-TR-15 | Anchored VWAP | PARTIAL |
+| D-TR-01 | Trend Line | MATCH | Segment with extend L/R, % / angle labels; Style |
+| D-TR-02 | Arrow | MATCH | Trend + arrow head; Style extend / labels |
+| D-TR-03 | Ray | MATCH | One-way extend; Style |
+| D-TR-04 | Info Line | MATCH | Bars / Δprice / % / angle label box; Style |
+| D-TR-05 | Extended Line | MATCH | Infinite both ways; Style |
+| D-TR-06 | Trend Angle | MATCH | Arc + degree label; Style |
+| D-TR-07 | Horizontal Line | MATCH | Full-width + price label; Style |
+| D-TR-08 | Horizontal Ray | MATCH | Right ray + price label; Style extend |
+| D-TR-09 | Vertical Line | MATCH | Full-height + time label; Style |
+| D-TR-10 | Cross Line | MATCH | Crosshair at point; price + time labels |
+| D-TR-11 | Parallel Channel | MATCH | Dual rails + middle line + fill; Style |
+| D-TR-12 | Regression Trend | MATCH | OLS fit + ±σ bands; Style |
+| D-TR-13 | Flat Top/Bottom | MATCH | Diagonal + flat rail with fill; Style |
+| D-TR-14 | Disjoint Channel | MATCH | Two independent rails + fill; 4 pts; Style |
+| D-TR-15 | Anchored VWAP | MATCH | HLC3 AVWAP + σ bands + fill; Style |
 
 ### 2.3 Gann and Fibonacci
 
@@ -248,7 +248,7 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | DI-19 | Stats on line (price, bars, %, angle, distance) | PARTIAL |
 | DI-20 | Fib levels: each ratio on/off, color, width, style, extend, reverse, fill | MATCH | Style tab: per-level toggle/ratio/color + extend / reverse / background / labels |
 
-Drawing tools **D-PR-02…12**, **D-SH-01…12**, **D-AN-01…17**, **D-IC-01…03**, and open **D-AX** items (01/02/05/09/11/14/15) are MATCH. **D-AX-12** sync remains MISSING (needs multi-layout). Next open drawing track: remaining DI-* / chart chrome PARTIALs, or layout sync.
+Trend Line Tools **D-TR-01…15** are MATCH (geometry, labels, channel/AVWAP bands, Style). Drawing tools through D-PR/SH/AN/IC/AX (except D-AX-12) remain MATCH. Next open drawing track: **DI-*** interaction PARTIALs/MISSINGs, then canvas **V-*** chrome.
 
 ---
 
