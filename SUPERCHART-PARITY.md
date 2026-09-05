@@ -248,7 +248,7 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | DI-19 | Stats on line (price, bars, %, angle, distance) | PARTIAL |
 | DI-20 | Fib levels: each ratio on/off, color, width, style, extend, reverse, fill | MATCH | Style tab: per-level toggle/ratio/color + extend / reverse / background / labels |
 
-Next drawing-parameter pass is **per tool** after DI-* is MATCH. Fib retracement (**D-FI-01**), trend-based fib extension (**D-FI-02**), and fib channel (**D-FI-03**) use Supercharts default levels, fills, labels, and Style-tab level controls.
+Next drawing-parameter pass is **per tool** after DI-* is MATCH. **D-FI-01…D-FI-18** (Fib, Pitchfork, and Gann tools through Gann Fan) use Supercharts default levels, geometry, labels, and Style-tab controls. Next open Fib/Gann item: **D-FI-19** Gann Square Fixed.
 
 ---
 
