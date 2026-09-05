@@ -196,8 +196,9 @@ export function defaultFibStyleForKind(kind: DrawingKind): FibRetraceStyle | und
       return defaultPitchforkStyle();
     case "gannbox":
     case "gannsquare":
-    case "gannsquarefixed":
       return defaultGannBoxStyle();
+    case "gannsquarefixed":
+      return defaultGannSquareFixedStyle();
     case "gannfan":
       return defaultGannFanStyle();
     default:
@@ -360,6 +361,32 @@ export function defaultGannBoxStyle(): FibRetraceStyle {
   return fibStyleBase(DEFAULT_GANN_BOX_LEVELS);
 }
 
+/** D-FI-19 Gann Square Fixed — 0…5 unit grid (Supercharts defaults). */
+const DEFAULT_GANN_SQUARE_FIXED_LEVELS: FibLevelStyle[] = [
+  { ratio: 0, visible: true, color: "#787b86", fill: "rgba(120,123,134,0.04)" },
+  { ratio: 0.2, visible: true, color: "#81c784", fill: "rgba(129,199,132,0.05)" },
+  { ratio: 0.4, visible: true, color: "#26a69a", fill: "rgba(38,166,154,0.05)" },
+  { ratio: 0.6, visible: true, color: "#2962ff", fill: "rgba(41,98,255,0.07)" },
+  { ratio: 0.8, visible: true, color: "#ab47bc", fill: "rgba(171,71,188,0.05)" },
+  { ratio: 1, visible: true, color: "#f23645", fill: "rgba(242,54,69,0.06)" },
+];
+export function defaultGannSquareFixedStyle(): FibRetraceStyle {
+  return fibStyleBase(DEFAULT_GANN_SQUARE_FIXED_LEVELS);
+}
+
+/** Classic Gann Square Fixed fan slopes (price:time) inside the locked square. */
+const GANN_FIXED_FAN_RATIOS: { ratio: number; label: string; color: string }[] = [
+  { ratio: 0.125, label: "1/8", color: "#787b86" },
+  { ratio: 0.25, label: "1/4", color: "#81c784" },
+  { ratio: 1 / 3, label: "1/3", color: "#26a69a" },
+  { ratio: 0.5, label: "1/2", color: "#4caf50" },
+  { ratio: 1, label: "1/1", color: "#f23645" },
+  { ratio: 2, label: "2/1", color: "#4caf50" },
+  { ratio: 3, label: "3/1", color: "#26a69a" },
+  { ratio: 4, label: "4/1", color: "#81c784" },
+  { ratio: 8, label: "8/1", color: "#787b86" },
+];
+
 /** D-FI-18 Gann Fan */
 const DEFAULT_GANN_FAN_LEVELS: FibLevelStyle[] = [
   { ratio: 0.125, visible: true, color: "#787b86", fill: "rgba(120,123,134,0.04)" },
@@ -427,7 +454,8 @@ export function paintDrawing(
   else if (kind === "fibarcs") paintFibArcs(ctx, d, pts, selected);
   else if (kind === "fibwedge") paintFibWedge(ctx, d, pts, rect, selected);
   else if (kind === "gannfan") paintGannFan(ctx, d, pts, rect, selected);
-  else if (kind === "gannbox" || kind === "gannsquare" || kind === "gannsquarefixed") paintGannBox(ctx, d, pts, kind, selected);
+  else if (kind === "gannsquarefixed") paintGannSquareFixed(ctx, d, pts, selected);
+  else if (kind === "gannbox" || kind === "gannsquare") paintGannBox(ctx, d, pts, kind, selected);
   else if (kind === "pitchfork" || kind === "schiff" || kind === "modschiff" || kind === "insidepitchfork" || kind === "pitchfan")
     paintPitchfork(ctx, d, pts, rect, kind, selected);
   else if (kind === "hline") stroke(ctx, { x: rect.x, y: pts[0].y }, { x: rect.x + rect.w, y: pts[0].y });
@@ -569,11 +597,21 @@ export function hitTestDrawing(d: Drawing, pts: Pt[], x: number, y: number, rect
     const r = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
     return FAN_RATIOS.some((lvl) => Math.abs(Math.hypot(x - pts[0].x, y - pts[0].y) - r * (lvl || 0.01)) < HIT);
   }
-  if ((kind === "gannbox" || kind === "rect" || kind === "measure" || kind === "datepricerange" || kind === "barspattern") && pts.length >= 2) {
-    const x0 = Math.min(pts[0].x, pts[1].x);
-    const y0 = Math.min(pts[0].y, pts[1].y);
-    const x1 = Math.max(pts[0].x, pts[1].x);
-    const y1 = Math.max(pts[0].y, pts[1].y);
+  if (
+    (kind === "gannbox" ||
+      kind === "gannsquare" ||
+      kind === "gannsquarefixed" ||
+      kind === "rect" ||
+      kind === "measure" ||
+      kind === "datepricerange" ||
+      kind === "barspattern") &&
+    pts.length >= 2
+  ) {
+    const box = gannScreenBox(pts, kind);
+    const x0 = box.x;
+    const y0 = box.y;
+    const x1 = box.x + box.w;
+    const y1 = box.y + box.h;
     const near = x >= x0 - HIT && x <= x1 + HIT && y >= y0 - HIT && y <= y1 + HIT;
     const onEdge = Math.abs(x - x0) < HIT || Math.abs(x - x1) < HIT || Math.abs(y - y0) < HIT || Math.abs(y - y1) < HIT;
     return near && (onEdge || (x >= x0 && x <= x1 && y >= y0 && y <= y1));
@@ -1108,20 +1146,26 @@ function paintGannFan(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rect
   });
 }
 
-function paintGannBox(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], kind: DrawingKind, selected: boolean): void {
-  if (pts.length < 2) return;
-  const style = resolveFibStyleForKind(d);
+function gannScreenBox(pts: Pt[], kind: DrawingKind): { x: number; y: number; w: number; h: number } {
   let x0 = Math.min(pts[0].x, pts[1].x);
   let y0 = Math.min(pts[0].y, pts[1].y);
   let w = Math.abs(pts[1].x - pts[0].x);
   let h = Math.abs(pts[1].y - pts[0].y);
-  if (kind !== "gannbox") {
-    const s = kind === "gannsquarefixed" ? Math.min(w, h) || 80 : Math.max(w, h) || 80;
+  if (kind === "gannsquare") {
+    const s = Math.max(w, h) || 80;
     w = s;
     h = s;
     x0 = pts[1].x < pts[0].x ? pts[0].x - s : pts[0].x;
     y0 = pts[1].y < pts[0].y ? pts[0].y - s : pts[0].y;
   }
+  // gannsquarefixed keeps data-space corners (price/bar locked); no pixel squaring.
+  return { x: x0, y: y0, w, h };
+}
+
+function paintGannBox(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], kind: DrawingKind, selected: boolean): void {
+  if (pts.length < 2) return;
+  const style = resolveFibStyleForKind(d);
+  const { x: x0, y: y0, w, h } = gannScreenBox(pts, kind);
   ctx.save();
   applyLineStyle(ctx, style.levelsStyle);
   ctx.strokeStyle = selected ? "#2962ff" : style.trendColor;
@@ -1143,6 +1187,129 @@ function paintGannBox(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], kind
   ctx.lineWidth = 1.2;
   stroke(ctx, { x: x0, y: y0 + h }, { x: x0 + w, y: y0 });
   stroke(ctx, { x: x0, y: y0 }, { x: x0 + w, y: y0 + h });
+}
+
+/** D-FI-19 Gann Square Fixed — locked price/bar square with unit grid, fans, arcs, and range labels. */
+function paintGannSquareFixed(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], selected: boolean): void {
+  if (pts.length < 2) return;
+  const style = resolveFibStyleForKind(d);
+  const a = pts[0];
+  const b = pts[1];
+  const ox = style.reverse ? b.x : a.x;
+  const oy = style.reverse ? b.y : a.y;
+  const ex = style.reverse ? a.x : b.x;
+  const ey = style.reverse ? a.y : b.y;
+  const dx = ex - ox;
+  const dy = ey - oy;
+  const x0 = Math.min(ox, ex);
+  const y0 = Math.min(oy, ey);
+  const w = Math.abs(dx) || 1;
+  const h = Math.abs(dy) || 1;
+
+  if (style.showBackground) {
+    ctx.fillStyle = "rgba(41,98,255,0.05)";
+    ctx.fillRect(x0, y0, w, h);
+  }
+
+  ctx.save();
+  applyLineStyle(ctx, style.trendStyle);
+  ctx.strokeStyle = selected ? "#2962ff" : style.trendColor;
+  ctx.lineWidth = style.trendWidth;
+  ctx.strokeRect(x0, y0, w, h);
+  ctx.restore();
+
+  // Unit grid (0…5)
+  for (const lvl of style.levels) {
+    if (!lvl.visible) continue;
+    const r = style.reverse ? 1 - lvl.ratio : lvl.ratio;
+    ctx.save();
+    applyLineStyle(ctx, style.levelsStyle);
+    ctx.strokeStyle = lvl.color;
+    ctx.lineWidth = style.levelsWidth * (Math.abs(lvl.ratio - 0.5) < 1e-6 || lvl.ratio === 0 || lvl.ratio === 1 ? 1.35 : 1);
+    stroke(ctx, { x: ox + dx * r, y: oy }, { x: ox + dx * r, y: ey });
+    stroke(ctx, { x: ox, y: oy + dy * r }, { x: ex, y: oy + dy * r });
+    ctx.restore();
+    if (style.showLevels) {
+      ctx.fillStyle = lvl.color;
+      ctx.font = AXIS_FONT;
+      const unit = Math.round(lvl.ratio * 5);
+      ctx.fillText(String(unit), ox + dx * r + 3, oy + 12);
+    }
+  }
+
+  // Fan rays from origin through the square
+  ctx.font = AXIS_FONT;
+  for (const fan of GANN_FIXED_FAN_RATIOS) {
+    let tx: number;
+    let ty: number;
+    if (fan.ratio <= 1) {
+      tx = ex;
+      ty = oy + dy * fan.ratio;
+    } else {
+      tx = ox + dx / fan.ratio;
+      ty = ey;
+    }
+    // Stay inside the square bounds
+    if (fan.ratio <= 1) {
+      if ((dy >= 0 && (ty < Math.min(oy, ey) || ty > Math.max(oy, ey))) || (dy < 0 && (ty > Math.max(oy, ey) || ty < Math.min(oy, ey)))) {
+        continue;
+      }
+    } else if ((dx >= 0 && (tx < Math.min(ox, ex) || tx > Math.max(ox, ex))) || (dx < 0 && (tx > Math.max(ox, ex) || tx < Math.min(ox, ex)))) {
+      continue;
+    }
+    ctx.save();
+    applyLineStyle(ctx, style.levelsStyle);
+    ctx.strokeStyle = fan.ratio === 1 ? "#f23645" : fan.color;
+    ctx.lineWidth = style.levelsWidth * (fan.ratio === 1 ? 1.6 : 1);
+    stroke(ctx, { x: ox, y: oy }, { x: tx, y: ty });
+    ctx.restore();
+    if (style.showLevels) {
+      ctx.fillStyle = fan.ratio === 1 ? "#f23645" : fan.color;
+      ctx.fillText(fan.label, ox + (tx - ox) * 0.62, oy + (ty - oy) * 0.62);
+    }
+  }
+
+  // Quarter arcs centered at origin (radii at each grid level)
+  for (const lvl of style.levels) {
+    if (!lvl.visible || lvl.ratio <= 0) continue;
+    const rx = Math.abs(dx) * lvl.ratio;
+    const ry = Math.abs(dy) * lvl.ratio;
+    const xSign = Math.sign(dx) || 1;
+    const ySign = Math.sign(dy) || 1;
+    ctx.save();
+    applyLineStyle(ctx, style.levelsStyle);
+    ctx.strokeStyle = lvl.color;
+    ctx.globalAlpha = 0.85;
+    ctx.lineWidth = style.levelsWidth;
+    ctx.beginPath();
+    for (let i = 0; i <= 24; i++) {
+      const t = (i / 24) * (Math.PI / 2);
+      const px = ox + xSign * rx * Math.cos(t);
+      const py = oy + ySign * ry * Math.sin(t);
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // 1×1 diagonals
+  ctx.strokeStyle = "#f23645";
+  ctx.lineWidth = 1.25;
+  stroke(ctx, { x: ox, y: oy }, { x: ex, y: ey });
+  stroke(ctx, { x: ox, y: ey }, { x: ex, y: oy });
+
+  // Ranges & ratio labels (Supercharts “Ranges and ratio”)
+  if (style.showPrices || style.showLevels) {
+    const priceSpan = Math.abs(d.points[1].price - d.points[0].price);
+    const ratio = d.scaleRatio && d.scaleRatio > 0 ? d.scaleRatio : NaN;
+    const barsApprox = ratio > 0 ? priceSpan / ratio : NaN;
+    ctx.fillStyle = selected ? "#2962ff" : "#d1d4dc";
+    ctx.font = AXIS_FONT;
+    ctx.fillText(`ΔP ${priceSpan.toPrecision(5)}`, x0 + 4, y0 + h - 34);
+    if (Number.isFinite(barsApprox)) ctx.fillText(`ΔB ${barsApprox.toFixed(1)}`, x0 + 4, y0 + h - 20);
+    if (Number.isFinite(ratio)) ctx.fillText(`ratio ${ratio.toPrecision(4)}`, x0 + 4, y0 + h - 6);
+  }
 }
 
 function pitchOrigin(kind: DrawingKind, p1: Pt, p2: Pt, p3: Pt): Pt {

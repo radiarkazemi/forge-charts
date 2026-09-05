@@ -225,6 +225,11 @@ export type Drawing = {
   visibility?: DrawingVisibility;
   /** Fib / Gann / Pitchfork style (D-FI-01…18); omitted uses Supercharts defaults. */
   fib?: FibRetraceStyle;
+  /**
+   * Locked price-per-bar ratio for Gann Square Fixed (D-FI-19).
+   * Captured from the chart scale at creation; keeps |Δprice| = |Δbars| × scaleRatio.
+   */
+  scaleRatio?: number;
 };
 
 export type DrawingContextMenu = {

@@ -503,7 +503,10 @@ export class ChartEngine {
   updateDrawing(
     id: string,
     patch: Partial<
-      Pick<Drawing, "color" | "lineWidth" | "lineStyle" | "text" | "locked" | "visible" | "visibility" | "points" | "fib">
+      Pick<
+        Drawing,
+        "color" | "lineWidth" | "lineStyle" | "text" | "locked" | "visible" | "visibility" | "points" | "fib" | "scaleRatio"
+      >
     >,
   ): void {
     this.pushUndo();
@@ -530,7 +533,9 @@ export class ChartEngine {
     const d = this.drawings.find((item) => item.id === id);
     if (!d || d.locked || index < 0 || index >= d.points.length) return;
     const points = d.points.map((p, i) => (i === index ? { ...point } : { ...p }));
-    this.updateDrawing(id, { points });
+    const next: Drawing = { ...d, points };
+    if (next.kind === "gannsquarefixed") this.constrainGannSquareFixed(next, index === 0 ? 0 : 1);
+    this.updateDrawing(id, { points: next.points, scaleRatio: next.scaleRatio });
   }
 
   cloneDrawing(id: string): string | null {
@@ -1885,6 +1890,55 @@ export class ChartEngine {
     return { x: this.xOfTime(point.time, bars, rect), y: this.yOf(this.scaled(point.price, bars), range.min, range.max, rect) };
   }
 
+  /** Logical bar index for a unix time (fractional between bars). */
+  private indexFromTime(time: number): number {
+    if (!this.bars.length) return 0;
+    const data = this.bars;
+    const step = intervalSeconds(this.interval) || 60;
+    if (time <= data[0].time) return (time - data[0].time) / step;
+    const last = data.length - 1;
+    if (time >= data[last].time) return last + (time - data[last].time) / step;
+    let lo = 0;
+    let hi = last;
+    while (lo < hi - 1) {
+      const mid = (lo + hi) >> 1;
+      if (data[mid].time <= time) lo = mid;
+      else hi = mid;
+    }
+    const span = data[hi].time - data[lo].time || 1;
+    return lo + (time - data[lo].time) / span;
+  }
+
+  /** Current chart price-per-bar (locks a 1:1 screen square into Gann Fixed). */
+  private chartScaleRatio(): number {
+    const main = this.layout().main;
+    const plotted = this.plotBars();
+    const sample = plotted.length ? plotted : this.bars.slice(-40);
+    if (!sample.length) return 1;
+    const range = this.priceRange(sample);
+    const priceSpan = Math.max(1e-12, range.max - range.min);
+    const pricePerPx = priceSpan / Math.max(1, main.h);
+    const slot = this.slotWidth(main);
+    return Math.max(1e-12, pricePerPx * Math.max(1e-6, slot));
+  }
+
+  /**
+   * Supercharts Gann Square Fixed: keep |Δprice| = |Δbars| × scaleRatio.
+   * Size follows the time drag; price is forced to the locked ratio.
+   */
+  private constrainGannSquareFixed(d: Drawing, movingIndex: 0 | 1): void {
+    if (d.kind !== "gannsquarefixed" || d.points.length < 2) return;
+    if (!(d.scaleRatio && d.scaleRatio > 0)) d.scaleRatio = this.chartScaleRatio();
+    const fixed = d.points[movingIndex === 0 ? 1 : 0];
+    const moving = d.points[movingIndex];
+    const i0 = this.indexFromTime(fixed.time);
+    const i1 = this.indexFromTime(moving.time);
+    let di = i1 - i0;
+    if (Math.abs(di) < 0.5) di = di < 0 ? -1 : 1;
+    const priceSign = Math.sign(moving.price - fixed.price) || 1;
+    moving.price = fixed.price + priceSign * Math.abs(di) * d.scaleRatio!;
+  }
+
   private xOfTime(time: number, _bars: Bar[], rect: Rect): number {
     if (!this.bars.length) return rect.x;
     const data = this.bars;
@@ -2259,10 +2313,14 @@ export class ChartEngine {
         lineWidth: 1,
         lineStyle: "solid",
         fib: defaultFibStyleForKind(kind),
+        scaleRatio: kind === "gannsquarefixed" ? this.chartScaleRatio() : undefined,
       };
       if (neededPoints(kind) === 1) this.finishDraft();
     } else {
       this.draft.points[this.draft.points.length - 1] = point;
+      if (this.draft.kind === "gannsquarefixed" && this.draft.points.length >= 2) {
+        this.constrainGannSquareFixed(this.draft, 1);
+      }
       if (!isOpenEnded(this.draft.kind) && this.draft.points.length >= neededPoints(this.draft.kind)) this.finishDraft();
       else this.draft.points = [...this.draft.points, point];
     }
@@ -2362,6 +2420,7 @@ export class ChartEngine {
         }
         if (this.dragHandle != null && d.points[this.dragHandle]) {
           d.points[this.dragHandle] = p;
+          if (d.kind === "gannsquarefixed") this.constrainGannSquareFixed(d, this.dragHandle === 0 ? 0 : 1);
         } else if (this.dragFrom) {
           const dt = p.time - this.dragFrom.time;
           const dp = p.price - this.dragFrom.price;
@@ -2374,6 +2433,9 @@ export class ChartEngine {
       if (p) {
         if (this.draft.points.length === 1) this.draft.points = [this.draft.points[0], p];
         else this.draft.points = [...this.draft.points.slice(0, -1), p];
+        if (this.draft.kind === "gannsquarefixed" && this.draft.points.length >= 2) {
+          this.constrainGannSquareFixed(this.draft, 1);
+        }
       }
     }
     if (this.dragging === "brush") {

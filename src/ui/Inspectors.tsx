@@ -485,8 +485,16 @@ function FibRetraceStylePanel({ engine, drawing }: { engine: ChartEngine | null;
       </label>
       <label className="row check-row">
         <input type="checkbox" checked={fib.showPrices} onChange={() => patchFib({ showPrices: !fib.showPrices })} />
-        Prices
+        Prices / ranges
       </label>
+      {drawing.kind === "gannsquarefixed" ? (
+        <p className="hint">
+          Scale ratio locked
+          {drawing.scaleRatio != null && Number.isFinite(drawing.scaleRatio)
+            ? `: ${drawing.scaleRatio.toPrecision(5)} price/bar`
+            : " at creation"}
+        </p>
+      ) : null}
       <label className="row">
         Levels width
         <select value={fib.levelsWidth} onChange={(e) => patchFib({ levelsWidth: Number(e.target.value) })}>
