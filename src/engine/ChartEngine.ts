@@ -161,6 +161,8 @@ export class ChartEngine {
   private replayHoverIndex: number | null = null;
   private stayMode = false;
   private hideDrawings = false;
+  private hideIndicators = false;
+  private snapIndicators = false;
   private lockDrawings = false;
   private fitMode = true;
   private rangePreset: RangePreset = "1M";
@@ -241,6 +243,8 @@ export class ChartEngine {
       replayStartIndex: this.replayStartIndex,
       stayMode: this.stayMode,
       hideDrawings: this.hideDrawings,
+      hideIndicators: this.hideIndicators,
+      snapIndicators: this.snapIndicators,
       lockDrawings: this.lockDrawings,
       fitMode: this.fitMode,
       countdown: this.countdown(),
@@ -351,8 +355,45 @@ export class ChartEngine {
     this.emit();
   }
 
-  toggle(flag: "logScale" | "percentScale" | "showGrid" | "stayMode" | "hideDrawings" | "lockDrawings" | "fitMode"): void {
+  toggle(
+    flag: "logScale" | "percentScale" | "showGrid" | "stayMode" | "hideDrawings" | "hideIndicators" | "snapIndicators" | "lockDrawings" | "fitMode",
+  ): void {
     this[flag] = !this[flag];
+    this.emit();
+    this.draw();
+  }
+
+  /** Hide drawings + indicators together (D-AX-11). */
+  toggleHideAll(): void {
+    const next = !(this.hideDrawings && this.hideIndicators);
+    this.hideDrawings = next;
+    this.hideIndicators = next;
+    this.emit();
+    this.draw();
+  }
+
+  clearIndicators(): void {
+    this.pushUndo();
+    this.indicators = [];
+    this.selectedIndicatorId = null;
+    this.emit();
+    this.draw();
+  }
+
+  /** Remove drawings and indicators (D-AX-15). */
+  clearDrawingsAndIndicators(): void {
+    if (this.lockDrawings) {
+      this.clearIndicators();
+      return;
+    }
+    this.pushUndo();
+    this.drawings = [];
+    this.draft = null;
+    this.selectedId = null;
+    this.drawingPropsId = null;
+    this.drawingMenu = null;
+    this.indicators = [];
+    this.selectedIndicatorId = null;
     this.emit();
     this.draw();
   }
@@ -907,18 +948,20 @@ export class ChartEngine {
       },
     ];
     const plotted = this.plotBars();
-    for (const ind of this.indicators) {
-      if (!ind.visible) continue;
-      const series = this.indicatorSeries(ind, plotted);
-      const last = series.lines[0]?.at(-1);
-      const extra = series.lines[1]?.at(-1);
-      const label =
-        last == null
-          ? ind.kind.toUpperCase()
-          : extra != null
-            ? `${ind.kind.toUpperCase()} ${formatPrice(last, 2)} / ${formatPrice(extra, 2)}`
-            : `${ind.kind.toUpperCase()} ${ind.params[0] ?? ""}  ${formatPrice(last, ind.kind === "rsi" || ind.kind === "stoch" ? 2 : p)}`;
-      lines.push({ id: ind.id, text: label, color: ind.color });
+    if (!this.hideIndicators) {
+      for (const ind of this.indicators) {
+        if (!ind.visible) continue;
+        const series = this.indicatorSeries(ind, plotted);
+        const last = series.lines[0]?.at(-1);
+        const extra = series.lines[1]?.at(-1);
+        const label =
+          last == null
+            ? ind.kind.toUpperCase()
+            : extra != null
+              ? `${ind.kind.toUpperCase()} ${formatPrice(last, 2)} / ${formatPrice(extra, 2)}`
+              : `${ind.kind.toUpperCase()} ${ind.params[0] ?? ""}  ${formatPrice(last, ind.kind === "rsi" || ind.kind === "stoch" ? 2 : p)}`;
+        lines.push({ id: ind.id, text: label, color: ind.color });
+      }
     }
     if (this.compareTicker) lines.push({ id: "cmp", text: `Compare ${this.compareTicker}`, color: "#ab47bc" });
     return lines;
@@ -958,6 +1001,7 @@ export class ChartEngine {
   }
 
   private extraIndicators(): IndicatorInstance[] {
+    if (this.hideIndicators) return [];
     return this.indicators.filter((i) => i.visible && ["rsi", "macd", "stoch", "atr"].includes(i.pane));
   }
 
@@ -1264,6 +1308,16 @@ export class ChartEngine {
     const bar = this.bars[idx];
     if (this.magnet !== "off" && bar && logical >= -0.5 && logical <= this.bars.length - 0.5) {
       const candidates = [bar.open, bar.high, bar.low, bar.close];
+      if (this.snapIndicators) {
+        for (const ind of this.indicators) {
+          if (!ind.visible || ind.pane !== "main") continue;
+          const { lines } = this.indicatorSeries(ind, this.bars);
+          for (const line of lines) {
+            const v = line[idx];
+            if (v != null && Number.isFinite(v)) candidates.push(v);
+          }
+        }
+      }
       const nearest = candidates.reduce((best, v) => (Math.abs(v - price) < Math.abs(best - price) ? v : best));
       if (this.magnet === "strong" || Math.abs(nearest - price) / (price || 1) < 0.004) {
         price = nearest;
@@ -1318,13 +1372,15 @@ export class ChartEngine {
     if (bars.length) {
       this.paintVolumeOverlay(layout.main, bars, pal);
       this.paintSeries(layout.main, bars, range, pal);
-      this.paintMainIndicators(layout.main, bars, range);
+      if (!this.hideIndicators) this.paintMainIndicators(layout.main, bars, range);
       this.paintCompare(layout.main, bars, pal);
       this.paintPrevDayClose(layout.main, bars, range, pal);
       this.paintPriceLine(layout.main, bars, range, pal);
       this.paintHighLowLabels(layout.main, bars, range, pal);
     }
-    for (const extra of layout.extras) this.paintPane(extra.rect, extra.ind, pal);
+    if (!this.hideIndicators) {
+      for (const extra of layout.extras) this.paintPane(extra.rect, extra.ind, pal);
+    }
     if (!this.hideDrawings) this.paintDrawings(layout.main, bars.length ? bars : this.bars.slice(-40), range);
     this.paintAxes(layout, bars, range, pal);
     this.paintCrosshair(layout, bars, range, pal);
@@ -2297,13 +2353,23 @@ export class ChartEngine {
     if (!point) return;
     const kind = this.tool;
     if (!this.draft) {
-      const needsText = kind === "text" || kind === "anchoredtext" || kind === "note" || kind === "signpost" || kind === "callout" || kind === "comment" || kind === "pricenote";
-      const text =
-        kind === "sticker" || kind === "flagmark"
-          ? this.glyph
-          : needsText
-            ? window.prompt("Text", kind === "note" ? "Note" : "Text") || "Text"
-            : undefined;
+      const needsText =
+        kind === "text" ||
+        kind === "anchoredtext" ||
+        kind === "note" ||
+        kind === "anchorednote" ||
+        kind === "signpost" ||
+        kind === "callout" ||
+        kind === "comment" ||
+        kind === "pricenote" ||
+        kind === "table";
+      let text: string | undefined;
+      if (kind === "sticker" || kind === "flagmark") text = this.glyph;
+      else if (kind === "image") text = "Image";
+      else if (needsText) {
+        const fallback = kind === "note" || kind === "anchorednote" ? "Note" : kind === "table" ? "A1" : "Text";
+        text = window.prompt("Text", fallback) || fallback;
+      }
       this.draft = {
         id: uid("dr"),
         kind,
@@ -2489,8 +2555,15 @@ export class ChartEngine {
       tapY != null;
 
     if (this.dragging === "zoom" && this.draft && this.draft.points.length >= 2) {
-      this.viewCount = this.clampViewCount(this.viewCount * 0.55);
+      const t0 = Math.min(this.draft.points[0].time, this.draft.points[1].time);
+      const t1 = Math.max(this.draft.points[0].time, this.draft.points[1].time);
+      const i0 = this.indexFromTime(t0);
+      const i1 = this.indexFromTime(t1);
+      const span = Math.max(8, Math.abs(i1 - i0));
+      this.setViewCount(span, (i0 + i1) / 2);
+      this.fitMode = false;
       this.draft = null;
+      this.tool = "crosshair";
     }
     if (this.dragging === "brush" && this.draft) this.finishDraft();
     this.dragging = null;

@@ -274,9 +274,50 @@ export function DrawingToolbar({ engine }: { engine: ChartEngine | null }) {
             <circle cx="12" cy="12" r="3" />
           </I>
         </button>
+        <button
+          className={snap.hideIndicators ? "tool on" : "tool"}
+          title="Hide indicators"
+          onClick={() => engine?.toggle("hideIndicators")}
+        >
+          <I>
+            <path d="M4 18V8M8 18V11M12 18V6M16 18V13M20 18V9" />
+          </I>
+        </button>
+        <button
+          className={snap.hideDrawings && snap.hideIndicators ? "tool on" : "tool"}
+          title="Hide all"
+          onClick={() => engine?.toggleHideAll()}
+        >
+          <I>
+            <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z" />
+            <path d="M4 4l16 16" />
+          </I>
+        </button>
+        <button
+          className={snap.snapIndicators ? "tool on" : "tool"}
+          title="Snap to indicators"
+          onClick={() => engine?.toggle("snapIndicators")}
+        >
+          <I>
+            <path d="M4 12h16M12 4v16" />
+            <circle cx="12" cy="12" r="3" />
+          </I>
+        </button>
         <button className="tool" title="Remove drawings" onClick={() => engine?.clearDrawings()}>
           <I>
             <path d="M5 7h14M9 7V5h6v2M8 7l1 12h6l1-12" />
+          </I>
+        </button>
+        <button className="tool" title="Remove indicators" onClick={() => engine?.clearIndicators()}>
+          <I>
+            <path d="M4 18V8M8 18V11M12 18V6M16 18V13M20 18V9" />
+            <path d="M3 4l18 16" />
+          </I>
+        </button>
+        <button className="tool" title="Remove drawings and indicators" onClick={() => engine?.clearDrawingsAndIndicators()}>
+          <I>
+            <path d="M5 7h14M9 7V5h6v2M8 7l1 12h6l1-12" />
+            <path d="M3 3l18 18" />
           </I>
         </button>
       </aside>
