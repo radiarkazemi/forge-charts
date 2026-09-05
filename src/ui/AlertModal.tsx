@@ -19,6 +19,7 @@ type Props = {
     price: number;
     trigger: AlertTrigger;
     message: string;
+    webhookUrl?: string;
   }) => void;
 };
 
@@ -38,6 +39,7 @@ export function AlertModal({
   const [name, setName] = useState("");
   const [trigger, setTrigger] = useState<AlertTrigger>("once");
   const [message, setMessage] = useState("");
+  const [webhookUrl, setWebhookUrl] = useState("");
   const priceRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -48,6 +50,7 @@ export function AlertModal({
     setName(defaultName?.trim() || `${symbol} crossing ${p}`);
     setTrigger("once");
     setMessage("");
+    setWebhookUrl("");
     requestAnimationFrame(() => {
       priceRef.current?.focus();
       priceRef.current?.select();
@@ -80,6 +83,7 @@ export function AlertModal({
       price: value,
       trigger,
       message: message.trim(),
+      webhookUrl: webhookUrl.trim() || undefined,
     });
     onClose();
   };
@@ -142,6 +146,16 @@ export function AlertModal({
           />
         </label>
 
+        <label className="row">
+          Webhook URL
+          <input
+            value={webhookUrl}
+            placeholder="https://… (optional POST on fire)"
+            onChange={(e) => setWebhookUrl(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submit()}
+          />
+        </label>
+
         <div className="alert-modal-actions">
           <button type="button" className="primary" onClick={submit} disabled={!Number.isFinite(Number(price))}>
             Create
@@ -157,5 +171,8 @@ export function AlertModal({
 
 export function alertStatusText(alert: PriceAlert): string {
   if (!alert.enabled) return alert.fireCount ? "Triggered" : "Paused";
+  if (alert.webhookUrl) return "Active · webhook";
+  if (alert.drawingId) return "Active · drawing";
+  if (alert.indicatorId) return "Active · indicator";
   return "Active";
 }

@@ -35,18 +35,18 @@ Forge already mirrors most **chrome**. Gaps are mostly **depth, data, and runtim
 
 ## 2. P0 — daily trader blockers
 
-| ID | Tag | TradingView | Forge today | Action |
+| ID | Tag | TradingView | Forge today (2026-09-05 P0 pass) | Action |
 | --- | --- | --- | --- | --- |
-| GAP-01 | ADD | Full Pine Script® runtime (compile → plot → alerts) | Regex maps a few keywords → SMA/EMA/RSI/MACD | Real interpreter or WASM subset; at least plots + inputs |
-| GAP-02 | ADD | Strategy Tester with equity, trades, ratios, properties | Tabbed shell with “—” metrics | Backtest engine + trade list + equity curve |
-| GAP-03 | MODIFY | Indicators dialog: hundreds of runnable studies | ~10 runnable; many catalog rows are preview-only | Expand runnable library (Ichimoku, Supertrend, OBV, pivots, ADL, CCI, MFI, …) |
-| GAP-04 | ADD | Server / push alerts (email, app, webhook, SMS) | Local `localStorage` + toast only | At least webhook + persistent server eval |
-| GAP-05 | MODIFY | Alert on price, indicator, strategy, drawing | Mostly price cross; “alert on drawing” ≈ price at first point | Drawing-break / indicator-condition alerts |
-| GAP-06 | PARTIAL | Volume footprint / cluster | Decorative stub | Real volume-at-price (or synthetic from tick/agg if no L2) |
-| GAP-07 | PARTIAL | TPO / Market Profile | Decorative stub | Letters, POC, Value Area, IB |
-| GAP-08 | PARTIAL | Session volume profile chart | Stub | Real session VP + fixed-range VP drawings accuracy |
-| GAP-09 | MODIFY | Multi-layout drawing sync (live) | Sync mostly on add/remove id-list, not drag/style | Live sync points, style, z-order across panes |
-| GAP-10 | PARTIAL | Object tree + Data window | Basic lists | Folders, multi-select, bulk hide/lock; data window shows indicator values at cursor |
+| GAP-01 | PARTIAL | Full Pine Script® runtime (compile → plot → alerts) | Subset runtime maps common `ta.*` / `strategy.*` onto Forge studies + tester | Deeper interpreter / WASM still open |
+| GAP-02 | PARTIAL | Strategy Tester with equity, trades, ratios, properties | Local backtester: MA/RSI/MACD/Donchian with net profit, DD, win rate, trade list | Equity curve chart + denser strategy catalog |
+| GAP-03 | PARTIAL | Indicators dialog: hundreds of runnable studies | ~25 runnable (MA family, Ichimoku, Supertrend, PSAR, ADX, Stoch RSI, CCI, WillR, OBV, CMF, Donchian, Keltner, pivots, …) | Keep expanding toward TV breadth |
+| GAP-04 | PARTIAL | Server / push alerts (email, app, webhook, SMS) | Optional webhook URL on create; JSON POST on fire (client-side) | Persistent server-side eval still open |
+| GAP-05 | PARTIAL | Alert on price, indicator, strategy, drawing | Drawing-level + indicator-value cross eval wired; webhook optional | Strategy alerts + richer drawing geometry |
+| GAP-06 | PARTIAL | Volume footprint / cluster | Synthetic volume-at-price buy/sell splits in candle range | True tick/L2 clusters still open |
+| GAP-07 | PARTIAL | TPO / Market Profile | Letter matrix + POC + value-area estimate | IB / session templates still open |
+| GAP-08 | PARTIAL | Session volume profile chart | Session VP with POC + ~70% VA from volume-at-price | Fixed-range VP drawing parity still open |
+| GAP-09 | PARTIAL | Multi-layout drawing sync (live) | Fingerprint sync (points/style/visibility/fib), not id-list only | Cross-layout remote sync still open |
+| GAP-10 | PARTIAL | Object tree + Data window | Data window shows indicator values at hover; visibility buckets on indicators | Folders / multi-select / bulk ops still open |
 
 ---
 

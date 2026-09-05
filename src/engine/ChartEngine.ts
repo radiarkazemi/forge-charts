@@ -3,7 +3,30 @@ import { chartStyleMatchesTheme, defaultChartStyle } from "../chartStyle";
 import { hitHandle, hitTestDrawing, isDrawingTool, isOpenEnded, neededPoints, paintDrawing, defaultFibStyleForKind } from "./drawings";
 import { bollinger, ema, heikinAshi, macd, rsi, sma } from "./indicators";
 import { clamp, formatPrice, formatTime, formatVolume, niceTicks, uid, snapAngle45 } from "./math";
-import { atr, stoch, vwap, wma } from "./studies";
+import { defaultLevelsForKind, defaultPaneForKind, defaultParamsForKind } from "./indicatorMeta";
+import {
+  adx,
+  atr,
+  buildTpo,
+  cci,
+  cmf,
+  donchian,
+  hma,
+  ichimoku,
+  keltner,
+  obv,
+  pivots,
+  psar,
+  smma,
+  stoch,
+  stochRsi,
+  supertrend,
+  volumeAtPrice,
+  vwap,
+  vwma,
+  willr,
+  wma,
+} from "./studies";
 import { AXIS_FONT, CHART_FONT, CHART_FONT_BOLD, palettes } from "./theme";
 import type {
   Bar,
@@ -24,7 +47,7 @@ import type {
   Theme,
   Tool,
 } from "./types";
-import { DEFAULT_DRAWING_VISIBILITY } from "./types";
+import { DEFAULT_DRAWING_VISIBILITY, DEFAULT_INDICATOR_VISIBILITY } from "./types";
 
 const PRICE_AXIS = 78;
 const TIME_AXIS = 28;
@@ -83,8 +106,18 @@ function drawingShownOnInterval(d: Drawing, interval: Interval): boolean {
   return vis[visibilityBucket(interval)] !== false;
 }
 
+function indicatorShownOnInterval(ind: IndicatorInstance, interval: Interval): boolean {
+  if (!ind.visible) return false;
+  const vis = ind.visibility ?? DEFAULT_INDICATOR_VISIBILITY;
+  return vis[visibilityBucket(interval)] !== false;
+}
+
 function cloneIndicators(rows: IndicatorInstance[]): IndicatorInstance[] {
-  return rows.map((i) => ({ ...i, params: [...i.params] }));
+  return rows.map((i) => ({
+    ...i,
+    params: [...i.params],
+    visibility: i.visibility ? { ...i.visibility } : undefined,
+  }));
 }
 
 export class ChartEngine {
@@ -481,20 +514,8 @@ export class ChartEngine {
   }
 
   addIndicator(kind: IndicatorInstance["kind"]): void {
-    const pane =
-      kind === "rsi" ? "rsi" : kind === "macd" ? "macd" : kind === "stoch" ? "stoch" : kind === "atr" ? "atr" : kind === "vol" ? "volume" : "main";
-    const params =
-      kind === "sma" || kind === "ema" || kind === "wma"
-        ? [20]
-        : kind === "bb"
-          ? [20, 2]
-          : kind === "rsi" || kind === "atr"
-            ? [14]
-            : kind === "stoch"
-              ? [14, 3]
-              : kind === "vol"
-                ? []
-                : [12, 26, 9];
+    const pane = defaultPaneForKind(kind);
+    const params = defaultParamsForKind(kind);
     this.pushUndo();
     this.indicators.push({
       id: uid("ind"),
@@ -503,7 +524,7 @@ export class ChartEngine {
       params,
       visible: true,
       color: COLORS[this.indicators.length % COLORS.length],
-      levels: kind === "rsi" ? [30, 50, 70] : kind === "stoch" ? [20, 50, 80] : undefined,
+      levels: defaultLevelsForKind(kind),
       zIndex: this.indicators.length,
     });
     this.emit();
@@ -524,19 +545,7 @@ export class ChartEngine {
   ): void {
     this.pushUndo();
     this.indicators = items.map((item, index) => {
-      const pane =
-        item.pane ??
-        (item.kind === "rsi"
-          ? "rsi"
-          : item.kind === "macd"
-            ? "macd"
-            : item.kind === "stoch"
-              ? "stoch"
-              : item.kind === "atr"
-                ? "atr"
-                : item.kind === "vol"
-                  ? "volume"
-                  : "main");
+      const pane = item.pane ?? defaultPaneForKind(item.kind);
       return {
         id: uid("ind"),
         kind: item.kind,
@@ -574,12 +583,21 @@ export class ChartEngine {
     patch: Partial<
       Pick<
         IndicatorInstance,
-        "params" | "color" | "visible" | "lineWidth" | "lineStyle" | "source" | "levels" | "zIndex" | "scaleSide" | "collapsed" | "pane"
+        "params" | "color" | "visible" | "lineWidth" | "lineStyle" | "source" | "levels" | "zIndex" | "scaleSide" | "collapsed" | "pane" | "visibility"
       >
     >,
   ): void {
     this.pushUndo();
-    this.indicators = this.indicators.map((i) => (i.id === id ? { ...i, ...patch, params: patch.params ? [...patch.params] : i.params } : i));
+    this.indicators = this.indicators.map((i) =>
+      i.id === id
+        ? {
+            ...i,
+            ...patch,
+            params: patch.params ? [...patch.params] : i.params,
+            visibility: patch.visibility ? { ...patch.visibility } : i.visibility,
+          }
+        : i,
+    );
     this.emit();
     this.draw();
   }
@@ -951,6 +969,27 @@ export class ChartEngine {
     }));
   }
 
+  getBars(): Bar[] {
+    return this.bars.slice();
+  }
+
+  /** Indicator values at a bar index for Data Window (GAP-10). */
+  indicatorValuesAt(index: number): { id: string; kind: string; label: string; values: (number | null)[] }[] {
+    if (index < 0 || index >= this.bars.length) return [];
+    const out: { id: string; kind: string; label: string; values: (number | null)[] }[] = [];
+    for (const ind of this.indicators) {
+      if (!indicatorShownOnInterval(ind, this.interval)) continue;
+      const series = this.indicatorSeries(ind, this.bars);
+      out.push({
+        id: ind.id,
+        kind: ind.kind,
+        label: ind.kind.toUpperCase(),
+        values: series.lines.map((line) => line[index] ?? null),
+      });
+    }
+    return out;
+  }
+
   /** Replace drawings (D-AX-12 sync). */
   setDrawings(rows: import("./types").Drawing[], opts?: { selectId?: string | null }): void {
     this.pushUndo();
@@ -1164,7 +1203,7 @@ export class ChartEngine {
     const plotted = this.plotBars();
     if (!this.hideIndicators) {
       for (const ind of this.indicators) {
-        if (!ind.visible) continue;
+        if (!indicatorShownOnInterval(ind, this.interval)) continue;
         const series = this.indicatorSeries(ind, plotted);
         const last = series.lines[0]?.at(-1);
         const extra = series.lines[1]?.at(-1);
@@ -1216,7 +1255,7 @@ export class ChartEngine {
 
   private extraIndicators(): IndicatorInstance[] {
     if (this.hideIndicators) return [];
-    let rows = this.indicators.filter((i) => i.visible && ["rsi", "macd", "stoch", "atr"].includes(i.pane));
+    let rows = this.indicators.filter((i) => indicatorShownOnInterval(i, this.interval) && ["rsi", "macd", "stoch", "atr", "volume", "osc"].includes(i.pane));
     if (this.maximizedPaneId) {
       const hit = rows.find((i) => i.id === this.maximizedPaneId);
       if (hit) return [hit];
@@ -1608,9 +1647,13 @@ export class ChartEngine {
   private indicatorSeries(ind: IndicatorInstance, src: Bar[]): { lines: (number | null)[][]; hist?: (number | null)[] } {
     const source = ind.source ?? "close";
     const c = src.map((bar) => this.sourceValue(bar, source));
+    const vols = src.map((bar) => bar.volume);
     if (ind.kind === "sma") return { lines: [sma(c, ind.params[0] ?? 20)] };
     if (ind.kind === "ema") return { lines: [ema(c, ind.params[0] ?? 50)] };
     if (ind.kind === "wma") return { lines: [wma(c, ind.params[0] ?? 20)] };
+    if (ind.kind === "smma") return { lines: [smma(c, ind.params[0] ?? 20)] };
+    if (ind.kind === "vwma") return { lines: [vwma(c, vols, ind.params[0] ?? 20)] };
+    if (ind.kind === "hma") return { lines: [hma(c, ind.params[0] ?? 20)] };
     if (ind.kind === "vwap") return { lines: [vwap(src)] };
     if (ind.kind === "bb") {
       const bb = bollinger(c, ind.params[0] ?? 20, ind.params[1] ?? 2);
@@ -1625,6 +1668,39 @@ export class ChartEngine {
     if (ind.kind === "macd") {
       const m = macd(c, ind.params[0] ?? 12, ind.params[1] ?? 26, ind.params[2] ?? 9);
       return { lines: [m.line, m.signal], hist: m.hist };
+    }
+    if (ind.kind === "ichimoku") {
+      const cloud = ichimoku(src, ind.params[0] ?? 9, ind.params[1] ?? 26, ind.params[2] ?? 52);
+      return { lines: [cloud.conversion, cloud.base, cloud.spanA, cloud.spanB, cloud.lagging] };
+    }
+    if (ind.kind === "psar") return { lines: [psar(src, ind.params[0] ?? 0.02, ind.params[1] ?? 0.2)] };
+    if (ind.kind === "supertrend") {
+      const s = supertrend(src, ind.params[0] ?? 10, ind.params[1] ?? 3);
+      return { lines: [s.line] };
+    }
+    if (ind.kind === "adx") {
+      const a = adx(src, ind.params[0] ?? 14);
+      return { lines: [a.adx, a.plusDI, a.minusDI] };
+    }
+    if (ind.kind === "stochrsi") {
+      const s = stochRsi(c, ind.params[0] ?? 14, ind.params[2] ?? 3, ind.params[3] ?? 3);
+      return { lines: [s.k, s.d] };
+    }
+    if (ind.kind === "cci") return { lines: [cci(src, ind.params[0] ?? 20)] };
+    if (ind.kind === "willr") return { lines: [willr(src, ind.params[0] ?? 14)] };
+    if (ind.kind === "obv") return { lines: [obv(src)] };
+    if (ind.kind === "cmf") return { lines: [cmf(src, ind.params[0] ?? 20)] };
+    if (ind.kind === "donchian") {
+      const d = donchian(src, ind.params[0] ?? 20);
+      return { lines: [d.upper, d.mid, d.lower] };
+    }
+    if (ind.kind === "keltner") {
+      const k = keltner(src, ind.params[0] ?? 20, ind.params[1] ?? 1.5, c);
+      return { lines: [k.upper, k.mid, k.lower] };
+    }
+    if (ind.kind === "pivot") {
+      const p = pivots(src);
+      return { lines: [p.p, p.r1, p.s1, p.r2, p.s2] };
     }
     return { lines: [] };
   }
@@ -1956,6 +2032,8 @@ export class ChartEngine {
     }
 
     if (this.chartType === "volfoot") {
+      const rows = volumeAtPrice(bars, 12);
+      const maxTotal = Math.max(...rows.map((r) => r.total), 1);
       bars.forEach((b, i) => {
         const x = this.xOf(i, bars.length, rect);
         const yO = this.yOf(this.scaled(b.open, bars), range.min, range.max, rect);
@@ -1970,51 +2048,70 @@ export class ChartEngine {
           ctx.lineTo(x, yL);
           ctx.stroke();
         }
-        ctx.fillStyle = up ? "rgba(38,166,154,0.24)" : "rgba(239,83,80,0.24)";
+        ctx.fillStyle = up ? "rgba(38,166,154,0.18)" : "rgba(239,83,80,0.18)";
         ctx.fillRect(x - body / 2, Math.min(yO, yC), body, Math.max(1, Math.abs(yC - yO)));
-        for (let r = 0; r < 4; r++) {
-          const yy = yH + ((yL - yH) * (r + 0.5)) / 4;
-          ctx.fillStyle = r % 2 === 0 ? "rgba(41,98,255,0.32)" : "rgba(255,255,255,0.18)";
-          ctx.fillRect(x - body * 0.42, yy - 2, body * 0.84, 3);
-        }
+        rows
+          .filter((r) => r.price >= b.low && r.price <= b.high)
+          .forEach((r) => {
+            const y = this.yOf(this.scaled(r.price, bars), range.min, range.max, rect);
+            const buyW = (r.buy / maxTotal) * body * 0.9;
+            const sellW = (r.sell / maxTotal) * body * 0.9;
+            ctx.fillStyle = "rgba(38,166,154,0.55)";
+            ctx.fillRect(x - buyW, y - 1.5, buyW, 3);
+            ctx.fillStyle = "rgba(239,83,80,0.55)";
+            ctx.fillRect(x, y - 1.5, sellW, 3);
+          });
       });
       return;
     }
 
     if (this.chartType === "tpo") {
-      ctx.font = `bold ${Math.max(9, Math.min(12, slot * 0.35))}px Trebuchet MS, Arial, sans-serif`;
-      const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-      bars.forEach((b, i) => {
-        const x = this.xOf(i, bars.length, rect);
-        const steps = 6;
-        for (let s = 0; s < steps; s++) {
-          const price = b.low + ((b.high - b.low) * s) / Math.max(1, steps - 1);
-          const y = this.yOf(this.scaled(price, bars), range.min, range.max, rect);
-          ctx.fillStyle = "rgba(41,98,255,0.72)";
-          ctx.fillText(letters[i % letters.length], x - 4, y + 3);
-        }
+      const profile = buildTpo(bars, 24);
+      ctx.font = `bold ${Math.max(8, Math.min(11, slot * 0.32))}px Trebuchet MS, Arial, sans-serif`;
+      profile.letters.forEach((letters, bin) => {
+        const price = profile.prices[bin]!;
+        const y = this.yOf(this.scaled(price, bars), range.min, range.max, rect);
+        const inVa = bin >= profile.vaLow && bin <= profile.vaHigh;
+        letters.forEach((ch, col) => {
+          const x = rect.x + 8 + col * Math.max(7, slot * 0.45);
+          ctx.fillStyle = bin === profile.pocBin ? "#ff6d00" : inVa ? "rgba(41,98,255,0.85)" : "rgba(120,123,134,0.7)";
+          ctx.fillText(ch, x, y + 3);
+        });
       });
       return;
     }
 
     if (this.chartType === "sessionvp") {
-      const bins = 24;
-      const vol = Array.from({ length: bins }, () => 0);
-      for (const b of bars) {
-        const mid = (b.high + b.low + b.close) / 3;
-        const t = (this.scaled(mid, bars) - range.min) / (range.max - range.min || 1);
-        const idx = clamp(Math.floor((1 - t) * bins), 0, bins - 1);
-        vol[idx] += b.volume;
+      const rows = volumeAtPrice(bars, 32);
+      const vmax = Math.max(...rows.map((r) => r.total), 1);
+      let poc = 0;
+      rows.forEach((r, i) => {
+        if (r.total > rows[poc]!.total) poc = i;
+      });
+      let covered = rows[poc]!.total;
+      let lo = poc;
+      let hi = poc;
+      const target = rows.reduce((a, r) => a + r.total, 0) * 0.7;
+      while (covered < target && (lo > 0 || hi < rows.length - 1)) {
+        const nextLo = lo > 0 ? rows[lo - 1]!.total : -1;
+        const nextHi = hi < rows.length - 1 ? rows[hi + 1]!.total : -1;
+        if (nextHi >= nextLo) {
+          hi++;
+          covered += rows[hi]!.total;
+        } else {
+          lo--;
+          covered += rows[lo]!.total;
+        }
       }
-      const vmax = Math.max(...vol, 1);
-      vol.forEach((v, i) => {
-        const y0 = rect.y + (i * rect.h) / bins;
-        const y1 = rect.y + ((i + 1) * rect.h) / bins;
-        const w = (v / vmax) * rect.w * 0.26;
-        ctx.fillStyle = "rgba(41,98,255,0.24)";
-        ctx.fillRect(rect.x + rect.w - w, y0 + 1, w, Math.max(1, y1 - y0 - 2));
+      rows.forEach((r, i) => {
+        const y = this.yOf(this.scaled(r.price, bars), range.min, range.max, rect);
+        const w = (r.total / vmax) * rect.w * 0.34;
+        const inVa = i >= lo && i <= hi;
+        ctx.fillStyle = i === poc ? "rgba(255,109,0,0.55)" : inVa ? "rgba(41,98,255,0.28)" : "rgba(120,123,134,0.18)";
+        ctx.fillRect(rect.x + rect.w - w, y - 3, w, 6);
       });
     }
+
 
     bars.forEach((b, i) => {
       const x = this.xOf(i, bars.length, rect);
@@ -2067,9 +2164,52 @@ export class ChartEngine {
   private paintMainIndicators(rect: Rect, bars: Bar[], range: { min: number; max: number }): void {
     const ctx = this.ctx;
     for (const ind of this.indicators) {
-      if (!ind.visible || ind.pane !== "main") continue;
+      if (!indicatorShownOnInterval(ind, this.interval) || ind.pane !== "main") continue;
       const { lines } = this.indicatorSeries(ind, bars);
+      if (ind.kind === "ichimoku" && lines.length >= 4) {
+        const spanA = lines[2]!;
+        const spanB = lines[3]!;
+        ctx.beginPath();
+        let started = false;
+        for (let i = 0; i < bars.length; i++) {
+          const a = spanA[i];
+          const b = spanB[i];
+          if (a == null || b == null) {
+            started = false;
+            continue;
+          }
+          const x = this.xOf(i, bars.length, rect);
+          const y = this.yOf(this.scaled(a, bars), range.min, range.max, rect);
+          if (!started) {
+            ctx.moveTo(x, y);
+            started = true;
+          } else ctx.lineTo(x, y);
+        }
+        for (let i = bars.length - 1; i >= 0; i--) {
+          const a = spanA[i];
+          const b = spanB[i];
+          if (a == null || b == null) continue;
+          const x = this.xOf(i, bars.length, rect);
+          const y = this.yOf(this.scaled(b, bars), range.min, range.max, rect);
+          ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.fillStyle = "rgba(41,98,255,0.12)";
+        ctx.fill();
+      }
       lines.forEach((line, li) => {
+        if (ind.kind === "psar") {
+          ctx.fillStyle = ind.color;
+          line.forEach((v, i) => {
+            if (v == null) return;
+            const x = this.xOf(i, bars.length, rect);
+            const y = this.yOf(this.scaled(v, bars), range.min, range.max, rect);
+            ctx.beginPath();
+            ctx.arc(x, y, Math.max(1.5, (ind.lineWidth ?? 1) * 1.4), 0, Math.PI * 2);
+            ctx.fill();
+          });
+          return;
+        }
         ctx.beginPath();
         let started = false;
         line.forEach((v, i) => {
@@ -2082,7 +2222,7 @@ export class ChartEngine {
           } else ctx.lineTo(x, y);
         });
         ctx.strokeStyle = ind.color;
-        ctx.globalAlpha = ind.kind === "bb" && li !== 1 ? 0.55 : 1;
+        ctx.globalAlpha = (ind.kind === "bb" || ind.kind === "donchian" || ind.kind === "keltner") && li !== 1 ? 0.55 : 1;
         ctx.lineWidth = ind.lineWidth ?? 1.15;
         if (ind.lineStyle === "dashed") ctx.setLineDash([6, 4]);
         else if (ind.lineStyle === "dotted") ctx.setLineDash([2, 3]);

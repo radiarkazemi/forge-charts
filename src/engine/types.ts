@@ -126,13 +126,30 @@ export type IndicatorKind =
   | "sma"
   | "ema"
   | "wma"
+  | "smma"
+  | "vwma"
+  | "hma"
   | "bb"
   | "vwap"
   | "rsi"
   | "macd"
   | "stoch"
   | "atr"
-  | "vol";
+  | "vol"
+  | "ichimoku"
+  | "psar"
+  | "supertrend"
+  | "adx"
+  | "stochrsi"
+  | "cci"
+  | "willr"
+  | "obv"
+  | "cmf"
+  | "donchian"
+  | "keltner"
+  | "pivot";
+
+export type IndicatorPane = "main" | "rsi" | "macd" | "stoch" | "atr" | "volume" | "osc";
 
 export type Bar = {
   time: number;
@@ -151,10 +168,22 @@ export type SymbolInfo = {
   pricePrecision: number;
 };
 
+/** Per-timeframe visibility buckets (GAP-14), same shape as drawing visibility. */
+export type IndicatorVisibility = DrawingVisibility;
+
+export const DEFAULT_INDICATOR_VISIBILITY: IndicatorVisibility = {
+  seconds: true,
+  minutes: true,
+  hours: true,
+  daily: true,
+  weekly: true,
+  monthly: true,
+};
+
 export type IndicatorInstance = {
   id: string;
   kind: IndicatorKind;
-  pane: "main" | "rsi" | "macd" | "stoch" | "atr" | "volume";
+  pane: IndicatorPane;
   params: number[];
   visible: boolean;
   color: string;
@@ -169,6 +198,8 @@ export type IndicatorInstance = {
   scaleSide?: "left" | "right";
   /** Soft-collapse extra pane (V-14). */
   collapsed?: boolean;
+  /** Interval-bucket visibility; omitted means all on (GAP-14). */
+  visibility?: IndicatorVisibility;
 };
 
 

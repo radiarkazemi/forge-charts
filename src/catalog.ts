@@ -167,21 +167,21 @@ export const INDICATOR_CATALOG: IndicatorCatalogEntry[] = [
   { id: "stoch", kind: "stoch", label: "Stochastic", group: "Oscillators", tab: "technicals", role: "indicator" },
   { id: "atr", kind: "atr", label: "Average True Range", group: "Volatility", tab: "technicals", role: "indicator" },
   // Built-in technicals catalog density (preview until engine support)
-  { id: "tech:smma", label: "Moving Average Smoothed", group: "Trend", tab: "technicals", role: "indicator" },
-  { id: "tech:vwma", label: "Moving Average Volume Weighted", group: "Trend", tab: "technicals", role: "indicator" },
-  { id: "tech:hma", label: "Hull Moving Average", group: "Trend", tab: "technicals", role: "indicator" },
-  { id: "tech:ichimoku", label: "Ichimoku Cloud", group: "Trend", tab: "technicals", role: "indicator" },
-  { id: "tech:psar", label: "Parabolic SAR", group: "Trend", tab: "technicals", role: "indicator" },
-  { id: "tech:supertrend", label: "Supertrend", group: "Trend", tab: "technicals", role: "indicator" },
-  { id: "tech:adx", label: "Average Directional Index", group: "Trend", tab: "technicals", role: "indicator" },
-  { id: "tech:stochrsi", label: "Stochastic RSI", group: "Oscillators", tab: "technicals", role: "indicator" },
-  { id: "tech:cci", label: "Commodity Channel Index", group: "Oscillators", tab: "technicals", role: "indicator" },
-  { id: "tech:willr", label: "Williams %R", group: "Oscillators", tab: "technicals", role: "indicator" },
-  { id: "tech:obv", label: "On Balance Volume", group: "Volume", tab: "technicals", role: "indicator" },
-  { id: "tech:cmf", label: "Chaikin Money Flow", group: "Volume", tab: "technicals", role: "indicator" },
-  { id: "tech:donchian", label: "Donchian Channels", group: "Volatility", tab: "technicals", role: "indicator" },
-  { id: "tech:keltner", label: "Keltner Channels", group: "Volatility", tab: "technicals", role: "indicator" },
-  { id: "tech:pivot", label: "Pivot Points Standard", group: "Levels", tab: "technicals", role: "indicator" },
+  { id: "smma", kind: "smma", label: "Moving Average Smoothed", group: "Trend", tab: "technicals", role: "indicator" },
+  { id: "vwma", kind: "vwma", label: "Moving Average Volume Weighted", group: "Trend", tab: "technicals", role: "indicator" },
+  { id: "hma", kind: "hma", label: "Hull Moving Average", group: "Trend", tab: "technicals", role: "indicator" },
+  { id: "ichimoku", kind: "ichimoku", label: "Ichimoku Cloud", group: "Trend", tab: "technicals", role: "indicator" },
+  { id: "psar", kind: "psar", label: "Parabolic SAR", group: "Trend", tab: "technicals", role: "indicator" },
+  { id: "supertrend", kind: "supertrend", label: "Supertrend", group: "Trend", tab: "technicals", role: "indicator" },
+  { id: "adx", kind: "adx", label: "Average Directional Index", group: "Trend", tab: "technicals", role: "indicator" },
+  { id: "stochrsi", kind: "stochrsi", label: "Stochastic RSI", group: "Oscillators", tab: "technicals", role: "indicator" },
+  { id: "cci", kind: "cci", label: "Commodity Channel Index", group: "Oscillators", tab: "technicals", role: "indicator" },
+  { id: "willr", kind: "willr", label: "Williams %R", group: "Oscillators", tab: "technicals", role: "indicator" },
+  { id: "obv", kind: "obv", label: "On Balance Volume", group: "Volume", tab: "technicals", role: "indicator" },
+  { id: "cmf", kind: "cmf", label: "Chaikin Money Flow", group: "Volume", tab: "technicals", role: "indicator" },
+  { id: "donchian", kind: "donchian", label: "Donchian Channels", group: "Volatility", tab: "technicals", role: "indicator" },
+  { id: "keltner", kind: "keltner", label: "Keltner Channels", group: "Volatility", tab: "technicals", role: "indicator" },
+  { id: "pivot", kind: "pivot", label: "Pivot Points Standard", group: "Levels", tab: "technicals", role: "indicator" },
   // Strategies
   { id: "strat:ma-cross", label: "MA Cross Strategy", group: "Strategies", tab: "technicals", role: "strategy" },
   { id: "strat:rsi-revert", label: "RSI Reversion Strategy", group: "Strategies", tab: "technicals", role: "strategy" },
@@ -238,7 +238,9 @@ export function catalogEntry(id: string): IndicatorCatalogEntry | undefined {
 }
 
 export function indicatorInputs(kind: IndicatorKind): { index: number; label: string }[] {
-  if (kind === "sma" || kind === "ema" || kind === "wma" || kind === "rsi" || kind === "atr") return [{ index: 0, label: "Length" }];
+  if (kind === "sma" || kind === "ema" || kind === "wma" || kind === "smma" || kind === "vwma" || kind === "hma" || kind === "rsi" || kind === "atr" || kind === "cci" || kind === "willr" || kind === "cmf" || kind === "adx" || kind === "donchian") {
+    return [{ index: 0, label: "Length" }];
+  }
   if (kind === "bb") return [
     { index: 0, label: "Length" },
     { index: 1, label: "StdDev" },
@@ -251,6 +253,25 @@ export function indicatorInputs(kind: IndicatorKind): { index: number; label: st
     { index: 0, label: "Fast" },
     { index: 1, label: "Slow" },
     { index: 2, label: "Signal" },
+  ];
+  if (kind === "ichimoku") return [
+    { index: 0, label: "Conversion" },
+    { index: 1, label: "Base" },
+    { index: 2, label: "Span B" },
+  ];
+  if (kind === "psar") return [
+    { index: 0, label: "Start" },
+    { index: 1, label: "Max" },
+  ];
+  if (kind === "supertrend" || kind === "keltner") return [
+    { index: 0, label: "Length" },
+    { index: 1, label: "Multiplier" },
+  ];
+  if (kind === "stochrsi") return [
+    { index: 0, label: "RSI Length" },
+    { index: 1, label: "Stoch Length" },
+    { index: 2, label: "%K" },
+    { index: 3, label: "%D" },
   ];
   return [];
 }
