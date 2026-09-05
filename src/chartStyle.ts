@@ -15,6 +15,13 @@ export function defaultChartStyle(theme: Theme = "dark"): ChartStyle {
     showWick: true,
     showBorder: true,
     source: "close",
+    lineWidth: 2,
+    markerSize: 3,
+    markerShape: "circle",
+    columnBaseline: "first",
+    renkoWicks: true,
+    lineBreakCount: 3,
+    pnfReversal: 3,
   };
 }
 

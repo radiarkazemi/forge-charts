@@ -332,6 +332,33 @@ export type ChartStyle = {
   showWick: boolean;
   showBorder: boolean;
   source: ChartSource;
+  /** Line / area / step line width (GAP-21/30). */
+  lineWidth?: number;
+  /** Line-with-markers radius (GAP-21). */
+  markerSize?: number;
+  /** Line-with-markers shape (GAP-21). */
+  markerShape?: "circle" | "square" | "diamond";
+  /** Line-with-markers fill (GAP-21). */
+  markerColor?: string;
+  /** HLC area band fills (GAP-22). */
+  hlcHighColor?: string;
+  hlcLowColor?: string;
+  /** Columns baseline mode (GAP-23). */
+  columnBaseline?: "zero" | "open" | "first";
+  /** Renko brick size; omit / 0 = ATR-ish auto (GAP-25). */
+  renkoBrick?: number;
+  /** Renko show wicks from source range (GAP-25). */
+  renkoWicks?: boolean;
+  /** Line Break N-line window (GAP-26). */
+  lineBreakCount?: number;
+  /** Kagi reversal amount (price); omit = auto (GAP-27). */
+  kagiReversal?: number;
+  /** Point & Figure box size; omit = auto (GAP-28). */
+  pnfBoxSize?: number;
+  /** Point & Figure reversal boxes (GAP-28). */
+  pnfReversal?: number;
+  /** Range bar size; omit = auto (GAP-29). */
+  rangeSize?: number;
 };
 
 export type CanvasSettings = {
@@ -383,6 +410,34 @@ export type CanvasSettings = {
   /** Vert / horiz / both / none (V-10). When set, overrides the legacy showGrid flag. */
   gridMode: GridMode;
   watermarkOpacity: number;
+  /** Axis label font size px (GAP-31). */
+  scaleFontSize?: number;
+  /** Axis label color (GAP-31). */
+  scaleTextColor?: string;
+  /** Axis line/tick color (GAP-31). */
+  scaleLineColor?: string;
+  /** Alert marker shape on chart (GAP-32). */
+  alertMarkerShape?: "diamond" | "circle" | "flag";
+  /** Alert marker color (GAP-32). */
+  alertMarkerColor?: string;
+  /** Show alert price label (GAP-32). */
+  alertShowLabel?: boolean;
+  /** Session filter for plotted bars (GAP-33). */
+  sessionFilter?: "all" | "rth" | "eth";
+  /** Apply dividend / split adjustments when feed supports it (GAP-33/37). */
+  adjustData?: boolean;
+  /** Continuous futures back-adjust (GAP-33). */
+  continuousFutures?: boolean;
+  /** Override display precision; null = symbol default (GAP-33). */
+  pricePrecision?: number | null;
+  /** Show bid/ask labels when available (GAP-34). */
+  showBidAsk?: boolean;
+  bidColor?: string;
+  askColor?: string;
+  /** Active settings template id (GAP-35). */
+  settingsTemplateId?: string | null;
+  /** Prefer calendar/corporate events over seeded demo markers (GAP-36). */
+  realEventsOnly?: boolean;
 };
 
 export type RangePreset = "1D" | "5D" | "1M" | "3M" | "6M" | "YTD" | "1Y" | "5Y" | "ALL";

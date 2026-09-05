@@ -89,6 +89,14 @@ export function ChartOverlays({
         <button type="button" className={goOpen ? "on" : ""} onClick={() => setGoOpen((v) => !v)} title="Go to date">
           📅
         </button>
+        <button
+          type="button"
+          className={cv.adjustData ? "on" : ""}
+          title="Adjusted / unadjusted series (dividends & splits)"
+          onClick={() => engine?.setCanvasSettings({ adjustData: !cv.adjustData })}
+        >
+          ADJ
+        </button>
         <span className="tz">{cv.timezone || "UTC"}</span>
       </div>
       {goOpen ? (

@@ -258,6 +258,14 @@ function ChartMenuPanel({
           >
             Invert scale
           </button>
+          <button type="button" onClick={() => { engine?.resetPriceScale(); close(); }}>Auto price scale</button>
+          <button type="button" onClick={() => { engine?.toggle("logScale"); close(); }}>Regular / log</button>
+          <button type="button" onClick={() => { engine?.toggle("percentScale"); close(); }}>Percentage</button>
+          <button type="button" onClick={() => { engine?.toggle("indexedScale"); close(); }}>Indexed to 100</button>
+          <button type="button" onClick={() => { engine?.setCanvasSettings({ invertScale: !cv?.invertScale }); close(); }}>Invert scale</button>
+          <button type="button" onClick={() => { engine?.setCanvasSettings({ lockRatio: !cv?.lockRatio }); close(); }}>{cv?.lockRatio ? "Unlock ratio" : "Lock price/bar ratio"}</button>
+          <button type="button" onClick={() => { engine?.setCanvasSettings({ leftScale: !cv?.leftScale, rightScale: cv?.leftScale ? true : cv?.rightScale }); close(); }}>Move scale left/right</button>
+          <button type="button" onClick={() => { engine?.setCanvasSettings({ scalePriceOnly: !cv?.scalePriceOnly }); close(); }}>{cv?.scalePriceOnly ? "Merge scales" : "No overlap (price only)"}</button>
           <button type="button" onClick={() => { engine?.resetPriceScale(); close(); }}>Reset price scale</button>
         </>
       ) : null}
