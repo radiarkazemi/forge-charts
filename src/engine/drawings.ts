@@ -52,7 +52,6 @@ export function neededPoints(kind: DrawingKind): number {
     case "fibchannel":
     case "fibwedge":
     case "fibtime":
-    case "disjoint":
     case "flattop":
     case "rotatedrect":
     case "curve":
@@ -64,6 +63,7 @@ export function neededPoints(kind: DrawingKind): number {
     case "abcd":
     case "trianglepattern":
     case "elliottcorrection":
+    case "disjoint":
       return 4;
     case "callout":
     case "comment":
@@ -266,6 +266,21 @@ export function defaultFibStyleForKind(kind: DrawingKind): FibRetraceStyle | und
     case "sticker":
     case "table":
     case "image":
+    case "trend":
+    case "arrow":
+    case "ray":
+    case "info":
+    case "extended":
+    case "trendangle":
+    case "hline":
+    case "horzray":
+    case "vline":
+    case "crossline":
+    case "parallel":
+    case "regression":
+    case "flattop":
+    case "disjoint":
+    case "anchoredvwap":
       return defaultPatternStyle(kind);
     default:
       return undefined;
@@ -484,22 +499,49 @@ export function defaultPatternStyle(kind: DrawingKind): FibRetraceStyle {
               ? "#ab47bc"
               : kind === "volprofile" || kind === "anchoredvolprofile"
                 ? "#2962ff"
-                : "#2962ff";
+                : kind === "anchoredvwap"
+                  ? "#e1a218"
+                  : kind === "regression"
+                    ? "#26a69a"
+                    : "#2962ff";
   const thick = kind === "brush" ? 3 : kind === "highlighter" ? 14 : 1;
+  const extendBoth =
+    kind === "hline" ||
+    kind === "vline" ||
+    kind === "crossline" ||
+    kind === "extended" ||
+    kind === "parallel" ||
+    kind === "flattop" ||
+    kind === "disjoint" ||
+    kind === "regression";
   return {
-    ...fibStyleBase([{ ratio: 1, visible: true, color: accent, fill: `${accent}22` }]),
+    ...fibStyleBase([
+      { ratio: 0, visible: true, color: accent, fill: `${accent}18` },
+      { ratio: 0.5, visible: true, color: accent, fill: `${accent}12` },
+      { ratio: 1, visible: true, color: accent, fill: `${accent}18` },
+      { ratio: 2, visible: true, color: "#26a69a", fill: "rgba(38,166,154,0.08)" },
+      { ratio: 3, visible: false, color: "#ab47bc", fill: "rgba(171,71,188,0.06)" },
+    ]),
     showTrendLine: true,
     trendColor: accent,
     trendWidth: thick,
-    trendStyle: kind === "ghostfeed" || kind === "projection" ? "dashed" : "solid",
-    extendLeft: false,
-    extendRight: kind === "cycliclines" || kind === "timecycles" || kind === "sineline" || kind === "projection",
+    trendStyle: kind === "ghostfeed" || kind === "projection" || kind === "regression" ? "dashed" : "solid",
+    extendLeft: extendBoth || kind === "cycliclines" || kind === "timecycles",
+    extendRight:
+      extendBoth ||
+      kind === "ray" ||
+      kind === "horzray" ||
+      kind === "anchoredvwap" ||
+      kind === "cycliclines" ||
+      kind === "timecycles" ||
+      kind === "sineline" ||
+      kind === "projection",
     reverse: false,
     showBackground: true,
     showPrices: true,
     showLevels: true,
     levelsWidth: 1,
-    levelsStyle: "solid",
+    levelsStyle: kind === "regression" ? "dashed" : "solid",
   };
 }
 
@@ -558,25 +600,16 @@ export function paintDrawing(
   else if (kind === "gannbox" || kind === "gannsquare") paintGannBox(ctx, d, pts, kind, selected);
   else if (kind === "pitchfork" || kind === "schiff" || kind === "modschiff" || kind === "insidepitchfork" || kind === "pitchfan")
     paintPitchfork(ctx, d, pts, rect, kind, selected);
-  else if (kind === "hline") stroke(ctx, { x: rect.x, y: pts[0].y }, { x: rect.x + rect.w, y: pts[0].y });
-  else if (kind === "vline") stroke(ctx, { x: pts[0].x, y: rect.y }, { x: pts[0].x, y: rect.y + rect.h });
-  else if (kind === "horzray") stroke(ctx, pts[0], { x: rect.x + rect.w, y: pts[0].y });
-  else if (kind === "crossline") {
-    stroke(ctx, { x: rect.x, y: pts[0].y }, { x: rect.x + rect.w, y: pts[0].y });
-    stroke(ctx, { x: pts[0].x, y: rect.y }, { x: pts[0].x, y: rect.y + rect.h });
-  } else if (kind === "trend" || kind === "arrow") {
-    if (pts.length >= 2) {
-      stroke(ctx, pts[0], pts[1]);
-      if (kind === "arrow") arrowHead(ctx, pts[0], pts[1]);
-    }
-  } else if (kind === "ray" && pts.length >= 2) extend(ctx, pts[0], pts[1], rect, false, true);
-  else if (kind === "extended" && pts.length >= 2) extend(ctx, pts[0], pts[1], rect, true, true);
-  else if (kind === "info" && pts.length >= 2) paintInfo(ctx, d, pts, precision);
-  else if (kind === "trendangle" && pts.length >= 2) paintTrendAngle(ctx, pts);
-  else if (kind === "parallel" && pts.length >= 3) paintParallel(ctx, pts, rect);
-  else if (kind === "regression" && pts.length >= 2) paintRegression(ctx, pts, rect, bars);
-  else if (kind === "flattop" && pts.length >= 3) paintFlatTop(ctx, pts, rect);
-  else if (kind === "disjoint" && pts.length >= 3) paintDisjoint(ctx, pts, rect);
+  else if (kind === "hline" || kind === "horzray" || kind === "vline" || kind === "crossline")
+    paintAxisLine(ctx, d, pts, rect, precision);
+  else if ((kind === "trend" || kind === "arrow" || kind === "ray" || kind === "extended") && pts.length >= 2)
+    paintTrendLine(ctx, d, pts, rect, kind);
+  else if (kind === "info" && pts.length >= 2) paintInfo(ctx, d, pts, rect, precision, bars);
+  else if (kind === "trendangle" && pts.length >= 2) paintTrendAngle(ctx, d, pts);
+  else if (kind === "parallel" && pts.length >= 3) paintParallel(ctx, d, pts, rect);
+  else if (kind === "regression" && pts.length >= 2) paintRegression(ctx, d, pts, rect, bars, yOfPrice);
+  else if (kind === "flattop" && pts.length >= 3) paintFlatTop(ctx, d, pts, rect);
+  else if (kind === "disjoint" && pts.length >= 3) paintDisjoint(ctx, d, pts, rect);
   else if (kind === "rect") paintShapeBox(ctx, d, pts);
   else if (kind === "datepricerange" || kind === "measure") paintDatePriceRange(ctx, d, pts, precision, bars);
   else if (kind === "barspattern") paintBarsPattern(ctx, d, pts, bars, yOfPrice);
@@ -595,7 +628,7 @@ export function paintDrawing(
   else if (kind === "projection") paintProjection(ctx, d, pts, rect, precision);
   else if (kind === "ghostfeed") paintGhostFeed(ctx, d, pts, bars, yOfPrice);
   else if (kind === "sector" && pts.length >= 3) paintSector(ctx, d, pts);
-  else if (kind === "anchoredvwap") paintAnchoredVwap(ctx, pts[0], rect, bars, yOfPrice);
+  else if (kind === "anchoredvwap") paintAnchoredVwap(ctx, d, pts[0], rect, bars, yOfPrice);
   else if (kind === "volprofile" || kind === "anchoredvolprofile") paintVolProfile(ctx, d, pts, rect, bars, kind === "anchoredvolprofile", yOfPrice);
   else if (
     kind === "text" ||
@@ -1533,68 +1566,290 @@ function paintPitchfork(
   }
 }
 
-function paintInfo(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], precision: number): void {
-  stroke(ctx, pts[0], pts[1]);
+function paintAxisLine(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rect: ViewRect, precision: number): void {
+  if (!pts[0]) return;
+  const style = resolveFibStyleForKind(d);
+  applyLineStyle(ctx, style.trendStyle);
+  ctx.strokeStyle = style.trendColor;
+  ctx.lineWidth = style.trendWidth;
+  const kind = d.kind;
+  if (kind === "hline" || kind === "crossline") stroke(ctx, { x: rect.x, y: pts[0].y }, { x: rect.x + rect.w, y: pts[0].y });
+  if (kind === "vline" || kind === "crossline") stroke(ctx, { x: pts[0].x, y: rect.y }, { x: pts[0].x, y: rect.y + rect.h });
+  if (kind === "horzray") {
+    const right = style.extendRight !== false;
+    const left = !!style.extendLeft;
+    const x0 = left ? rect.x : pts[0].x;
+    const x1 = right ? rect.x + rect.w : pts[0].x;
+    stroke(ctx, { x: x0, y: pts[0].y }, { x: x1, y: pts[0].y });
+  }
+  ctx.setLineDash([]);
+  if (style.showPrices && (kind === "hline" || kind === "horzray" || kind === "crossline")) {
+    ctx.font = CHART_FONT;
+    ctx.fillStyle = style.trendColor;
+    ctx.fillText(formatPrice(d.points[0].price, precision), rect.x + rect.w - 72, pts[0].y - 4);
+  }
+  if (style.showLevels && (kind === "vline" || kind === "crossline")) {
+    ctx.font = CHART_FONT;
+    ctx.fillStyle = style.trendColor;
+    const label = new Date(d.points[0].time * (d.points[0].time > 1e12 ? 1 : 1000)).toISOString().slice(5, 16).replace("T", " ");
+    ctx.fillText(label, pts[0].x + 6, rect.y + 14);
+  }
+}
+
+function paintTrendLine(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rect: ViewRect, kind: DrawingKind): void {
+  if (pts.length < 2) return;
+  const style = resolveFibStyleForKind(d);
+  applyLineStyle(ctx, style.trendStyle);
+  ctx.strokeStyle = style.trendColor;
+  ctx.lineWidth = style.trendWidth;
+  const left = kind === "extended" ? true : kind === "ray" ? false : !!style.extendLeft;
+  const right = kind === "extended" || kind === "ray" ? true : !!style.extendRight;
+  if (kind === "trend" && !left && !right) stroke(ctx, pts[0], pts[1]);
+  else if (kind === "arrow" && !left && !right) stroke(ctx, pts[0], pts[1]);
+  else extend(ctx, pts[0], pts[1], rect, left, right);
+  ctx.setLineDash([]);
+  if (kind === "arrow" || (kind === "trend" && style.showLevels)) {
+    ctx.fillStyle = style.trendColor;
+    arrowHead(ctx, pts[0], pts[1]);
+  }
+  if (style.showPrices) {
+    const dp = d.points[1].price - d.points[0].price;
+    const pct = (dp / (Math.abs(d.points[0].price) || 1)) * 100;
+    const ang = (Math.atan2(pts[0].y - pts[1].y, pts[1].x - pts[0].x) * 180) / Math.PI;
+    ctx.font = CHART_FONT;
+    ctx.fillStyle = style.trendColor;
+    ctx.fillText(
+      `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%  ${ang.toFixed(1)}°`,
+      (pts[0].x + pts[1].x) / 2 + 6,
+      (pts[0].y + pts[1].y) / 2 - 6,
+    );
+  }
+}
+
+function paintInfo(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rect: ViewRect, precision: number, bars: Bar[]): void {
+  if (pts.length < 2) return;
+  const style = resolveFibStyleForKind(d);
+  applyLineStyle(ctx, style.trendStyle);
+  ctx.strokeStyle = style.trendColor;
+  ctx.lineWidth = style.trendWidth;
+  extend(ctx, pts[0], pts[1], rect, !!style.extendLeft, !!style.extendRight);
+  ctx.setLineDash([]);
   const dp = d.points[1].price - d.points[0].price;
-  const pct = (dp / d.points[0].price) * 100;
-  const bars = Math.abs(d.points[1].time - d.points[0].time);
+  const pct = (dp / (Math.abs(d.points[0].price) || 1)) * 100;
+  const t0 = Math.min(d.points[0].time, d.points[1].time);
+  const t1 = Math.max(d.points[0].time, d.points[1].time);
+  const nBars = Math.max(1, bars.filter((b) => b.time >= t0 && b.time <= t1).length);
   const ang = (Math.atan2(pts[0].y - pts[1].y, pts[1].x - pts[0].x) * 180) / Math.PI;
   const mx = (pts[0].x + pts[1].x) / 2;
   const my = (pts[0].y + pts[1].y) / 2;
+  const lines: string[] = [];
+  if (style.showPrices) lines.push(`${formatPrice(dp, precision)} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`);
+  if (style.showLevels) lines.push(`${nBars} bars · ${ang.toFixed(1)}°`);
+  if (!lines.length) return;
   ctx.font = CHART_FONT;
+  const tw = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 14;
+  const th = 8 + lines.length * 14;
+  if (style.showBackground) {
+    ctx.fillStyle = "rgba(30,34,45,0.92)";
+    ctx.fillRect(mx + 8, my - th - 4, tw, th);
+    ctx.strokeStyle = style.trendColor;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(mx + 8, my - th - 4, tw, th);
+  }
   ctx.fillStyle = "#d1d4dc";
-  ctx.fillText(`${formatPrice(dp, precision)} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)  ${ang.toFixed(1)}°  Δt ${bars}s`, mx + 8, my - 6);
+  lines.forEach((line, i) => ctx.fillText(line, mx + 14, my - th + 14 + i * 14));
 }
 
-function paintTrendAngle(ctx: CanvasRenderingContext2D, pts: Pt[]): void {
+function paintTrendAngle(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[]): void {
+  const style = resolveFibStyleForKind(d);
+  applyLineStyle(ctx, style.trendStyle);
+  ctx.strokeStyle = style.trendColor;
+  ctx.lineWidth = style.trendWidth;
   stroke(ctx, pts[0], pts[1]);
+  applyLineStyle(ctx, "dashed");
   stroke(ctx, pts[0], { x: pts[1].x, y: pts[0].y });
+  ctx.setLineDash([]);
   const ang = Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x);
+  const r = 34;
   ctx.beginPath();
-  ctx.arc(pts[0].x, pts[0].y, 28, 0, ang, ang < 0);
+  ctx.arc(pts[0].x, pts[0].y, r, 0, ang, ang < 0);
+  ctx.strokeStyle = style.trendColor;
   ctx.stroke();
-  ctx.font = CHART_FONT;
-  ctx.fillText(`${((-ang * 180) / Math.PI).toFixed(1)}°`, pts[0].x + 32, pts[0].y - 8);
+  if (style.showLevels || style.showPrices) {
+    ctx.font = CHART_FONT_BOLD;
+    ctx.fillStyle = style.trendColor;
+    ctx.fillText(`${((-ang * 180) / Math.PI).toFixed(1)}°`, pts[0].x + r + 6, pts[0].y - 8);
+  }
 }
 
-function paintParallel(ctx: CanvasRenderingContext2D, pts: Pt[], rect: ViewRect): void {
+function paintParallel(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rect: ViewRect): void {
+  if (pts.length < 3) return;
+  const style = resolveFibStyleForKind(d);
   const [a, b, c] = pts;
   const ox = c.x - a.x;
   const oy = c.y - a.y;
-  extend(ctx, a, b, rect, true, true);
-  extend(ctx, { x: a.x + ox, y: a.y + oy }, { x: b.x + ox, y: b.y + oy }, rect, true, true);
-  ctx.globalAlpha = 0.12;
-  ctx.beginPath();
-  ctx.moveTo(a.x, a.y);
-  ctx.lineTo(b.x, b.y);
-  ctx.lineTo(b.x + ox, b.y + oy);
-  ctx.lineTo(a.x + ox, a.y + oy);
-  ctx.closePath();
-  ctx.fill();
-  ctx.globalAlpha = 1;
-}
-
-function paintRegression(ctx: CanvasRenderingContext2D, pts: Pt[], rect: ViewRect, bars: Bar[]): void {
-  const t0 = Math.min(pts[0].x, pts[1].x);
-  const t1 = Math.max(pts[0].x, pts[1].x);
-  extend(ctx, pts[0], pts[1], rect, false, true);
-  if (bars.length < 3) return;
-  const midY = (pts[0].y + pts[1].y) / 2;
-  const amp = Math.abs(pts[1].y - pts[0].y) * 0.35 + 12;
-  ctx.setLineDash([6, 4]);
-  extend(ctx, { x: t0, y: midY - amp }, { x: t1, y: midY - amp }, rect, false, true);
-  extend(ctx, { x: t0, y: midY + amp }, { x: t1, y: midY + amp }, rect, false, true);
+  const a2 = { x: a.x + ox, y: a.y + oy };
+  const b2 = { x: b.x + ox, y: b.y + oy };
+  const midA = { x: (a.x + a2.x) / 2, y: (a.y + a2.y) / 2 };
+  const midB = { x: (b.x + b2.x) / 2, y: (b.y + b2.y) / 2 };
+  if (style.showBackground) {
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.lineTo(b2.x, b2.y);
+    ctx.lineTo(a2.x, a2.y);
+    ctx.closePath();
+    ctx.fillStyle = style.levels[0]?.fill ?? `${style.trendColor}22`;
+    ctx.fill();
+  }
+  applyLineStyle(ctx, style.trendStyle);
+  ctx.strokeStyle = style.trendColor;
+  ctx.lineWidth = style.trendWidth;
+  extend(ctx, a, b, rect, !!style.extendLeft, !!style.extendRight);
+  extend(ctx, a2, b2, rect, !!style.extendLeft, !!style.extendRight);
+  if (style.showLevels) {
+    applyLineStyle(ctx, "dashed");
+    ctx.lineWidth = Math.max(1, style.levelsWidth);
+    extend(ctx, midA, midB, rect, !!style.extendLeft, !!style.extendRight);
+  }
   ctx.setLineDash([]);
 }
 
-function paintFlatTop(ctx: CanvasRenderingContext2D, pts: Pt[], rect: ViewRect): void {
-  extend(ctx, pts[0], pts[1], rect, true, true);
-  stroke(ctx, { x: rect.x, y: pts[2].y }, { x: rect.x + rect.w, y: pts[2].y });
+function paintRegression(
+  ctx: CanvasRenderingContext2D,
+  d: Drawing,
+  pts: Pt[],
+  rect: ViewRect,
+  bars: Bar[],
+  yOfPrice: (price: number) => number,
+): void {
+  if (pts.length < 2 || !bars.length) return;
+  const style = resolveFibStyleForKind(d);
+  const t0 = Math.min(d.points[0].time, d.points[1].time);
+  const t1 = Math.max(d.points[0].time, d.points[1].time);
+  const subset = bars.filter((b) => b.time >= t0 && b.time <= t1);
+  const slot = rect.w / bars.length;
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const use = subset.length >= 3 ? subset : bars.slice(-Math.min(bars.length, 40));
+  use.forEach((b) => {
+    const i = bars.indexOf(b);
+    const x = i >= 0 ? rect.x + slot * (i + 0.5) : (pts[0].x + pts[1].x) / 2;
+    xs.push(x);
+    ys.push((b.high + b.low + b.close) / 3);
+  });
+  const n = xs.length || 1;
+  const meanX = xs.reduce((s, v) => s + v, 0) / n;
+  const meanY = ys.reduce((s, v) => s + v, 0) / n;
+  let num = 0;
+  let den = 0;
+  for (let i = 0; i < n; i++) {
+    num += (xs[i] - meanX) * (ys[i] - meanY);
+    den += (xs[i] - meanX) ** 2;
+  }
+  const slope = den ? num / den : 0;
+  const intercept = meanY - slope * meanX;
+  const residuals = ys.map((y, i) => y - (slope * xs[i] + intercept));
+  const variance = residuals.reduce((s, r) => s + r * r, 0) / Math.max(1, n - 2);
+  const sigma = Math.sqrt(Math.max(variance, 0));
+  const xL = Math.min(pts[0].x, pts[1].x);
+  const xR = Math.max(pts[0].x, pts[1].x);
+  const x0 = style.extendLeft ? rect.x : xL;
+  const x1 = style.extendRight ? rect.x + rect.w : xR;
+  const yAt = (x: number) => yOfPrice(slope * x + intercept);
+  const bandLevels = style.levels.filter((l) => l.visible && l.ratio > 0);
+  if (style.showBackground && bandLevels.length) {
+    const maxRatio = Math.max(...bandLevels.map((l) => l.ratio));
+    const yTop0 = yOfPrice(slope * x0 + intercept + sigma * maxRatio);
+    const yTop1 = yOfPrice(slope * x1 + intercept + sigma * maxRatio);
+    const yBot0 = yOfPrice(slope * x0 + intercept - sigma * maxRatio);
+    const yBot1 = yOfPrice(slope * x1 + intercept - sigma * maxRatio);
+    ctx.beginPath();
+    ctx.moveTo(x0, yTop0);
+    ctx.lineTo(x1, yTop1);
+    ctx.lineTo(x1, yBot1);
+    ctx.lineTo(x0, yBot0);
+    ctx.closePath();
+    ctx.fillStyle = style.levels[0]?.fill ?? "rgba(38,166,154,0.10)";
+    ctx.fill();
+  }
+  applyLineStyle(ctx, style.trendStyle);
+  ctx.strokeStyle = style.trendColor;
+  ctx.lineWidth = style.trendWidth;
+  stroke(ctx, { x: x0, y: yAt(x0) }, { x: x1, y: yAt(x1) });
+  applyLineStyle(ctx, style.levelsStyle);
+  ctx.lineWidth = style.levelsWidth;
+  for (const lvl of bandLevels) {
+    ctx.strokeStyle = lvl.color;
+    const yup0 = yOfPrice(slope * x0 + intercept + sigma * lvl.ratio);
+    const yup1 = yOfPrice(slope * x1 + intercept + sigma * lvl.ratio);
+    const ydn0 = yOfPrice(slope * x0 + intercept - sigma * lvl.ratio);
+    const ydn1 = yOfPrice(slope * x1 + intercept - sigma * lvl.ratio);
+    stroke(ctx, { x: x0, y: yup0 }, { x: x1, y: yup1 });
+    stroke(ctx, { x: x0, y: ydn0 }, { x: x1, y: ydn1 });
+    if (style.showLevels) {
+      ctx.font = CHART_FONT;
+      ctx.fillStyle = lvl.color;
+      ctx.fillText(`±${lvl.ratio}σ`, x1 - 36, yup1 - 4);
+    }
+  }
+  ctx.setLineDash([]);
 }
 
-function paintDisjoint(ctx: CanvasRenderingContext2D, pts: Pt[], rect: ViewRect): void {
-  extend(ctx, pts[0], pts[1], rect, false, true);
-  extend(ctx, pts[0], pts[2], rect, false, true);
+function paintFlatTop(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rect: ViewRect): void {
+  if (pts.length < 3) return;
+  const style = resolveFibStyleForKind(d);
+  const [a, b, c] = pts;
+  if (style.showBackground) {
+    const { s, e } = extendedEnds(a, b, rect, !!style.extendLeft, !!style.extendRight);
+    ctx.beginPath();
+    ctx.moveTo(s.x, s.y);
+    ctx.lineTo(e.x, e.y);
+    ctx.lineTo(e.x, c.y);
+    ctx.lineTo(s.x, c.y);
+    ctx.closePath();
+    ctx.fillStyle = style.levels[0]?.fill ?? `${style.trendColor}18`;
+    ctx.fill();
+  }
+  applyLineStyle(ctx, style.trendStyle);
+  ctx.strokeStyle = style.trendColor;
+  ctx.lineWidth = style.trendWidth;
+  extend(ctx, a, b, rect, !!style.extendLeft, !!style.extendRight);
+  applyLineStyle(ctx, style.levelsStyle);
+  stroke(ctx, { x: rect.x, y: c.y }, { x: rect.x + rect.w, y: c.y });
+  ctx.setLineDash([]);
+  if (style.showLevels) {
+    ctx.font = CHART_FONT;
+    ctx.fillStyle = style.trendColor;
+    ctx.fillText("Flat", rect.x + 8, c.y - 4);
+  }
+}
+
+function paintDisjoint(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rect: ViewRect): void {
+  if (pts.length < 3) return;
+  const style = resolveFibStyleForKind(d);
+  const a = pts[0];
+  const b = pts[1];
+  const c = pts[2];
+  const dpt = pts[3] ?? { x: c.x + (b.x - a.x), y: c.y + (b.y - a.y) * 0.6 };
+  if (style.showBackground) {
+    const e1 = extendedEnds(a, b, rect, !!style.extendLeft, !!style.extendRight);
+    const e2 = extendedEnds(c, dpt, rect, !!style.extendLeft, !!style.extendRight);
+    ctx.beginPath();
+    ctx.moveTo(e1.s.x, e1.s.y);
+    ctx.lineTo(e1.e.x, e1.e.y);
+    ctx.lineTo(e2.e.x, e2.e.y);
+    ctx.lineTo(e2.s.x, e2.s.y);
+    ctx.closePath();
+    ctx.fillStyle = style.levels[0]?.fill ?? `${style.trendColor}16`;
+    ctx.fill();
+  }
+  applyLineStyle(ctx, style.trendStyle);
+  ctx.strokeStyle = style.trendColor;
+  ctx.lineWidth = style.trendWidth;
+  extend(ctx, a, b, rect, !!style.extendLeft, !!style.extendRight);
+  extend(ctx, c, dpt, rect, !!style.extendLeft, !!style.extendRight);
+  ctx.setLineDash([]);
 }
 
 function paintShapeBox(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[]): void {
@@ -2256,33 +2511,86 @@ function paintSector(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[]): void
   }
 }
 
-function paintAnchoredVwap(ctx: CanvasRenderingContext2D, p: Pt, rect: ViewRect, bars: Bar[], yOfPrice: (price: number) => number): void {
+function paintAnchoredVwap(
+  ctx: CanvasRenderingContext2D,
+  d: Drawing,
+  p: Pt,
+  rect: ViewRect,
+  bars: Bar[],
+  yOfPrice: (price: number) => number,
+): void {
   if (!bars.length) return;
+  const style = resolveFibStyleForKind(d);
   const slot = rect.w / bars.length;
   const start = Math.max(
     0,
     bars.findIndex((_, i) => rect.x + slot * (i + 0.5) >= p.x - slot),
   );
-  ctx.beginPath();
+  const vwapPts: Pt[] = [];
+  const band: Record<number, Pt[]> = {};
+  const ratios = style.levels.filter((l) => l.visible && l.ratio > 0).map((l) => l.ratio);
+  ratios.forEach((r) => {
+    band[r] = [];
+    band[-r] = [];
+  });
   let pv = 0;
   let vol = 0;
-  let started = false;
+  let p2 = 0;
   for (let i = start; i < bars.length; i++) {
     const b = bars[i];
     const tp = (b.high + b.low + b.close) / 3;
     pv += tp * b.volume;
+    p2 += tp * tp * b.volume;
     vol += b.volume;
     const vwap = vol ? pv / vol : tp;
+    const variance = vol ? Math.max(0, p2 / vol - vwap * vwap) : 0;
+    const sigma = Math.sqrt(variance);
     const x = rect.x + slot * (i + 0.5);
     const y = yOfPrice(vwap);
-    if (!started) {
-      ctx.moveTo(x, y);
-      started = true;
-    } else ctx.lineTo(x, y);
+    vwapPts.push({ x, y });
+    for (const r of ratios) {
+      band[r].push({ x, y: yOfPrice(vwap + sigma * r) });
+      band[-r].push({ x, y: yOfPrice(vwap - sigma * r) });
+    }
   }
-  ctx.strokeStyle = "#e1a218";
-  ctx.lineWidth = 1.4;
+  if (style.showBackground && ratios.length) {
+    const maxR = Math.max(...ratios);
+    const up = band[maxR];
+    const dn = band[-maxR];
+    if (up?.length && dn?.length) {
+      ctx.beginPath();
+      up.forEach((pt, i) => (i ? ctx.lineTo(pt.x, pt.y) : ctx.moveTo(pt.x, pt.y)));
+      for (let i = dn.length - 1; i >= 0; i--) ctx.lineTo(dn[i].x, dn[i].y);
+      ctx.closePath();
+      ctx.fillStyle = style.levels[0]?.fill ?? "rgba(225,162,24,0.12)";
+      ctx.fill();
+    }
+  }
+  applyLineStyle(ctx, style.levelsStyle);
+  ctx.lineWidth = style.levelsWidth;
+  for (const lvl of style.levels.filter((l) => l.visible && l.ratio > 0)) {
+    ctx.strokeStyle = lvl.color;
+    for (const sign of [1, -1] as const) {
+      const ptsBand = band[sign * lvl.ratio];
+      if (!ptsBand?.length) continue;
+      ctx.beginPath();
+      ptsBand.forEach((pt, i) => (i ? ctx.lineTo(pt.x, pt.y) : ctx.moveTo(pt.x, pt.y)));
+      ctx.stroke();
+    }
+  }
+  applyLineStyle(ctx, style.trendStyle);
+  ctx.strokeStyle = style.trendColor;
+  ctx.lineWidth = style.trendWidth;
+  ctx.beginPath();
+  vwapPts.forEach((pt, i) => (i ? ctx.lineTo(pt.x, pt.y) : ctx.moveTo(pt.x, pt.y)));
   ctx.stroke();
+  ctx.setLineDash([]);
+  if (style.showLevels && vwapPts.length) {
+    const last = vwapPts[vwapPts.length - 1];
+    ctx.font = CHART_FONT;
+    ctx.fillStyle = style.trendColor;
+    ctx.fillText("AVWAP", last.x - 44, last.y - 6);
+  }
 }
 
 function paintVolProfile(
