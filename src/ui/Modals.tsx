@@ -592,10 +592,38 @@ export function SettingsModal({
             <h3>Price scale</h3>
             <label className="row check-row"><input type="checkbox" checked={snap?.logScale ?? false} onChange={() => engine?.toggle("logScale")} /> Logarithmic</label>
             <label className="row check-row"><input type="checkbox" checked={snap?.percentScale ?? false} onChange={() => engine?.toggle("percentScale")} /> Percent</label>
-            <h3>Labels</h3>
+            <label className="row check-row"><input type="checkbox" checked={snap?.indexedScale ?? false} onChange={() => engine?.toggle("indexedScale")} /> Indexed to 100</label>
+            <label className="row check-row"><input type="checkbox" checked={cv?.invertScale ?? false} onChange={(e) => engine?.setCanvasSettings({ invertScale: e.target.checked })} /> Invert scale</label>
+            <label className="row check-row"><input type="checkbox" checked={cv?.lockRatio ?? false} onChange={(e) => engine?.setCanvasSettings({ lockRatio: e.target.checked })} /> Lock price-to-bar ratio</label>
+            <label className="row check-row"><input type="checkbox" checked={cv?.scalePriceOnly ?? false} onChange={(e) => engine?.setCanvasSettings({ scalePriceOnly: e.target.checked })} /> Scale price chart only</label>
+            <label className="row check-row"><input type="checkbox" checked={cv?.leftScale ?? false} onChange={(e) => engine?.setCanvasSettings({ leftScale: e.target.checked })} /> Left price scale</label>
+            <label className="row check-row"><input type="checkbox" checked={cv?.rightScale ?? true} onChange={(e) => engine?.setCanvasSettings({ rightScale: e.target.checked })} /> Right price scale</label>
+            <h3>Labels & overlays</h3>
             <label className="row check-row"><input type="checkbox" checked={cv?.showCountdown ?? true} onChange={(e) => engine?.setCanvasSettings({ showCountdown: e.target.checked })} /> Countdown to bar close</label>
             <label className="row check-row"><input type="checkbox" checked={cv?.showHighLow ?? true} onChange={(e) => engine?.setCanvasSettings({ showHighLow: e.target.checked })} /> High/low price labels</label>
             <label className="row check-row"><input type="checkbox" checked={cv?.showPrevDayClose ?? true} onChange={(e) => engine?.setCanvasSettings({ showPrevDayClose: e.target.checked })} /> Previous day close line</label>
+            <label className="row check-row"><input type="checkbox" checked={cv?.volumeOverlay ?? true} onChange={(e) => engine?.setCanvasSettings({ volumeOverlay: e.target.checked })} /> Volume overlay on main pane</label>
+            <label className="row check-row"><input type="checkbox" checked={cv?.sessionBreaks ?? false} onChange={(e) => engine?.setCanvasSettings({ sessionBreaks: e.target.checked })} /> Session breaks</label>
+            <label className="row check-row"><input type="checkbox" checked={cv?.showEvents ?? false} onChange={(e) => engine?.setCanvasSettings({ showEvents: e.target.checked })} /> Events on time scale</label>
+            <h3>Time scale</h3>
+            <label className="row check-row"><input type="checkbox" checked={cv?.pinLeft ?? false} onChange={(e) => engine?.setCanvasSettings({ pinLeft: e.target.checked })} /> Pin chart left when changing interval</label>
+            <label className="row">
+              Timezone
+              <select value={cv?.timezone ?? "UTC"} onChange={(e) => engine?.setCanvasSettings({ timezone: e.target.value })}>
+                {["UTC","America/New_York","America/Chicago","America/Los_Angeles","Europe/London","Europe/Berlin","Asia/Tokyo","Asia/Singapore","Australia/Sydney","Exchange"].map((z) => (
+                  <option key={z} value={z === "Exchange" ? "UTC" : z}>{z}</option>
+                ))}
+              </select>
+            </label>
+            <label className="row">
+              Date format
+              <select value={cv?.dateFormat ?? "default"} onChange={(e) => engine?.setCanvasSettings({ dateFormat: e.target.value as "default" | "ymd" | "dmy" | "mdy" })}>
+                <option value="default">Default</option>
+                <option value="ymd">YYYY-MM-DD</option>
+                <option value="dmy">DD/MM/YYYY</option>
+                <option value="mdy">MM/DD/YYYY</option>
+              </select>
+            </label>
           </div>
         ) : null}
 
@@ -646,6 +674,17 @@ export function SettingsModal({
             <label className="row">
               Opacity
               <input type="range" min="0" max="0.3" step="0.01" value={cv?.watermarkOpacity ?? 0.07} onChange={(e) => engine?.setCanvasSettings({ watermarkOpacity: Number(e.target.value) })} />
+            </label>
+            <h3>Panes & margins</h3>
+            <label className="row check-row"><input type="checkbox" checked={cv?.showPaneButtons ?? true} onChange={(e) => engine?.setCanvasSettings({ showPaneButtons: e.target.checked })} /> Show pane buttons</label>
+            <label className="row">Top margin
+              <input type="range" min="0" max="0.4" step="0.01" value={cv?.marginTop ?? 0.08} onChange={(e) => engine?.setCanvasSettings({ marginTop: Number(e.target.value) })} />
+            </label>
+            <label className="row">Bottom margin
+              <input type="range" min="0" max="0.4" step="0.01" value={cv?.marginBottom ?? 0.08} onChange={(e) => engine?.setCanvasSettings({ marginBottom: Number(e.target.value) })} />
+            </label>
+            <label className="row">Right margin
+              <input type="range" min="0" max="0.4" step="0.01" value={cv?.marginRight ?? 0.05} onChange={(e) => engine?.setCanvasSettings({ marginRight: Number(e.target.value) })} />
             </label>
             <h3>Navigation</h3>
             <label className="row check-row"><input type="checkbox" checked={cv?.showNavButtons ?? true} onChange={(e) => engine?.setCanvasSettings({ showNavButtons: e.target.checked })} /> Show zoom / scale buttons</label>

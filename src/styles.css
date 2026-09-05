@@ -1901,3 +1901,46 @@ button { cursor: pointer; }
   border-radius: 4px;
   font-size: 11px;
 }
+
+
+.goto-date {
+  position: absolute;
+  left: 12px;
+  bottom: 34px;
+  z-index: 5;
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--panel, #1e222d);
+  border: 1px solid var(--border, #2a2e39);
+  border-radius: 6px;
+}
+.goto-date input {
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--border, #2a2e39);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+.scale-btns .scale-plus {
+  color: var(--accent, #2962ff);
+  font-weight: 700;
+}
+.ctx-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border, #2a2e39);
+}
+.tester-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--muted, #787b86);
+}
+.tester-tabs .on { color: var(--text, #d1d4dc); font-weight: 600; }
+.range-bar .tz, .range-bar .tz {
+  margin-left: 6px;
+  opacity: 0.7;
+  font-size: 11px;
+}

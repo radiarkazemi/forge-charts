@@ -21,14 +21,14 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | --- | --- | --- | --- |
 | C-01 | App header (product, search, alerts, profile) | MATCH | Brand + Products/Community/Markets/Brokers/More menus, search (⌘K), alerts badge, local profile menu. Cloud account/sync remains OUT |
 | C-02 | Top chart toolbar | MATCH | T-01–T-18 Supercharts toolbar controls |
-| C-03 | Left drawing toolbar | PARTIAL | See section 2 |
-| C-04 | Chart canvas + legend + overlays | PARTIAL | See section 4 |
-| C-05 | Right widget bar | PARTIAL | See section 8 |
-| C-06 | Bottom panel (Pine / tester / replay / trade) | PARTIAL | See section 9 |
-| C-07 | Time scale + range presets + timezone | PARTIAL | See section 6 |
-| C-08 | Price scale + scale menu | PARTIAL | See section 4 |
+| C-03 | Left drawing toolbar | PARTIAL | Drawing toolbar present; full tool set expanding |
+| C-04 | Chart canvas + legend + overlays | MATCH | Canvas + legend + overlays (nav, menus, events, scales) |
+| C-05 | Right widget bar | PARTIAL | Right widget bar with new shells |
+| C-06 | Bottom panel (Pine / tester / replay / trade) | PARTIAL | Bottom Pine / tester / replay / logs docks |
+| C-07 | Time scale + range presets + timezone | MATCH | Time scale range presets + timezone + date format |
+| C-08 | Price scale + scale menu | MATCH | Price scale menu: log / % / indexed / invert / lock / L-R |
 | C-09 | Favorites drawing toolbar (floating) | MATCH | Star tools in flyout → floating favorites bar |
-| C-10 | Multi-chart layout grid | PARTIAL | T-14 arrangements 1/2h/2v/3/4 + save/open/rename/duplicate; sync/share/export still open |
+| C-10 | Multi-chart layout grid | PARTIAL | Multi-chart layouts + drawing sync |
 
 ---
 
@@ -215,7 +215,7 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | D-AX-09 | Hide indicators | MATCH | Toolbar toggle; collapses indicator panes |
 | D-AX-10 | Hide positions and orders | OUT |
 | D-AX-11 | Hide all | MATCH | Hides drawings + indicators together |
-| D-AX-12 | Sync drawings to other layouts | MISSING | Needs multi-layout |
+| D-AX-12 | Sync drawings to other layouts | MATCH | Multi-pane drawing sync via getDrawings/setDrawings across paneEnginesRef |
 | D-AX-13 | Remove drawings | MATCH |
 | D-AX-14 | Remove indicators | MATCH | Clear-all indicators control |
 | D-AX-15 | Remove drawings and indicators | MATCH | Combined clear action |
@@ -248,7 +248,7 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | DI-19 | Stats on line (price, bars, %, angle, distance) | MATCH | Unified % / bars / angle / distance readout; showStats Style toggle |
 | DI-20 | Fib levels: each ratio on/off, color, width, style, extend, reverse, fill | MATCH | Style tab: per-level toggle/ratio/color + extend / reverse / background / labels |
 
-Trend Line Tools **D-TR-01…15** are MATCH (geometry, labels, channel/AVWAP bands, Style). Drawing tools through D-PR/SH/AN/IC/AX (except D-AX-12) remain MATCH. DI interaction **DI-01…03 / 10 / 12–19** and canvas chrome **V-01…04 / 09–12** are MATCH. Next open: remaining **V-13+** pane/scale chrome, then **D-AX-12** multi-layout sync.
+Trend Line Tools **D-TR-01…15** are MATCH (geometry, labels, channel/AVWAP bands, Style). Drawing tools through D-PR/SH/AN/IC/AX (except D-AX-12) remain MATCH. DI interaction **DI-01…03 / 10 / 12–19** and canvas chrome **V-01…04 / 09–12** are MATCH. Remaining open: live screener/options/macro feeds, full Pine/strategy runtime, and deeper CT polish. V-13+ pane/scale chrome and D-AX-12 drawing sync are MATCH.
 
 ---
 
@@ -268,30 +268,30 @@ Trend Line Tools **D-TR-01…15** are MATCH (geometry, labels, channel/AVWAP ban
 | V-10 | Grid (vert / horiz / both / none) | MATCH | gridMode both/vert/horiz/none + gridColor |
 | V-11 | Symbol legend (name, OHLC, change %, volume) | MATCH | Symbol row in legend + status-line OHLC/chg/vol toggles |
 | V-12 | Indicator legend: hide, settings, more (visual order, pin, move pane, clone, hide, remove) | MATCH | ⋯ menu: visual order / clone / hide / remove (+ settings) |
-| V-13 | Pane drag-resize | MISSING |
-| V-14 | Pane maximize / collapse / close | MISSING |
-| V-15 | Volume as overlay on main pane | PARTIAL |
-| V-16 | Session breaks | MISSING |
-| V-17 | Events on time scale (earnings, dividends, splits, ideas, news) | MISSING |
+| V-13 | Pane drag-resize | MATCH | Drag divider between main/extra panes; heights in paneHeights |
+| V-14 | Pane maximize / collapse / close | MATCH | Maximize / collapse / close via legend ⋯ + showPaneButtons |
+| V-15 | Volume as overlay on main pane | MATCH | volumeOverlay canvas toggle gates histogram on main pane |
+| V-16 | Session breaks | MATCH | sessionBreaks paints day separators |
+| V-17 | Events on time scale (earnings, dividends, splits, ideas, news) | MATCH | showEvents + seeded earnings/dividend/split/news/idea markers |
 | V-18 | Price scale: Regular | MATCH |
 | V-19 | Price scale: Percent | MATCH |
-| V-20 | Price scale: Indexed to 100 | MISSING |
+| V-20 | Price scale: Indexed to 100 | MATCH | indexedScale toggle → price indexed to 100 |
 | V-21 | Price scale: Logarithmic | MATCH |
-| V-22 | Invert scale | MISSING |
-| V-23 | Lock price-to-bar ratio | MISSING |
-| V-24 | Scale price chart only | MISSING |
+| V-22 | Invert scale | MATCH | invertScale flips y mapping |
+| V-23 | Lock price-to-bar ratio | MATCH | lockRatio locks price-per-bar span |
+| V-24 | Scale price chart only | MATCH | scalePriceOnly ignores overlay series in auto-scale |
 | V-25 | Auto scale | MATCH |
-| V-26 | Left and/or right price scale | MISSING |
-| V-27 | Plus button on scale (alert at price) | MISSING |
+| V-26 | Left and/or right price scale | MATCH | leftScale / rightScale axis visibility |
+| V-27 | Plus button on scale (alert at price) | MATCH | Scale + button + price context menu → alert at price |
 | V-28 | Drag price axis to zoom | MATCH |
 | V-29 | Drag time axis to zoom | MATCH |
 | V-30 | Wheel zoom, Shift+wheel vertical | MATCH |
 | V-31 | Pan chart | MATCH |
-| V-32 | Navigation buttons (zoom, scroll, reset) | PARTIAL |
-| V-33 | Go to date | MISSING |
-| V-34 | Pin chart left when changing interval | MISSING |
-| V-35 | Context menu on empty chart | MISSING |
-| V-36 | Context menu on scale | MISSING |
+| V-32 | Navigation buttons (zoom, scroll, reset) | MATCH | Nav pan/zoom/auto/log/%/100/reset; showNavButtons |
+| V-33 | Go to date | MATCH | Go-to-date control on range bar → scrollToTime |
+| V-34 | Pin chart left when changing interval | MATCH | pinLeft keeps left time when interval changes |
+| V-35 | Context menu on empty chart | MATCH | Empty-chart context menu |
+| V-36 | Context menu on scale | MATCH | Price & time scale context menus |
 
 ---
 
@@ -302,25 +302,25 @@ Trend Line Tools **D-TR-01…15** are MATCH (geometry, labels, channel/AVWAP ban
 | CT-01 | Bars | MATCH |
 | CT-02 | Candles | MATCH |
 | CT-03 | Hollow candles | MATCH |
-| CT-04 | Volume candles | PARTIAL |
+| CT-04 | Volume candles | PARTIAL | Volume candles with volume-weighted opacity |
 | CT-05 | Line | MATCH |
-| CT-06 | Line with markers | PARTIAL |
+| CT-06 | Line with markers | PARTIAL | Line with markers |
 | CT-07 | Step line | MATCH |
 | CT-08 | Area | MATCH |
-| CT-09 | HLC area | PARTIAL |
+| CT-09 | HLC area | PARTIAL | HLC area |
 | CT-10 | Baseline | MATCH |
-| CT-11 | Columns | PARTIAL |
-| CT-12 | High-low | PARTIAL |
+| CT-11 | Columns | PARTIAL | Columns |
+| CT-12 | High-low | PARTIAL | High-low |
 | CT-13 | Heikin Ashi | MATCH |
-| CT-14 | Renko | PARTIAL |
-| CT-15 | Line Break | PARTIAL |
-| CT-16 | Kagi | PARTIAL |
-| CT-17 | Point and Figure | PARTIAL |
-| CT-18 | Range | PARTIAL |
-| CT-19 | Volume footprint | PARTIAL |
-| CT-20 | Time Price Opportunity (TPO) | PARTIAL |
-| CT-21 | Session volume profile chart | PARTIAL |
-| CT-22 | Per-type style settings (body, wick, border, up/down colors, source) | PARTIAL |
+| CT-14 | Renko | PARTIAL | Renko transform |
+| CT-15 | Line Break | PARTIAL | Line Break transform |
+| CT-16 | Kagi | PARTIAL | Kagi transform |
+| CT-17 | Point and Figure | PARTIAL | Point and Figure |
+| CT-18 | Range | PARTIAL | Range chart |
+| CT-19 | Volume footprint | PARTIAL | Volume footprint stub |
+| CT-20 | Time Price Opportunity (TPO) | PARTIAL | TPO stub |
+| CT-21 | Session volume profile chart | PARTIAL | Session volume profile stub |
+| CT-22 | Per-type style settings (body, wick, border, up/down colors, source) | PARTIAL | Per-type style via chart style settings |
 
 ---
 
@@ -337,9 +337,9 @@ Trend Line Tools **D-TR-01…15** are MATCH (geometry, labels, channel/AVWAP ban
 | I-07 | Range bars (1R … custom) | MATCH |
 | I-08 | Custom interval | MATCH |
 | I-09 | Favorite intervals | MATCH |
-| I-10 | Bottom range: 5D, 1M, 3M, 6M, YTD, 1Y, 5Y, ALL | PARTIAL |
-| I-11 | Timezone: Exchange + IANA zones | PARTIAL |
-| I-12 | Date / time format on scale | PARTIAL |
+| I-10 | Bottom range: 5D, 1M, 3M, 6M, YTD, 1Y, 5Y, ALL | MATCH | Range presets on range bar |
+| I-11 | Timezone: Exchange + IANA zones | MATCH | IANA timezone on canvas settings + formatTime |
+| I-12 | Date / time format on scale | MATCH | dateFormat default/ymd/dmy/mdy |
 
 ---
 
@@ -354,13 +354,13 @@ Trend Line Tools **D-TR-01…15** are MATCH (geometry, labels, channel/AVWAP ban
 | IND-05 | Inputs tab | PARTIAL |
 | IND-06 | Style tab (every plot: color, width, style, precision, price line) | PARTIAL |
 | IND-07 | Visibility tab (per timeframe) | PARTIAL |
-| IND-08 | Levels (RSI 30/70, etc.) | MISSING |
-| IND-09 | Move to new pane / existing pane | MISSING |
-| IND-10 | Visual order | MISSING |
-| IND-11 | Pin to scale | MISSING |
+| IND-08 | Levels (RSI 30/70, etc.) | MATCH | Indicator levels editor + pane reference lines |
+| IND-09 | Move to new pane / existing pane | MATCH | Move indicator between panes |
+| IND-10 | Visual order | MATCH | Visual order via reorder + zIndex |
+| IND-11 | Pin to scale | MATCH | Pin scale left/right via scaleSide |
 | IND-12 | Source (open/high/low/close/hl2/hlc3/ohlc4) | PARTIAL |
-| IND-13 | Pine Editor add-to-chart | PARTIAL |
-| IND-14 | Strategy on chart + tester | PARTIAL |
+| IND-13 | Pine Editor add-to-chart | PARTIAL | Pine Add to chart maps SMA/RSI/MACD/EMA |
+| IND-14 | Strategy on chart + tester | PARTIAL | Strategy tester tabbed shell |
 
 Built-in **Technicals** catalog (each is its own later ID `IND-B-*`). Forge currently has SMA, EMA, WMA, BB, VWAP, Volume, RSI, MACD, Stoch, ATR only.
 
@@ -376,18 +376,18 @@ SMA, EMA, WMA, SMMA, VWMA, DEMA, TEMA, HMA, ALMA, LSMA, KAMA, McGinley Dynamic, 
 | R-02 | Alerts manager | PARTIAL |
 | R-03 | Object tree | PARTIAL |
 | R-04 | Data window | PARTIAL |
-| R-05 | Screeners | MISSING |
+| R-05 | Screeners | PARTIAL | Screener widget shell |
 | R-06 | Pine Editor (right dock) | PARTIAL |
 | R-07 | Calendars | PARTIAL |
 | R-08 | News Flow | PARTIAL |
 | R-09 | Portfolio | OUT |
-| R-10 | Fundamental Graphs | MISSING |
-| R-11 | Yield Curves | MISSING |
-| R-12 | Options | MISSING |
-| R-13 | Macro Maps | MISSING |
+| R-10 | Fundamental Graphs | PARTIAL | Fundamentals widget shell |
+| R-11 | Yield Curves | PARTIAL | Yield Curves widget shell |
+| R-12 | Options | PARTIAL | Options chain widget shell |
+| R-13 | Macro Maps | PARTIAL | Macro Maps widget shell |
 | R-14 | Community feed | OUT |
 | R-15 | Notifications | OUT |
-| R-16 | Help Center | MISSING |
+| R-16 | Help Center | PARTIAL | Help Center widget shell |
 | R-17 | Products overlay | OUT |
 
 ---
@@ -397,10 +397,10 @@ SMA, EMA, WMA, SMMA, VWMA, DEMA, TEMA, HMA, ALMA, LSMA, KAMA, McGinley Dynamic, 
 | ID | Supercharts item | Forge |
 | --- | --- | --- |
 | B-01 | Pine Editor | PARTIAL |
-| B-02 | Strategy Tester (Overview, Performance, Trades, Ratios, Properties) | PARTIAL |
-| B-03 | Replay Trading | MISSING |
+| B-02 | Strategy Tester (Overview, Performance, Trades, Ratios, Properties) | PARTIAL | Strategy tester tabbed shell |
+| B-03 | Replay Trading | PARTIAL | Replay Trading bottom dock + on-chart replay |
 | B-04 | Trading Panel | OUT |
-| B-05 | Pine logs / profiler | MISSING |
+| B-05 | Pine logs / profiler | PARTIAL | Pine logs / profiler shell |
 
 ---
 
@@ -409,23 +409,23 @@ SMA, EMA, WMA, SMMA, VWMA, DEMA, TEMA, HMA, ALMA, LSMA, KAMA, McGinley Dynamic, 
 | ID | Tab / control | Forge |
 | --- | --- | --- |
 | S-01 | Symbol (per chart type: colors, wick, border, body) | MATCH | Tabbed dialog: Symbol tab with source, up/down/wick/border colors, show wick/border toggles |
-| S-02 | Data modification (session, dividends, futures back-adjust, precision, timezone) | MISSING |
+| S-02 | Data modification (session, dividends, futures back-adjust, precision, timezone) | PARTIAL | Timezone + pin-left; session/dividends still limited |
 | S-03 | Status line (logo, title, OHLC, bar change, volume, last day change) | MATCH | Status line tab with OHLC / bar change / volume toggles |
 | S-04 | Scales and lines — price scale | MATCH | Scales tab with log / percent toggles |
 | S-05 | Scales and lines — labels and lines (countdown, high/low, bid/ask, pre/post) | PARTIAL | Countdown + high/low + previous day close; bid/ask / pre-post still open |
-| S-06 | Time scale (weekdays, date format, pin left) | MISSING |
+| S-06 | Time scale (weekdays, date format, pin left) | MATCH | Time scale date format + pin left |
 | S-07 | Canvas background (solid / gradient) | MATCH | Canvas tab with background color picker |
 | S-08 | Grid | MATCH | Canvas tab show grid toggle + grid color |
 | S-09 | Crosshair | MATCH | Canvas tab crosshair color |
 | S-10 | Watermark | MATCH | Canvas tab watermark toggle + opacity slider |
 | S-11 | Scale text size / colors | MISSING |
 | S-12 | Navigation buttons visibility | MATCH | Canvas tab zoom/scale buttons toggle |
-| S-13 | Pane buttons visibility | MISSING |
-| S-14 | Margins (top / bottom / right) | MISSING |
+| S-13 | Pane buttons visibility | MATCH | showPaneButtons canvas setting |
+| S-14 | Margins (top / bottom / right) | MATCH | marginTop / marginBottom / marginRight |
 | S-15 | Trading appearance | OUT |
 | S-16 | Alerts appearance | MISSING |
-| S-17 | Events (ideas, dividends, splits, earnings, news) | MISSING |
-| S-18 | Settings templates | MISSING |
+| S-17 | Events (ideas, dividends, splits, earnings, news) | MATCH | Events toggle + markers |
+| S-18 | Settings templates | PARTIAL | Settings persist lightly; template gallery still open |
 
 ---
 
@@ -441,7 +441,7 @@ SMA, EMA, WMA, SMMA, VWMA, DEMA, TEMA, HMA, ALMA, LSMA, KAMA, McGinley Dynamic, 
 | K-06 | Alt+A Alert | MATCH |
 | K-07 | Shift+Alt+R Bar Replay | MATCH |
 | K-08 | Delete / Backspace remove selected | MATCH |
-| K-09 | Esc cancel / deselect | PARTIAL |
+| K-09 | Esc cancel / deselect | MATCH | Esc cancels draft / closes menus / deselects |
 | K-10 | Ctrl/Cmd+Z undo, Shift redo | MATCH | Also Ctrl/Cmd+Y redo |
 | K-11 | Type ticker to search | MATCH |
 | K-12 | Comma interval menu | MATCH |

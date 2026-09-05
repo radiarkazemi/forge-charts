@@ -41,17 +41,56 @@ export function formatVolume(value: number): string {
   return value.toFixed(0);
 }
 
-export function formatTime(unix: number, interval: string): string {
+export function formatTime(
+  unix: number,
+  interval: string,
+  timezone = "UTC",
+  dateFormat: "default" | "ymd" | "dmy" | "mdy" = "default",
+): string {
   const d = new Date(unix * 1000);
   const pad = (n: number) => String(n).padStart(2, "0");
+  let y: number, mo: number, day: number, h: number, mi: number, s: number;
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone || "UTC",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).formatToParts(d);
+    const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+    y = get("year");
+    mo = get("month");
+    day = get("day");
+    h = get("hour") % 24;
+    mi = get("minute");
+    s = get("second");
+  } catch {
+    y = d.getUTCFullYear();
+    mo = d.getUTCMonth() + 1;
+    day = d.getUTCDate();
+    h = d.getUTCHours();
+    mi = d.getUTCMinutes();
+    s = d.getUTCSeconds();
+  }
   const upper = interval.toUpperCase();
-  if (/^\d+S$/.test(upper)) {
-    return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+  if (/^\d+S$/.test(upper)) return `${pad(h)}:${pad(mi)}:${pad(s)}`;
+  const date =
+    dateFormat === "dmy"
+      ? `${pad(day)}/${pad(mo)}/${y}`
+      : dateFormat === "mdy"
+        ? `${pad(mo)}/${pad(day)}/${y}`
+        : `${y}-${pad(mo)}-${pad(day)}`;
+  if (/^\d+[DWM]$/.test(upper) || dateFormat !== "default") {
+    if (/^\d+[DWM]$/.test(upper)) return date;
   }
-  if (/^\d+[DWM]$/.test(upper)) {
-    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  if (dateFormat === "ymd" || dateFormat === "dmy" || dateFormat === "mdy") {
+    return `${date} ${pad(h)}:${pad(mi)}`;
   }
-  return `${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  return `${pad(mo)}-${pad(day)} ${pad(h)}:${pad(mi)}`;
 }
 
 export function hashString(input: string): number {
