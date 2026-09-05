@@ -20,6 +20,9 @@ export type PriceAlert = {
   createdAt: number;
   firedAt: number | null;
   fireCount: number;
+  /** When set, alert was created from a drawing (DI-12). */
+  drawingId?: string;
+  drawingKind?: string;
 };
 
 export type AlertFire = {
@@ -62,6 +65,8 @@ export function createAlert(input: {
   price: number;
   trigger: AlertTrigger;
   message?: string;
+  drawingId?: string;
+  drawingKind?: string;
 }): PriceAlert {
   const price = Number(input.price);
   const name =
@@ -81,6 +86,8 @@ export function createAlert(input: {
     createdAt: Date.now(),
     firedAt: null,
     fireCount: 0,
+    drawingId: input.drawingId,
+    drawingKind: input.drawingKind,
   };
 }
 

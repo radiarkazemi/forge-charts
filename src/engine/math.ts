@@ -95,3 +95,21 @@ export function distToLine(px: number, py: number, x1: number, y1: number, x2: n
   const len = Math.hypot(dx, dy) || 1;
   return Math.abs((px - x1) * dy - (py - y1) * dx) / len;
 }
+
+
+/** Snap chart point B to nearest 45° from A in screen space (DI-14). */
+export function snapAngle45(
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): { x: number; y: number } {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return { x: bx, y: by };
+  const ang = Math.atan2(dy, dx);
+  const step = Math.PI / 4;
+  const snapped = Math.round(ang / step) * step;
+  return { x: ax + Math.cos(snapped) * len, y: ay + Math.sin(snapped) * len };
+}

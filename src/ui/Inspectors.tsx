@@ -16,7 +16,16 @@ import type {
   IndicatorInstance,
   LineStyle,
 } from "../engine/types";
+import type { LineEnd } from "../engine/types";
 import { DEFAULT_DRAWING_VISIBILITY } from "../engine/types";
+import {
+  createDrawingTemplate,
+  drawingTemplateSummary,
+  loadDrawingTemplates,
+  saveDrawingTemplates,
+  templatePatch,
+  type DrawingTemplate,
+} from "../data/drawingTemplates";
 import { useEngine } from "./useEngine";
 
 const PALETTE = ["#2962ff", "#f23645", "#089981", "#ff9800", "#ab47bc", "#e1a218", "#26a69a", "#d1d4dc"];
@@ -68,20 +77,34 @@ function fromLocalInput(value: string): number | null {
   return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
 }
 
-export function ChartInspectors({ engine }: { engine: ChartEngine | null }) {
+export function ChartInspectors({
+  engine,
+  onAlertDrawing,
+}: {
+  engine: ChartEngine | null;
+  onAlertDrawing?: (drawing: Drawing) => void;
+}) {
   const snap = useEngine(engine);
   const [indOpen, setIndOpen] = useState<string | null>(null);
+  const [moreInd, setMoreInd] = useState<string | null>(null);
   const selected = snap?.drawings.find((d) => d.id === snap.selectedId) ?? null;
   const propsDrawing = snap?.drawings.find((d) => d.id === snap.drawingPropsId) ?? null;
   const menuDrawing = snap?.drawings.find((d) => d.id === snap.drawingMenu?.id) ?? null;
   const editingInd = snap?.indicators.find((i) => i.id === (indOpen ?? snap.selectedIndicatorId)) ?? null;
+  const symLine = snap?.legend.find((l) => l.id === "sym" || l.id === "symbol");
 
   if (!snap) return null;
   return (
     <>
       <div className="legend">
+        {symLine ? (
+          <div className="legend-row legend-symbol">
+            <span className="legend-swatch" style={{ background: symLine.color }} />
+            <span>{symLine.text}</span>
+          </div>
+        ) : null}
         {snap.legend
-          .filter((l) => l.id !== "sym" && l.id !== "cmp")
+          .filter((l) => l.id !== "sym" && l.id !== "symbol" && l.id !== "cmp")
           .map((line) => {
             const ind = snap.indicators.find((i) => i.id === line.id);
             if (!ind) return null;
@@ -111,15 +134,37 @@ export function ChartInspectors({ engine }: { engine: ChartEngine | null }) {
                   >
                     ⚙
                   </button>
+                  <button
+                    title="More"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMoreInd((cur) => (cur === ind.id ? null : ind.id));
+                    }}
+                  >
+                    ⋯
+                  </button>
                   <button title="Remove" onClick={(e) => { e.stopPropagation(); engine?.removeIndicator(ind.id); }}>
                     ×
                   </button>
                 </span>
+                {moreInd === ind.id ? (
+                  <div className="legend-more" onClick={(e) => e.stopPropagation()}>
+                    <button type="button" onClick={() => { engine?.reorderIndicator(ind.id, "front"); setMoreInd(null); }}>Bring to front</button>
+                    <button type="button" onClick={() => { engine?.reorderIndicator(ind.id, "back"); setMoreInd(null); }}>Send to back</button>
+                    <button type="button" onClick={() => { engine?.cloneIndicator(ind.id); setMoreInd(null); }}>Clone</button>
+                    <button type="button" onClick={() => { engine?.updateIndicator(ind.id, { visible: !ind.visible }); setMoreInd(null); }}>
+                      {ind.visible ? "Hide" : "Show"}
+                    </button>
+                    <button type="button" className="danger" onClick={() => { engine?.removeIndicator(ind.id); setMoreInd(null); }}>Remove</button>
+                  </div>
+                ) : null}
               </div>
             );
           })}
       </div>
-      {selected && !propsDrawing ? <DrawingEditor engine={engine} drawing={selected} /> : null}
+      {selected && !propsDrawing ? (
+        <DrawingEditor engine={engine} drawing={selected} onAlertDrawing={onAlertDrawing} />
+      ) : null}
       {propsDrawing ? <DrawingPropertiesDialog engine={engine} drawing={propsDrawing} /> : null}
       {menuDrawing && snap.drawingMenu ? (
         <DrawingContextMenu
@@ -127,6 +172,7 @@ export function ChartInspectors({ engine }: { engine: ChartEngine | null }) {
           drawing={menuDrawing}
           x={snap.drawingMenu.x}
           y={snap.drawingMenu.y}
+          onAlertDrawing={onAlertDrawing}
         />
       ) : null}
       {editingInd && indOpen === editingInd.id ? (
@@ -140,7 +186,43 @@ export function ChartInspectors({ engine }: { engine: ChartEngine | null }) {
   );
 }
 
-function DrawingEditor({ engine, drawing }: { engine: ChartEngine | null; drawing: Drawing }) {
+function DrawingEditor({
+  engine,
+  drawing,
+  onAlertDrawing,
+}: {
+  engine: ChartEngine | null;
+  drawing: Drawing;
+  onAlertDrawing?: (drawing: Drawing) => void;
+}) {
+  const [tplOpen, setTplOpen] = useState(false);
+  const [templates, setTemplates] = useState<DrawingTemplate[]>(() => loadDrawingTemplates());
+  const fib = drawing.fib;
+  const isLinear =
+    drawing.kind === "trend" ||
+    drawing.kind === "arrow" ||
+    drawing.kind === "ray" ||
+    drawing.kind === "info" ||
+    drawing.kind === "extended" ||
+    drawing.kind === "hline" ||
+    drawing.kind === "horzray";
+
+  const refreshTpl = () => setTemplates(loadDrawingTemplates());
+
+  const saveTpl = () => {
+    const name = window.prompt("Template name", `${drawing.kind} style`);
+    if (!name) return;
+    const next = [createDrawingTemplate({ name, drawing }), ...loadDrawingTemplates()];
+    saveDrawingTemplates(next);
+    refreshTpl();
+    setTplOpen(false);
+  };
+
+  const applyTpl = (tpl: DrawingTemplate) => {
+    engine?.updateDrawing(drawing.id, templatePatch(tpl.style));
+    setTplOpen(false);
+  };
+
   return (
     <div className="obj-bar" onPointerDown={(e) => e.stopPropagation()}>
       {PALETTE.map((c) => (
@@ -174,7 +256,71 @@ function DrawingEditor({ engine, drawing }: { engine: ChartEngine | null; drawin
           {s.label}
         </button>
       ))}
+      {isLinear ? (
+        <>
+          <span className="obj-sep" />
+          <button
+            className={fib?.extendLeft ? "on" : ""}
+            title="Extend left"
+            onClick={() =>
+              engine?.updateDrawing(drawing.id, {
+                fib: { ...(fib ?? resolveFibStyleForKind(drawing)), extendLeft: !fib?.extendLeft },
+              })
+            }
+          >
+            ⬅
+          </button>
+          <button
+            className={fib?.extendRight ? "on" : ""}
+            title="Extend right"
+            onClick={() =>
+              engine?.updateDrawing(drawing.id, {
+                fib: { ...(fib ?? resolveFibStyleForKind(drawing)), extendRight: !fib?.extendRight },
+              })
+            }
+          >
+            ➡
+          </button>
+          <select
+            title="Left end"
+            value={drawing.leftEnd ?? "normal"}
+            onChange={(e) => engine?.updateDrawing(drawing.id, { leftEnd: e.target.value as LineEnd })}
+          >
+            <option value="normal">L ·</option>
+            <option value="arrow">L ▶</option>
+            <option value="circle">L ●</option>
+          </select>
+          <select
+            title="Right end"
+            value={drawing.rightEnd ?? (drawing.kind === "arrow" ? "arrow" : "normal")}
+            onChange={(e) => engine?.updateDrawing(drawing.id, { rightEnd: e.target.value as LineEnd })}
+          >
+            <option value="normal">R ·</option>
+            <option value="arrow">R ▶</option>
+            <option value="circle">R ●</option>
+          </select>
+        </>
+      ) : null}
       <span className="obj-sep" />
+      <button title="Alert on drawing" onClick={() => onAlertDrawing?.(drawing)}>
+        ⏰
+      </button>
+      <div className="tpl-mini">
+        <button title="Drawing template" className={tplOpen ? "on" : ""} onClick={() => { refreshTpl(); setTplOpen((v) => !v); }}>
+          ▤
+        </button>
+        {tplOpen ? (
+          <div className="tpl-mini-menu" onPointerDown={(e) => e.stopPropagation()}>
+            <button type="button" onClick={saveTpl}>Save template…</button>
+            {templates.map((tpl) => (
+              <button key={tpl.id} type="button" title={drawingTemplateSummary(tpl)} onClick={() => applyTpl(tpl)}>
+                {tpl.name}
+              </button>
+            ))}
+            {!templates.length ? <div className="tpl-empty">No templates yet</div> : null}
+          </div>
+        ) : null}
+      </div>
       <button title="Settings" onClick={() => engine?.openDrawingProperties(drawing.id)}>
         ⚙
       </button>
@@ -580,6 +726,42 @@ function PatternStylePanel({ engine, drawing }: { engine: ChartEngine | null; dr
             />
             Extend right
           </label>
+          {(isTrendLine || isChannel) && (
+            <label className="row check-row">
+              <input
+                type="checkbox"
+                checked={fib.showStats ?? fib.showPrices}
+                onChange={() => patchFib({ showStats: !(fib.showStats ?? fib.showPrices) })}
+              />
+              Stats on line
+            </label>
+          )}
+          {isTrendLine && (
+            <>
+              <label className="row">
+                Left end
+                <select
+                  value={drawing.leftEnd ?? "normal"}
+                  onChange={(e) => engine?.updateDrawing(drawing.id, { leftEnd: e.target.value as LineEnd })}
+                >
+                  <option value="normal">Normal</option>
+                  <option value="arrow">Arrow</option>
+                  <option value="circle">Circle</option>
+                </select>
+              </label>
+              <label className="row">
+                Right end
+                <select
+                  value={drawing.rightEnd ?? (drawing.kind === "arrow" ? "arrow" : "normal")}
+                  onChange={(e) => engine?.updateDrawing(drawing.id, { rightEnd: e.target.value as LineEnd })}
+                >
+                  <option value="normal">Normal</option>
+                  <option value="arrow">Arrow</option>
+                  <option value="circle">Circle</option>
+                </select>
+              </label>
+            </>
+          )}
         </>
       )}
       <label className="row">
@@ -804,11 +986,13 @@ function DrawingContextMenu({
   drawing,
   x,
   y,
+  onAlertDrawing,
 }: {
   engine: ChartEngine | null;
   drawing: Drawing;
   x: number;
   y: number;
+  onAlertDrawing?: (drawing: Drawing) => void;
 }) {
   useEffect(() => {
     const close = () => engine?.closeDrawingMenu();
@@ -824,7 +1008,15 @@ function DrawingContextMenu({
   }, [engine]);
 
   const left = Math.min(x, window.innerWidth - 220);
-  const top = Math.min(y, window.innerHeight - 280);
+  const top = Math.min(y, window.innerHeight - 320);
+
+  const saveTpl = () => {
+    const name = window.prompt("Template name", `${drawing.kind} style`);
+    if (!name) return;
+    const next = [createDrawingTemplate({ name, drawing }), ...loadDrawingTemplates()];
+    saveDrawingTemplates(next);
+    engine?.closeDrawingMenu();
+  };
 
   return (
     <div
@@ -840,6 +1032,18 @@ function DrawingContextMenu({
         }}
       >
         Settings…
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          onAlertDrawing?.(drawing);
+          engine?.closeDrawingMenu();
+        }}
+      >
+        Add alert…
+      </button>
+      <button type="button" onClick={saveTpl}>
+        Save as template…
       </button>
       <div className="ctx-sep" />
       <button type="button" onClick={() => { engine?.reorderDrawing(drawing.id, "front"); engine?.closeDrawingMenu(); }}>

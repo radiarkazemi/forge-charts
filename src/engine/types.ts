@@ -171,6 +171,12 @@ export type ChartPoint = {
 
 export type LineStyle = "solid" | "dashed" | "dotted";
 
+/** Line endpoint cap (DI-17). */
+export type LineEnd = "normal" | "arrow" | "circle";
+
+/** Grid mode for canvas (V-10). */
+export type GridMode = "both" | "vert" | "horiz" | "none";
+
 /** Per-level Fib Retracement style (DI-20 / D-FI-01). */
 export type FibLevelStyle = {
   ratio: number;
@@ -193,6 +199,8 @@ export type FibRetraceStyle = {
   showBackground: boolean;
   showPrices: boolean;
   showLevels: boolean;
+  /** Independent stats readout for trend / channel tools (DI-19). */
+  showStats?: boolean;
   levelsWidth: number;
   levelsStyle: LineStyle;
 };
@@ -227,6 +235,10 @@ export type Drawing = {
   visible?: boolean;
   lineWidth?: number;
   lineStyle?: LineStyle;
+  /** Left endpoint cap for linear tools (DI-17). */
+  leftEnd?: LineEnd;
+  /** Right endpoint cap for linear tools (DI-17). */
+  rightEnd?: LineEnd;
   /** Interval-bucket visibility; omitted means all on. */
   visibility?: DrawingVisibility;
   /** Fib / Gann / Pitchfork style (D-FI-01…18); omitted uses Supercharts defaults. */
@@ -269,9 +281,17 @@ export type CanvasSettings = {
   showHighLow: boolean;
   showPrevDayClose: boolean;
   showNavButtons: boolean;
+  /** Crosshair OHLC tracker box (V-02). */
+  showTrackerBox: boolean;
+  /** Last price line + axis label (V-04). */
+  showLastPriceLine: boolean;
   bgColor: string;
   gridColor: string;
   crosshairColor: string;
+  crosshairStyle: LineStyle;
+  crosshairWidth: number;
+  /** Vert / horiz / both / none (V-10). When set, overrides the legacy showGrid flag. */
+  gridMode: GridMode;
   watermarkOpacity: number;
 };
 

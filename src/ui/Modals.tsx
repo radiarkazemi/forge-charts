@@ -604,10 +604,43 @@ export function SettingsModal({
             <h3>Background</h3>
             <label className="row">Background <input type="color" value={cv?.bgColor || (theme === "dark" ? "#131722" : "#ffffff")} onChange={(e) => engine?.setCanvasSettings({ bgColor: e.target.value })} /></label>
             <h3>Grid</h3>
-            <label className="row check-row"><input type="checkbox" checked={snap?.showGrid ?? true} onChange={() => engine?.toggle("showGrid")} /> Show grid lines</label>
+            <label className="row">
+              Grid
+              <select
+                value={cv?.gridMode ?? (snap?.showGrid ? "both" : "none")}
+                onChange={(e) => {
+                  const gridMode = e.target.value as "both" | "vert" | "horiz" | "none";
+                  engine?.setCanvasSettings({ gridMode });
+                  if ((snap?.showGrid ?? true) !== (gridMode !== "none")) engine?.toggle("showGrid");
+                }}
+              >
+                <option value="both">Both</option>
+                <option value="vert">Vertical</option>
+                <option value="horiz">Horizontal</option>
+                <option value="none">None</option>
+              </select>
+            </label>
             <label className="row">Grid color <input type="color" value={cv?.gridColor || (theme === "dark" ? "#2a2e39" : "#e0e3eb")} onChange={(e) => engine?.setCanvasSettings({ gridColor: e.target.value })} /></label>
             <h3>Crosshair</h3>
             <label className="row">Crosshair color <input type="color" value={cv?.crosshairColor || (theme === "dark" ? "#758696" : "#9598a1")} onChange={(e) => engine?.setCanvasSettings({ crosshairColor: e.target.value })} /></label>
+            <label className="row">
+              Crosshair style
+              <select value={cv?.crosshairStyle ?? "dashed"} onChange={(e) => engine?.setCanvasSettings({ crosshairStyle: e.target.value as "solid" | "dashed" | "dotted" })}>
+                <option value="solid">Solid</option>
+                <option value="dashed">Dashed</option>
+                <option value="dotted">Dotted</option>
+              </select>
+            </label>
+            <label className="row">
+              Crosshair width
+              <select value={cv?.crosshairWidth ?? 1} onChange={(e) => engine?.setCanvasSettings({ crosshairWidth: Number(e.target.value) })}>
+                {[1, 2, 3, 4].map((w) => (
+                  <option key={w} value={w}>{w}</option>
+                ))}
+              </select>
+            </label>
+            <label className="row check-row"><input type="checkbox" checked={cv?.showTrackerBox ?? true} onChange={(e) => engine?.setCanvasSettings({ showTrackerBox: e.target.checked })} /> OHLC tracker box</label>
+            <label className="row check-row"><input type="checkbox" checked={cv?.showLastPriceLine ?? true} onChange={(e) => engine?.setCanvasSettings({ showLastPriceLine: e.target.checked })} /> Current price line</label>
             <h3>Watermark</h3>
             <label className="row check-row"><input type="checkbox" checked={cv?.showWatermark ?? true} onChange={(e) => engine?.setCanvasSettings({ showWatermark: e.target.checked })} /> Show symbol watermark</label>
             <label className="row">

@@ -2,7 +2,7 @@ import { intervalSeconds } from "../data/interval";
 import { chartStyleMatchesTheme, defaultChartStyle } from "../chartStyle";
 import { hitHandle, hitTestDrawing, isDrawingTool, isOpenEnded, neededPoints, paintDrawing, defaultFibStyleForKind } from "./drawings";
 import { bollinger, ema, heikinAshi, macd, rsi, sma } from "./indicators";
-import { clamp, formatPrice, formatTime, formatVolume, niceTicks, uid } from "./math";
+import { clamp, formatPrice, formatTime, formatVolume, niceTicks, uid, snapAngle45 } from "./math";
 import { atr, stoch, vwap, wma } from "./studies";
 import { AXIS_FONT, CHART_FONT, CHART_FONT_BOLD, palettes } from "./theme";
 import type {
@@ -114,9 +114,14 @@ export class ChartEngine {
     showHighLow: true,
     showPrevDayClose: true,
     showNavButtons: true,
+    showTrackerBox: true,
+    showLastPriceLine: true,
     bgColor: "",
     gridColor: "",
     crosshairColor: "",
+    crosshairStyle: "dashed",
+    crosshairWidth: 1,
+    gridMode: "both",
     watermarkOpacity: 0.07,
   };
   private logScale = false;
@@ -500,6 +505,42 @@ export class ChartEngine {
     this.draw();
   }
 
+  cloneIndicator(id: string): string | null {
+    const src = this.indicators.find((i) => i.id === id);
+    if (!src) return null;
+    this.pushUndo();
+    const copy: IndicatorInstance = {
+      ...src,
+      id: uid("ind"),
+      params: [...src.params],
+      visible: true,
+    };
+    const idx = this.indicators.findIndex((i) => i.id === id);
+    const next = [...this.indicators];
+    next.splice(idx + 1, 0, copy);
+    this.indicators = next;
+    this.selectedIndicatorId = copy.id;
+    this.selectedId = null;
+    this.emit();
+    this.draw();
+    return copy.id;
+  }
+
+  reorderIndicator(id: string, mode: "front" | "back" | "forward" | "backward"): void {
+    const idx = this.indicators.findIndex((i) => i.id === id);
+    if (idx < 0) return;
+    this.pushUndo();
+    const next = [...this.indicators];
+    const [item] = next.splice(idx, 1);
+    if (mode === "front") next.push(item);
+    else if (mode === "back") next.unshift(item);
+    else if (mode === "forward") next.splice(Math.min(next.length, idx + 1), 0, item);
+    else next.splice(Math.max(0, idx - 1), 0, item);
+    this.indicators = next;
+    this.emit();
+    this.draw();
+  }
+
   selectDrawing(id: string | null): void {
     this.selectedId = id;
     if (id) this.selectedIndicatorId = null;
@@ -546,7 +587,18 @@ export class ChartEngine {
     patch: Partial<
       Pick<
         Drawing,
-        "color" | "lineWidth" | "lineStyle" | "text" | "locked" | "visible" | "visibility" | "points" | "fib" | "scaleRatio"
+        | "color"
+        | "lineWidth"
+        | "lineStyle"
+        | "text"
+        | "locked"
+        | "visible"
+        | "visibility"
+        | "points"
+        | "fib"
+        | "scaleRatio"
+        | "leftEnd"
+        | "rightEnd"
       >
     >,
   ): void {
@@ -656,6 +708,8 @@ export class ChartEngine {
   undo(): void {
     const prev = this.undoStack.pop();
     if (!prev) return;
+    const keepSel = this.selectedId;
+    const keepInd = this.selectedIndicatorId;
     this.redoStack.push({
       drawings: cloneDrawings(this.drawings),
       indicators: cloneIndicators(this.indicators),
@@ -664,8 +718,9 @@ export class ChartEngine {
     this.drawings = cloneDrawings(prev.drawings);
     this.indicators = cloneIndicators(prev.indicators);
     this.chartType = prev.chartType;
-    this.selectedId = null;
-    this.selectedIndicatorId = null;
+    this.selectedId = keepSel && this.drawings.some((d) => d.id === keepSel) ? keepSel : null;
+    this.selectedIndicatorId =
+      keepInd && this.indicators.some((i) => i.id === keepInd) ? keepInd : null;
     this.drawingPropsId = null;
     this.drawingMenu = null;
     this.emit();
@@ -675,6 +730,8 @@ export class ChartEngine {
   redo(): void {
     const next = this.redoStack.pop();
     if (!next) return;
+    const keepSel = this.selectedId;
+    const keepInd = this.selectedIndicatorId;
     this.undoStack.push({
       drawings: cloneDrawings(this.drawings),
       indicators: cloneIndicators(this.indicators),
@@ -683,8 +740,9 @@ export class ChartEngine {
     this.drawings = cloneDrawings(next.drawings);
     this.indicators = cloneIndicators(next.indicators);
     this.chartType = next.chartType;
-    this.selectedId = null;
-    this.selectedIndicatorId = null;
+    this.selectedId = keepSel && this.drawings.some((d) => d.id === keepSel) ? keepSel : null;
+    this.selectedIndicatorId =
+      keepInd && this.indicators.some((i) => i.id === keepInd) ? keepInd : null;
     this.drawingPropsId = null;
     this.drawingMenu = null;
     this.emit();
@@ -1292,6 +1350,19 @@ export class ChartEngine {
     return logical;
   }
 
+  /** DI-14 — project target onto nearest 45° from anchor in screen space. */
+  private shiftSnapPoint(anchor: ChartPoint, target: ChartPoint): ChartPoint {
+    const { main } = this.layout();
+    const bars = this.plotBars();
+    const rangeBars = bars.length ? bars : this.bars.slice(-40);
+    if (!rangeBars.length) return target;
+    const range = this.priceRange(rangeBars);
+    const a = this.locate(anchor, rangeBars, range, main);
+    const b = this.locate(target, rangeBars, range, main);
+    const s = snapAngle45(a.x, a.y, b.x, b.y);
+    return this.pointFromMouse(s.x, s.y) ?? target;
+  }
+
   private pointFromMouse(x: number, y: number): ChartPoint | null {
     const { main } = this.layout();
     const visible = this.plotBars();
@@ -1319,7 +1390,9 @@ export class ChartEngine {
         }
       }
       const nearest = candidates.reduce((best, v) => (Math.abs(v - price) < Math.abs(best - price) ? v : best));
-      if (this.magnet === "strong" || Math.abs(nearest - price) / (price || 1) < 0.004) {
+      const dyPx = Math.abs(this.yOf(nearest, range.min, range.max, main) - y);
+      const weakPx = 12;
+      if (this.magnet === "strong" || dyPx <= weakPx) {
         price = nearest;
         time = bar.time;
       }
@@ -1461,34 +1534,43 @@ export class ChartEngine {
     ctx.save();
     ctx.globalAlpha = this.canvasSettings.watermarkOpacity;
     ctx.fillStyle = color;
-    ctx.font = "bold 92px Trebuchet MS, Arial, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(this.symbol.ticker, rect.x + rect.w / 2, rect.y + rect.h / 2);
+    const cx = rect.x + rect.w / 2;
+    const cy = rect.y + rect.h / 2;
+    ctx.font = "bold 84px Trebuchet MS, Arial, sans-serif";
+    ctx.fillText(this.symbol.ticker, cx, cy - 18);
+    ctx.font = "bold 36px Trebuchet MS, Arial, sans-serif";
+    ctx.fillText(String(this.interval), cx, cy + 28);
     ctx.restore();
   }
 
   private paintGrid(rect: Rect, min: number, max: number, color: string): void {
-    if (!this.showGrid) return;
+    const mode = this.canvasSettings.gridMode ?? (this.showGrid ? "both" : "none");
+    if (mode === "none") return;
     const ctx = this.ctx;
-    ctx.strokeStyle = color;
+    ctx.strokeStyle = this.canvasSettings.gridColor || color;
     ctx.lineWidth = 1;
-    for (const tick of niceTicks(min, max, 8)) {
-      const y = this.yOf(tick, min, max, rect);
-      ctx.beginPath();
-      ctx.moveTo(rect.x, y);
-      ctx.lineTo(rect.x + rect.w, y);
-      ctx.stroke();
+    if (mode === "both" || mode === "horiz") {
+      for (const tick of niceTicks(min, max, 8)) {
+        const y = this.yOf(tick, min, max, rect);
+        ctx.beginPath();
+        ctx.moveTo(rect.x, y);
+        ctx.lineTo(rect.x + rect.w, y);
+        ctx.stroke();
+      }
     }
-    const start = Math.floor(this.viewStart());
-    const end = Math.ceil(this.viewEnd);
-    const step = Math.max(1, Math.floor(this.viewCount / 8));
-    for (let i = start; i <= end; i += step) {
-      const x = this.xOfIndex(i, rect);
-      ctx.beginPath();
-      ctx.moveTo(x, rect.y);
-      ctx.lineTo(x, rect.y + rect.h);
-      ctx.stroke();
+    if (mode === "both" || mode === "vert") {
+      const start = Math.floor(this.viewStart());
+      const end = Math.ceil(this.viewEnd);
+      const step = Math.max(1, Math.floor(this.viewCount / 8));
+      for (let i = start; i <= end; i += step) {
+        const x = this.xOfIndex(i, rect);
+        ctx.beginPath();
+        ctx.moveTo(x, rect.y);
+        ctx.lineTo(x, rect.y + rect.h);
+        ctx.stroke();
+      }
     }
   }
 
@@ -1779,6 +1861,7 @@ export class ChartEngine {
   }
 
   private paintPriceLine(rect: Rect, bars: Bar[], range: { min: number; max: number }, pal: (typeof palettes)["dark"]): void {
+    if (this.canvasSettings.showLastPriceLine === false) return;
     const last = this.bars.at(-1);
     if (!last) return;
     const y = this.yOf(this.scaled(last.close, bars.length ? bars : [last]), range.min, range.max, rect);
@@ -2057,7 +2140,7 @@ export class ChartEngine {
     }
     ctx.textAlign = "left";
     const last = this.bars.at(-1) ?? bars.at(-1);
-    if (last) {
+    if (last && this.canvasSettings.showLastPriceLine !== false) {
       const y = this.yOf(this.scaled(last.close, bars.length ? bars : [last]), range.min, range.max, layout.main);
       ctx.fillStyle = last.close >= last.open ? pal.up : pal.down;
       ctx.fillRect(layout.chart.w, y - 9, this.priceAxisWidth(), 18);
@@ -2091,8 +2174,13 @@ export class ChartEngine {
     const ctx = this.ctx;
     const { x, y } = this.mouse;
     if (x > layout.chart.w || y > layout.chart.h) return;
-    ctx.setLineDash([5, 4]);
-    ctx.strokeStyle = pal.cross;
+    const xhStyle = this.canvasSettings.crosshairStyle ?? "dashed";
+    const xhWidth = this.canvasSettings.crosshairWidth ?? 1;
+    if (xhStyle === "dashed") ctx.setLineDash([5, 4]);
+    else if (xhStyle === "dotted") ctx.setLineDash([2, 3]);
+    else ctx.setLineDash([]);
+    ctx.strokeStyle = this.canvasSettings.crosshairColor || pal.cross;
+    ctx.lineWidth = xhWidth;
     ctx.beginPath();
     ctx.moveTo(x + 0.5, 0);
     ctx.lineTo(x + 0.5, layout.chart.h);
@@ -2100,6 +2188,7 @@ export class ChartEngine {
     ctx.lineTo(layout.chart.w, y + 0.5);
     ctx.stroke();
     ctx.setLineDash([]);
+    ctx.lineWidth = 1;
     const logical = this.indexAtX(x, bars.length, layout.main);
     const idx = Math.round(logical);
     const bar = idx >= 0 && idx < this.bars.length ? this.bars[idx] : undefined;
@@ -2116,7 +2205,7 @@ export class ChartEngine {
     ctx.textAlign = "center";
     ctx.fillText(formatTime(this.timeAtIndex(logical), this.interval), x, layout.chart.h + 16);
     ctx.textAlign = "left";
-    if (bar) {
+    if (bar && this.canvasSettings.showTrackerBox !== false) {
       const boxW = 132;
       const bx = x + 16 + boxW > layout.chart.w ? x - boxW - 12 : x + 16;
       const by = y + 18;
@@ -2145,11 +2234,20 @@ export class ChartEngine {
 
   private paintLegend(rect: Rect, pal: (typeof palettes)["dark"]): void {
     const ctx = this.ctx;
-    const line = this.legendLines()[0];
-    if (!line) return;
+    const lines = this.legendLines();
+    const sym = lines.find((l) => l.id === "sym" || l.id === "symbol") ?? lines[0];
+    if (!sym) return;
     ctx.font = CHART_FONT_BOLD;
-    ctx.fillStyle = line.color || pal.text;
-    ctx.fillText(line.text, rect.x + 10, rect.y + 18);
+    ctx.fillStyle = sym.color || pal.text;
+    const parts = sym.text.split("  ").filter(Boolean);
+    let y = rect.y + 18;
+    ctx.fillText(parts[0] ?? sym.text, rect.x + 10, y);
+    if (parts.length > 1) {
+      y += 16;
+      ctx.font = AXIS_FONT;
+      ctx.fillStyle = pal.text;
+      ctx.fillText(parts.slice(1).join("  "), rect.x + 10, y);
+    }
   }
 
   private locPts(d: Drawing): { x: number; y: number }[] {
@@ -2478,13 +2576,17 @@ export class ChartEngine {
     }
     if (this.dragging === "drawing" && this.selectedId) {
       const d = this.drawings.find((item) => item.id === this.selectedId);
-      const p = this.pointFromMouse(x, y);
+      let p = this.pointFromMouse(x, y);
       if (d && p && !d.locked) {
         if (!this.dragDirty) {
           this.pushUndo();
           this.dragDirty = true;
         }
         if (this.dragHandle != null && d.points[this.dragHandle]) {
+          if (e.shiftKey && d.points.length >= 2) {
+            const anchorIdx = this.dragHandle === 0 ? Math.min(1, d.points.length - 1) : 0;
+            p = this.shiftSnapPoint(d.points[anchorIdx], p);
+          }
           d.points[this.dragHandle] = p;
           if (d.kind === "gannsquarefixed") this.constrainGannSquareFixed(d, this.dragHandle === 0 ? 0 : 1);
         } else if (this.dragFrom) {
@@ -2495,8 +2597,11 @@ export class ChartEngine {
         }
       }
     } else if (this.draft && this.dragging !== "brush") {
-      const p = this.pointFromMouse(x, y);
+      let p = this.pointFromMouse(x, y);
       if (p) {
+        if (e.shiftKey && this.draft.points.length >= 1) {
+          p = this.shiftSnapPoint(this.draft.points[0], p);
+        }
         if (this.draft.points.length === 1) this.draft.points = [this.draft.points[0], p];
         else this.draft.points = [...this.draft.points.slice(0, -1), p];
         if (this.draft.kind === "gannsquarefixed" && this.draft.points.length >= 2) {

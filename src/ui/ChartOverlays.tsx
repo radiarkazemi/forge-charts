@@ -1,11 +1,17 @@
 import type { ChartEngine } from "../engine/ChartEngine";
-import type { RangePreset } from "../engine/types";
+import type { Drawing, RangePreset } from "../engine/types";
 import { ChartInspectors } from "./Inspectors";
 import { useEngine } from "./useEngine";
 
 const RANGES: RangePreset[] = ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y", "ALL"];
 
-export function ChartOverlays({ engine }: { engine: ChartEngine | null }) {
+export function ChartOverlays({
+  engine,
+  onAlertDrawing,
+}: {
+  engine: ChartEngine | null;
+  onAlertDrawing?: (drawing: Drawing) => void;
+}) {
   const snap = useEngine(engine);
   if (!snap) return null;
   return (
@@ -31,7 +37,7 @@ export function ChartOverlays({ engine }: { engine: ChartEngine | null }) {
         ))}
         <span className="tz">UTC</span>
       </div>
-      <ChartInspectors engine={engine} />
+      <ChartInspectors engine={engine} onAlertDrawing={onAlertDrawing} />
       {snap.replay ? <div className="replay-banner">{snap.replaySelecting ? "Bar Replay · select starting point" : "Bar Replay"}</div> : null}
     </>
   );
