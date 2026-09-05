@@ -27,7 +27,7 @@ import {
   willr,
   wma,
 } from "./studies";
-import { AXIS_FONT, CHART_FONT, CHART_FONT_BOLD, palettes } from "./theme";
+import { CHART_FONT, CHART_FONT_BOLD, palettes } from "./theme";
 import type {
   Bar,
   ChartPoint,
@@ -224,6 +224,8 @@ export class ChartEngine {
   private snapIndicators = false;
   private lockDrawings = false;
   private fitMode = true;
+  /** When true, live ticks keep the viewport stuck to the latest bar (TV “auto-scroll”). */
+  private followLive = true;
   private rangePreset: RangePreset = "1M";
   private undoStack: HistoryState[] = [];
   private redoStack: HistoryState[] = [];
@@ -1039,6 +1041,72 @@ export class ChartEngine {
     this.draw();
   }
 
+  /** Snapshot chart chrome for workspace/profile persistence (TV “save chart layout”). */
+  exportChartState(): {
+    chartType: ChartType;
+    chartStyle: ChartStyle;
+    canvas: import("./types").CanvasSettings;
+    indicators: IndicatorInstance[];
+    drawings: Drawing[];
+    viewCount: number;
+    viewEnd: number;
+    followLive: boolean;
+    logScale: boolean;
+    percentScale: boolean;
+    theme: Theme;
+  } {
+    return {
+      chartType: this.chartType,
+      chartStyle: { ...this.chartStyle },
+      canvas: { ...this.canvasSettings },
+      indicators: cloneIndicators(this.indicators),
+      drawings: cloneDrawings(this.drawings),
+      viewCount: this.viewCount,
+      viewEnd: this.viewEnd,
+      followLive: this.followLive,
+      logScale: this.logScale,
+      percentScale: this.percentScale,
+      theme: this.theme,
+    };
+  }
+
+  /** Restore chart chrome from a saved workspace pane (bars/symbol applied by host). */
+  applyChartState(state: {
+    chartType?: ChartType;
+    chartStyle?: Partial<ChartStyle>;
+    canvas?: Partial<import("./types").CanvasSettings>;
+    indicators?: IndicatorInstance[];
+    drawings?: Drawing[];
+    viewCount?: number;
+    viewEnd?: number;
+    followLive?: boolean;
+    logScale?: boolean;
+    percentScale?: boolean;
+    theme?: Theme;
+  }): void {
+    if (state.theme) this.theme = state.theme;
+    if (state.chartType) this.chartType = state.chartType;
+    if (state.chartStyle) this.chartStyle = { ...this.chartStyle, ...state.chartStyle };
+    if (state.canvas) this.canvasSettings = { ...this.canvasSettings, ...state.canvas };
+    if (state.indicators) this.indicators = cloneIndicators(state.indicators);
+    if (state.drawings) this.drawings = cloneDrawings(state.drawings);
+    if (state.viewCount != null) this.viewCount = this.clampViewCount(state.viewCount);
+    if (state.viewEnd != null) this.viewEnd = state.viewEnd;
+    if (state.followLive != null) this.followLive = state.followLive;
+    if (state.logScale != null) this.logScale = state.logScale;
+    if (state.percentScale != null) this.percentScale = state.percentScale;
+    this.clampPan();
+    this.emit();
+    this.draw();
+  }
+
+  setFollowLive(on: boolean): void {
+    this.followLive = on;
+    if (on) this.snapToLatest();
+    this.emit();
+    this.draw();
+  }
+
   setCompare(ticker: string | null, bars: Bar[] | null): void {
     this.compareTicker = ticker;
     this.compareBars = bars;
@@ -1341,13 +1409,28 @@ export class ChartEngine {
   }
 
   private rightPad(): number {
-    const narrow = this.container.clientWidth > 0 && this.container.clientWidth < 520;
-    return Math.max(narrow ? 4 : 8, this.viewCount * (narrow ? 0.08 : 0.18));
+    const narrow = this.container.clientWidth > 0 && this.container.clientWidth < 720;
+    // Keep a usable right margin on phones so pan-away can clear the follow zone.
+    return Math.max(narrow ? 10 : 8, this.viewCount * (narrow ? 0.14 : 0.18));
+  }
+
+
+  private axisFont(): string {
+    const size = Math.max(9, Math.min(18, this.canvasSettings.scaleFontSize ?? 11));
+    return `${size}px Trebuchet MS, Arial, sans-serif`;
+  }
+
+  private axisTextColor(fallback: string): string {
+    return this.canvasSettings.scaleTextColor || fallback;
   }
 
   private clampViewCount(count: number): number {
     const max = Math.max(40, this.bars.length * 4, 400);
     return clamp(count, 8, max);
+  }
+
+  private isNarrow(): boolean {
+    return this.container.clientWidth > 0 && this.container.clientWidth < 720;
   }
 
   private snapToLatest(): void {
@@ -1358,10 +1441,33 @@ export class ChartEngine {
       this.viewCount = this.clampViewCount(this.bars.length + this.rightPad());
       this.viewEnd = this.bars.length + this.rightPad();
     }
+    this.followLive = true;
+  }
+
+  /** Live-follow deadzone. Mobile needs a much larger gap so a finger-pan doesn't stay "following". */
+  private followThreshold(): number {
+    const pad = this.rightPad();
+    return this.bars.length + pad * (this.isNarrow() ? 0.15 : 0.4);
   }
 
   private isFollowing(): boolean {
-    return this.viewEnd >= this.bars.length + this.rightPad() * 0.4;
+    return this.followLive && this.viewEnd >= this.followThreshold();
+  }
+
+  private updateFollowFromView(): void {
+    // Once the user scrolls away from the live edge, stay detached until snapToLatest / goToRealtime.
+    if (this.viewEnd < this.followThreshold()) this.followLive = false;
+  }
+
+  goToRealtime(): void {
+    this.snapToLatest();
+    this.fitMode = false;
+    this.emit();
+    this.draw();
+  }
+
+  isLiveFollowing(): boolean {
+    return this.isFollowing();
   }
 
   private viewStart(): number {
@@ -1376,6 +1482,7 @@ export class ChartEngine {
       this.viewEnd = anchorIndex + keep * this.viewCount;
     }
     this.clampPan();
+    this.updateFollowFromView();
   }
 
   private clampPan(): void {
@@ -1424,11 +1531,35 @@ export class ChartEngine {
 
   private transformBars(src: Bar[]): Bar[] {
     if (this.chartType === "heikin") return heikinAshi(src);
-    if (this.chartType === "renko") return this.toRenko(src, Math.max(this.avgRange(src) * 0.75, 1e-6));
-    if (this.chartType === "rangechart") return this.toRenko(src, Math.max(this.avgRange(src) * 0.55, 1e-6));
-    if (this.chartType === "linebreak") return this.toLineBreak(src);
-    if (this.chartType === "kagi") return this.toKagi(src);
-    if (this.chartType === "pnf") return this.toPointFigure(src);
+    if (this.chartType === "renko") {
+      const brick =
+        this.chartStyle.renkoBrick && this.chartStyle.renkoBrick > 0
+          ? this.chartStyle.renkoBrick
+          : Math.max(this.avgRange(src) * 0.75, 1e-6);
+      return this.toRenko(src, brick, this.chartStyle.renkoWicks !== false);
+    }
+    if (this.chartType === "rangechart") {
+      const size =
+        this.chartStyle.rangeSize && this.chartStyle.rangeSize > 0
+          ? this.chartStyle.rangeSize
+          : Math.max(this.avgRange(src) * 0.55, 1e-6);
+      return this.toRenko(src, size, false);
+    }
+    if (this.chartType === "linebreak") return this.toLineBreak(src, this.chartStyle.lineBreakCount ?? 3);
+    if (this.chartType === "kagi") {
+      const rev =
+        this.chartStyle.kagiReversal && this.chartStyle.kagiReversal > 0
+          ? this.chartStyle.kagiReversal
+          : Math.max(this.avgRange(src) * 1.2, 1e-6);
+      return this.toKagi(src, rev);
+    }
+    if (this.chartType === "pnf") {
+      const box =
+        this.chartStyle.pnfBoxSize && this.chartStyle.pnfBoxSize > 0
+          ? this.chartStyle.pnfBoxSize
+          : Math.max(this.avgRange(src) * 0.5, 1e-6);
+      return this.toPointFigure(src, box, this.chartStyle.pnfReversal ?? 3);
+    }
     return src;
   }
 
@@ -1437,7 +1568,7 @@ export class ChartEngine {
     return src.reduce((sum, bar) => sum + Math.abs(bar.high - bar.low), 0) / src.length;
   }
 
-  private toRenko(src: Bar[], brick: number): Bar[] {
+  private toRenko(src: Bar[], brick: number, withWicks = false): Bar[] {
     if (src.length < 2) return src;
     const out: Bar[] = [];
     let lastClose = src[0].close;
@@ -1446,11 +1577,13 @@ export class ChartEngine {
       while (Math.abs(next - lastClose) >= brick) {
         const dir = Math.sign(next - lastClose) || 1;
         const close = lastClose + dir * brick;
+        const high = withWicks ? Math.max(lastClose, close, bar.high) : Math.max(lastClose, close);
+        const low = withWicks ? Math.min(lastClose, close, bar.low) : Math.min(lastClose, close);
         out.push({
           time: bar.time,
           open: lastClose,
-          high: Math.max(lastClose, close),
-          low: Math.min(lastClose, close),
+          high,
+          low,
           close,
           volume: bar.volume,
         });
@@ -1461,12 +1594,13 @@ export class ChartEngine {
     return out.length ? out : src;
   }
 
-  private toLineBreak(src: Bar[]): Bar[] {
+  private toLineBreak(src: Bar[], lines = 3): Bar[] {
     if (src.length < 2) return src;
+    const n = Math.max(1, Math.floor(lines));
     const out: Bar[] = [src[0]];
     for (let i = 1; i < src.length; i++) {
       const last = out[out.length - 1];
-      const window = out.slice(-3);
+      const window = out.slice(-n);
       const max = Math.max(...window.map((b) => b.high));
       const min = Math.min(...window.map((b) => b.low));
       const close = src[i].close;
@@ -1484,10 +1618,10 @@ export class ChartEngine {
     return out.length ? out : src;
   }
 
-  private toKagi(src: Bar[]): Bar[] {
+  private toKagi(src: Bar[], reversal: number): Bar[] {
     if (src.length < 2) return src;
     const out: Bar[] = [src[0]];
-    const rev = Math.max(this.avgRange(src) * 1.2, 1e-6);
+    const rev = Math.max(reversal, 1e-6);
     let pivot = src[0].close;
     for (let i = 1; i < src.length; i++) {
       const close = src[i].close;
@@ -1507,17 +1641,22 @@ export class ChartEngine {
     return out.length ? out : src;
   }
 
-  private toPointFigure(src: Bar[]): Bar[] {
+  private toPointFigure(src: Bar[], box: number, reversal = 3): Bar[] {
     if (src.length < 2) return src;
-    const box = Math.max(this.avgRange(src) * 0.5, 1e-6);
+    const boxSize = Math.max(box, 1e-6);
+    const rev = Math.max(1, Math.floor(reversal));
     const out: Bar[] = [];
     let anchor = src[0].close;
+    let dir = 0;
+    let run = 0;
     for (const bar of src) {
       const diff = bar.close - anchor;
-      const boxes = Math.trunc(diff / box);
+      const boxes = Math.trunc(diff / boxSize);
       if (!boxes) continue;
+      const nextDir = Math.sign(boxes);
+      if (dir !== 0 && nextDir !== dir && Math.abs(boxes) < rev) continue;
       for (let i = 0; i < Math.abs(boxes); i++) {
-        const close = anchor + Math.sign(boxes) * box;
+        const close = anchor + nextDir * boxSize;
         out.push({
           time: bar.time,
           open: anchor,
@@ -1527,7 +1666,9 @@ export class ChartEngine {
           volume: bar.volume,
         });
         anchor = close;
+        run += 1;
       }
+      dir = nextDir;
     }
     return out.length ? out : src;
   }
@@ -1805,7 +1946,7 @@ export class ChartEngine {
       ctx.fillStyle = "#2962ff";
       ctx.fillRect(x - 54, rect.y + rect.h + 2, 108, 16);
       ctx.fillStyle = "#fff";
-      ctx.font = AXIS_FONT;
+      ctx.font = this.axisFont();
       ctx.fillText(formatTime(bar.time, this.interval), x, rect.y + rect.h + 14);
     }
     ctx.restore();
@@ -1957,11 +2098,40 @@ export class ChartEngine {
     const slot = this.slotWidth(rect);
     const body = Math.max(1.2, slot * 0.7);
 
+    if (this.chartType === "hlcarea") {
+      ctx.beginPath();
+      bars.forEach((b, i) => {
+        const x = this.xOf(i, bars.length, rect);
+        const y = this.yOf(this.scaled(b.high, bars), range.min, range.max, rect);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      for (let i = bars.length - 1; i >= 0; i--) {
+        const b = bars[i]!;
+        const x = this.xOf(i, bars.length, rect);
+        const y = this.yOf(this.scaled(b.low, bars), range.min, range.max, rect);
+        ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fillStyle = this.chartStyle.hlcHighColor || "rgba(41,98,255,0.16)";
+      ctx.fill();
+      ctx.beginPath();
+      bars.forEach((b, i) => {
+        const x = this.xOf(i, bars.length, rect);
+        const y = this.yOf(this.scaled(b.close, bars), range.min, range.max, rect);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.strokeStyle = this.chartStyle.hlcLowColor || pal.accent;
+      ctx.lineWidth = this.chartStyle.lineWidth ?? 1.8;
+      ctx.stroke();
+      return;
+    }
+
     if (
       this.chartType === "line" ||
       this.chartType === "linemarkers" ||
       this.chartType === "area" ||
-      this.chartType === "hlcarea" ||
       this.chartType === "stepline" ||
       this.chartType === "baseline" ||
       this.chartType === "kagi"
@@ -1969,56 +2139,62 @@ export class ChartEngine {
       ctx.beginPath();
       bars.forEach((b, i) => {
         const x = this.xOf(i, bars.length, rect);
-        const source = this.chartType === "hlcarea" ? (b.high + b.low + b.close) / 3 : this.sourceValue(b);
-        const y = this.yOf(this.scaled(source, bars), range.min, range.max, rect);
+        const y = this.yOf(this.scaled(this.sourceValue(b), bars), range.min, range.max, rect);
         if (i === 0) ctx.moveTo(x, y);
         else if (this.chartType === "stepline") {
-          const px = this.xOf(i - 1, bars.length, rect);
-          ctx.lineTo(x, this.yOf(this.scaled(this.sourceValue(bars[i - 1]), bars), range.min, range.max, rect));
+          ctx.lineTo(x, this.yOf(this.scaled(this.sourceValue(bars[i - 1]!), bars), range.min, range.max, rect));
           ctx.lineTo(x, y);
-          void px;
         } else ctx.lineTo(x, y);
       });
       ctx.strokeStyle = this.chartType === "baseline" ? pal.up : pal.accent;
-      if (this.chartType === "kagi") ctx.lineWidth = 2.4;
-      ctx.lineWidth = 1.6;
+      ctx.lineWidth =
+        this.chartType === "kagi"
+          ? Math.max(2.2, this.chartStyle.lineWidth ?? 2.4)
+          : (this.chartStyle.lineWidth ?? 1.6);
       ctx.stroke();
       if (this.chartType === "linemarkers") {
-        ctx.fillStyle = pal.accent;
+        const size = this.chartStyle.markerSize ?? Math.max(2.5, slot * 0.14);
+        const shape = this.chartStyle.markerShape ?? "circle";
+        ctx.fillStyle = this.chartStyle.markerColor || pal.accent;
         bars.forEach((b, i) => {
           const x = this.xOf(i, bars.length, rect);
           const y = this.yOf(this.scaled(this.sourceValue(b), bars), range.min, range.max, rect);
           ctx.beginPath();
-          ctx.arc(x, y, Math.max(2, slot * 0.14), 0, Math.PI * 2);
+          if (shape === "square") ctx.rect(x - size, y - size, size * 2, size * 2);
+          else if (shape === "diamond") {
+            ctx.moveTo(x, y - size);
+            ctx.lineTo(x + size, y);
+            ctx.lineTo(x, y + size);
+            ctx.lineTo(x - size, y);
+            ctx.closePath();
+          } else ctx.arc(x, y, size, 0, Math.PI * 2);
           ctx.fill();
         });
       }
-      if (this.chartType === "area" || this.chartType === "baseline" || this.chartType === "hlcarea") {
+      if (this.chartType === "area" || this.chartType === "baseline") {
         const baseY =
           this.chartType === "baseline"
-            ? this.yOf(this.scaled(bars[0].close, bars), range.min, range.max, rect)
+            ? this.yOf(this.scaled(bars[0]!.close, bars), range.min, range.max, rect)
             : rect.y + rect.h;
         ctx.lineTo(this.xOf(bars.length - 1, bars.length, rect), baseY);
         ctx.lineTo(this.xOf(0, bars.length, rect), baseY);
         ctx.closePath();
-        ctx.fillStyle =
-          this.chartType === "baseline"
-            ? "rgba(38,166,154,0.12)"
-            : this.chartType === "hlcarea"
-              ? "rgba(41,98,255,0.18)"
-              : "rgba(41,98,255,0.12)";
+        ctx.fillStyle = this.chartType === "baseline" ? "rgba(38,166,154,0.12)" : "rgba(41,98,255,0.12)";
         ctx.fill();
       }
       return;
     }
 
     if (this.chartType === "columns") {
-      const base = this.yOf(this.scaled(bars[0].close, bars), range.min, range.max, rect);
+      const mode = this.chartStyle.columnBaseline ?? "first";
+      const basePrice = mode === "zero" ? 0 : mode === "open" ? bars[0]?.open ?? 0 : bars[0]?.close ?? 0;
+      const base = this.yOf(this.scaled(basePrice, bars), range.min, range.max, rect);
       bars.forEach((b, i) => {
         const x = this.xOf(i, bars.length, rect);
         const y = this.yOf(this.scaled(this.sourceValue(b), bars), range.min, range.max, rect);
-        ctx.fillStyle = b.close >= b.open ? this.chartStyle.upColor : this.chartStyle.downColor;
-        ctx.fillRect(x - body / 2, Math.min(base, y), body, Math.abs(y - base));
+        const up = this.sourceValue(b) >= basePrice;
+        ctx.fillStyle = up ? this.chartStyle.upColor : this.chartStyle.downColor;
+        ctx.fillRect(x - body / 2, Math.min(base, y), body, Math.max(1, Math.abs(y - base)));
       });
       return;
     }
@@ -2028,13 +2204,21 @@ export class ChartEngine {
         const x = this.xOf(i, bars.length, rect);
         const yH = this.yOf(this.scaled(b.high, bars), range.min, range.max, rect);
         const yL = this.yOf(this.scaled(b.low, bars), range.min, range.max, rect);
-        const yC = this.yOf(this.scaled(this.sourceValue(b), bars), range.min, range.max, rect);
+        const yO = this.yOf(this.scaled(b.open, bars), range.min, range.max, rect);
+        const yC = this.yOf(this.scaled(b.close, bars), range.min, range.max, rect);
         ctx.strokeStyle = b.close >= b.open ? this.chartStyle.upColor : this.chartStyle.downColor;
+        ctx.lineWidth = 1.4;
         ctx.beginPath();
         ctx.moveTo(x, yH);
         ctx.lineTo(x, yL);
+        ctx.moveTo(x - body * 0.45, yO);
+        ctx.lineTo(x, yO);
         ctx.moveTo(x, yC);
-        ctx.lineTo(x + body * 0.55, yC);
+        ctx.lineTo(x + body * 0.45, yC);
+        ctx.moveTo(x - body * 0.25, yH);
+        ctx.lineTo(x + body * 0.25, yH);
+        ctx.moveTo(x - body * 0.25, yL);
+        ctx.lineTo(x + body * 0.25, yL);
         ctx.stroke();
       });
       return;
@@ -2170,14 +2354,20 @@ export class ChartEngine {
         ctx.strokeStyle = up ? this.chartStyle.upColor : this.chartStyle.downColor;
         ctx.stroke();
       } else if (this.chartType === "volcandle") {
-        const alpha = clamp(b.volume / Math.max(...bars.map((it) => it.volume), 1), 0.18, 1);
-        ctx.globalAlpha = alpha;
+        const vols = bars.map((it) => it.volume || 0);
+        const vmax = Math.max(...vols, 1);
+        const vmin = Math.min(...vols);
+        const span = Math.max(vmax - vmin, 1e-9);
+        const vol = b.volume || 0;
+        const t = (vol - vmin) / span;
+        const w = Math.max(1.2, body * (0.35 + t * 0.9));
+        ctx.globalAlpha = 0.35 + t * 0.65;
         ctx.fillStyle = up ? this.chartStyle.upColor : this.chartStyle.downColor;
-        ctx.fillRect(x - body / 2, top, body, height);
+        ctx.fillRect(x - w / 2, top, w, height);
         ctx.globalAlpha = 1;
         if (this.chartStyle.showBorder) {
           ctx.strokeStyle = up ? this.chartStyle.borderUpColor : this.chartStyle.borderDownColor;
-          ctx.strokeRect(x - body / 2, top, body, height);
+          ctx.strokeRect(x - w / 2, top, w, height);
         }
       } else if (this.chartType === "hollow" && up) {
         ctx.strokeStyle = up ? this.chartStyle.borderUpColor : this.chartStyle.borderDownColor;
@@ -2379,7 +2569,7 @@ export class ChartEngine {
     ctx.stroke();
     ctx.setLineDash([]);
     const label = `PClose ${formatPrice(px, this.symbol.pricePrecision)}`;
-    ctx.font = AXIS_FONT;
+    ctx.font = this.axisFont();
     const tw = ctx.measureText(label).width + 8;
     const lx = rect.x + 6;
     const ly = Math.max(rect.y + 12, Math.min(rect.y + rect.h - 4, y - 4));
@@ -2427,7 +2617,7 @@ export class ChartEngine {
     if (!Number.isFinite(hi) || !Number.isFinite(lo)) return;
     const ctx = this.ctx;
     ctx.save();
-    ctx.font = AXIS_FONT;
+    ctx.font = this.axisFont();
     const drawTag = (price: number, index: number, kind: "H" | "L") => {
       const x = this.xOf(index, bars.length, rect);
       const y = this.yOf(this.scaled(price, bars), range.min, range.max, rect);
@@ -2646,7 +2836,7 @@ export class ChartEngine {
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
     ctx.fillStyle = pal.muted;
-    ctx.font = AXIS_FONT;
+    ctx.font = this.axisFont();
     ctx.textAlign = "left";
     for (const tick of niceTicks(range.min, range.max, 8)) {
       const y = this.yOf(tick, range.min, range.max, layout.main);
@@ -2732,7 +2922,7 @@ export class ChartEngine {
     ctx.fillStyle = "#2962ff";
     ctx.fillRect(layout.chart.w, y - 8, this.priceAxisWidth(), 16);
     ctx.fillStyle = "#fff";
-    ctx.font = AXIS_FONT;
+    ctx.font = this.axisFont();
     ctx.fillText(this.percentScale ? `${price.toFixed(2)}%` : formatPrice(price, this.symbol.pricePrecision), layout.chart.w + 8, y + 4);
     ctx.fillStyle = "#2962ff";
     ctx.fillRect(x - 48, layout.chart.h + 4, 96, 16);
@@ -2759,7 +2949,7 @@ export class ChartEngine {
         `Chg   ${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%`,
         `Vol   ${formatVolume(bar.volume)}`,
       ];
-      ctx.font = AXIS_FONT;
+      ctx.font = this.axisFont();
       rows.forEach((row, i) => {
         ctx.fillStyle = i === 5 ? (chg >= 0 ? pal.up : pal.down) : pal.text;
         ctx.fillText(row, bx + 8, by + 16 + i * 13);
@@ -2779,8 +2969,8 @@ export class ChartEngine {
     ctx.fillText(parts[0] ?? sym.text, rect.x + 10, y);
     if (parts.length > 1) {
       y += 16;
-      ctx.font = AXIS_FONT;
-      ctx.fillStyle = pal.text;
+      ctx.font = this.axisFont();
+      ctx.fillStyle = (this.axisTextColor(pal.text) as string);
       ctx.fillText(parts.slice(1).join("  "), rect.x + 10, y);
     }
   }
@@ -3099,9 +3289,12 @@ export class ChartEngine {
       this.dragLastY = y;
       if (Math.abs(dx) > 3 || Math.abs(dy) > 3) this.gestureMoved = true;
       const slot = this.slotWidth(this.layout().main);
+      // Finger right → view scrolls left (older bars) → detach from live edge (mobile snap-back fix).
+      if (dx > 2) this.followLive = false;
       this.viewEnd -= dx / Math.max(0.001, slot);
       this.clampPan();
       this.fitMode = false;
+      this.updateFollowFromView();
       if (Math.abs(dy) > 0) {
         this.ensurePriceSpan();
         if (this.priceSpan != null && this.priceMid != null) {

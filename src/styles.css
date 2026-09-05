@@ -1320,6 +1320,37 @@ button { cursor: pointer; }
 }
 .chart-grid.layout-3 > .chart-pane:first-child { grid-row: 1 / span 2; }
 .chart-grid.layout-4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.chart-grid.layout-6 { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.chart-grid.layout-8 { grid-template-columns: 1fr 1fr 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.lg-6, .lg-8 {
+  display: inline-grid;
+  gap: 1px;
+  width: 22px;
+  height: 14px;
+  vertical-align: middle;
+}
+.lg-6 { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2, 1fr); }
+.lg-8 { grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(2, 1fr); }
+.lg-6::before, .lg-8::before {
+  content: "";
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+  background:
+    linear-gradient(var(--border) 0 0) center/1px 100% no-repeat,
+    linear-gradient(var(--border) 0 0) center/100% 1px no-repeat;
+  border: 1px solid var(--muted);
+  opacity: 0.7;
+}
+.layout-sync-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 8px 10px 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.layout-sync-row label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+
 .chart-pane {
   position: relative;
   min-width: 0;
@@ -1961,3 +1992,33 @@ button { cursor: pointer; }
 }
 .vis-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; }
 .ind-badge.locked { color: #f23645; }
+
+
+/* Workspace / layout profile manager */
+.workspace-manager { width: min(520px, 94vw); }
+.workspace-manager-hint { margin: 0 0 12px; font-size: 12px; line-height: 1.4; }
+.workspace-save-row { display: flex; gap: 8px; margin-bottom: 12px; }
+.workspace-save-row input { flex: 1; }
+.workspace-list { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow: auto; }
+.workspace-list li { display: flex; align-items: stretch; gap: 6px; border-bottom: 1px solid var(--border); }
+.workspace-list li.on { background: var(--hover); }
+.workspace-open { flex: 1; text-align: left; background: transparent; border: 0; color: inherit; padding: 10px 8px; cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
+.workspace-open b { font-size: 13px; }
+.workspace-open em { font-style: normal; color: var(--muted); font-size: 11px; }
+.danger-ghost { background: transparent; border: 0; color: var(--muted); cursor: pointer; padding: 8px; }
+.danger-ghost:hover { color: #ef5350; }
+
+/* Multi-chart layout glyphs */
+.lg-6, .lg-8 { display: inline-grid; gap: 1px; width: 22px; height: 16px; vertical-align: middle; }
+.lg-6 { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2, 1fr); }
+.lg-8 { grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(2, 1fr); }
+.lg-6::before, .lg-8::before { content: ""; grid-column: 1 / -1; grid-row: 1 / -1; background:
+  linear-gradient(var(--border), var(--border)) center/100% 1px no-repeat,
+  linear-gradient(var(--border), var(--border)); box-shadow: inset 0 0 0 1px var(--border); }
+
+/* Always expose legend hover actions (GAP-39) */
+.legend-row .legend-acts { opacity: 1; }
+.legend-row .legend-acts button { min-width: 22px; }
+
+.layout-sync-row { display: flex; flex-wrap: wrap; gap: 10px 14px; padding: 6px 8px 10px; font-size: 12px; }
+.layout-sync-row label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }

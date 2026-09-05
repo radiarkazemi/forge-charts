@@ -10,12 +10,17 @@ type Props = {
   theme: "dark" | "light";
   alertCount: number;
   symbolLabel?: string;
+  workspaceName?: string;
   onOpenSearch: () => void;
   onOpenQuickSearch?: () => void;
   onOpenAlerts: () => void;
   onOpenSettings: () => void;
   onToggleTheme: () => void;
   onOpenMarkets: () => void;
+  onSaveWorkspace?: () => void;
+  onManageWorkspaces?: () => void;
+  onExportWorkspace?: () => void;
+  onImportWorkspace?: () => void;
 };
 
 function HeaderMenu({
@@ -46,12 +51,17 @@ export function ProductHeader({
   theme,
   alertCount,
   symbolLabel,
+  workspaceName,
   onOpenSearch,
   onOpenQuickSearch,
   onOpenAlerts,
   onOpenSettings,
   onToggleTheme,
   onOpenMarkets,
+  onSaveWorkspace,
+  onManageWorkspaces,
+  onExportWorkspace,
+  onImportWorkspace,
 }: Props) {
   const rootRef = useRef<HTMLElement | null>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -214,7 +224,47 @@ export function ProductHeader({
         </button>
         {profileOpen ? (
           <div className="hdr-dropdown hdr-dropdown-right">
-            <div className="hdr-drop-label">Local profile</div>
+            <div className="hdr-drop-label">Local profile{workspaceName ? ` · ${workspaceName}` : ""}</div>
+            <button
+              type="button"
+              className="hdr-drop-item"
+              onClick={() => {
+                onSaveWorkspace?.();
+                setProfileOpen(false);
+              }}
+            >
+              <span>Save chart layout</span>
+            </button>
+            <button
+              type="button"
+              className="hdr-drop-item"
+              onClick={() => {
+                onManageWorkspaces?.();
+                setProfileOpen(false);
+              }}
+            >
+              <span>My layouts…</span>
+            </button>
+            <button
+              type="button"
+              className="hdr-drop-item"
+              onClick={() => {
+                onExportWorkspace?.();
+                setProfileOpen(false);
+              }}
+            >
+              <span>Export layout JSON</span>
+            </button>
+            <button
+              type="button"
+              className="hdr-drop-item"
+              onClick={() => {
+                onImportWorkspace?.();
+                setProfileOpen(false);
+              }}
+            >
+              <span>Import layout JSON</span>
+            </button>
             <button
               type="button"
               className="hdr-drop-item"
@@ -237,7 +287,7 @@ export function ProductHeader({
             </button>
             <button type="button" className="hdr-drop-item" disabled>
               <span>Cloud sync</span>
-              <em>Out of scope</em>
+              <em>Local only</em>
             </button>
           </div>
         ) : null}

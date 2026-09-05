@@ -23,6 +23,17 @@ import { ChartEngine } from "./engine/ChartEngine";
 import type { Bar, ChartStyle, IndicatorKind, Interval, SymbolInfo } from "./engine/types";
 import { CHART_STYLE_KEY } from "./chartStyle";
 import { loadJson, saveJson } from "./persist";
+import {
+  exportWorkspaceJson,
+  importWorkspaceJson,
+  loadWorkspaceProfile,
+  saveWorkspaceProfile,
+  upsertNamedWorkspace,
+  type NamedWorkspace,
+  type PaneProfile,
+  type WorkspaceProfile,
+} from "./data/workspaceProfile";
+import { WorkspaceManager } from "./ui/WorkspaceManager";
 import { AlertModal } from "./ui/AlertModal";
 import { BottomDock } from "./ui/BottomDock";
 import { ChartOverlays } from "./ui/ChartOverlays";
@@ -113,6 +124,14 @@ export default function App() {
   const [activePane, setActivePane] = useState(0);
   const [secondaryEngines, setSecondaryEngines] = useState<Record<number, ChartEngine | null>>({});
   const paneEnginesRef = useRef<Record<number, ChartEngine | null>>({});
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const restoringRef = useRef(false);
+  const [syncCrosshair, setSyncCrosshair] = useState(true);
+  const [syncInterval, setSyncInterval] = useState(false);
+  const [syncSymbol, setSyncSymbol] = useState(false);
+  const [workspaceName, setWorkspaceName] = useState("Untitled layout");
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
   const snap = useEngine(engine);
   const narrow = useNarrow(720);
   const compact = boot.embed || boot.mobile || narrow;
@@ -581,6 +600,186 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataMode, showWidgets]);
 
+
+  const collectWorkspace = useCallback(
+    (name = workspaceName): WorkspaceProfile => {
+      const meta = ARRANGEMENTS.find((a) => a.id === arrangement) ?? ARRANGEMENTS[0];
+      const panes: PaneProfile[] = [];
+      for (let i = 0; i < meta.count; i++) {
+        const eng = i === 0 ? engineRef.current : paneEnginesRef.current[i];
+        const ticker = paneSymbols[i] || paneSymbols[0] || "XAUUSD";
+        if (eng) {
+          const st = eng.exportChartState();
+          const s = eng.getSnapshot();
+          panes.push({
+            symbol: s.symbol.ticker,
+            interval: s.interval,
+            chartType: st.chartType,
+            chartStyle: st.chartStyle,
+            canvas: st.canvas,
+            indicators: st.indicators,
+            drawings: st.drawings,
+            viewCount: st.viewCount,
+            viewEnd: st.viewEnd,
+            followLive: st.followLive,
+            logScale: st.logScale,
+            percentScale: st.percentScale,
+            theme: st.theme,
+          });
+        } else {
+          panes.push({
+            symbol: ticker,
+            interval: (snap?.interval as Interval) || "15",
+            chartType: "candle",
+            indicators: [],
+            drawings: [],
+          });
+        }
+      }
+      return {
+        version: 1,
+        name,
+        updatedAt: Date.now(),
+        arrangement,
+        activePane,
+        syncCrosshair,
+        syncInterval,
+        syncSymbol,
+        panes,
+      };
+    },
+    [activePane, arrangement, paneSymbols, snap?.interval, syncCrosshair, syncInterval, syncSymbol, workspaceName],
+  );
+
+  const applyWorkspace = useCallback((profile: WorkspaceProfile) => {
+    restoringRef.current = true;
+    setWorkspaceName(profile.name || "Untitled layout");
+    setArrangement(profile.arrangement);
+    setActivePane(profile.activePane ?? 0);
+    setSyncCrosshair(profile.syncCrosshair);
+    setSyncInterval(profile.syncInterval);
+    setSyncSymbol(profile.syncSymbol);
+    setPaneSymbols(profile.panes.map((p) => p.symbol));
+    const primary = profile.panes[0];
+    const eng = engineRef.current;
+    if (primary && eng) {
+      eng.applyChartState({
+        chartType: primary.chartType,
+        chartStyle: primary.chartStyle,
+        canvas: primary.canvas,
+        indicators: primary.indicators,
+        drawings: primary.drawings,
+        viewCount: primary.viewCount,
+        viewEnd: primary.viewEnd,
+        followLive: primary.followLive,
+        logScale: primary.logScale,
+        percentScale: primary.percentScale,
+        theme: primary.theme,
+      });
+      const sym = findSymbol(primary.symbol);
+      void attachFeed(sym, primary.interval, "symbol").then(() => {
+        eng.applyChartState({
+          viewCount: primary.viewCount,
+          viewEnd: primary.viewEnd,
+          followLive: primary.followLive,
+        });
+        restoringRef.current = false;
+        setWorkspaceReady(true);
+      });
+    } else {
+      restoringRef.current = false;
+      setWorkspaceReady(true);
+    }
+    window.setTimeout(() => {
+      profile.panes.forEach((pane, i) => {
+        if (i === 0) return;
+        const secondary = paneEnginesRef.current[i];
+        if (!secondary) return;
+        secondary.applyChartState({
+          chartType: pane.chartType,
+          chartStyle: pane.chartStyle,
+          canvas: pane.canvas,
+          indicators: pane.indicators,
+          drawings: pane.drawings,
+          viewCount: pane.viewCount,
+          viewEnd: pane.viewEnd,
+          followLive: pane.followLive,
+          logScale: pane.logScale,
+          percentScale: pane.percentScale,
+          theme: pane.theme,
+        });
+      });
+    }, 700);
+  }, []);
+
+  const saveWorkspaceNow = useCallback(
+    (name?: string) => {
+      const profile = collectWorkspace(name ?? workspaceName);
+      saveWorkspaceProfile(profile);
+      upsertNamedWorkspace(profile);
+      setWorkspaceName(profile.name);
+    },
+    [collectWorkspace, workspaceName],
+  );
+
+  useEffect(() => {
+    if (!engine || workspaceReady) return;
+    const saved = loadWorkspaceProfile();
+    if (saved?.panes?.length) applyWorkspace(saved);
+    else setWorkspaceReady(true);
+  }, [engine, workspaceReady, applyWorkspace]);
+
+  useEffect(() => {
+    if (!workspaceReady || restoringRef.current) return;
+    const id = window.setTimeout(() => {
+      try {
+        saveWorkspaceProfile(collectWorkspace());
+      } catch {
+        /* ignore quota */
+      }
+    }, 900);
+    return () => window.clearTimeout(id);
+  }, [
+    workspaceReady,
+    collectWorkspace,
+    arrangement,
+    paneSymbols,
+    activePane,
+    syncCrosshair,
+    syncInterval,
+    syncSymbol,
+    snap?.chartType,
+    snap?.theme,
+    snap?.interval,
+    snap?.symbol.ticker,
+    snap?.indicators,
+    snap?.drawings,
+  ]);
+
+  // Sync interval across panes (TV layout sync).
+  useEffect(() => {
+    if (!syncInterval || !toolbarSnap?.interval) return;
+    const iv = toolbarSnap.interval as Interval;
+    Object.entries(paneEnginesRef.current).forEach(([key, eng]) => {
+      if (!eng || Number(key) === 0) return;
+      if (eng.getSnapshot().interval === iv) return;
+      const sym = eng.getSnapshot().symbol;
+      void fetchHistory(sym, iv).then(({ bars }) => {
+        eng.setInterval(iv, bars.length ? bars : generateBars(sym, iv, 200));
+      });
+    });
+  }, [syncInterval, toolbarSnap?.interval]);
+
+  // Sync symbol across panes.
+  useEffect(() => {
+    if (!syncSymbol || !snap?.symbol.ticker) return;
+    const ticker = snap.symbol.ticker;
+    setPaneSymbols((prev) => {
+      if (prev.every((t) => t === ticker)) return prev;
+      return prev.map(() => ticker);
+    });
+  }, [syncSymbol, snap?.symbol.ticker]);
+
   const shellClass = [
     "shell",
     boot.embed ? "embed" : "",
@@ -661,6 +860,19 @@ export default function App() {
           }}
           onOpenSettings={() => setSettingsOpen(true)}
           onToggleTheme={() => engine?.setTheme(snap?.theme === "dark" ? "light" : "dark")}
+          workspaceName={workspaceName}
+          onSaveWorkspace={() => saveWorkspaceNow()}
+          onManageWorkspaces={() => setWorkspaceOpen(true)}
+          onExportWorkspace={() => {
+            const blob = new Blob([exportWorkspaceJson(collectWorkspace())], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${(workspaceName || "forge-layout").replace(/\s+/g, "-").toLowerCase()}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+          }}
+          onImportWorkspace={() => fileInputRef.current?.click()}
           onOpenMarkets={() => {
             if (showWidgets) {
               setWidget("watchlist");
@@ -681,15 +893,28 @@ export default function App() {
               <LayoutMenu
                 arrangement={arrangement}
                 symbols={paneSymbols}
+                syncCrosshair={syncCrosshair}
+                syncInterval={syncInterval}
+                syncSymbol={syncSymbol}
+                onSyncChange={(next) => {
+                  if (next.syncCrosshair != null) setSyncCrosshair(next.syncCrosshair);
+                  if (next.syncInterval != null) setSyncInterval(next.syncInterval);
+                  if (next.syncSymbol != null) setSyncSymbol(next.syncSymbol);
+                }}
                 onArrangement={setArrangement}
                 onOpenLayout={(layout) => {
                   setArrangement(layout.arrangement);
                   setPaneSymbols(layout.symbols);
                   setActivePane(0);
+                  if (layout.syncCrosshair != null) setSyncCrosshair(layout.syncCrosshair);
+                  if (layout.syncInterval != null) setSyncInterval(layout.syncInterval);
+                  if (layout.syncSymbol != null) setSyncSymbol(layout.syncSymbol);
                   const sym = findSymbol(layout.symbols[0] || "XAUUSD");
                   void attachFeed(sym, engineRef.current?.getSnapshot().interval ?? "15", "symbol");
                 }}
-                onSaveCurrent={(name) => createLayout(name, arrangement, paneSymbols)}
+                onSaveCurrent={(name) =>
+                  createLayout(name, arrangement, paneSymbols, { syncCrosshair, syncInterval, syncSymbol })
+                }
               />
             )
           }
@@ -907,6 +1132,34 @@ export default function App() {
             setWidget("alerts");
             if (compact) setMobileWidgetOpen(true);
           }
+        }}
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/json,.json"
+        hidden
+        onChange={async (e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (!file) return;
+          const raw = await file.text();
+          const profile = importWorkspaceJson(raw);
+          if (profile) {
+            applyWorkspace(profile);
+            saveWorkspaceProfile(profile);
+            upsertNamedWorkspace(profile);
+          }
+        }}
+      />
+      <WorkspaceManager
+        open={workspaceOpen}
+        onClose={() => setWorkspaceOpen(false)}
+        currentName={workspaceName}
+        onSaveAs={(name) => saveWorkspaceNow(name)}
+        onLoad={(ws: NamedWorkspace) => {
+          applyWorkspace(ws);
+          saveWorkspaceProfile(ws);
         }}
       />
       <SettingsModal

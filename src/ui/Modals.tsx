@@ -3,6 +3,7 @@ import { CHART_TYPES, INDICATOR_CATALOG, INDICATOR_ROLE_FILTERS, INDICATOR_TABS,
 import { UNIVERSE } from "../data/feed";
 import type { ChartSource, EngineSnapshot, IndicatorKind, SymbolInfo, Tool } from "../engine/types";
 import type { ChartEngine } from "../engine/ChartEngine";
+import { loadSettingsTemplates, saveSettingsTemplate, deleteSettingsTemplate, type SettingsTemplate } from "../data/settingsTemplates";
 
 const SYMBOL_FILTERS = [
   { id: "all", label: "All" },
@@ -544,7 +545,9 @@ export function SettingsModal({
   engine: ChartEngine | null;
   snap: EngineSnapshot | null;
 }) {
-  const [tab, setTab] = useState<"symbol" | "status" | "scales" | "canvas">("symbol");
+  const [tab, setTab] = useState<"symbol" | "status" | "scales" | "canvas" | "templates">("symbol");
+  const [templates, setTemplates] = useState<SettingsTemplate[]>(() => loadSettingsTemplates());
+  const [tplName, setTplName] = useState("My settings");
   if (!open) return null;
   const style = snap?.chartStyle;
   const cv = snap?.canvas;
@@ -555,6 +558,7 @@ export function SettingsModal({
     { id: "status", label: "Status line" },
     { id: "scales", label: "Scales" },
     { id: "canvas", label: "Canvas" },
+    { id: "templates", label: "Templates" },
   ];
   return (
     <div className="modal-bg" onClick={onClose}>
@@ -594,6 +598,79 @@ export function SettingsModal({
             <label className="row">Border down <input type="color" value={style?.borderDownColor ?? "#ef5350"} onChange={(e) => engine?.setChartStyle({ borderDownColor: e.target.value })} /></label>
             <label className="row check-row"><input type="checkbox" checked={style?.showWick ?? true} onChange={(e) => engine?.setChartStyle({ showWick: e.target.checked })} /> Show wicks</label>
             <label className="row check-row"><input type="checkbox" checked={style?.showBorder ?? true} onChange={(e) => engine?.setChartStyle({ showBorder: e.target.checked })} /> Show borders</label>
+            {(snap?.chartType === "line" || snap?.chartType === "linemarkers" || snap?.chartType === "area" || snap?.chartType === "stepline" || snap?.chartType === "baseline" || snap?.chartType === "kagi" || snap?.chartType === "hlcarea") ? (
+              <label className="row">Line width
+                <input type="number" min={1} max={6} step={0.5} value={style?.lineWidth ?? 2}
+                  onChange={(e) => engine?.setChartStyle({ lineWidth: Number(e.target.value) || 2 })} />
+              </label>
+            ) : null}
+            {snap?.chartType === "linemarkers" ? (
+              <>
+                <label className="row">Marker size
+                  <input type="number" min={1} max={12} value={style?.markerSize ?? 3}
+                    onChange={(e) => engine?.setChartStyle({ markerSize: Number(e.target.value) || 3 })} />
+                </label>
+                <label className="row">Marker shape
+                  <select value={style?.markerShape ?? "circle"} onChange={(e) => engine?.setChartStyle({ markerShape: e.target.value as "circle" | "square" | "diamond" })}>
+                    <option value="circle">Circle</option>
+                    <option value="square">Square</option>
+                    <option value="diamond">Diamond</option>
+                  </select>
+                </label>
+                <label className="row">Marker color <input type="color" value={style?.markerColor ?? "#2962ff"} onChange={(e) => engine?.setChartStyle({ markerColor: e.target.value })} /></label>
+              </>
+            ) : null}
+            {snap?.chartType === "hlcarea" ? (
+              <>
+                <label className="row">HLC high fill <input type="color" value={style?.hlcHighColor ?? "#2962ff"} onChange={(e) => engine?.setChartStyle({ hlcHighColor: e.target.value })} /></label>
+                <label className="row">HLC close line <input type="color" value={style?.hlcLowColor ?? "#2962ff"} onChange={(e) => engine?.setChartStyle({ hlcLowColor: e.target.value })} /></label>
+              </>
+            ) : null}
+            {snap?.chartType === "columns" ? (
+              <label className="row">Column baseline
+                <select value={style?.columnBaseline ?? "first"} onChange={(e) => engine?.setChartStyle({ columnBaseline: e.target.value as "zero" | "open" | "first" })}>
+                  <option value="first">First close</option>
+                  <option value="open">First open</option>
+                  <option value="zero">Zero</option>
+                </select>
+              </label>
+            ) : null}
+            {snap?.chartType === "renko" || snap?.chartType === "rangechart" ? (
+              <>
+                <label className="row">{snap.chartType === "renko" ? "Brick size" : "Range size"} (0 = auto)
+                  <input type="number" min={0} step="any"
+                    value={snap.chartType === "renko" ? (style?.renkoBrick ?? 0) : (style?.rangeSize ?? 0)}
+                    onChange={(e) => engine?.setChartStyle(snap.chartType === "renko" ? { renkoBrick: Number(e.target.value) || 0 } : { rangeSize: Number(e.target.value) || 0 })} />
+                </label>
+                {snap.chartType === "renko" ? (
+                  <label className="row check-row"><input type="checkbox" checked={style?.renkoWicks !== false} onChange={(e) => engine?.setChartStyle({ renkoWicks: e.target.checked })} /> Show Renko wicks</label>
+                ) : null}
+              </>
+            ) : null}
+            {snap?.chartType === "linebreak" ? (
+              <label className="row">Line break count
+                <input type="number" min={1} max={10} value={style?.lineBreakCount ?? 3}
+                  onChange={(e) => engine?.setChartStyle({ lineBreakCount: Number(e.target.value) || 3 })} />
+              </label>
+            ) : null}
+            {snap?.chartType === "kagi" ? (
+              <label className="row">Reversal (0 = auto)
+                <input type="number" min={0} step="any" value={style?.kagiReversal ?? 0}
+                  onChange={(e) => engine?.setChartStyle({ kagiReversal: Number(e.target.value) || 0 })} />
+              </label>
+            ) : null}
+            {snap?.chartType === "pnf" ? (
+              <>
+                <label className="row">Box size (0 = auto)
+                  <input type="number" min={0} step="any" value={style?.pnfBoxSize ?? 0}
+                    onChange={(e) => engine?.setChartStyle({ pnfBoxSize: Number(e.target.value) || 0 })} />
+                </label>
+                <label className="row">Reversal boxes
+                  <input type="number" min={1} max={9} value={style?.pnfReversal ?? 3}
+                    onChange={(e) => engine?.setChartStyle({ pnfReversal: Number(e.target.value) || 3 })} />
+                </label>
+              </>
+            ) : null}
           </div>
         ) : null}
 
@@ -624,6 +701,42 @@ export function SettingsModal({
             <label className="row check-row"><input type="checkbox" checked={cv?.volumeOverlay ?? true} onChange={(e) => engine?.setCanvasSettings({ volumeOverlay: e.target.checked })} /> Volume overlay on main pane</label>
             <label className="row check-row"><input type="checkbox" checked={cv?.sessionBreaks ?? false} onChange={(e) => engine?.setCanvasSettings({ sessionBreaks: e.target.checked })} /> Session breaks</label>
             <label className="row check-row"><input type="checkbox" checked={cv?.showEvents ?? false} onChange={(e) => engine?.setCanvasSettings({ showEvents: e.target.checked })} /> Events on time scale</label>
+            <label className="row check-row"><input type="checkbox" checked={cv?.realEventsOnly ?? false} onChange={(e) => engine?.setCanvasSettings({ realEventsOnly: e.target.checked })} /> Prefer real calendar events</label>
+            <h3>Scale typography</h3>
+            <label className="row">Axis text size
+              <input type="number" min={9} max={18} value={cv?.scaleFontSize ?? 11}
+                onChange={(e) => engine?.setCanvasSettings({ scaleFontSize: Number(e.target.value) || 11 })} />
+            </label>
+            <label className="row">Axis text color <input type="color" value={cv?.scaleTextColor || (theme === "dark" ? "#b2b5be" : "#131722")} onChange={(e) => engine?.setCanvasSettings({ scaleTextColor: e.target.value })} /></label>
+            <label className="row">Axis line color <input type="color" value={cv?.scaleLineColor || (theme === "dark" ? "#2a2e39" : "#e0e3eb")} onChange={(e) => engine?.setCanvasSettings({ scaleLineColor: e.target.value })} /></label>
+            <h3>Alerts appearance</h3>
+            <label className="row">Marker shape
+              <select value={cv?.alertMarkerShape ?? "diamond"} onChange={(e) => engine?.setCanvasSettings({ alertMarkerShape: e.target.value as "diamond" | "circle" | "flag" })}>
+                <option value="diamond">Diamond</option>
+                <option value="circle">Circle</option>
+                <option value="flag">Flag</option>
+              </select>
+            </label>
+            <label className="row">Marker color <input type="color" value={cv?.alertMarkerColor ?? "#f44336"} onChange={(e) => engine?.setCanvasSettings({ alertMarkerColor: e.target.value })} /></label>
+            <label className="row check-row"><input type="checkbox" checked={cv?.alertShowLabel !== false} onChange={(e) => engine?.setCanvasSettings({ alertShowLabel: e.target.checked })} /> Show alert labels</label>
+            <h3>Data modification</h3>
+            <label className="row">Session
+              <select value={cv?.sessionFilter ?? "all"} onChange={(e) => engine?.setCanvasSettings({ sessionFilter: e.target.value as "all" | "rth" | "eth" })}>
+                <option value="all">All sessions</option>
+                <option value="rth">Regular trading hours</option>
+                <option value="eth">Extended hours</option>
+              </select>
+            </label>
+            <label className="row check-row"><input type="checkbox" checked={!!cv?.adjustData} onChange={(e) => engine?.setCanvasSettings({ adjustData: e.target.checked })} /> Adjust for dividends / splits (ADJ)</label>
+            <label className="row check-row"><input type="checkbox" checked={!!cv?.continuousFutures} onChange={(e) => engine?.setCanvasSettings({ continuousFutures: e.target.checked })} /> Continuous futures back-adjust</label>
+            <label className="row">Price precision (blank = symbol)
+              <input type="number" min={0} max={8} value={cv?.pricePrecision ?? ""}
+                onChange={(e) => engine?.setCanvasSettings({ pricePrecision: e.target.value === "" ? null : Number(e.target.value) })} />
+            </label>
+            <h3>Bid / ask labels</h3>
+            <label className="row check-row"><input type="checkbox" checked={!!cv?.showBidAsk} onChange={(e) => engine?.setCanvasSettings({ showBidAsk: e.target.checked })} /> Show bid/ask when available</label>
+            <label className="row">Bid color <input type="color" value={cv?.bidColor ?? "#26a69a"} onChange={(e) => engine?.setCanvasSettings({ bidColor: e.target.value })} /></label>
+            <label className="row">Ask color <input type="color" value={cv?.askColor ?? "#ef5350"} onChange={(e) => engine?.setCanvasSettings({ askColor: e.target.value })} /></label>
             <h3>Time scale</h3>
             <label className="row check-row"><input type="checkbox" checked={cv?.pinLeft ?? false} onChange={(e) => engine?.setCanvasSettings({ pinLeft: e.target.checked })} /> Pin chart left when changing interval</label>
             <label className="row">
@@ -707,6 +820,62 @@ export function SettingsModal({
             </label>
             <h3>Navigation</h3>
             <label className="row check-row"><input type="checkbox" checked={cv?.showNavButtons ?? true} onChange={(e) => engine?.setCanvasSettings({ showNavButtons: e.target.checked })} /> Show zoom / scale buttons</label>
+          </div>
+        ) : null}
+
+        {tab === "templates" ? (
+          <div className="settings-tab-body">
+            <h3>Settings templates</h3>
+            <p className="muted">Save chart style + canvas options as named templates (local).</p>
+            <div className="workspace-save-row">
+              <input value={tplName} onChange={(e) => setTplName(e.target.value)} placeholder="Template name" />
+              <button
+                type="button"
+                className="primary"
+                onClick={() => {
+                  if (!snap) return;
+                  saveSettingsTemplate({
+                    id: `tpl_${Math.random().toString(36).slice(2, 8)}`,
+                    name: tplName.trim() || "My settings",
+                    updatedAt: Date.now(),
+                    chartStyle: snap.chartStyle,
+                    canvas: snap.canvas,
+                    chartType: snap.chartType,
+                    logScale: snap.logScale,
+                    percentScale: snap.percentScale,
+                    indexedScale: snap.indexedScale,
+                    theme: snap.theme,
+                  });
+                  setTemplates(loadSettingsTemplates());
+                  engine?.setCanvasSettings({ settingsTemplateId: tplName.trim() || "My settings" });
+                }}
+              >
+                Save
+              </button>
+            </div>
+            <ul className="workspace-list">
+              {templates.length ? templates.map((tpl) => (
+                <li key={tpl.id}>
+                  <button
+                    type="button"
+                    className="workspace-open"
+                    onClick={() => {
+                      engine?.setChartStyle(tpl.chartStyle);
+                      engine?.setCanvasSettings({ ...tpl.canvas, settingsTemplateId: tpl.id });
+                      if (tpl.chartType) engine?.setChartType(tpl.chartType);
+                      if (tpl.theme) engine?.setTheme(tpl.theme);
+                      if (tpl.logScale != null && snap?.logScale !== tpl.logScale) engine?.toggle("logScale");
+                      if (tpl.percentScale != null && snap?.percentScale !== tpl.percentScale) engine?.toggle("percentScale");
+                      if (tpl.indexedScale != null && snap?.indexedScale !== tpl.indexedScale) engine?.toggle("indexedScale");
+                    }}
+                  >
+                    <b>{tpl.name}</b>
+                    <em>{new Date(tpl.updatedAt).toLocaleString()}</em>
+                  </button>
+                  <button type="button" className="danger-ghost" title="Delete" onClick={() => { deleteSettingsTemplate(tpl.id); setTemplates(loadSettingsTemplates()); }}>×</button>
+                </li>
+              )) : <li className="muted">No templates yet</li>}
+            </ul>
           </div>
         ) : null}
 

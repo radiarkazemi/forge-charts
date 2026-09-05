@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { loadJson, saveJson } from "../persist";
 
-export type LayoutArrangement = "1" | "2h" | "2v" | "3" | "4";
+export type LayoutArrangement = "1" | "2h" | "2v" | "3" | "4" | "6" | "8";
 
 export type ChartLayout = {
   id: string;
@@ -9,6 +9,9 @@ export type ChartLayout = {
   arrangement: LayoutArrangement;
   symbols: string[];
   updatedAt: number;
+  syncCrosshair?: boolean;
+  syncInterval?: boolean;
+  syncSymbol?: boolean;
 };
 
 const LAYOUTS_KEY = "forge.chartLayouts";
@@ -20,6 +23,8 @@ export const ARRANGEMENTS: Array<{ id: LayoutArrangement; label: string; cols: n
   { id: "2v", label: "2 charts · vertical", cols: 1, rows: 2, count: 2 },
   { id: "3", label: "3 charts", cols: 2, rows: 2, count: 3 },
   { id: "4", label: "4 charts", cols: 2, rows: 2, count: 4 },
+  { id: "6", label: "6 charts", cols: 3, rows: 2, count: 6 },
+  { id: "8", label: "8 charts", cols: 4, rows: 2, count: 8 },
 ];
 
 export function loadLayouts(): ChartLayout[] {
@@ -45,12 +50,26 @@ function uid(): string {
 type Props = {
   arrangement: LayoutArrangement;
   symbols: string[];
+  syncCrosshair?: boolean;
+  syncInterval?: boolean;
+  syncSymbol?: boolean;
   onArrangement: (next: LayoutArrangement) => void;
+  onSyncChange?: (next: { syncCrosshair?: boolean; syncInterval?: boolean; syncSymbol?: boolean }) => void;
   onOpenLayout: (layout: ChartLayout) => void;
   onSaveCurrent: (name: string) => ChartLayout;
 };
 
-export function LayoutMenu({ arrangement, symbols, onArrangement, onOpenLayout, onSaveCurrent }: Props) {
+export function LayoutMenu({
+  arrangement,
+  symbols,
+  syncCrosshair = true,
+  syncInterval = false,
+  syncSymbol = false,
+  onArrangement,
+  onSyncChange,
+  onOpenLayout,
+  onSaveCurrent,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [layouts, setLayouts] = useState<ChartLayout[]>(loadLayouts);
   const [renameId, setRenameId] = useState<string | null>(null);
@@ -113,6 +132,33 @@ export function LayoutMenu({ arrangement, symbols, onArrangement, onOpenLayout, 
                 <span>{a.label}</span>
               </button>
             ))}
+          </div>
+          <div className="iv-head">Sync across charts</div>
+          <div className="layout-sync-row">
+            <label>
+              <input
+                type="checkbox"
+                checked={syncCrosshair}
+                onChange={(e) => onSyncChange?.({ syncCrosshair: e.target.checked })}
+              />
+              Crosshair
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={syncInterval}
+                onChange={(e) => onSyncChange?.({ syncInterval: e.target.checked })}
+              />
+              Interval
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={syncSymbol}
+                onChange={(e) => onSyncChange?.({ syncSymbol: e.target.checked })}
+              />
+              Symbol
+            </label>
           </div>
           <div className="iv-head">Saved layouts</div>
           <div className="layout-actions">
@@ -209,7 +255,12 @@ export function LayoutMenu({ arrangement, symbols, onArrangement, onOpenLayout, 
   );
 }
 
-export function createLayout(name: string, arrangement: LayoutArrangement, symbols: string[]): ChartLayout {
+export function createLayout(
+  name: string,
+  arrangement: LayoutArrangement,
+  symbols: string[],
+  sync?: { syncCrosshair?: boolean; syncInterval?: boolean; syncSymbol?: boolean },
+): ChartLayout {
   const meta = ARRANGEMENTS.find((a) => a.id === arrangement) ?? ARRANGEMENTS[0];
   const padded = [...symbols];
   while (padded.length < meta.count) padded.push(symbols[0] || "XAUUSD");
@@ -219,6 +270,9 @@ export function createLayout(name: string, arrangement: LayoutArrangement, symbo
     arrangement,
     symbols: padded.slice(0, meta.count),
     updatedAt: Date.now(),
+    syncCrosshair: sync?.syncCrosshair ?? true,
+    syncInterval: sync?.syncInterval ?? false,
+    syncSymbol: sync?.syncSymbol ?? false,
   };
 }
 
@@ -227,5 +281,7 @@ function LayoutGlyph({ id }: { id: LayoutArrangement }) {
   if (id === "2h") return <i className="lg lg-2h" />;
   if (id === "2v") return <i className="lg lg-2v" />;
   if (id === "3") return <i className="lg lg-3" />;
+  if (id === "6") return <i className="lg lg-6" />;
+  if (id === "8") return <i className="lg lg-8" />;
   return <i className="lg lg-4" />;
 }

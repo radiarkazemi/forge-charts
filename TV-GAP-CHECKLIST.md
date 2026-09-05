@@ -17,6 +17,9 @@
 
 Current parity snapshot when this was written: ~244 MATCH · 45 PARTIAL · 2 MISSING · 11 OUT. That MATCH count overstates product depth — many MATCH rows are chrome-complete but trader-shallow. This list is the corrective backlog.
 
+
+**2026-09-05 TV parity pass:** multi-chart layers (1–8) + sync, local profile/workspace save-export-import, mobile pan followLive detach, GAP-20…39 chart-type/settings depth.
+
 ---
 
 ## 1. What TradingView Supercharts actually is (observation)
@@ -70,17 +73,17 @@ Forge already mirrors most **chrome**. Gaps are mostly **depth, data, and runtim
 
 | ID | Tag | Type | Action |
 | --- | --- | --- | --- |
-| GAP-20 | PARTIAL | Volume candles | True volume→body mapping + style |
-| GAP-21 | PARTIAL | Line with markers | Marker size/shape/color settings |
-| GAP-22 | PARTIAL | HLC area | Proper H/L/C bands + fills |
-| GAP-23 | PARTIAL | Columns | Baseline, up/down colors |
-| GAP-24 | PARTIAL | High-low | Exact TV geometry |
-| GAP-25 | PARTIAL | Renko | Brick size (ATR/traditional), wicks, assignments |
-| GAP-26 | PARTIAL | Line Break | N-line setting |
-| GAP-27 | PARTIAL | Kagi | Reversal amount |
-| GAP-28 | PARTIAL | Point & Figure | Box size, reversal, ATR method, X/O style |
-| GAP-29 | PARTIAL | Range bars | Range size + style |
-| GAP-30 | PARTIAL | Per-type style dialog (CT-22) | Body/wick/border/source per type like TV Symbol tab |
+| GAP-20 | DONE | Volume candles | True volume→body mapping + style |
+| GAP-21 | DONE | Line with markers | Marker size/shape/color settings |
+| GAP-22 | DONE | HLC area | Proper H/L/C bands + fills |
+| GAP-23 | DONE | Columns | Baseline, up/down colors |
+| GAP-24 | DONE | High-low | Exact TV geometry |
+| GAP-25 | DONE | Renko | Brick size (ATR/traditional), wicks, assignments |
+| GAP-26 | DONE | Line Break | N-line setting |
+| GAP-27 | DONE | Kagi | Reversal amount |
+| GAP-28 | DONE | Point & Figure | Box size, reversal, ATR method, X/O style |
+| GAP-29 | DONE | Range bars | Range size + style |
+| GAP-30 | DONE | Per-type style dialog (CT-22) | Body/wick/border/source per type like TV Symbol tab |
 
 ---
 
@@ -88,15 +91,15 @@ Forge already mirrors most **chrome**. Gaps are mostly **depth, data, and runtim
 
 | ID | Tag | Item | Action |
 | --- | --- | --- | --- |
-| GAP-31 | ADD | Scale text size / colors (was S-11 MISSING) | Typography + axis colors in settings |
-| GAP-32 | ADD | Alerts appearance (was S-16 MISSING) | Marker shape/color/label on chart |
-| GAP-33 | PARTIAL | Data modification (session, dividends, futures back-adjust, precision) | Session filter, dividend adjust, continuous futures |
-| GAP-34 | PARTIAL | Scales labels: bid/ask, pre/post | Add when feed supports; else hide cleanly |
-| GAP-35 | PARTIAL | Settings templates gallery | Save/load named chart-settings templates |
-| GAP-36 | MODIFY | Events on time scale | Replace seeded fake E/D/news with real calendar/corporate events |
-| GAP-37 | MODIFY | ADJ toggle (TV bottom bar) | Explicit adjusted/unadjusted series switch |
-| GAP-38 | MODIFY | Price-scale gear menu parity | Match TV scale context: auto, invert, lock, percentage, index, regular, move L/R, merge/no-overlap |
-| GAP-39 | MODIFY | Legend hover actions | Always expose hide / settings / ⋯ / remove with TV order |
+| GAP-31 | DONE | Scale text size / colors (was S-11 MISSING) | Typography + axis colors in settings |
+| GAP-32 | DONE | Alerts appearance (was S-16 MISSING) | Marker shape/color/label on chart |
+| GAP-33 | DONE | Data modification (session, dividends, futures back-adjust, precision) | Session filter, dividend adjust, continuous futures |
+| GAP-34 | DONE | Scales labels: bid/ask, pre/post | Add when feed supports; else hide cleanly |
+| GAP-35 | DONE | Settings templates gallery | Save/load named chart-settings templates |
+| GAP-36 | PARTIAL | Events on time scale | Replace seeded fake E/D/news with real calendar/corporate events |
+| GAP-37 | DONE | ADJ toggle (TV bottom bar) | Explicit adjusted/unadjusted series switch |
+| GAP-38 | DONE | Price-scale gear menu parity | Match TV scale context: auto, invert, lock, percentage, index, regular, move L/R, merge/no-overlap |
+| GAP-39 | DONE | Legend hover actions | Always expose hide / settings / ⋯ / remove with TV order |
 | GAP-40 | ADD | Soft magnet vs strong magnet UI copy + snap-to-indicators default clarity | Match TV magnet menu wording/behavior |
 
 ---
