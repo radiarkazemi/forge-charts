@@ -603,7 +603,7 @@ export function paintDrawing(
   else if (kind === "hline" || kind === "horzray" || kind === "vline" || kind === "crossline")
     paintAxisLine(ctx, d, pts, rect, precision);
   else if ((kind === "trend" || kind === "arrow" || kind === "ray" || kind === "extended") && pts.length >= 2)
-    paintTrendLine(ctx, d, pts, rect, kind);
+    paintTrendLine(ctx, d, pts, rect, kind, bars);
   else if (kind === "info" && pts.length >= 2) paintInfo(ctx, d, pts, rect, precision, bars);
   else if (kind === "trendangle" && pts.length >= 2) paintTrendAngle(ctx, d, pts);
   else if (kind === "parallel" && pts.length >= 3) paintParallel(ctx, d, pts, rect);
@@ -664,7 +664,20 @@ export function paintDrawing(
     paintPattern(ctx, d, pts, kind);
   else if (kind === "cycliclines" || kind === "timecycles") paintCycles(ctx, d, pts, rect, kind === "timecycles");
   else if (kind === "sineline" && pts.length >= 2) paintSine(ctx, d, pts, rect);
-  if (selected) pts.forEach((p) => handle(ctx, p));
+  if (selected) {
+    ctx.save();
+    ctx.strokeStyle = "rgba(41,98,255,0.35)";
+    ctx.lineWidth = (d.lineWidth ?? 1) + 4;
+    ctx.lineJoin = "round";
+    if (pts.length >= 2) {
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.stroke();
+    }
+    ctx.restore();
+    if (!d.locked) pts.forEach((pt) => handle(ctx, pt));
+  }
   ctx.restore();
 }
 
@@ -838,6 +851,24 @@ function arrowHead(ctx: CanvasRenderingContext2D, a: Pt, b: Pt): void {
   ctx.closePath();
   ctx.fill();
 }
+
+function circleEnd(ctx: CanvasRenderingContext2D, p: Pt, color: string): void {
+  ctx.beginPath();
+  ctx.fillStyle = color;
+  ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function paintLineEnds(ctx: CanvasRenderingContext2D, d: Drawing, a: Pt, b: Pt): void {
+  const left = d.leftEnd ?? "normal";
+  const right = d.rightEnd ?? (d.kind === "arrow" ? "arrow" : "normal");
+  ctx.fillStyle = d.color;
+  if (left === "arrow") arrowHead(ctx, b, a);
+  else if (left === "circle") circleEnd(ctx, a, d.color);
+  if (right === "arrow") arrowHead(ctx, a, b);
+  else if (right === "circle") circleEnd(ctx, b, d.color);
+}
+
 
 function paintFibRetrace(
   ctx: CanvasRenderingContext2D,
@@ -1596,7 +1627,7 @@ function paintAxisLine(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rec
   }
 }
 
-function paintTrendLine(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rect: ViewRect, kind: DrawingKind): void {
+function paintTrendLine(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rect: ViewRect, kind: DrawingKind, bars?: Bar[]): void {
   if (pts.length < 2) return;
   const style = resolveFibStyleForKind(d);
   applyLineStyle(ctx, style.trendStyle);
@@ -1608,18 +1639,22 @@ function paintTrendLine(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], re
   else if (kind === "arrow" && !left && !right) stroke(ctx, pts[0], pts[1]);
   else extend(ctx, pts[0], pts[1], rect, left, right);
   ctx.setLineDash([]);
-  if (kind === "arrow" || (kind === "trend" && style.showLevels)) {
-    ctx.fillStyle = style.trendColor;
-    arrowHead(ctx, pts[0], pts[1]);
-  }
-  if (style.showPrices) {
+  paintLineEnds(ctx, d, pts[0], pts[1]);
+  const showStats = style.showStats ?? style.showPrices;
+  if (showStats) {
     const dp = d.points[1].price - d.points[0].price;
     const pct = (dp / (Math.abs(d.points[0].price) || 1)) * 100;
     const ang = (Math.atan2(pts[0].y - pts[1].y, pts[1].x - pts[0].x) * 180) / Math.PI;
+    const t0 = Math.min(d.points[0].time, d.points[1].time);
+    const t1 = Math.max(d.points[0].time, d.points[1].time);
+    const nBars = bars
+      ? Math.max(1, bars.filter((b) => b.time >= t0 && b.time <= t1).length)
+      : Math.max(1, Math.round(Math.abs(d.points[1].time - d.points[0].time)));
+    const dist = Math.hypot(nBars, pct);
     ctx.font = CHART_FONT;
     ctx.fillStyle = style.trendColor;
     ctx.fillText(
-      `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%  ${ang.toFixed(1)}°`,
+      `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%  ${nBars} bars  ${ang.toFixed(1)}°  d${dist.toFixed(1)}`,
       (pts[0].x + pts[1].x) / 2 + 6,
       (pts[0].y + pts[1].y) / 2 - 6,
     );
@@ -1644,7 +1679,7 @@ function paintInfo(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rect: V
   const my = (pts[0].y + pts[1].y) / 2;
   const lines: string[] = [];
   if (style.showPrices) lines.push(`${formatPrice(dp, precision)} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`);
-  if (style.showLevels) lines.push(`${nBars} bars · ${ang.toFixed(1)}°`);
+  if (style.showLevels || style.showStats) lines.push(`${nBars} bars · ${ang.toFixed(1)}° · d${Math.hypot(nBars, pct).toFixed(1)}`);
   if (!lines.length) return;
   ctx.font = CHART_FONT;
   const tw = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 14;

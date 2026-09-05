@@ -90,6 +90,7 @@ export default function App() {
   const [compareOpen, setCompareOpen] = useState(false);
   const [indOpen, setIndOpen] = useState(false);
   const [alertOpen, setAlertOpen] = useState(false);
+  const [alertDraft, setAlertDraft] = useState<{ price: number; name: string; drawingId?: string; drawingKind?: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [symbolQuery, setSymbolQuery] = useState("");
@@ -428,7 +429,20 @@ export default function App() {
     return () => window.clearTimeout(id);
   }, [toast]);
 
-  const openCreateAlert = () => setAlertOpen(true);
+  const openCreateAlert = () => {
+    setAlertDraft(null);
+    setAlertOpen(true);
+  };
+  const openDrawingAlert = (drawing: import("./engine/types").Drawing) => {
+    const price = drawing.points[0]?.price ?? snap?.last?.close ?? 0;
+    setAlertDraft({
+      price,
+      name: `${snap?.symbol.ticker ?? "SYM"} ${drawing.kind}`,
+      drawingId: drawing.id,
+      drawingKind: drawing.kind,
+    });
+    setAlertOpen(true);
+  };
 
   const touchRecentIndicator = (kind: IndicatorKind) => {
     setRecentIndicators((prev) => [kind, ...prev.filter((item) => item !== kind)].slice(0, 12));
@@ -637,7 +651,7 @@ export default function App() {
           >
             <div className="chart-stage">
               <div className="chart-host" ref={hostRef} />
-              <ChartOverlays engine={engine} />
+              <ChartOverlays engine={engine} onAlertDrawing={openDrawingAlert} />
               <ReplayBar engine={engine} />
             </div>
             {!compact && arrangement !== "1" ? <div className="pane-tag">{snap?.symbol.ticker}</div> : null}
@@ -800,17 +814,21 @@ export default function App() {
       />
       <AlertModal
         open={alertOpen}
-        onClose={() => setAlertOpen(false)}
+        onClose={() => { setAlertOpen(false); setAlertDraft(null); }}
         symbol={toolbarSnap?.symbol.ticker ?? snap?.symbol.ticker ?? "SYMBOL"}
         exchange={toolbarSnap?.symbol.exchange ?? snap?.symbol.exchange}
         interval={toolbarSnap?.interval ?? snap?.interval}
         precision={toolbarSnap?.symbol.pricePrecision ?? snap?.symbol.pricePrecision ?? 2}
-        defaultPrice={toolbarSnap?.last?.close ?? snap?.last?.close ?? 0}
+        defaultPrice={alertDraft?.price ?? toolbarSnap?.last?.close ?? snap?.last?.close ?? 0}
+        defaultName={alertDraft?.name}
         onCreate={(input) => {
           const alert = createAlert({
             ...input,
             interval: input.interval as Interval | undefined,
+            drawingId: alertDraft?.drawingId,
+            drawingKind: alertDraft?.drawingKind,
           });
+          setAlertDraft(null);
           setAlerts((prev) => [alert, ...prev]);
           if (showWidgets) {
             setWidget("alerts");

@@ -9,6 +9,7 @@ type Props = {
   interval?: string;
   precision: number;
   defaultPrice: number;
+  defaultName?: string;
   onCreate: (input: {
     symbol: string;
     exchange?: string;
@@ -29,6 +30,7 @@ export function AlertModal({
   interval,
   precision,
   defaultPrice,
+  defaultName,
   onCreate,
 }: Props) {
   const [condition, setCondition] = useState<AlertCondition>("crossing");
@@ -43,14 +45,14 @@ export function AlertModal({
     const p = Number.isFinite(defaultPrice) ? defaultPrice.toFixed(Math.max(0, precision)) : "";
     setCondition("crossing");
     setPrice(p);
-    setName(`${symbol} crossing ${p}`);
+    setName(defaultName?.trim() || `${symbol} crossing ${p}`);
     setTrigger("once");
     setMessage("");
     requestAnimationFrame(() => {
       priceRef.current?.focus();
       priceRef.current?.select();
     });
-  }, [defaultPrice, open, precision, symbol]);
+  }, [defaultName, defaultPrice, open, precision, symbol]);
 
   useEffect(() => {
     if (!open) return;

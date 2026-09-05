@@ -227,28 +227,28 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 
 | ID | Supercharts behavior | Forge |
 | --- | --- | --- |
-| DI-01 | Click to select; handles on anchors | PARTIAL |
-| DI-02 | Drag body to move | PARTIAL |
-| DI-03 | Drag handle to reshape | PARTIAL |
-| DI-04 | Floating toolbar: color, thickness, style, alert, settings, lock, hide, clone, delete | MATCH | Color / width / style / settings / lock / hide / clone / delete (alert still open as DI-12) |
+| DI-01 | Click to select; handles on anchors | MATCH | Selection halo + anchor handles; handles hidden when locked |
+| DI-02 | Drag body to move | MATCH | Body drag with single undo snapshot; locked drawings immovable |
+| DI-03 | Drag handle to reshape | MATCH | Handle reshape + Shift 45° snap (DI-14) |
+| DI-04 | Floating toolbar: color, thickness, style, alert, settings, lock, hide, clone, delete | MATCH | Color / width / style / alert / template / ends / extend / settings / lock / hide / clone / delete |
 | DI-05 | Double-click → properties dialog | MATCH | Opens Style / Text / Coordinates / Visibility dialog |
 | DI-06 | Properties → Style (tool-specific) | MATCH | Color, line style, thickness, lock |
 | DI-07 | Properties → Text | MATCH | For text / note / label / sticker kinds |
 | DI-08 | Properties → Coordinates (time / price / bar) | MATCH | Per-anchor UTC time + price editors |
 | DI-09 | Properties → Visibility (seconds / minutes / hours / daily / weekly / monthly) | MATCH | Soft hide + interval-bucket visibility filters paint/hit |
-| DI-10 | Save / apply drawing template | MISSING |
-| DI-11 | Right-click menu (settings, visual order, clone, lock, hide, remove, alert) | MATCH | Context menu with settings / z-order / clone / lock / hide / remove (alert → DI-12) |
-| DI-12 | Alert on drawing | MISSING |
-| DI-13 | Magnet while placing and editing | PARTIAL |
-| DI-14 | Snap 45° / hold Shift | MISSING |
-| DI-15 | Undo / redo drawing edits | PARTIAL |
-| DI-16 | Object tree sync with selection | PARTIAL |
-| DI-17 | Line ends: normal / arrow / circle | MISSING |
-| DI-18 | Extend left / right | PARTIAL |
-| DI-19 | Stats on line (price, bars, %, angle, distance) | PARTIAL |
+| DI-10 | Save / apply drawing template | MATCH | localStorage drawing templates; save/apply from floating bar + context menu |
+| DI-11 | Right-click menu (settings, visual order, clone, lock, hide, remove, alert) | MATCH | Settings / alert / template / z-order / clone / lock / hide / remove |
+| DI-12 | Alert on drawing | MATCH | Floating bar + context menu open Alert modal prefilled from drawing price; stores drawingId |
+| DI-13 | Magnet while placing and editing | MATCH | Weak magnet uses pixel threshold (~12px); strong always snaps OHLC (+ indicators) |
+| DI-14 | Snap 45° / hold Shift | MATCH | Shift while placing/reshaping projects onto nearest 45° in screen space |
+| DI-15 | Undo / redo drawing edits | MATCH | Undo/redo restores selection when id still exists; drag edits coalesce |
+| DI-16 | Object tree sync with selection | MATCH | Bidirectional select + scroll-into-view + z-order buttons in object tree |
+| DI-17 | Line ends: normal / arrow / circle | MATCH | leftEnd/rightEnd on Drawing; Style panel + floating bar; painted on linear tools |
+| DI-18 | Extend left / right | MATCH | Extend toggles on floating bar + Style for trend/channel kinds |
+| DI-19 | Stats on line (price, bars, %, angle, distance) | MATCH | Unified % / bars / angle / distance readout; showStats Style toggle |
 | DI-20 | Fib levels: each ratio on/off, color, width, style, extend, reverse, fill | MATCH | Style tab: per-level toggle/ratio/color + extend / reverse / background / labels |
 
-Trend Line Tools **D-TR-01…15** are MATCH (geometry, labels, channel/AVWAP bands, Style). Drawing tools through D-PR/SH/AN/IC/AX (except D-AX-12) remain MATCH. Next open drawing track: **DI-*** interaction PARTIALs/MISSINGs, then canvas **V-*** chrome.
+Trend Line Tools **D-TR-01…15** are MATCH (geometry, labels, channel/AVWAP bands, Style). Drawing tools through D-PR/SH/AN/IC/AX (except D-AX-12) remain MATCH. DI interaction **DI-01…03 / 10 / 12–19** and canvas chrome **V-01…04 / 09–12** are MATCH. Next open: remaining **V-13+** pane/scale chrome, then **D-AX-12** multi-layout sync.
 
 ---
 
@@ -256,18 +256,18 @@ Trend Line Tools **D-TR-01…15** are MATCH (geometry, labels, channel/AVWAP ban
 
 | ID | Supercharts item | Forge |
 | --- | --- | --- |
-| V-01 | Crosshair (vertical + horizontal) | PARTIAL |
-| V-02 | Crosshair OHLC tracker box | PARTIAL |
-| V-03 | Crosshair styles (solid/dashed/dotted, width, color) | MISSING |
-| V-04 | Current price line + last-value label | PARTIAL |
+| V-01 | Crosshair (vertical + horizontal) | MATCH | Full chart-height crosshair for crosshair/dot tools |
+| V-02 | Crosshair OHLC tracker box | MATCH | Tracker box with O/H/L/C/Chg/Vol; Canvas settings toggle |
+| V-03 | Crosshair styles (solid/dashed/dotted, width, color) | MATCH | Canvas settings: color / style / width applied in paint |
+| V-04 | Current price line + last-value label | MATCH | Dashed last line + axis label; Canvas toggle showLastPriceLine |
 | V-05 | Countdown to bar close | MATCH | UTC period remaining; ticks every second |
 | V-06 | High/low of visible range labels | MATCH | H/L tags on visible extremes; Scales settings toggle |
 | V-07 | Previous day close line | MATCH | Dashed PClose line + label; Scales settings toggle |
 | V-08 | Bid/ask lines | OUT |
-| V-09 | Watermark (symbol + interval) | PARTIAL |
-| V-10 | Grid (vert / horiz / both / none) | PARTIAL |
-| V-11 | Symbol legend (name, OHLC, change %, volume) | PARTIAL |
-| V-12 | Indicator legend: hide, settings, more (visual order, pin, move pane, clone, hide, remove) | PARTIAL |
+| V-09 | Watermark (symbol + interval) | MATCH | Ticker + interval watermark with opacity |
+| V-10 | Grid (vert / horiz / both / none) | MATCH | gridMode both/vert/horiz/none + gridColor |
+| V-11 | Symbol legend (name, OHLC, change %, volume) | MATCH | Symbol row in legend + status-line OHLC/chg/vol toggles |
+| V-12 | Indicator legend: hide, settings, more (visual order, pin, move pane, clone, hide, remove) | MATCH | ⋯ menu: visual order / clone / hide / remove (+ settings) |
 | V-13 | Pane drag-resize | MISSING |
 | V-14 | Pane maximize / collapse / close | MISSING |
 | V-15 | Volume as overlay on main pane | PARTIAL |

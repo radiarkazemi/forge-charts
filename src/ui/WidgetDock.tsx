@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { conditionLabel, type PriceAlert } from "../data/alerts";
 import { UNIVERSE } from "../data/feed";
 import type { ChartEngine } from "../engine/ChartEngine";
@@ -42,6 +43,12 @@ export function WidgetDock({
   onDeleteAlert,
 }: Props) {
   const snap = useEngine(engine);
+  const objTreeRef = useRef<HTMLUListElement | null>(null);
+  useEffect(() => {
+    if (active !== "object") return;
+    const el = objTreeRef.current?.querySelector("li.on");
+    el?.scrollIntoView({ block: "nearest" });
+  }, [active, snap?.selectedId, snap?.selectedIndicatorId]);
   const bar = snap?.hover ?? snap?.last;
   return (
     <div className="widget-dock">
@@ -74,7 +81,7 @@ export function WidgetDock({
             </ul>
           ) : null}
           {active === "object" ? (
-            <ul className="objects">
+            <ul className="objects" ref={objTreeRef}>
               {snap?.indicators.map((ind) => (
                 <li key={ind.id} className={snap.selectedIndicatorId === ind.id ? "on" : ""}>
                   <button
@@ -97,6 +104,8 @@ export function WidgetDock({
                     {d.visible === false ? "○" : "●"} {d.kind}
                   </button>
                   <span>
+                    <button title="Forward" onClick={() => engine?.reorderDrawing(d.id, "forward")}>↑</button>
+                    <button title="Backward" onClick={() => engine?.reorderDrawing(d.id, "backward")}>↓</button>
                     <button
                       title="Hide/show"
                       onClick={() => engine?.updateDrawing(d.id, { visible: d.visible === false })}
