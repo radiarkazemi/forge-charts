@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createAlert,
   evaluateAlerts,
@@ -429,10 +429,26 @@ export default function App() {
     return () => window.clearTimeout(id);
   }, [toast]);
 
-  const openCreateAlert = () => {
-    setAlertDraft(null);
+  const openCreateAlert = (price?: number) => {
+    if (price != null && Number.isFinite(price)) {
+      setAlertDraft({
+        price,
+        name: `${snap?.symbol.ticker ?? "SYM"} @ ${price}`,
+      });
+    } else {
+      setAlertDraft(null);
+    }
     setAlertOpen(true);
   };
+  
+  const syncDrawingsAcrossPanes = useCallback((source: ChartEngine) => {
+    const rows = source.getDrawings();
+    Object.values(paneEnginesRef.current).forEach((eng) => {
+      if (!eng || eng === source) return;
+      eng.setDrawings(rows);
+    });
+  }, []);
+
   const openDrawingAlert = (drawing: import("./engine/types").Drawing) => {
     const price = drawing.points[0]?.price ?? snap?.last?.close ?? 0;
     setAlertDraft({
@@ -552,6 +568,17 @@ export default function App() {
 
   const widgetOverlay = showWidgets && compact && mobileWidgetOpen;
 
+  useEffect(() => {
+    if (!engine) return;
+    let last = engine.getDrawings().map((d) => d.id).join(",");
+    return engine.subscribe(() => {
+      const ids = engine.getDrawings().map((d) => d.id).join(",");
+      if (ids === last) return;
+      last = ids;
+      syncDrawingsAcrossPanes(engine);
+    });
+  }, [engine, syncDrawingsAcrossPanes]);
+
   return (
     <div
       className={shellClass}
@@ -651,7 +678,7 @@ export default function App() {
           >
             <div className="chart-stage">
               <div className="chart-host" ref={hostRef} />
-              <ChartOverlays engine={engine} onAlertDrawing={openDrawingAlert} />
+              <ChartOverlays engine={engine} onAlertDrawing={openDrawingAlert} onAlertPrice={(price) => openCreateAlert(price)} />
               <ReplayBar engine={engine} />
             </div>
             {!compact && arrangement !== "1" ? <div className="pane-tag">{snap?.symbol.ticker}</div> : null}

@@ -7,7 +7,7 @@ import type { SymbolInfo } from "../engine/types";
 import { alertStatusText } from "./AlertModal";
 import { useEngine } from "./useEngine";
 
-export type WidgetId = "watchlist" | "alerts" | "object" | "data" | "news" | "calendar" | "ideas";
+export type WidgetId = "watchlist" | "alerts" | "object" | "data" | "news" | "calendar" | "ideas" | "screener" | "options" | "macro" | "fundamentals" | "yields" | "help";
 
 const ICONS: { id: WidgetId; label: string; glyph: string }[] = [
   { id: "watchlist", label: "Watchlist", glyph: "☰" },
@@ -17,6 +17,12 @@ const ICONS: { id: WidgetId; label: string; glyph: string }[] = [
   { id: "news", label: "News", glyph: "◉" },
   { id: "calendar", label: "Calendar", glyph: "▦" },
   { id: "ideas", label: "Ideas", glyph: "✎" },
+  { id: "screener", label: "Screener", glyph: "⌕" },
+  { id: "options", label: "Options", glyph: "⌥" },
+  { id: "macro", label: "Macro Maps", glyph: "◎" },
+  { id: "fundamentals", label: "Fundamentals", glyph: "Σ" },
+  { id: "yields", label: "Yield Curves", glyph: "∿" },
+  { id: "help", label: "Help Center", glyph: "?" },
 ];
 
 type Props = {
@@ -218,6 +224,55 @@ export function WidgetDock({
                 <span className="muted"> — wait for failed auction</span>
               </li>
               <li className="muted">Community publish is OUT — ideas stay on-device only.</li>
+            </ul>
+          ) : null}
+          {active === "screener" ? (
+            <ul className="objects">
+              <li><strong>Gainers</strong><span className="muted"> — sample scan</span></li>
+              <li>BTCUSD · +4.2%</li>
+              <li>NVDA · +2.8%</li>
+              <li>XAUUSD · +1.1%</li>
+              <li className="muted">Live screener feeds are stubbed — criteria UI ready.</li>
+            </ul>
+          ) : null}
+          {active === "options" ? (
+            <ul className="objects">
+              <li><strong>{snap?.symbol.ticker ?? "SYM"} chain</strong></li>
+              <li>Call  · ATM · IV 28%</li>
+              <li>Put   · ATM · IV 30%</li>
+              <li className="muted">Options chain is a layout shell (no live OPRA feed).</li>
+            </ul>
+          ) : null}
+          {active === "macro" ? (
+            <ul className="objects">
+              <li>USD liquidity pulse — stable</li>
+              <li>Rates vol — elevated</li>
+              <li>Credit spreads — quiet</li>
+              <li className="muted">Macro maps shell — heatmap data later.</li>
+            </ul>
+          ) : null}
+          {active === "fundamentals" ? (
+            <ul className="objects">
+              <li>Revenue TTM — sample</li>
+              <li>EPS growth — sample</li>
+              <li>Margins — sample</li>
+              <li className="muted">Fundamental graphs shell.</li>
+            </ul>
+          ) : null}
+          {active === "yields" ? (
+            <ul className="objects">
+              <li>2Y · 4.21%</li>
+              <li>10Y · 4.05%</li>
+              <li>30Y · 4.28%</li>
+              <li className="muted">Yield curve shell — static demo points.</li>
+            </ul>
+          ) : null}
+          {active === "help" ? (
+            <ul className="objects">
+              <li>Hotkeys: Alt+T/H/V/F drawings</li>
+              <li>Double-click empty chart to reset</li>
+              <li>Right-click chart / scale for menus</li>
+              <li className="muted">Help Center shell — docs link later.</li>
             </ul>
           ) : null}
         </div>

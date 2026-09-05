@@ -161,6 +161,14 @@ export type IndicatorInstance = {
   lineWidth?: number;
   lineStyle?: LineStyle;
   source?: ChartSource;
+  /** Horizontal reference levels (IND-08), e.g. RSI 30/70. */
+  levels?: number[];
+  /** Paint order within a pane (IND-10); higher draws later. */
+  zIndex?: number;
+  /** Pin to left/right price scale (IND-11 / V-26). */
+  scaleSide?: "left" | "right";
+  /** Soft-collapse extra pane (V-14). */
+  collapsed?: boolean;
 };
 
 
@@ -256,6 +264,23 @@ export type DrawingContextMenu = {
   y: number;
 };
 
+export type ChartContextMenu = {
+  kind: "chart" | "price" | "time";
+  x: number;
+  y: number;
+  price?: number;
+  time?: number;
+};
+
+export type ChartEventKind = "earnings" | "dividend" | "split" | "news" | "idea";
+
+export type ChartEvent = {
+  id: string;
+  time: number;
+  kind: ChartEventKind;
+  label: string;
+};
+
 export type Theme = "dark" | "light";
 
 export type ChartSource = "open" | "high" | "low" | "close" | "hl2" | "hlc3" | "ohlc4";
@@ -285,6 +310,34 @@ export type CanvasSettings = {
   showTrackerBox: boolean;
   /** Last price line + axis label (V-04). */
   showLastPriceLine: boolean;
+  /** Volume histogram overlay on main pane (V-15). */
+  volumeOverlay: boolean;
+  /** Session / day separators (V-16). */
+  sessionBreaks: boolean;
+  /** Earnings / dividend / split / news markers on time scale (V-17). */
+  showEvents: boolean;
+  /** Invert price scale (V-22). */
+  invertScale: boolean;
+  /** Lock price-to-bar ratio (V-23). */
+  lockRatio: boolean;
+  /** Auto-scale using price only, ignore overlays (V-24). */
+  scalePriceOnly: boolean;
+  /** Show left price scale (V-26). */
+  leftScale: boolean;
+  /** Show right price scale (V-26). */
+  rightScale: boolean;
+  /** Pin left edge when interval changes (V-34). */
+  pinLeft: boolean;
+  /** Pane maximize/collapse/close buttons (V-14 / S-13). */
+  showPaneButtons: boolean;
+  /** Top / bottom / right plot margins 0–0.4 (S-14). */
+  marginTop: number;
+  marginBottom: number;
+  marginRight: number;
+  /** IANA timezone for axis labels (I-11). */
+  timezone: string;
+  /** Axis date format (I-12). */
+  dateFormat: "default" | "ymd" | "dmy" | "mdy";
   bgColor: string;
   gridColor: string;
   crosshairColor: string;
@@ -311,6 +364,8 @@ export type EngineSnapshot = {
   theme: Theme;
   logScale: boolean;
   percentScale: boolean;
+  /** Price indexed to 100 at left of view (V-20). */
+  indexedScale: boolean;
   magnet: MagnetMode;
   showGrid: boolean;
   hover: Bar | null;
@@ -323,6 +378,10 @@ export type EngineSnapshot = {
   drawingPropsId: string | null;
   /** Right-click menu anchor (DI-11). */
   drawingMenu: DrawingContextMenu | null;
+  /** Empty-chart / scale context menu (V-35 / V-36). */
+  chartMenu: ChartContextMenu | null;
+  /** Maximized extra pane indicator id (V-14). */
+  maximizedPaneId: string | null;
   replay: boolean;
   /** Choosing start bar (blue scissors line) before / during replay. */
   replaySelecting: boolean;

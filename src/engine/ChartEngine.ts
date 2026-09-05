@@ -116,6 +116,21 @@ export class ChartEngine {
     showNavButtons: true,
     showTrackerBox: true,
     showLastPriceLine: true,
+    volumeOverlay: true,
+    sessionBreaks: false,
+    showEvents: false,
+    invertScale: false,
+    lockRatio: false,
+    scalePriceOnly: false,
+    leftScale: false,
+    rightScale: true,
+    pinLeft: false,
+    showPaneButtons: true,
+    marginTop: 0.08,
+    marginBottom: 0.08,
+    marginRight: 0.05,
+    timezone: "UTC",
+    dateFormat: "default",
     bgColor: "",
     gridColor: "",
     crosshairColor: "",
@@ -126,6 +141,12 @@ export class ChartEngine {
   };
   private logScale = false;
   private percentScale = false;
+  private indexedScale = false;
+  private chartMenu: import("./types").ChartContextMenu | null = null;
+  private maximizedPaneId: string | null = null;
+  private paneHeights: Record<string, number> = {};
+  private events: import("./types").ChartEvent[] = [];
+  private lockedPricePerBar: number | null = null;
   private magnet: MagnetMode = "weak";
   private showGrid = true;
   private hover: Bar | null = null;
@@ -231,6 +252,7 @@ export class ChartEngine {
       theme: this.theme,
       logScale: this.logScale,
       percentScale: this.percentScale,
+      indexedScale: this.indexedScale,
       magnet: this.magnet,
       showGrid: this.showGrid,
       hover: this.hover,
@@ -241,6 +263,8 @@ export class ChartEngine {
       selectedIndicatorId: this.selectedIndicatorId,
       drawingPropsId: this.drawingPropsId,
       drawingMenu: this.drawingMenu,
+      chartMenu: this.chartMenu,
+      maximizedPaneId: this.maximizedPaneId,
       replay: this.replay,
       replaySelecting: this.replaySelecting,
       replayPlaying: this.replayPlaying,
@@ -296,14 +320,28 @@ export class ChartEngine {
     this.selectedIndicatorId = null;
     this.drawingPropsId = null;
     this.drawingMenu = null;
+    this.chartMenu = null;
     this.compareBars = null;
     this.compareTicker = null;
     this.setBars(bars);
+  
+    const last = bars.at(-1)?.time ?? Math.floor(Date.now() / 1000);
+    this.setEvents([
+      { id: "ev_earn", time: last - 86400 * 12, kind: "earnings", label: "Earnings" },
+      { id: "ev_div", time: last - 86400 * 28, kind: "dividend", label: "Dividend" },
+      { id: "ev_split", time: last - 86400 * 90, kind: "split", label: "Split" },
+      { id: "ev_news", time: last - 86400 * 5, kind: "news", label: "News" },
+      { id: "ev_idea", time: last - 86400 * 3, kind: "idea", label: "Idea" },
+    ]);
+
   }
 
   setInterval(interval: Interval, bars: Bar[]): void {
+    const pinLeft = this.canvasSettings.pinLeft;
+    const leftTime = pinLeft && this.bars.length ? this.timeAtIndex(this.viewStart()) : null;
     this.interval = interval;
     this.setBars(bars);
+    if (pinLeft && leftTime != null) this.scrollToTime(leftTime, "left");
   }
 
   setChartType(type: ChartType): void {
@@ -327,7 +365,19 @@ export class ChartEngine {
   }
 
   setCanvasSettings(next: Partial<import("./types").CanvasSettings>): void {
+    const wasLock = this.canvasSettings.lockRatio;
     this.canvasSettings = { ...this.canvasSettings, ...next };
+    if (this.canvasSettings.lockRatio && (!wasLock || this.lockedPricePerBar == null)) {
+      const main = this.layout().main;
+      const bars = this.plotBars();
+      const sample = bars.length ? bars : this.bars.slice(-40);
+      if (sample.length) {
+        const range = this.priceRange(sample);
+        const slot = this.slotWidth(main);
+        this.lockedPricePerBar = ((range.max - range.min) / Math.max(main.w, 1)) * Math.max(slot, 1e-6);
+      }
+    }
+    if (!this.canvasSettings.lockRatio) this.lockedPricePerBar = null;
     this.emit();
     this.draw();
   }
@@ -361,9 +411,31 @@ export class ChartEngine {
   }
 
   toggle(
-    flag: "logScale" | "percentScale" | "showGrid" | "stayMode" | "hideDrawings" | "hideIndicators" | "snapIndicators" | "lockDrawings" | "fitMode",
+    flag:
+      | "logScale"
+      | "percentScale"
+      | "indexedScale"
+      | "showGrid"
+      | "stayMode"
+      | "hideDrawings"
+      | "hideIndicators"
+      | "snapIndicators"
+      | "lockDrawings"
+      | "fitMode",
   ): void {
-    this[flag] = !this[flag];
+    if (flag === "indexedScale") {
+      this.indexedScale = !this.indexedScale;
+      if (this.indexedScale) this.percentScale = false;
+    } else if (flag === "percentScale") {
+      this.percentScale = !this.percentScale;
+      if (this.percentScale) this.indexedScale = false;
+    } else {
+      this[flag] = !this[flag];
+    }
+    if (flag === "indexedScale" || flag === "percentScale" || flag === "logScale") {
+      this.priceSpan = null;
+      this.priceMid = null;
+    }
     this.emit();
     this.draw();
   }
@@ -431,6 +503,8 @@ export class ChartEngine {
       params,
       visible: true,
       color: COLORS[this.indicators.length % COLORS.length],
+      levels: kind === "rsi" ? [30, 50, 70] : kind === "stoch" ? [20, 50, 80] : undefined,
+      zIndex: this.indicators.length,
     });
     this.emit();
     this.draw();
@@ -497,7 +571,12 @@ export class ChartEngine {
 
   updateIndicator(
     id: string,
-    patch: Partial<Pick<IndicatorInstance, "params" | "color" | "visible" | "lineWidth" | "lineStyle" | "source">>,
+    patch: Partial<
+      Pick<
+        IndicatorInstance,
+        "params" | "color" | "visible" | "lineWidth" | "lineStyle" | "source" | "levels" | "zIndex" | "scaleSide" | "collapsed" | "pane"
+      >
+    >,
   ): void {
     this.pushUndo();
     this.indicators = this.indicators.map((i) => (i.id === id ? { ...i, ...patch, params: patch.params ? [...patch.params] : i.params } : i));
@@ -812,6 +891,83 @@ export class ChartEngine {
     this.draw();
   }
 
+  /** Scroll so `time` is visible (V-33). align: center | left | right. */
+  scrollToTime(time: number, align: "center" | "left" | "right" = "center"): void {
+    if (!this.bars.length) return;
+    const idx = this.indexFromTime(time);
+    const frac = align === "left" ? 0.08 : align === "right" ? 0.92 : 0.5;
+    this.viewEnd = idx + this.viewCount * (1 - frac);
+    this.fitMode = false;
+    this.clampPan();
+    this.emit();
+    this.draw();
+  }
+
+  /** Pan by N bars (V-32). */
+  panByBars(bars: number): void {
+    this.viewEnd += bars;
+    this.fitMode = false;
+    this.clampPan();
+    this.emit();
+    this.draw();
+  }
+
+  openChartMenu(kind: "chart" | "price" | "time", x: number, y: number, extras?: { price?: number; time?: number }): void {
+    this.chartMenu = { kind, x, y, price: extras?.price, time: extras?.time };
+    this.drawingMenu = null;
+    this.emit();
+  }
+
+  closeChartMenu(): void {
+    if (!this.chartMenu) return;
+    this.chartMenu = null;
+    this.emit();
+  }
+
+  setMaximizedPane(id: string | null): void {
+    this.maximizedPaneId = id;
+    this.emit();
+    this.draw();
+  }
+
+  setPaneHeight(id: string, height: number): void {
+    this.paneHeights[id] = Math.max(40, Math.min(280, height));
+    this.emit();
+    this.draw();
+  }
+
+  setEvents(events: import("./types").ChartEvent[]): void {
+    this.events = events.map((e) => ({ ...e }));
+    this.emit();
+    this.draw();
+  }
+
+  getDrawings(): import("./types").Drawing[] {
+    return this.drawings.map((d) => ({
+      ...d,
+      points: d.points.map((p) => ({ ...p })),
+      visibility: d.visibility ? { ...d.visibility } : undefined,
+      fib: d.fib ? { ...d.fib, levels: d.fib.levels.map((l) => ({ ...l })) } : undefined,
+    }));
+  }
+
+  /** Replace drawings (D-AX-12 sync). */
+  setDrawings(rows: import("./types").Drawing[], opts?: { selectId?: string | null }): void {
+    this.pushUndo();
+    this.drawings = rows.map((d) => ({
+      ...d,
+      points: d.points.map((p) => ({ ...p })),
+      visibility: d.visibility ? { ...d.visibility } : undefined,
+      fib: d.fib ? { ...d.fib, levels: d.fib.levels.map((l) => ({ ...l })) } : undefined,
+    }));
+    this.selectedId = opts?.selectId !== undefined ? opts.selectId : this.selectedId;
+    if (this.selectedId && !this.drawings.some((d) => d.id === this.selectedId)) this.selectedId = null;
+    this.drawingPropsId = null;
+    this.drawingMenu = null;
+    this.emit();
+    this.draw();
+  }
+
   setCompare(ticker: string | null, bars: Bar[] | null): void {
     this.compareTicker = ticker;
     this.compareBars = bars;
@@ -1060,21 +1216,52 @@ export class ChartEngine {
 
   private extraIndicators(): IndicatorInstance[] {
     if (this.hideIndicators) return [];
-    return this.indicators.filter((i) => i.visible && ["rsi", "macd", "stoch", "atr"].includes(i.pane));
+    let rows = this.indicators.filter((i) => i.visible && ["rsi", "macd", "stoch", "atr"].includes(i.pane));
+    if (this.maximizedPaneId) {
+      const hit = rows.find((i) => i.id === this.maximizedPaneId);
+      if (hit) return [hit];
+    }
+    return rows.filter((i) => !i.collapsed);
   }
 
-  private layout(): { main: Rect; extras: { rect: Rect; ind: IndicatorInstance }[]; chart: Rect } {
+  private layout(): { main: Rect; extras: { rect: Rect; ind: IndicatorInstance }[]; chart: Rect; leftAxis: number; rightAxis: number } {
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
-    const chart: Rect = { x: 0, y: 0, w: Math.max(0, w - this.priceAxisWidth()), h: Math.max(0, h - TIME_AXIS) };
+    const leftAxis = this.canvasSettings.leftScale ? this.priceAxisWidth() : 0;
+    const rightAxis = this.canvasSettings.rightScale === false ? 0 : this.priceAxisWidth();
+    const chart: Rect = {
+      x: leftAxis,
+      y: 0,
+      w: Math.max(0, w - leftAxis - rightAxis),
+      h: Math.max(0, h - TIME_AXIS),
+    };
     const extrasInd = this.extraIndicators();
-    const extraH = extrasInd.length ? Math.min(120, chart.h * 0.18) : 0;
-    const mainH = chart.h - extraH * extrasInd.length;
-    const extras = extrasInd.map((ind, i) => ({
-      ind,
-      rect: { x: 0, y: mainH + i * extraH, w: chart.w, h: extraH } satisfies Rect,
-    }));
-    return { main: { x: 0, y: 0, w: chart.w, h: mainH }, extras, chart };
+    const defaultH = extrasInd.length ? Math.min(120, chart.h * 0.18) : 0;
+    let used = 0;
+    const heights = extrasInd.map((ind) => {
+      if (this.maximizedPaneId === ind.id) return chart.h * 0.72;
+      const hPane = this.paneHeights[ind.id] ?? defaultH;
+      used += hPane;
+      return hPane;
+    });
+    if (this.maximizedPaneId && extrasInd.length === 1) {
+      const mainH = Math.max(48, chart.h * 0.28);
+      return {
+        main: { x: chart.x, y: 0, w: chart.w, h: mainH },
+        extras: [{ ind: extrasInd[0], rect: { x: chart.x, y: mainH, w: chart.w, h: chart.h - mainH } }],
+        chart,
+        leftAxis,
+        rightAxis,
+      };
+    }
+    const mainH = Math.max(48, chart.h - heights.reduce((a, b) => a + b, 0));
+    let y = mainH;
+    const extras = extrasInd.map((ind, i) => {
+      const rect = { x: chart.x, y, w: chart.w, h: heights[i] } satisfies Rect;
+      y += heights[i];
+      return { ind, rect };
+    });
+    return { main: { x: chart.x, y: 0, w: chart.w, h: mainH }, extras, chart, leftAxis, rightAxis };
   }
 
   private priceAxisWidth(): number {
@@ -1289,6 +1476,10 @@ export class ChartEngine {
   }
 
   private scaled(price: number, bars: Bar[]): number {
+    if (this.indexedScale) {
+      const base = this.baseClose(bars) || 1;
+      return (price / base) * 100;
+    }
     if (!this.percentScale) return price;
     return ((price - this.baseClose(bars)) / this.baseClose(bars)) * 100;
   }
@@ -1301,13 +1492,15 @@ export class ChartEngine {
       min = Math.min(min, this.scaled(b.low, bars));
       max = Math.max(max, this.scaled(b.high, bars));
     }
-    for (const ind of this.indicators) {
-      if (!ind.visible || ind.pane !== "main") continue;
-      const series = this.indicatorSeries(ind, bars);
-      for (const v of series.lines.flat()) {
-        if (v != null) {
-          min = Math.min(min, this.scaled(v, bars));
-          max = Math.max(max, this.scaled(v, bars));
+    if (!this.canvasSettings.scalePriceOnly) {
+      for (const ind of this.indicators) {
+        if (!ind.visible || ind.pane !== "main") continue;
+        const series = this.indicatorSeries(ind, bars);
+        for (const v of series.lines.flat()) {
+          if (v != null) {
+            min = Math.min(min, this.scaled(v, bars));
+            max = Math.max(max, this.scaled(v, bars));
+          }
         }
       }
     }
@@ -1315,9 +1508,18 @@ export class ChartEngine {
       min -= 1;
       max += 1;
     }
-    const pad = (max - min) * 0.16;
-    const autoMin = min - pad;
-    const autoMax = max + pad;
+    const topM = this.canvasSettings.marginTop ?? 0.08;
+    const botM = this.canvasSettings.marginBottom ?? 0.08;
+    const span0 = max - min;
+    const autoMin = min - span0 * botM;
+    const autoMax = max + span0 * topM;
+    if (this.canvasSettings.lockRatio && this.lockedPricePerBar != null) {
+      const main = this.layout().main;
+      const slot = this.slotWidth(main);
+      const priceSpan = this.lockedPricePerBar * (main.w / Math.max(slot, 1e-6));
+      const mid = this.priceMid ?? (autoMin + autoMax) / 2;
+      return { min: mid - priceSpan / 2, max: mid + priceSpan / 2 };
+    }
     if (this.priceSpan != null && this.priceMid != null) {
       return { min: this.priceMid - this.priceSpan / 2, max: this.priceMid + this.priceSpan / 2 };
     }
@@ -1332,11 +1534,14 @@ export class ChartEngine {
     const p = this.logScale ? Math.log(Math.max(Math.abs(price) < 1e-9 ? 1e-9 : price, 1e-9)) : price;
     const a = this.logScale ? Math.log(Math.max(min, 1e-9)) : min;
     const b = this.logScale ? Math.log(Math.max(max, 1e-9)) : max;
-    return rect.y + rect.h * (1 - (p - a) / (b - a || 1));
+    let t = (p - a) / (b - a || 1);
+    if (this.canvasSettings.invertScale) t = 1 - t;
+    return rect.y + rect.h * (1 - t);
   }
 
   private priceAtY(y: number, min: number, max: number, rect: Rect): number {
-    const t = 1 - (y - rect.y) / (rect.h || 1);
+    let t = 1 - (y - rect.y) / (rect.h || 1);
+    if (this.canvasSettings.invertScale) t = 1 - t;
     if (this.logScale) {
       const a = Math.log(Math.max(min, 1e-9));
       const b = Math.log(Math.max(max, 1e-9));
@@ -1443,6 +1648,7 @@ export class ChartEngine {
     this.paintWatermark(layout.main, pal.watermark);
     this.paintGrid(layout.main, range.min, range.max, pal.grid);
     if (bars.length) {
+      this.paintSessionBreaks(layout.main, bars, pal);
       this.paintVolumeOverlay(layout.main, bars, pal);
       this.paintSeries(layout.main, bars, range, pal);
       if (!this.hideIndicators) this.paintMainIndicators(layout.main, bars, range);
@@ -1456,6 +1662,7 @@ export class ChartEngine {
     }
     if (!this.hideDrawings) this.paintDrawings(layout.main, bars.length ? bars : this.bars.slice(-40), range);
     this.paintAxes(layout, bars, range, pal);
+    this.paintEvents(layout.main, bars, pal);
     this.paintCrosshair(layout, bars, range, pal);
     this.paintReplaySelectLine(layout.main);
     this.paintDemoTrail();
@@ -1574,8 +1781,57 @@ export class ChartEngine {
     }
   }
 
+  private paintSessionBreaks(rect: Rect, bars: Bar[], pal: (typeof palettes)["dark"]): void {
+    if (!this.canvasSettings.sessionBreaks || bars.length < 2) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.strokeStyle = pal.grid;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 3]);
+    let prevDay = -1;
+    bars.forEach((b, i) => {
+      const day = Math.floor(b.time / 86400);
+      if (prevDay >= 0 && day !== prevDay) {
+        const x = this.xOf(i, bars.length, rect);
+        ctx.beginPath();
+        ctx.moveTo(x + 0.5, rect.y);
+        ctx.lineTo(x + 0.5, rect.y + rect.h);
+        ctx.stroke();
+      }
+      prevDay = day;
+    });
+    ctx.restore();
+  }
+
+  private paintEvents(rect: Rect, bars: Bar[], pal: (typeof palettes)["dark"]): void {
+    if (!this.canvasSettings.showEvents || !this.events.length || !bars.length) return;
+    const ctx = this.ctx;
+    const t0 = bars[0].time;
+    const t1 = bars[bars.length - 1].time;
+    ctx.save();
+    ctx.font = "10px Trebuchet MS, Arial, sans-serif";
+    ctx.textAlign = "center";
+    for (const ev of this.events) {
+      if (ev.time < t0 - 86400 || ev.time > t1 + 86400) continue;
+      const x = this.xOfTime(ev.time, bars, rect);
+      if (x < rect.x || x > rect.x + rect.w) continue;
+      const glyph = ev.kind === "earnings" ? "E" : ev.kind === "dividend" ? "D" : ev.kind === "split" ? "S" : ev.kind === "news" ? "N" : "I";
+      ctx.fillStyle = ev.kind === "earnings" ? "#ab47bc" : ev.kind === "dividend" ? "#26a69a" : ev.kind === "split" ? "#ffa726" : "#42a5f5";
+      ctx.beginPath();
+      ctx.moveTo(x, rect.y + rect.h - 2);
+      ctx.lineTo(x - 5, rect.y + rect.h + 10);
+      ctx.lineTo(x + 5, rect.y + rect.h + 10);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = pal.text;
+      ctx.fillText(glyph, x, rect.y + rect.h + 22);
+    }
+    ctx.restore();
+  }
+
   private paintVolumeOverlay(rect: Rect, bars: Bar[], pal: (typeof palettes)["dark"]): void {
-    if (!this.indicators.some((i) => i.kind === "vol" && i.visible)) return;
+    const volIndOn = this.indicators.some((i) => i.kind === "vol" && i.visible);
+    if (!(this.canvasSettings.volumeOverlay && volIndOn)) return;
     const ctx = this.ctx;
     const maxVol = Math.max(...bars.map((b) => b.volume), 1);
     const slot = this.slotWidth(rect);
@@ -1982,14 +2238,20 @@ export class ChartEngine {
     const vals = series.lines.flat().filter((v): v is number => v != null);
     const min = bounded ? 0 : Math.min(...vals, 0);
     const max = bounded ? 100 : Math.max(...vals, 0.01);
-    if (bounded) {
-      for (const lvl of [20, 50, 80]) {
+    const levels = ind.levels ?? (bounded ? (ind.kind === "rsi" ? [30, 50, 70] : [20, 50, 80]) : []);
+    if (levels.length) {
+      for (const lvl of levels) {
         const y = this.yOf(lvl, min, max, rect);
         ctx.strokeStyle = pal.grid;
+        ctx.setLineDash([4, 3]);
         ctx.beginPath();
         ctx.moveTo(rect.x, y);
         ctx.lineTo(rect.x + rect.w, y);
         ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = pal.muted;
+        ctx.font = "10px Trebuchet MS, Arial, sans-serif";
+        ctx.fillText(String(lvl), rect.x + 4, y - 2);
       }
     }
     if (series.hist) {
@@ -2127,8 +2389,16 @@ export class ChartEngine {
     ctx.textAlign = "left";
     for (const tick of niceTicks(range.min, range.max, 8)) {
       const y = this.yOf(tick, range.min, range.max, layout.main);
-      const label = this.percentScale ? `${tick.toFixed(2)}%` : formatPrice(tick, this.symbol.pricePrecision);
-      ctx.fillText(label, layout.chart.w + 8, y + 3);
+      const label =
+        this.percentScale || this.indexedScale
+          ? `${tick.toFixed(2)}${this.indexedScale ? "" : "%"}`
+          : formatPrice(tick, this.symbol.pricePrecision);
+      if (this.canvasSettings.rightScale !== false) ctx.fillText(label, layout.chart.x + layout.chart.w + 8, y + 3);
+      if (this.canvasSettings.leftScale) {
+        ctx.textAlign = "right";
+        ctx.fillText(label, layout.chart.x - 8, y + 3);
+        ctx.textAlign = "left";
+      }
     }
     const labelCount = w < 400 ? 3 : w < 720 ? 4 : 6;
     const step = Math.max(1, Math.floor(this.viewCount / labelCount));
@@ -2136,7 +2406,11 @@ export class ChartEngine {
     const axisStart = Math.floor(this.viewStart());
     const axisEnd = Math.ceil(this.viewEnd);
     for (let i = axisStart; i <= axisEnd; i += step) {
-      ctx.fillText(formatTime(this.timeAtIndex(i), this.interval), this.xOfIndex(i, layout.main), h - 8);
+      ctx.fillText(
+        formatTime(this.timeAtIndex(i), this.interval, this.canvasSettings.timezone, this.canvasSettings.dateFormat),
+        this.xOfIndex(i, layout.main),
+        h - 8,
+      );
     }
     ctx.textAlign = "left";
     const last = this.bars.at(-1) ?? bars.at(-1);
@@ -2733,9 +3007,26 @@ export class ChartEngine {
     const hit = this.hideDrawings || this.lockDrawings ? null : this.hitDrawing(x, y);
     if (hit) {
       this.openDrawingMenu(hit.id, e.clientX, e.clientY);
+      this.closeChartMenu();
       return;
     }
     this.closeDrawingMenu();
+    const zone = this.hitZone(x, y);
+    const bars = this.plotBars();
+    const rangeBars = bars.length ? bars : this.bars.slice(-40);
+    if (zone === "price" && rangeBars.length) {
+      const range = this.priceRange(rangeBars);
+      const price = this.priceAtY(y, range.min, range.max, this.layout().main);
+      const raw = this.percentScale || this.indexedScale ? this.baseClose(rangeBars) * (price / 100) : price;
+      this.openChartMenu("price", e.clientX, e.clientY, { price: raw });
+      return;
+    }
+    if (zone === "time") {
+      const logical = this.indexAtX(x, this.bars.length, this.layout().main);
+      this.openChartMenu("time", e.clientX, e.clientY, { time: this.timeAtIndex(logical) });
+      return;
+    }
+    this.openChartMenu("chart", e.clientX, e.clientY);
   };
 
   private onDbl = (e?: MouseEvent): void => {
@@ -2815,9 +3106,10 @@ export class ChartEngine {
         this.jumpToRealtime();
         return;
       }
-      if (this.drawingPropsId || this.drawingMenu) {
+      if (this.drawingPropsId || this.drawingMenu || this.chartMenu) {
         this.drawingPropsId = null;
         this.drawingMenu = null;
+        this.chartMenu = null;
         this.emit();
         return;
       }

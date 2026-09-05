@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { indicatorInputs, indicatorTitle, toolLabelForDraw } from "../catalog";
 import type { ChartEngine } from "../engine/ChartEngine";
 import {
@@ -80,9 +80,11 @@ function fromLocalInput(value: string): number | null {
 export function ChartInspectors({
   engine,
   onAlertDrawing,
+  onAlertPrice,
 }: {
   engine: ChartEngine | null;
   onAlertDrawing?: (drawing: Drawing) => void;
+  onAlertPrice?: (price: number) => void;
 }) {
   const snap = useEngine(engine);
   const [indOpen, setIndOpen] = useState<string | null>(null);
@@ -152,6 +154,22 @@ export function ChartInspectors({
                     <button type="button" onClick={() => { engine?.reorderIndicator(ind.id, "front"); setMoreInd(null); }}>Bring to front</button>
                     <button type="button" onClick={() => { engine?.reorderIndicator(ind.id, "back"); setMoreInd(null); }}>Send to back</button>
                     <button type="button" onClick={() => { engine?.cloneIndicator(ind.id); setMoreInd(null); }}>Clone</button>
+                    {ind.pane !== "main" && ind.pane !== "volume" ? (
+                      <>
+                        <button type="button" onClick={() => { engine?.setMaximizedPane(snap.maximizedPaneId === ind.id ? null : ind.id); setMoreInd(null); }}>
+                          {snap.maximizedPaneId === ind.id ? "Restore pane" : "Maximize pane"}
+                        </button>
+                        <button type="button" onClick={() => { engine?.updateIndicator(ind.id, { collapsed: !ind.collapsed }); setMoreInd(null); }}>
+                          {ind.collapsed ? "Expand pane" : "Collapse pane"}
+                        </button>
+                        <button type="button" onClick={() => { engine?.updateIndicator(ind.id, { pane: "main" }); setMoreInd(null); }}>Move to main pane</button>
+                      </>
+                    ) : (
+                      <button type="button" onClick={() => { engine?.updateIndicator(ind.id, { pane: "rsi" }); setMoreInd(null); }}>Move to new pane</button>
+                    )}
+                    <button type="button" onClick={() => { engine?.updateIndicator(ind.id, { scaleSide: ind.scaleSide === "left" ? "right" : "left" }); setMoreInd(null); }}>
+                      Pin scale: {ind.scaleSide === "left" ? "left" : "right"}
+                    </button>
                     <button type="button" onClick={() => { engine?.updateIndicator(ind.id, { visible: !ind.visible }); setMoreInd(null); }}>
                       {ind.visible ? "Hide" : "Show"}
                     </button>
@@ -182,7 +200,83 @@ export function ChartInspectors({
           onClose={() => setIndOpen(null)}
         />
       ) : null}
+      {snap.chartMenu ? (
+        <ChartMenuPanel
+          engine={engine}
+          menu={snap.chartMenu}
+          onAlertPrice={onAlertPrice}
+        />
+      ) : null}
     </>
+  );
+}
+
+function ChartMenuPanel({
+  engine,
+  menu,
+  onAlertPrice,
+}: {
+  engine: ChartEngine | null;
+  menu: import("../engine/types").ChartContextMenu;
+  onAlertPrice?: (price: number) => void;
+}) {
+  const close = () => engine?.closeChartMenu();
+  const cv = engine?.getSnapshot().canvas;
+  const style: React.CSSProperties = {
+    position: "fixed",
+    left: Math.min(menu.x, window.innerWidth - 220),
+    top: Math.min(menu.y, window.innerHeight - 260),
+    zIndex: 80,
+  };
+  return (
+    <div className="ctx-menu" style={style} onPointerDown={(e) => e.stopPropagation()}>
+      {menu.kind === "price" ? (
+        <>
+          <button type="button" onClick={() => { if (menu.price != null) onAlertPrice?.(menu.price); close(); }}>Add alert at price…</button>
+          <button type="button" onClick={() => { engine?.toggle("logScale"); close(); }}>Toggle log scale</button>
+          <button type="button" onClick={() => { engine?.toggle("percentScale"); close(); }}>Toggle percent</button>
+          <button type="button" onClick={() => { engine?.toggle("indexedScale"); close(); }}>Toggle indexed 100</button>
+          <button
+            type="button"
+            onClick={() => {
+              engine?.setCanvasSettings({ invertScale: !cv?.invertScale });
+              close();
+            }}
+          >
+            Invert scale
+          </button>
+          <button type="button" onClick={() => { engine?.resetPriceScale(); close(); }}>Reset price scale</button>
+        </>
+      ) : null}
+      {menu.kind === "time" ? (
+        <>
+          <button type="button" onClick={() => { engine?.fitTimeScale(); close(); }}>Fit time scale</button>
+          <button type="button" onClick={() => { if (menu.time != null) engine?.scrollToTime(menu.time, "center"); close(); }}>Scroll here</button>
+          <button
+            type="button"
+            onClick={() => {
+              engine?.setCanvasSettings({ pinLeft: !cv?.pinLeft });
+              close();
+            }}
+          >
+            {cv?.pinLeft ? "Unpin left" : "Pin left on interval change"}
+          </button>
+        </>
+      ) : null}
+      {menu.kind === "chart" ? (
+        <>
+          <button type="button" onClick={() => { engine?.fitContent(); close(); }}>Reset chart view</button>
+          <button type="button" onClick={() => { engine?.resetPriceScale(); close(); }}>Auto price scale</button>
+          <button type="button" onClick={() => { engine?.setCanvasSettings({ sessionBreaks: !cv?.sessionBreaks }); close(); }}>Toggle session breaks</button>
+          <button type="button" onClick={() => { engine?.setCanvasSettings({ showEvents: !cv?.showEvents }); close(); }}>Toggle events</button>
+          <button type="button" onClick={() => { engine?.setCanvasSettings({ volumeOverlay: !cv?.volumeOverlay }); close(); }}>Toggle volume overlay</button>
+          <div className="ctx-sep" />
+          <button type="button" onClick={() => { engine?.clearDrawings(); close(); }}>Remove drawings</button>
+        </>
+      ) : null}
+      <div className="ctx-sep" />
+      <button type="button" onClick={close}>Close</button>
+    </div>
   );
 }
 
@@ -1152,6 +1246,33 @@ function IndicatorEditor({
             </label>
           ))}
           {!inputs.length && !showSource ? <p className="hint">No configurable inputs.</p> : null}
+          <label className="row">
+            Pane
+            <select
+              value={ind.pane}
+              onChange={(e) => engine?.updateIndicator(ind.id, { pane: e.target.value as IndicatorInstance["pane"] })}
+            >
+              <option value="main">Overlay</option>
+              <option value="rsi">RSI pane</option>
+              <option value="macd">MACD pane</option>
+              <option value="stoch">Stoch pane</option>
+              <option value="atr">ATR pane</option>
+              <option value="volume">Volume</option>
+            </select>
+          </label>
+          {(ind.kind === "rsi" || ind.kind === "stoch" || (ind.levels && ind.levels.length)) ? (
+            <label className="row">
+              Levels
+              <input
+                type="text"
+                value={(ind.levels ?? (ind.kind === "rsi" ? [30, 50, 70] : ind.kind === "stoch" ? [20, 50, 80] : [])).join(", ")}
+                onChange={(e) => {
+                  const levels = e.target.value.split(/[\s,]+/).map(Number).filter((n) => Number.isFinite(n));
+                  engine?.updateIndicator(ind.id, { levels });
+                }}
+              />
+            </label>
+          ) : null}
         </div>
       ) : null}
       {tab === "Style" ? (
