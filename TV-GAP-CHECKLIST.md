@@ -57,7 +57,7 @@ Forge already mirrors most **chrome**. Gaps are mostly **depth, data, and runtim
 | GAP-11 | PARTIAL | IND tabs: Technicals / Financials / Community / Invite-only / Patterns | Financials + Patterns runnable; Community as importable scripts later |
 | GAP-12 | PARTIAL | Indicator Inputs tab | Per-study typed inputs matching TV (source, length, smoothing, …) |
 | GAP-13 | PARTIAL | Indicator Style tab | Every plot: color, width, style, precision, price line, track price |
-| GAP-14 | PARTIAL | Indicator Visibility tab | Enforce per-timeframe visibility (not a hint) |
+| GAP-14 | PARTIAL | Indicator Visibility tab | Per-TF buckets wired + enforced in paint | Polish UX to match TV Visibility tab denser layout |
 | GAP-15 | PARTIAL | Indicator source OHLC/HL2/HLC3/OHLC4 | Wire through all studies, not a subset |
 | GAP-16 | PARTIAL | Pine Editor add-to-chart | Beyond 4-keyword mapping; show compile errors |
 | GAP-17 | PARTIAL | Pine logs / profiler | Tie logs to real runtime; drop static stub lines |
