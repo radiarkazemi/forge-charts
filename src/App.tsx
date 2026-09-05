@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createAlert,
+  dispatchWebhook,
   evaluateAlerts,
   loadAlerts,
   saveAlerts,
@@ -153,9 +154,32 @@ export default function App() {
   const onPriceTick = (symbol: SymbolInfo, close: number) => {
     const prev = prevCloseRef.current;
     prevCloseRef.current = close;
-    const { alerts: next, fires } = evaluateAlerts(alertsRef.current, symbol.ticker, prev, close);
+    const eng = engineRef.current;
+    const drawingLevels: Record<string, number> = {};
+    const indicatorValues: Record<string, number> = {};
+    if (eng) {
+      for (const d of eng.getDrawings()) {
+        const px = d.points[0]?.price;
+        if (px != null && Number.isFinite(px)) drawingLevels[d.id] = px;
+      }
+      const idx = eng.getBars().length - 1;
+      if (idx >= 0) {
+        for (const row of eng.indicatorValuesAt(idx)) {
+          const v = row.values.find((x) => x != null);
+          if (v != null) indicatorValues[row.id] = v;
+        }
+      }
+    }
+    const { alerts: next, fires } = evaluateAlerts(alertsRef.current, {
+      symbol: symbol.ticker,
+      prevClose: prev,
+      nextClose: close,
+      drawingLevels,
+      indicatorValues,
+    });
     if (fires.length) {
       setAlerts(next);
+      for (const fire of fires) dispatchWebhook(fire);
       setToast(fires[0]!);
       if (showWidgets) setWidget("alerts");
     }
@@ -570,11 +594,27 @@ export default function App() {
 
   useEffect(() => {
     if (!engine) return;
-    let last = engine.getDrawings().map((d) => d.id).join(",");
+    const fingerprint = () =>
+      JSON.stringify(
+        engine.getDrawings().map((d) => ({
+          id: d.id,
+          kind: d.kind,
+          color: d.color,
+          lineWidth: d.lineWidth,
+          lineStyle: d.lineStyle,
+          visible: d.visible,
+          locked: d.locked,
+          text: d.text,
+          points: d.points,
+          visibility: d.visibility,
+          fib: d.fib,
+        })),
+      );
+    let last = fingerprint();
     return engine.subscribe(() => {
-      const ids = engine.getDrawings().map((d) => d.id).join(",");
-      if (ids === last) return;
-      last = ids;
+      const next = fingerprint();
+      if (next === last) return;
+      last = next;
       syncDrawingsAcrossPanes(engine);
     });
   }, [engine, syncDrawingsAcrossPanes]);
@@ -854,6 +894,7 @@ export default function App() {
             interval: input.interval as Interval | undefined,
             drawingId: alertDraft?.drawingId,
             drawingKind: alertDraft?.drawingKind,
+            webhookUrl: input.webhookUrl,
           });
           setAlertDraft(null);
           setAlerts((prev) => [alert, ...prev]);

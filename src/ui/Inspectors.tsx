@@ -17,7 +17,8 @@ import type {
   LineStyle,
 } from "../engine/types";
 import type { LineEnd } from "../engine/types";
-import { DEFAULT_DRAWING_VISIBILITY } from "../engine/types";
+import { DEFAULT_DRAWING_VISIBILITY,
+  DEFAULT_INDICATOR_VISIBILITY } from "../engine/types";
 import {
   createDrawingTemplate,
   drawingTemplateSummary,
@@ -1322,11 +1323,27 @@ function IndicatorEditor({
       ) : null}
       {tab === "Visibility" ? (
         <div className="ind-tab-panel">
-          <p className="hint">Per-timeframe visibility will mirror TradingView&apos;s Visibility tab in a later pass.</p>
           <label className="row check-row">
             <input type="checkbox" checked={ind.visible} onChange={() => engine?.toggleIndicator(ind.id)} />
             Visible on chart
           </label>
+          {VIS_ROWS.map((row) => {
+            const vis = { ...DEFAULT_INDICATOR_VISIBILITY, ...ind.visibility };
+            return (
+              <label key={row.key} className="row check-row">
+                <input
+                  type="checkbox"
+                  checked={vis[row.key]}
+                  onChange={() =>
+                    engine?.updateIndicator(ind.id, {
+                      visibility: { ...vis, [row.key]: !vis[row.key] },
+                    })
+                  }
+                />
+                {row.label}
+              </label>
+            );
+          })}
         </div>
       ) : null}
       <div className="ind-actions">

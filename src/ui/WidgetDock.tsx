@@ -100,6 +100,9 @@ export function WidgetDock({
                     <button title="Hide/show" onClick={() => engine?.toggleIndicator(ind.id)}>
                       👁
                     </button>
+                    <button title="Settings" onClick={() => engine?.selectIndicator(ind.id)}>
+                      ⚙
+                    </button>
                     <button onClick={() => engine?.removeIndicator(ind.id)}>×</button>
                   </span>
                 </li>
@@ -154,6 +157,29 @@ export function WidgetDock({
                 <dt>Time</dt>
                 <dd>{new Date(bar.time * 1000).toUTCString()}</dd>
               </div>
+              {(engine
+                ? engine.indicatorValuesAt(
+                    Math.max(
+                      0,
+                      (() => {
+                        const bars = engine.getBars();
+                        const hit = bars.findIndex((b) => b.time === bar.time);
+                        return hit >= 0 ? hit : bars.length - 1;
+                      })(),
+                    ),
+                  )
+                : []
+              ).flatMap((row) =>
+                row.values.map((v, vi) => (
+                  <div key={`${row.id}-${vi}`}>
+                    <dt>
+                      {row.label}
+                      {row.values.length > 1 ? ` ${vi + 1}` : ""}
+                    </dt>
+                    <dd>{v == null ? "—" : formatPrice(v, snap?.symbol.pricePrecision ?? 2)}</dd>
+                  </div>
+                )),
+              )}
             </dl>
             ) : (
               <ul className="objects">
