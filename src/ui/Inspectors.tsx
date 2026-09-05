@@ -3,6 +3,7 @@ import { indicatorInputs, indicatorTitle, toolLabelForDraw } from "../catalog";
 import type { ChartEngine } from "../engine/ChartEngine";
 import {
   defaultFibStyleForKind,
+  defaultPatternStyle,
   formatFibRatio,
   resolveFibStyleForKind,
 } from "../engine/drawings";
@@ -240,6 +241,8 @@ function DrawingPropertiesDialog({ engine, drawing }: { engine: ChartEngine | nu
         <div className="ind-tab-panel">
           {FIB_STYLE_KINDS.has(drawing.kind) ? (
             <FibRetraceStylePanel engine={engine} drawing={drawing} />
+          ) : PATTERN_STYLE_KINDS.has(drawing.kind) ? (
+            <PatternStylePanel engine={engine} drawing={drawing} />
           ) : (
             <>
               <label className="row">
@@ -411,6 +414,139 @@ const FIB_STYLE_KINDS = new Set([
   "gannsquarefixed",
   "gannfan",
 ]);
+
+const PATTERN_STYLE_KINDS = new Set([
+  "xabcd",
+  "cypher",
+  "abcd",
+  "headshoulders",
+  "trianglepattern",
+  "threedrives",
+  "elliottimpulse",
+  "elliottcorrection",
+  "elliotttriangle",
+  "elliottdouble",
+  "elliotttriple",
+  "cycliclines",
+  "timecycles",
+  "sineline",
+  "long",
+  "short",
+]);
+
+function PatternStylePanel({ engine, drawing }: { engine: ChartEngine | null; drawing: Drawing }) {
+  const fib = resolveFibStyleForKind(drawing);
+  const resetDefaults = () => defaultPatternStyle(drawing.kind);
+  const patchFib = (next: Partial<FibRetraceStyle>) => {
+    engine?.updateDrawing(drawing.id, { fib: { ...fib, ...next } });
+  };
+  const isPosition = drawing.kind === "long" || drawing.kind === "short";
+  const isCycle = drawing.kind === "cycliclines" || drawing.kind === "timecycles" || drawing.kind === "sineline";
+  return (
+    <div className="fib-style-panel">
+      <label className="row check-row">
+        <input
+          type="checkbox"
+          checked={fib.showBackground}
+          onChange={() => patchFib({ showBackground: !fib.showBackground })}
+        />
+        {isPosition ? "Risk / reward fill" : "Background fill"}
+      </label>
+      <label className="row check-row">
+        <input type="checkbox" checked={fib.showLevels} onChange={() => patchFib({ showLevels: !fib.showLevels })} />
+        {isPosition ? "Entry labels" : isCycle ? "Cycle / phase labels" : "Point labels"}
+      </label>
+      <label className="row check-row">
+        <input type="checkbox" checked={fib.showPrices} onChange={() => patchFib({ showPrices: !fib.showPrices })} />
+        {isPosition ? "Prices & RR" : isCycle ? "Period readout" : "Leg ratios"}
+      </label>
+      {(drawing.kind.startsWith("elliott") || drawing.kind === "sineline") && (
+        <label className="row check-row">
+          <input
+            type="checkbox"
+            checked={fib.showTrendLine}
+            onChange={() => patchFib({ showTrendLine: !fib.showTrendLine })}
+          />
+          {drawing.kind === "sineline" ? "Baseline" : "Guide / channel"}
+        </label>
+      )}
+      {isCycle && (
+        <>
+          <label className="row check-row">
+            <input
+              type="checkbox"
+              checked={fib.extendLeft}
+              onChange={() => patchFib({ extendLeft: !fib.extendLeft })}
+            />
+            Extend left
+          </label>
+          <label className="row check-row">
+            <input
+              type="checkbox"
+              checked={fib.extendRight}
+              onChange={() => patchFib({ extendRight: !fib.extendRight })}
+            />
+            Extend right
+          </label>
+        </>
+      )}
+      <label className="row">
+        Line color
+        <span className="swatch-row">
+          {PALETTE.map((c) => (
+            <button
+              key={c}
+              type="button"
+              className={fib.trendColor === c ? "swatch on" : "swatch"}
+              style={{ background: c }}
+              onClick={() => patchFib({ trendColor: c })}
+            />
+          ))}
+        </span>
+      </label>
+      <label className="row">
+        Thickness
+        <select value={fib.trendWidth} onChange={(e) => patchFib({ trendWidth: Number(e.target.value) })}>
+          {WIDTHS.map((w) => (
+            <option key={w} value={w}>
+              {w}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="row">
+        Line style
+        <span className="style-row">
+          {STYLES.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className={fib.trendStyle === s.id || fib.levelsStyle === s.id ? "on" : ""}
+              onClick={() => patchFib({ trendStyle: s.id, levelsStyle: s.id })}
+            >
+              {s.label}
+            </button>
+          ))}
+        </span>
+      </label>
+      <button
+        type="button"
+        className="fib-reset"
+        onClick={() => engine?.updateDrawing(drawing.id, { fib: resetDefaults() })}
+      >
+        Reset to Supercharts defaults
+      </button>
+      <label className="row check-row">
+        <input
+          type="checkbox"
+          checked={!!drawing.locked}
+          onChange={() => engine?.updateDrawing(drawing.id, { locked: !drawing.locked })}
+        />
+        Locked
+      </label>
+    </div>
+  );
+}
 
 function FibRetraceStylePanel({ engine, drawing }: { engine: ChartEngine | null; drawing: Drawing }) {
   const fib = resolveFibStyleForKind(drawing);

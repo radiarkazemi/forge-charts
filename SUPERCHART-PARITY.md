@@ -120,26 +120,26 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 
 | ID | Tool | Forge |
 | --- | --- | --- |
-| D-PA-01 | XABCD Pattern | PARTIAL |
-| D-PA-02 | Cypher Pattern | PARTIAL |
-| D-PA-03 | Head and Shoulders | PARTIAL |
-| D-PA-04 | ABCD Pattern | PARTIAL |
-| D-PA-05 | Triangle Pattern | PARTIAL |
-| D-PA-06 | Three Drives Pattern | PARTIAL |
-| D-PA-07 | Elliott Impulse Wave (12345) | PARTIAL |
-| D-PA-08 | Elliott Correction Wave (ABC) | PARTIAL |
-| D-PA-09 | Elliott Triangle Wave (ABCDE) | PARTIAL |
-| D-PA-10 | Elliott Double Combo (WXY) | PARTIAL |
-| D-PA-11 | Elliott Triple Combo (WXYXZ) | PARTIAL |
-| D-PA-12 | Cyclic Lines | PARTIAL |
-| D-PA-13 | Time Cycles | PARTIAL |
-| D-PA-14 | Sine Line | PARTIAL |
+| D-PA-01 | XABCD Pattern | MATCH | Filled XA/AB/BC triangles; AB/XA·BC/AB·CD/BC·XB/XA·XD/XA ratios; Style fill/labels/ratios |
+| D-PA-02 | Cypher Pattern | MATCH | Same XABCD geometry with Cypher fills + measured ratios; Style tab |
+| D-PA-03 | Head and Shoulders | MATCH | LS–N–H–N–RS labels; neckline; shoulder fill; Style tab |
+| D-PA-04 | ABCD Pattern | MATCH | Dual-triangle fill; AB / BC/AB / CD/AB ratios; Style tab |
+| D-PA-05 | Triangle Pattern | MATCH | A–B–C–D closed triangle fills; Style tab |
+| D-PA-06 | Three Drives Pattern | MATCH | 0–6 labels; drive ratio labels; Style tab |
+| D-PA-07 | Elliott Impulse Wave (12345) | MATCH | 0–5 labels; 0–2 / 1–3 channel guides; 3/1 & 5/1 ratios; Style tab |
+| D-PA-08 | Elliott Correction Wave (ABC) | MATCH | 4-point 0–A–B–C; B/A & C/A ratios; Style tab |
+| D-PA-09 | Elliott Triangle Wave (ABCDE) | MATCH | A–E labels + fill; Style tab |
+| D-PA-10 | Elliott Double Combo (WXY) | MATCH | W–X–Y labels + fill; Style tab |
+| D-PA-11 | Elliott Triple Combo (WXYXZ) | MATCH | W–X–Y–X–Z labels + fill; Style tab |
+| D-PA-12 | Cyclic Lines | MATCH | Period grid both directions; labels; extend L/R; Style tab |
+| D-PA-13 | Time Cycles | MATCH | Numbered cycle lines + period readout; Style tab |
+| D-PA-14 | Sine Line | MATCH | Baseline + multi-period sine; extend; Style tab |
 
 ### 2.5 Prediction and measurement
 
 | ID | Tool | Forge |
 | --- | --- | --- |
-| D-PR-01 | Long Position | PARTIAL |
+| D-PR-01 | Long Position | MATCH | Entry / target / stop bands; RR + % labels; Style fill/labels/prices |
 | D-PR-02 | Short Position | PARTIAL |
 | D-PR-03 | Forecast | PARTIAL |
 | D-PR-04 | Date Range | PARTIAL |
@@ -248,7 +248,7 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | DI-19 | Stats on line (price, bars, %, angle, distance) | PARTIAL |
 | DI-20 | Fib levels: each ratio on/off, color, width, style, extend, reverse, fill | MATCH | Style tab: per-level toggle/ratio/color + extend / reverse / background / labels |
 
-Next drawing-parameter pass is **per tool** after DI-* is MATCH. **D-FI-01…D-FI-19** (Fib, Pitchfork, and Gann tools through Gann Square Fixed) use Supercharts default levels, geometry, labels, and Style-tab controls. Next open drawing batch: **D-PA-01** XABCD Pattern.
+Next drawing-parameter pass is **per tool** after DI-* is MATCH. **D-FI-01…D-FI-19** and **D-PA-01…D-PA-14** plus **D-PR-01** Long Position use Supercharts defaults (geometry, fills, ratio/wave labels, Style-tab controls). Next open drawing batch: **D-PR-02** Short Position.
 
 ---
 
