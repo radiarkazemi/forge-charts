@@ -114,7 +114,7 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | D-FI-16 | Gann Box | MATCH | Grid at 0 / 0.25 / 0.333 / 0.5 / 0.667 / 0.75 / 1 + diagonals; Style tab |
 | D-FI-17 | Gann Square | MATCH | Square-constrained Gann grid + diagonals; Style tab |
 | D-FI-18 | Gann Fan | MATCH | Fan rays 1/8…8/1 with 1/1 emphasis; labels; Style tab |
-| D-FI-19 | Gann Square Fixed | PARTIAL |
+| D-FI-19 | Gann Square Fixed | MATCH | Price/bar scaleRatio locked at creation; 0–5 unit grid; fans; arcs; ranges/ratio labels; Style tab |
 
 ### 2.4 Patterns
 
@@ -248,7 +248,7 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | DI-19 | Stats on line (price, bars, %, angle, distance) | PARTIAL |
 | DI-20 | Fib levels: each ratio on/off, color, width, style, extend, reverse, fill | MATCH | Style tab: per-level toggle/ratio/color + extend / reverse / background / labels |
 
-Next drawing-parameter pass is **per tool** after DI-* is MATCH. **D-FI-01…D-FI-18** (Fib, Pitchfork, and Gann tools through Gann Fan) use Supercharts default levels, geometry, labels, and Style-tab controls. Next open Fib/Gann item: **D-FI-19** Gann Square Fixed.
+Next drawing-parameter pass is **per tool** after DI-* is MATCH. **D-FI-01…D-FI-19** (Fib, Pitchfork, and Gann tools through Gann Square Fixed) use Supercharts default levels, geometry, labels, and Style-tab controls. Next open drawing batch: **D-PA-01** XABCD Pattern.
 
 ---
 
