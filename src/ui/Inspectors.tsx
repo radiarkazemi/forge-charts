@@ -152,9 +152,21 @@ export function ChartInspectors({
                 </span>
                 {moreInd === ind.id ? (
                   <div className="legend-more" onClick={(e) => e.stopPropagation()}>
+                    <button type="button" onClick={() => { engine?.selectIndicator(ind.id); setIndOpen(ind.id); setMoreInd(null); }}>Settings…</button>
+                    <button type="button" onClick={() => { engine?.reorderIndicator(ind.id, "forward"); setMoreInd(null); }}>Move forward</button>
+                    <button type="button" onClick={() => { engine?.reorderIndicator(ind.id, "backward"); setMoreInd(null); }}>Move backward</button>
                     <button type="button" onClick={() => { engine?.reorderIndicator(ind.id, "front"); setMoreInd(null); }}>Bring to front</button>
                     <button type="button" onClick={() => { engine?.reorderIndicator(ind.id, "back"); setMoreInd(null); }}>Send to back</button>
                     <button type="button" onClick={() => { engine?.cloneIndicator(ind.id); setMoreInd(null); }}>Clone</button>
+                    <button type="button" onClick={() => {
+                      const bars = engine?.getBars?.() ?? [];
+                      const rows = engine?.indicatorValuesAt?.(Math.max(0, bars.length - 1)) ?? [];
+                      const row = rows.find((r) => r.id === ind.id);
+                      const v = row?.values.find((x) => x != null);
+                      if (v != null) void navigator.clipboard?.writeText(String(v));
+                      setMoreInd(null);
+                    }}>Copy value</button>
+                    <button type="button" onClick={() => { engine?.resetIndicatorDefaults(ind.id); setMoreInd(null); }}>Apply default</button>
                     {ind.pane !== "main" && ind.pane !== "volume" ? (
                       <>
                         <button type="button" onClick={() => { engine?.setMaximizedPane(snap.maximizedPaneId === ind.id ? null : ind.id); setMoreInd(null); }}>
@@ -1319,6 +1331,40 @@ function IndicatorEditor({
               ))}
             </select>
           </label>
+          <label className="row">
+            Precision
+            <select
+              value={ind.precision ?? ""}
+              onChange={(e) =>
+                engine?.updateIndicator(ind.id, {
+                  precision: e.target.value === "" ? undefined : Number(e.target.value),
+                })
+              }
+            >
+              <option value="">Default</option>
+              {[0, 1, 2, 3, 4, 5, 8].map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="row check-row">
+            <input
+              type="checkbox"
+              checked={!!ind.priceLine}
+              onChange={() => engine?.updateIndicator(ind.id, { priceLine: !ind.priceLine })}
+            />
+            Price line
+          </label>
+          <label className="row check-row">
+            <input
+              type="checkbox"
+              checked={!!ind.trackPrice}
+              onChange={() => engine?.updateIndicator(ind.id, { trackPrice: !ind.trackPrice })}
+            />
+            Track price
+          </label>
         </div>
       ) : null}
       {tab === "Visibility" ? (
@@ -1327,27 +1373,55 @@ function IndicatorEditor({
             <input type="checkbox" checked={ind.visible} onChange={() => engine?.toggleIndicator(ind.id)} />
             Visible on chart
           </label>
-          {VIS_ROWS.map((row) => {
-            const vis = { ...DEFAULT_INDICATOR_VISIBILITY, ...ind.visibility };
-            return (
-              <label key={row.key} className="row check-row">
-                <input
-                  type="checkbox"
-                  checked={vis[row.key]}
-                  onChange={() =>
-                    engine?.updateIndicator(ind.id, {
-                      visibility: { ...vis, [row.key]: !vis[row.key] },
-                    })
-                  }
-                />
-                {row.label}
-              </label>
-            );
-          })}
+          <div className="vis-actions">
+            <button
+              type="button"
+              onClick={() =>
+                engine?.updateIndicator(ind.id, {
+                  visibility: { seconds: true, minutes: true, hours: true, daily: true, weekly: true, monthly: true },
+                })
+              }
+            >
+              All intervals
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                engine?.updateIndicator(ind.id, {
+                  visibility: { seconds: false, minutes: false, hours: false, daily: false, weekly: false, monthly: false },
+                })
+              }
+            >
+              None
+            </button>
+          </div>
+          <div className="vis-grid">
+            {VIS_ROWS.map((row) => {
+              const vis = { ...DEFAULT_INDICATOR_VISIBILITY, ...ind.visibility };
+              return (
+                <label key={row.key} className="row check-row">
+                  <input
+                    type="checkbox"
+                    checked={vis[row.key]}
+                    onChange={() =>
+                      engine?.updateIndicator(ind.id, {
+                        visibility: { ...vis, [row.key]: !vis[row.key] },
+                      })
+                    }
+                  />
+                  {row.label}
+                </label>
+              );
+            })}
+          </div>
+          <p className="hint">Buckets follow the active chart interval family (seconds → monthly).</p>
         </div>
       ) : null}
       <div className="ind-actions">
         <button onClick={() => engine?.toggleIndicator(ind.id)}>{ind.visible ? "Hide" : "Show"}</button>
+        <button type="button" onClick={() => engine?.resetIndicatorDefaults(ind.id)}>
+          Defaults
+        </button>
         <button
           className="danger"
           onClick={() => {

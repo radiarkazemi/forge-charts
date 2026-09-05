@@ -54,12 +54,13 @@ export function hma(values: number[], period: number): (number | null)[] {
   return smoothed.map((v, i) => (Number.isFinite(raw[i]) ? v : null));
 }
 
-export function vwap(bars: Bar[]): (number | null)[] {
+/** Typical-price VWAP by default; optional `source` replaces TP (GAP-15). */
+export function vwap(bars: Bar[], source?: number[]): (number | null)[] {
   const out: (number | null)[] = Array(bars.length).fill(null);
   let pv = 0;
   let vol = 0;
   for (let i = 0; i < bars.length; i++) {
-    const tp = (bars[i].high + bars[i].low + bars[i].close) / 3;
+    const tp = source?.[i] ?? (bars[i].high + bars[i].low + bars[i].close) / 3;
     pv += tp * bars[i].volume;
     vol += bars[i].volume;
     out[i] = vol ? pv / vol : null;
@@ -67,11 +68,11 @@ export function vwap(bars: Bar[]): (number | null)[] {
   return out;
 }
 
-export function atr(bars: Bar[], period = 14): (number | null)[] {
+export function atr(bars: Bar[], period = 14, source?: number[]): (number | null)[] {
   const out: (number | null)[] = Array(bars.length).fill(null);
   const trs: number[] = [];
   for (let i = 0; i < bars.length; i++) {
-    const prev = bars[i - 1]?.close ?? bars[i].open;
+    const prev = source?.[i - 1] ?? bars[i - 1]?.close ?? (source?.[i] ?? bars[i].open);
     trs.push(Math.max(bars[i].high - bars[i].low, Math.abs(bars[i].high - prev), Math.abs(bars[i].low - prev)));
   }
   const smoothed = ema(trs, period);
@@ -79,7 +80,7 @@ export function atr(bars: Bar[], period = 14): (number | null)[] {
   return out;
 }
 
-export function stoch(bars: Bar[], kPeriod = 14, dPeriod = 3) {
+export function stoch(bars: Bar[], kPeriod = 14, dPeriod = 3, source?: number[]) {
   const k: (number | null)[] = Array(bars.length).fill(null);
   for (let i = kPeriod - 1; i < bars.length; i++) {
     let hi = -Infinity;
@@ -88,14 +89,15 @@ export function stoch(bars: Bar[], kPeriod = 14, dPeriod = 3) {
       hi = Math.max(hi, bars[i - j].high);
       lo = Math.min(lo, bars[i - j].low);
     }
-    k[i] = hi === lo ? 50 : ((bars[i].close - lo) / (hi - lo)) * 100;
+    const px = source?.[i] ?? bars[i].close;
+    k[i] = hi === lo ? 50 : ((px - lo) / (hi - lo)) * 100;
   }
   const compact = k.map((v) => v ?? 50);
   const d = sma(compact, dPeriod).map((v, i) => (k[i] == null ? null : v));
   return { k, d };
 }
 
-export function ichimoku(bars: Bar[], tenkan = 9, kijun = 26, senkou = 52) {
+export function ichimoku(bars: Bar[], tenkan = 9, kijun = 26, senkou = 52, source?: number[]) {
   const mid = (period: number, i: number) => {
     let hi = -Infinity;
     let lo = Infinity;
@@ -124,12 +126,12 @@ export function ichimoku(bars: Bar[], tenkan = 9, kijun = 26, senkou = 52) {
       if (target < bars.length) spanB[target] = b;
     }
     const lag = i - kijun;
-    if (lag >= 0) lagging[lag] = bars[i].close;
+    if (lag >= 0) lagging[lag] = source?.[i] ?? bars[i].close;
   }
   return { conversion, base, spanA, spanB, lagging };
 }
 
-export function supertrend(bars: Bar[], period = 10, mult = 3) {
+export function supertrend(bars: Bar[], period = 10, mult = 3, source?: number[]) {
   const atrLine = atr(bars, period);
   const line: (number | null)[] = Array(bars.length).fill(null);
   const dir: (number | null)[] = Array(bars.length).fill(null);
@@ -142,15 +144,17 @@ export function supertrend(bars: Bar[], period = 10, mult = 3) {
     const mid = (bars[i].high + bars[i].low) / 2;
     const bu = mid + mult * a;
     const bl = mid - mult * a;
+    const px = source?.[i] ?? bars[i].close;
+    const prevPx = source?.[i - 1] ?? bars[i - 1]?.close;
     if (i === 0 || atrLine[i - 1] == null) {
       upper = bu;
       lower = bl;
-      trend = bars[i].close >= mid ? 1 : -1;
+      trend = px >= mid ? 1 : -1;
     } else {
-      lower = bl > lower || bars[i - 1].close < lower ? bl : lower;
-      upper = bu < upper || bars[i - 1].close > upper ? bu : upper;
-      if (trend === 1 && bars[i].close < lower) trend = -1;
-      else if (trend === -1 && bars[i].close > upper) trend = 1;
+      lower = bl > lower || (prevPx != null && prevPx < lower) ? bl : lower;
+      upper = bu < upper || (prevPx != null && prevPx > upper) ? bu : upper;
+      if (trend === 1 && px < lower) trend = -1;
+      else if (trend === -1 && px > upper) trend = 1;
     }
     line[i] = trend === 1 ? lower : upper;
     dir[i] = trend;
@@ -158,10 +162,12 @@ export function supertrend(bars: Bar[], period = 10, mult = 3) {
   return { line, dir };
 }
 
-export function psar(bars: Bar[], step = 0.02, max = 0.2): (number | null)[] {
+export function psar(bars: Bar[], step = 0.02, max = 0.2, source?: number[]): (number | null)[] {
   const out: (number | null)[] = Array(bars.length).fill(null);
   if (bars.length < 2) return out;
-  let bull = bars[1].close >= bars[0].close;
+  const px0 = source?.[0] ?? bars[0].close;
+  const px1 = source?.[1] ?? bars[1].close;
+  let bull = px1 >= px0;
   let af = step;
   let ep = bull ? bars[0].high : bars[0].low;
   let sar = bull ? bars[0].low : bars[0].high;
@@ -275,7 +281,7 @@ export function pivots(bars: Bar[]) {
   return { p, r1, s1, r2, s2 };
 }
 
-export function obv(bars: Bar[]): (number | null)[] {
+export function obv(bars: Bar[], source?: number[]): (number | null)[] {
   const out: (number | null)[] = Array(bars.length).fill(null);
   let v = 0;
   for (let i = 0; i < bars.length; i++) {
@@ -283,18 +289,21 @@ export function obv(bars: Bar[]): (number | null)[] {
       out[i] = 0;
       continue;
     }
-    if (bars[i].close > bars[i - 1].close) v += bars[i].volume;
-    else if (bars[i].close < bars[i - 1].close) v -= bars[i].volume;
+    const cur = source?.[i] ?? bars[i].close;
+    const prev = source?.[i - 1] ?? bars[i - 1].close;
+    if (cur > prev) v += bars[i].volume;
+    else if (cur < prev) v -= bars[i].volume;
     out[i] = v;
   }
   return out;
 }
 
-export function cmf(bars: Bar[], period = 20): (number | null)[] {
+export function cmf(bars: Bar[], period = 20, source?: number[]): (number | null)[] {
   const out: (number | null)[] = Array(bars.length).fill(null);
-  const mfv = bars.map((b) => {
+  const mfv = bars.map((b, i) => {
     const range = b.high - b.low;
-    const mfm = range === 0 ? 0 : (b.close - b.low - (b.high - b.close)) / range;
+    const px = source?.[i] ?? b.close;
+    const mfm = range === 0 ? 0 : (px - b.low - (b.high - px)) / range;
     return mfm * b.volume;
   });
   for (let i = period - 1; i < bars.length; i++) {
@@ -309,8 +318,8 @@ export function cmf(bars: Bar[], period = 20): (number | null)[] {
   return out;
 }
 
-export function cci(bars: Bar[], period = 20): (number | null)[] {
-  const tp = bars.map((b) => (b.high + b.low + b.close) / 3);
+export function cci(bars: Bar[], period = 20, source?: number[]): (number | null)[] {
+  const tp = source ?? bars.map((b) => (b.high + b.low + b.close) / 3);
   const out: (number | null)[] = Array(bars.length).fill(null);
   const avg = sma(tp, period);
   for (let i = period - 1; i < bars.length; i++) {
@@ -322,7 +331,7 @@ export function cci(bars: Bar[], period = 20): (number | null)[] {
   return out;
 }
 
-export function willr(bars: Bar[], period = 14): (number | null)[] {
+export function willr(bars: Bar[], period = 14, source?: number[]): (number | null)[] {
   const out: (number | null)[] = Array(bars.length).fill(null);
   for (let i = period - 1; i < bars.length; i++) {
     let hi = -Infinity;
@@ -331,7 +340,8 @@ export function willr(bars: Bar[], period = 14): (number | null)[] {
       hi = Math.max(hi, bars[i - j].high);
       lo = Math.min(lo, bars[i - j].low);
     }
-    out[i] = hi === lo ? -50 : ((hi - bars[i].close) / (hi - lo)) * -100;
+    const px = source?.[i] ?? bars[i].close;
+    out[i] = hi === lo ? -50 : ((hi - px) / (hi - lo)) * -100;
   }
   return out;
 }

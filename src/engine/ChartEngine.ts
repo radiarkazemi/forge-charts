@@ -583,7 +583,21 @@ export class ChartEngine {
     patch: Partial<
       Pick<
         IndicatorInstance,
-        "params" | "color" | "visible" | "lineWidth" | "lineStyle" | "source" | "levels" | "zIndex" | "scaleSide" | "collapsed" | "pane" | "visibility"
+        | "params"
+        | "color"
+        | "visible"
+        | "lineWidth"
+        | "lineStyle"
+        | "source"
+        | "levels"
+        | "zIndex"
+        | "scaleSide"
+        | "collapsed"
+        | "pane"
+        | "visibility"
+        | "precision"
+        | "priceLine"
+        | "trackPrice"
       >
     >,
   ): void {
@@ -600,6 +614,24 @@ export class ChartEngine {
     );
     this.emit();
     this.draw();
+  }
+
+  /** Reset inputs/style to study defaults (GAP-19 Apply default). */
+  resetIndicatorDefaults(id: string): void {
+    const ind = this.indicators.find((i) => i.id === id);
+    if (!ind) return;
+    this.updateIndicator(id, {
+      params: defaultParamsForKind(ind.kind),
+      levels: defaultLevelsForKind(ind.kind),
+      source: "close",
+      lineWidth: 1,
+      lineStyle: "solid",
+      precision: undefined,
+      priceLine: false,
+      trackPrice: false,
+      visibility: { ...DEFAULT_INDICATOR_VISIBILITY },
+      visible: true,
+    });
   }
 
   cloneIndicator(id: string): string | null {
@@ -1654,15 +1686,15 @@ export class ChartEngine {
     if (ind.kind === "smma") return { lines: [smma(c, ind.params[0] ?? 20)] };
     if (ind.kind === "vwma") return { lines: [vwma(c, vols, ind.params[0] ?? 20)] };
     if (ind.kind === "hma") return { lines: [hma(c, ind.params[0] ?? 20)] };
-    if (ind.kind === "vwap") return { lines: [vwap(src)] };
+    if (ind.kind === "vwap") return { lines: [vwap(src, source === "hlc3" ? undefined : c)] };
     if (ind.kind === "bb") {
       const bb = bollinger(c, ind.params[0] ?? 20, ind.params[1] ?? 2);
       return { lines: [bb.upper, bb.mid, bb.lower] };
     }
     if (ind.kind === "rsi") return { lines: [rsi(c, ind.params[0] ?? 14)] };
-    if (ind.kind === "atr") return { lines: [atr(src, ind.params[0] ?? 14)] };
+    if (ind.kind === "atr") return { lines: [atr(src, ind.params[0] ?? 14, c)] };
     if (ind.kind === "stoch") {
-      const s = stoch(src, ind.params[0] ?? 14, ind.params[1] ?? 3);
+      const s = stoch(src, ind.params[0] ?? 14, ind.params[1] ?? 3, c);
       return { lines: [s.k, s.d] };
     }
     if (ind.kind === "macd") {
@@ -1670,12 +1702,12 @@ export class ChartEngine {
       return { lines: [m.line, m.signal], hist: m.hist };
     }
     if (ind.kind === "ichimoku") {
-      const cloud = ichimoku(src, ind.params[0] ?? 9, ind.params[1] ?? 26, ind.params[2] ?? 52);
+      const cloud = ichimoku(src, ind.params[0] ?? 9, ind.params[1] ?? 26, ind.params[2] ?? 52, c);
       return { lines: [cloud.conversion, cloud.base, cloud.spanA, cloud.spanB, cloud.lagging] };
     }
-    if (ind.kind === "psar") return { lines: [psar(src, ind.params[0] ?? 0.02, ind.params[1] ?? 0.2)] };
+    if (ind.kind === "psar") return { lines: [psar(src, ind.params[0] ?? 0.02, ind.params[1] ?? 0.2, c)] };
     if (ind.kind === "supertrend") {
-      const s = supertrend(src, ind.params[0] ?? 10, ind.params[1] ?? 3);
+      const s = supertrend(src, ind.params[0] ?? 10, ind.params[1] ?? 3, c);
       return { lines: [s.line] };
     }
     if (ind.kind === "adx") {
@@ -1686,10 +1718,10 @@ export class ChartEngine {
       const s = stochRsi(c, ind.params[0] ?? 14, ind.params[2] ?? 3, ind.params[3] ?? 3);
       return { lines: [s.k, s.d] };
     }
-    if (ind.kind === "cci") return { lines: [cci(src, ind.params[0] ?? 20)] };
-    if (ind.kind === "willr") return { lines: [willr(src, ind.params[0] ?? 14)] };
-    if (ind.kind === "obv") return { lines: [obv(src)] };
-    if (ind.kind === "cmf") return { lines: [cmf(src, ind.params[0] ?? 20)] };
+    if (ind.kind === "cci") return { lines: [cci(src, ind.params[0] ?? 20, source === "hlc3" ? undefined : c)] };
+    if (ind.kind === "willr") return { lines: [willr(src, ind.params[0] ?? 14, c)] };
+    if (ind.kind === "obv") return { lines: [obv(src, c)] };
+    if (ind.kind === "cmf") return { lines: [cmf(src, ind.params[0] ?? 20, c)] };
     if (ind.kind === "donchian") {
       const d = donchian(src, ind.params[0] ?? 20);
       return { lines: [d.upper, d.mid, d.lower] };
@@ -2161,6 +2193,57 @@ export class ChartEngine {
     });
   }
 
+  
+  private paintIndicatorPriceGuides(
+    ind: IndicatorInstance,
+    rect: Rect,
+    bars: Bar[],
+    range: { min: number; max: number },
+    lines: (number | null)[][],
+  ): void {
+    if (!ind.priceLine && !ind.trackPrice) return;
+    const primary = lines[0];
+    if (!primary?.length) return;
+    let last: number | null = null;
+    for (let i = primary.length - 1; i >= 0; i--) {
+      const v = primary[i];
+      if (v != null && Number.isFinite(v)) {
+        last = v;
+        break;
+      }
+    }
+    if (last == null) return;
+    const ctx = this.ctx;
+    const y = this.yOf(this.scaled(last, bars), range.min, range.max, rect);
+    const prec = ind.precision ?? this.symbol.pricePrecision ?? 2;
+    if (ind.priceLine) {
+      ctx.save();
+      ctx.strokeStyle = ind.color;
+      ctx.globalAlpha = 0.55;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(rect.x, y);
+      ctx.lineTo(rect.x + rect.w, y);
+      ctx.stroke();
+      ctx.restore();
+    }
+    if (ind.trackPrice) {
+      const label = last.toFixed(Math.max(0, Math.min(8, prec)));
+      ctx.save();
+      ctx.fillStyle = ind.color;
+      ctx.font = "10px Trebuchet MS, Arial, sans-serif";
+      const pad = 4;
+      const tw = ctx.measureText(label).width + pad * 2;
+      const th = 14;
+      const x = rect.x + rect.w - tw - 2;
+      ctx.fillRect(x, y - th / 2, tw, th);
+      ctx.fillStyle = "#fff";
+      ctx.fillText(label, x + pad, y + 3);
+      ctx.restore();
+    }
+  }
+
   private paintMainIndicators(rect: Rect, bars: Bar[], range: { min: number; max: number }): void {
     const ctx = this.ctx;
     for (const ind of this.indicators) {
@@ -2208,6 +2291,8 @@ export class ChartEngine {
             ctx.arc(x, y, Math.max(1.5, (ind.lineWidth ?? 1) * 1.4), 0, Math.PI * 2);
             ctx.fill();
           });
+      this.paintIndicatorPriceGuides(ind, rect, bars, range, lines);
+
           return;
         }
         ctx.beginPath();
@@ -2419,6 +2504,42 @@ export class ChartEngine {
           started = true;
         } else ctx.lineTo(x, y);
       });
+    if (ind.priceLine || ind.trackPrice) {
+      const primary = series.lines[0] ?? [];
+      let last: number | null = null;
+      for (let i = primary.length - 1; i >= 0; i--) {
+        const v = primary[i];
+        if (v != null && Number.isFinite(v)) { last = v; break; }
+      }
+      if (last != null) {
+        const y = this.yOf(last, min, max, rect);
+        const ctx = this.ctx;
+        if (ind.priceLine) {
+          ctx.save();
+          ctx.strokeStyle = ind.color;
+          ctx.globalAlpha = 0.55;
+          ctx.setLineDash([4, 3]);
+          ctx.beginPath();
+          ctx.moveTo(rect.x, y);
+          ctx.lineTo(rect.x + rect.w, y);
+          ctx.stroke();
+          ctx.restore();
+        }
+        if (ind.trackPrice) {
+          const prec = ind.precision ?? 2;
+          const label = last.toFixed(Math.max(0, Math.min(8, prec)));
+          ctx.save();
+          ctx.fillStyle = ind.color;
+          ctx.font = "10px Trebuchet MS, Arial, sans-serif";
+          const tw = ctx.measureText(label).width + 8;
+          ctx.fillRect(rect.x + rect.w - tw - 2, y - 7, tw, 14);
+          ctx.fillStyle = "#fff";
+          ctx.fillText(label, rect.x + rect.w - tw + 2, y + 3);
+          ctx.restore();
+        }
+      }
+    }
+
       ctx.strokeStyle = li === 0 ? ind.color : pal.muted;
       ctx.stroke();
     });

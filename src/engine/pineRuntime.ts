@@ -56,11 +56,53 @@ export function runPineSubset(code: string): PineRunResult {
     logs.push(`[strategy] detected → ${strategyId}`);
   }
 
-  if (!addKinds.length && !strategyId) {
-    push("sma", "default");
-    logs.push("[warn] no recognized ta.* call — defaulted to SMA");
+  // Syntax / structure checks (GAP-16) — fail closed instead of silent SMA.
+  const errors: string[] = [];
+  const openParen = (text.match(/\(/g) ?? []).length;
+  const closeParen = (text.match(/\)/g) ?? []).length;
+  if (openParen !== closeParen) {
+    errors.push(`Mismatched parentheses (${openParen} open / ${closeParen} close)`);
+  }
+  const openBrace = (text.match(/\{/g) ?? []).length;
+  const closeBrace = (text.match(/\}/g) ?? []).length;
+  if (openBrace !== closeBrace) {
+    errors.push(`Mismatched braces (${openBrace} open / ${closeBrace} close)`);
+  }
+  if (/\bplot\s*\([^)]*$/m.test(code) || /\bstrategy\.entry\s*\([^)]*$/m.test(code)) {
+    errors.push("Unterminated plot/strategy.entry call");
+  }
+  // Unknown ta.* calls that we do not map
+  for (const m of text.matchAll(/\bta\.([a-zA-Z_][a-zA-Z0-9_]*)/g)) {
+    const fn = m[1]!.toLowerCase();
+    const known = new Set([
+      "sma","ema","wma","rma","vwma","hma","bb","vwap","rsi","macd","stoch","atr","sar","adx","cci","wpr","obv",
+    ]);
+    if (!known.has(fn) && !/^(highest|lowest|change|crossover|crossunder|valuewhen)$/.test(fn)) {
+      errors.push(`Unsupported ta.${m[1]} in subset runtime`);
+    }
+  }
+  if (errors.length) {
+    for (const err of errors) logs.push(`[error] ${err}`);
+    return {
+      ok: false,
+      message: `Compile failed · ${errors.length} error(s)`,
+      logs,
+      addKinds: [],
+      strategyId: undefined,
+    };
   }
 
+  if (!addKinds.length && !strategyId) {
+    logs.push("[error] no recognized ta.* / strategy call — refusing silent default");
+    return {
+      ok: false,
+      message: "Compile failed · no mappable plots or strategy",
+      logs,
+      addKinds: [],
+    };
+  }
+
+  logs.push(`[ok] subset compile · ${addKinds.length} plot(s)${strategyId ? ` · strategy ${strategyId}` : ""}`);
   return {
     ok: true,
     message: strategyId
@@ -94,6 +136,13 @@ export type StrategyReport = {
   avgTradePct: number;
   trades: StrategyTrade[];
   equity: number[];
+  /** GAP-62 ratio extras */
+  payoffRatio: number;
+  expectancyPct: number;
+  avgWinPct: number;
+  avgLossPct: number;
+  longTrades: number;
+  shortTrades: number;
 };
 
 function finalize(id: string, name: string, trades: StrategyTrade[], equity: number[]): StrategyReport {
@@ -109,6 +158,10 @@ function finalize(id: string, name: string, trades: StrategyTrade[], equity: num
   }
   const net = trades.reduce((a, t) => a + t.pnl, 0);
   const start = equity[0] ?? 10_000;
+  const avgWinPct = wins.length ? wins.reduce((a, t) => a + t.pnlPct, 0) / wins.length : 0;
+  const avgLossPct = losses.length ? losses.reduce((a, t) => a + t.pnlPct, 0) / losses.length : 0;
+  const payoffRatio = avgLossPct !== 0 ? Math.abs(avgWinPct / avgLossPct) : avgWinPct > 0 ? Infinity : 0;
+  const winRate = trades.length ? wins.length / trades.length : 0;
   return {
     id,
     name,
@@ -116,11 +169,17 @@ function finalize(id: string, name: string, trades: StrategyTrade[], equity: num
     netProfitPct: start ? (net / start) * 100 : 0,
     maxDrawdownPct: maxDd,
     totalTrades: trades.length,
-    winRate: trades.length ? (wins.length / trades.length) * 100 : 0,
+    winRate: winRate * 100,
     profitFactor: grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0,
     avgTradePct: trades.length ? trades.reduce((a, t) => a + t.pnlPct, 0) / trades.length : 0,
     trades,
     equity,
+    payoffRatio,
+    expectancyPct: winRate * avgWinPct + (1 - winRate) * avgLossPct,
+    avgWinPct,
+    avgLossPct,
+    longTrades: trades.filter((t) => t.side === "long").length,
+    shortTrades: trades.filter((t) => t.side === "short").length,
   };
 }
 
