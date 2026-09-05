@@ -90,16 +90,17 @@ export function BottomDock({
     <div className={open ? "bottom-dock open" : "bottom-dock"}>
       <div className="dock-tabs">
         <button
+          type="button"
           className={tab === "pine" && open ? "on" : ""}
           onClick={() => {
             setTab("pine");
             if (!open) onToggle();
-            else if (tab !== "pine") setTab("pine");
           }}
         >
           Pine Editor
         </button>
         <button
+          type="button"
           className={tab === "tester" && open ? "on" : ""}
           onClick={() => {
             setTab("tester");
@@ -109,6 +110,7 @@ export function BottomDock({
           Strategy Tester
         </button>
         <button
+          type="button"
           className={tab === "replay" && open ? "on" : ""}
           onClick={() => {
             setTab("replay");
@@ -118,6 +120,7 @@ export function BottomDock({
           Replay Trading
         </button>
         <button
+          type="button"
           className={tab === "logs" && open ? "on" : ""}
           onClick={() => {
             setTab("logs");
