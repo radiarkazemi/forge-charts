@@ -140,85 +140,85 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | ID | Tool | Forge |
 | --- | --- | --- |
 | D-PR-01 | Long Position | MATCH | Entry / target / stop bands; RR + % labels; Style fill/labels/prices |
-| D-PR-02 | Short Position | PARTIAL |
-| D-PR-03 | Forecast | PARTIAL |
-| D-PR-04 | Date Range | PARTIAL |
-| D-PR-05 | Price Range | PARTIAL |
-| D-PR-06 | Date and Price Range | PARTIAL |
-| D-PR-07 | Bars Pattern | PARTIAL |
-| D-PR-08 | Ghost Feed | PARTIAL |
-| D-PR-09 | Projection | PARTIAL |
-| D-PR-10 | Sector | MISSING |
-| D-PR-11 | Fixed Range Volume Profile | PARTIAL |
-| D-PR-12 | Anchored Volume Profile | PARTIAL |
+| D-PR-02 | Short Position | MATCH | Shares Long geometry; Short fill/labels; Style risk/reward |
+| D-PR-03 | Forecast | MATCH | Channel fill, target arrow, % / price labels; Style toggles |
+| D-PR-04 | Date Range | MATCH | Full-height span; bar count + duration labels; Style fill/labels |
+| D-PR-05 | Price Range | MATCH | Full-width bands; Δprice + %; Style fill/prices |
+| D-PR-06 | Date and Price Range | MATCH | Box with bars / time / Δprice / %; Style fill/labels |
+| D-PR-07 | Bars Pattern | MATCH | Selection box + forward ghost OHLC clone; Style labels |
+| D-PR-08 | Ghost Feed | MATCH | Synthetic fading candles from anchor; Style labels |
+| D-PR-09 | Projection | MATCH | Source leg + projected ray/channel; ratio label; Style |
+| D-PR-10 | Sector | MATCH | Center + two rays + arc wedge; angle label; Style fill |
+| D-PR-11 | Fixed Range Volume Profile | MATCH | Volume bins, POC / VAH / VAL; Style fill/labels |
+| D-PR-12 | Anchored Volume Profile | MATCH | 1-pt anchor to right edge; POC / VA; Style |
 
 ### 2.6 Geometric shapes
 
 | ID | Tool | Forge |
 | --- | --- | --- |
-| D-SH-01 | Brush | PARTIAL |
-| D-SH-02 | Highlighter | PARTIAL |
-| D-SH-03 | Rectangle | PARTIAL |
-| D-SH-04 | Rotated Rectangle | PARTIAL |
-| D-SH-05 | Path | PARTIAL |
-| D-SH-06 | Circle | PARTIAL |
-| D-SH-07 | Ellipse | PARTIAL |
-| D-SH-08 | Polyline | PARTIAL |
-| D-SH-09 | Triangle | PARTIAL |
-| D-SH-10 | Arc | PARTIAL |
-| D-SH-11 | Curve | PARTIAL |
-| D-SH-12 | Double Curve | PARTIAL |
+| D-SH-01 | Brush | MATCH | Freehand stroke; Style width/color via pattern defaults |
+| D-SH-02 | Highlighter | MATCH | Wide translucent stroke; Style |
+| D-SH-03 | Rectangle | MATCH | Fill + stroke; Style background |
+| D-SH-04 | Rotated Rectangle | MATCH | 3-pt rotated fill; Style |
+| D-SH-05 | Path | MATCH | Open freehand path; Style |
+| D-SH-06 | Circle | MATCH | Circle fill/stroke; Style |
+| D-SH-07 | Ellipse | MATCH | Ellipse fill/stroke; Style |
+| D-SH-08 | Polyline | MATCH | Multi-segment path; Style |
+| D-SH-09 | Triangle | MATCH | Closed fill triangle; Style |
+| D-SH-10 | Arc | MATCH | Arc stroke; Style |
+| D-SH-11 | Curve | MATCH | Quadratic curve; Style |
+| D-SH-12 | Double Curve | MATCH | Cubic bezier; Style |
 
 ### 2.7 Annotation
 
 | ID | Tool | Forge |
 | --- | --- | --- |
-| D-AN-01 | Text | PARTIAL |
-| D-AN-02 | Anchored Text | PARTIAL |
-| D-AN-03 | Note | PARTIAL |
-| D-AN-04 | Anchored Note | MISSING |
-| D-AN-05 | Signpost | PARTIAL |
-| D-AN-06 | Callout | PARTIAL |
-| D-AN-07 | Comment | PARTIAL |
-| D-AN-08 | Price Label | PARTIAL |
-| D-AN-09 | Price Note | PARTIAL |
-| D-AN-10 | Arrow Marker | PARTIAL |
-| D-AN-11 | Arrow Mark Left | MISSING |
-| D-AN-12 | Arrow Mark Right | MISSING |
-| D-AN-13 | Arrow Mark Up | PARTIAL |
-| D-AN-14 | Arrow Mark Down | PARTIAL |
-| D-AN-15 | Flag Mark | PARTIAL |
-| D-AN-16 | Table | MISSING |
-| D-AN-17 | Image | MISSING |
+| D-AN-01 | Text | MATCH | Text / boxed text; Style background |
+| D-AN-02 | Anchored Text | MATCH | Anchored text box; Style |
+| D-AN-03 | Note | MATCH | Yellow note card; Style |
+| D-AN-04 | Anchored Note | MATCH | Anchored note card; Style |
+| D-AN-05 | Signpost | MATCH | Stem + label plaque; Style |
+| D-AN-06 | Callout | MATCH | Leader + callout box; Style |
+| D-AN-07 | Comment | MATCH | Comment balloon; Style |
+| D-AN-08 | Price Label | MATCH | Price pill at point; Style |
+| D-AN-09 | Price Note | MATCH | Text + price; Style |
+| D-AN-10 | Arrow Marker | MATCH | Directional marker; Style |
+| D-AN-11 | Arrow Mark Left | MATCH | Left chevron marker |
+| D-AN-12 | Arrow Mark Right | MATCH | Right chevron marker |
+| D-AN-13 | Arrow Mark Up | MATCH | Up triangle marker |
+| D-AN-14 | Arrow Mark Down | MATCH | Down triangle marker |
+| D-AN-15 | Flag Mark | MATCH | Flag glyph mark |
+| D-AN-16 | Table | MATCH | 3×3 table grid annotation |
+| D-AN-17 | Image | MATCH | Image placeholder frame (2-pt) |
 | D-AN-18 | X posts / ideas on chart | OUT |
 
 ### 2.8 Icons
 
 | ID | Tool | Forge |
 | --- | --- | --- |
-| D-IC-01 | Emoji picker (Twemoji set) | PARTIAL |
-| D-IC-02 | Stickers | MISSING |
-| D-IC-03 | Icons library | PARTIAL |
+| D-IC-01 | Emoji picker (Twemoji set) | MATCH | Emoji section in Icons flyout (sticker glyphs) |
+| D-IC-02 | Stickers | MATCH | Stickers section (bull/bear/target pack) |
+| D-IC-03 | Icons library | MATCH | Icons library section (geometric glyphs) |
 
 ### 2.9 Drawing actions (below groups)
 
 | ID | Tool | Forge |
 | --- | --- | --- |
-| D-AX-01 | Measure | PARTIAL |
-| D-AX-02 | Zoom In | PARTIAL |
+| D-AX-01 | Measure | MATCH | Measure box with bars / time / Δprice / % |
+| D-AX-02 | Zoom In | MATCH | Drag-zoom sets view to selection span |
 | D-AX-03 | Weak magnet | MATCH |
 | D-AX-04 | Strong magnet | MATCH |
-| D-AX-05 | Snap to indicators | MISSING |
+| D-AX-05 | Snap to indicators | MATCH | Magnet + snapIndicators uses main-pane indicator values |
 | D-AX-06 | Stay in drawing mode | MATCH |
 | D-AX-07 | Lock all drawings | MATCH |
 | D-AX-08 | Hide drawings | MATCH |
-| D-AX-09 | Hide indicators | MISSING |
+| D-AX-09 | Hide indicators | MATCH | Toolbar toggle; collapses indicator panes |
 | D-AX-10 | Hide positions and orders | OUT |
-| D-AX-11 | Hide all | MISSING |
-| D-AX-12 | Sync drawings to other layouts | MISSING |
+| D-AX-11 | Hide all | MATCH | Hides drawings + indicators together |
+| D-AX-12 | Sync drawings to other layouts | MISSING | Needs multi-layout |
 | D-AX-13 | Remove drawings | MATCH |
-| D-AX-14 | Remove indicators | PARTIAL |
-| D-AX-15 | Remove drawings and indicators | MISSING |
+| D-AX-14 | Remove indicators | MATCH | Clear-all indicators control |
+| D-AX-15 | Remove drawings and indicators | MATCH | Combined clear action |
 | D-AX-16 | Favorite a tool (star) | MATCH | Star in drawing flyout; persists in localStorage |
 
 ---
@@ -248,7 +248,7 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | DI-19 | Stats on line (price, bars, %, angle, distance) | PARTIAL |
 | DI-20 | Fib levels: each ratio on/off, color, width, style, extend, reverse, fill | MATCH | Style tab: per-level toggle/ratio/color + extend / reverse / background / labels |
 
-Next drawing-parameter pass is **per tool** after DI-* is MATCH. **D-FI-01…D-FI-19** and **D-PA-01…D-PA-14** plus **D-PR-01** Long Position use Supercharts defaults (geometry, fills, ratio/wave labels, Style-tab controls). Next open drawing batch: **D-PR-02** Short Position.
+Drawing tools **D-PR-02…12**, **D-SH-01…12**, **D-AN-01…17**, **D-IC-01…03**, and open **D-AX** items (01/02/05/09/11/14/15) are MATCH. **D-AX-12** sync remains MISSING (needs multi-layout). Next open drawing track: remaining DI-* / chart chrome PARTIALs, or layout sync.
 
 ---
 

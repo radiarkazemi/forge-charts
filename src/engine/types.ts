@@ -82,8 +82,13 @@ export type DrawingKind =
   | "pricelabel"
   | "pricenote"
   | "arrowmarker"
+  | "arrowmarkleft"
+  | "arrowmarkright"
   | "flagmark"
   | "sticker"
+  | "table"
+  | "image"
+  | "anchorednote"
   | "xabcd"
   | "cypher"
   | "headshoulders"
@@ -107,6 +112,7 @@ export type DrawingKind =
   | "barspattern"
   | "ghostfeed"
   | "projection"
+  | "sector"
   | "anchoredvwap"
   | "volprofile"
   | "anchoredvolprofile"
@@ -306,6 +312,9 @@ export type EngineSnapshot = {
   replayStartIndex: number | null;
   stayMode: boolean;
   hideDrawings: boolean;
+  hideIndicators: boolean;
+  /** When true, magnet also snaps to main-pane indicator values (D-AX-05). */
+  snapIndicators: boolean;
   lockDrawings: boolean;
   fitMode: boolean;
   countdown: string;
