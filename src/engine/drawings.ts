@@ -57,6 +57,7 @@ export function neededPoints(kind: DrawingKind): number {
     case "doublecurve":
     case "abcd":
     case "trianglepattern":
+    case "elliottcorrection":
       return 4;
     case "callout":
     case "comment":
@@ -201,6 +202,23 @@ export function defaultFibStyleForKind(kind: DrawingKind): FibRetraceStyle | und
       return defaultGannSquareFixedStyle();
     case "gannfan":
       return defaultGannFanStyle();
+    case "xabcd":
+    case "cypher":
+    case "abcd":
+    case "headshoulders":
+    case "trianglepattern":
+    case "threedrives":
+    case "elliottimpulse":
+    case "elliottcorrection":
+    case "elliotttriangle":
+    case "elliottdouble":
+    case "elliotttriple":
+    case "cycliclines":
+    case "timecycles":
+    case "sineline":
+    case "long":
+    case "short":
+      return defaultPatternStyle(kind);
     default:
       return undefined;
   }
@@ -403,6 +421,27 @@ export function defaultGannFanStyle(): FibRetraceStyle {
   return fibStyleBase(DEFAULT_GANN_FAN_LEVELS);
 }
 
+/** D-PA / D-PR pattern & position defaults — reuse FibRetraceStyle toggles (fill / labels / ratios). */
+export function defaultPatternStyle(kind: DrawingKind): FibRetraceStyle {
+  const accent =
+    kind === "long" ? "#089981" : kind === "short" ? "#f23645" : kind.startsWith("elliott") ? "#ab47bc" : "#2962ff";
+  return {
+    ...fibStyleBase([{ ratio: 1, visible: true, color: accent, fill: `${accent}22` }]),
+    showTrendLine: true,
+    trendColor: accent,
+    trendWidth: 1,
+    trendStyle: "solid",
+    extendLeft: false,
+    extendRight: kind === "cycliclines" || kind === "timecycles" || kind === "sineline",
+    reverse: false,
+    showBackground: true,
+    showPrices: true,
+    showLevels: true,
+    levelsWidth: 1,
+    levelsStyle: "solid",
+  };
+}
+
 export function formatFibRatio(ratio: number): string {
   if (Number.isInteger(ratio)) return String(ratio);
   const fixed = ratio.toFixed(3).replace(/\.?0+$/, "");
@@ -513,9 +552,9 @@ export function paintDrawing(
     kind === "elliottdouble" ||
     kind === "elliotttriple"
   )
-    paintPattern(ctx, pts, kind);
-  else if (kind === "cycliclines" || kind === "timecycles") paintCycles(ctx, pts, rect, kind === "timecycles");
-  else if (kind === "sineline" && pts.length >= 2) paintSine(ctx, pts, rect);
+    paintPattern(ctx, d, pts, kind);
+  else if (kind === "cycliclines" || kind === "timecycles") paintCycles(ctx, d, pts, rect, kind === "timecycles");
+  else if (kind === "sineline" && pts.length >= 2) paintSine(ctx, d, pts, rect);
   if (selected) pts.forEach((p) => handle(ctx, p));
   ctx.restore();
 }
@@ -596,6 +635,20 @@ export function hitTestDrawing(d: Drawing, pts: Pt[], x: number, y: number, rect
   if (kind === "fibcircles" && pts.length >= 2) {
     const r = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
     return FAN_RATIOS.some((lvl) => Math.abs(Math.hypot(x - pts[0].x, y - pts[0].y) - r * (lvl || 0.01)) < HIT);
+  }
+  if ((kind === "cycliclines" || kind === "timecycles") && pts.length >= 2) {
+    const unit = pts[1].x - pts[0].x || 40;
+    for (let i = -8; i < 24; i++) {
+      if (Math.abs(x - (pts[0].x + unit * i)) < HIT) return true;
+    }
+  }
+  if (kind === "sineline" && pts.length >= 2) {
+    const amp = pts[1].y - pts[0].y;
+    const len = Math.abs(pts[1].x - pts[0].x) || 80;
+    for (let sx = Math.min(pts[0].x, rect.x); sx < rect.x + rect.w; sx += 6) {
+      const sy = pts[0].y + amp * Math.sin(((sx - pts[0].x) / len) * Math.PI * 2);
+      if (Math.hypot(x - sx, y - sy) < HIT) return true;
+    }
   }
   if (
     (kind === "gannbox" ||
@@ -1548,26 +1601,274 @@ function paintFree(ctx: CanvasRenderingContext2D, pts: Pt[], kind: DrawingKind):
 
 function paintPosition(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], precision: number): void {
   if (!pts[0]) return;
+  const style = resolveFibStyleForKind(d);
   const entry = pts[0];
-  const tp = pts[1] ?? { x: entry.x + 120, y: entry.y - (d.kind === "long" ? 50 : -50) };
-  const sl = pts[2] ?? { x: entry.x + 120, y: entry.y + (d.kind === "long" ? 30 : -30) };
-  const w = Math.max(96, Math.abs((tp.x || entry.x) - entry.x) + 80);
   const long = d.kind === "long";
-  ctx.fillStyle = long ? "rgba(8,153,129,0.18)" : "rgba(242,54,69,0.18)";
-  ctx.fillRect(entry.x, Math.min(entry.y, tp.y), w, Math.abs(tp.y - entry.y) || 1);
-  ctx.fillStyle = long ? "rgba(242,54,69,0.18)" : "rgba(8,153,129,0.18)";
-  ctx.fillRect(entry.x, Math.min(entry.y, sl.y), w, Math.abs(sl.y - entry.y) || 1);
+  const tp = pts[1] ?? { x: entry.x + 120, y: entry.y - (long ? 50 : -50) };
+  const sl = pts[2] ?? { x: entry.x + 120, y: entry.y + (long ? 30 : -30) };
+  const w = Math.max(110, Math.abs(tp.x - entry.x) + 90);
+  const profit = long ? "rgba(8,153,129,0.20)" : "rgba(242,54,69,0.20)";
+  const loss = long ? "rgba(242,54,69,0.20)" : "rgba(8,153,129,0.20)";
+  if (style.showBackground) {
+    ctx.fillStyle = profit;
+    ctx.fillRect(entry.x, Math.min(entry.y, tp.y), w, Math.abs(tp.y - entry.y) || 1);
+    ctx.fillStyle = loss;
+    ctx.fillRect(entry.x, Math.min(entry.y, sl.y), w, Math.abs(sl.y - entry.y) || 1);
+  }
+  applyLineStyle(ctx, style.levelsStyle);
+  ctx.strokeStyle = style.trendColor;
+  ctx.lineWidth = style.trendWidth;
+  ctx.strokeRect(entry.x, Math.min(entry.y, tp.y, sl.y), w, Math.max(Math.abs(tp.y - entry.y), Math.abs(sl.y - entry.y)) || 1);
+  ctx.beginPath();
+  ctx.moveTo(entry.x, entry.y);
+  ctx.lineTo(entry.x + w, entry.y);
   ctx.strokeStyle = "#d1d4dc";
-  stroke(ctx, { x: entry.x, y: entry.y }, { x: entry.x + w, y: entry.y });
-  ctx.font = CHART_FONT;
-  const tpP = d.points[1]?.price ?? entry.y;
-  const slP = d.points[2]?.price ?? entry.y;
-  const eP = d.points[0].price;
+  ctx.stroke();
+  const eP = d.points[0]?.price ?? 0;
+  const tpP = d.points[1]?.price ?? eP;
+  const slP = d.points[2]?.price ?? eP;
   const reward = Math.abs(tpP - eP);
-  const risk = Math.abs(slP - eP) || 1;
+  const risk = Math.abs(slP - eP) || 1e-9;
+  const rr = reward / risk;
+  const stopPct = (risk / (Math.abs(eP) || 1)) * 100;
+  const tgtPct = (reward / (Math.abs(eP) || 1)) * 100;
+  ctx.font = CHART_FONT;
   ctx.fillStyle = "#d1d4dc";
-  ctx.fillText(`Target ${formatPrice(tpP, precision)}`, entry.x + 8, Math.min(entry.y, tp.y) + 14);
-  ctx.fillText(`Stop ${formatPrice(slP, precision)}  RR ${(reward / risk).toFixed(2)}`, entry.x + 8, Math.max(entry.y, sl.y) - 8);
+  if (style.showLevels) {
+    ctx.fillText(long ? "Long" : "Short", entry.x + 8, Math.min(entry.y, tp.y, sl.y) + 14);
+    ctx.fillText(`Entry ${formatPrice(eP, precision)}`, entry.x + 8, entry.y - 6);
+  }
+  if (style.showPrices) {
+    ctx.fillStyle = long ? "#089981" : "#f23645";
+    ctx.fillText(`Target ${formatPrice(tpP, precision)}  (+${tgtPct.toFixed(2)}%)`, entry.x + 8, Math.min(entry.y, tp.y) + (style.showLevels ? 28 : 14));
+    ctx.fillStyle = long ? "#f23645" : "#089981";
+    ctx.fillText(`Stop ${formatPrice(slP, precision)}  (−${stopPct.toFixed(2)}%)`, entry.x + 8, Math.max(entry.y, sl.y) - 8);
+    ctx.fillStyle = "#d1d4dc";
+    ctx.fillText(`RR ${rr.toFixed(2)}`, entry.x + w - 64, entry.y - 6);
+  }
+}
+
+function priceDelta(a: { price: number } | undefined, b: { price: number } | undefined): number {
+  if (!a || !b) return 0;
+  return Math.abs(a.price - b.price);
+}
+
+function ratioLabel(num: number, den: number): string {
+  if (!(den > 0) || !Number.isFinite(num / den)) return "—";
+  return formatFibRatio(num / den);
+}
+
+function fillPoly(ctx: CanvasRenderingContext2D, pts: Pt[], fill: string): void {
+  if (pts.length < 3) return;
+  ctx.beginPath();
+  pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+}
+
+function mid(a: Pt, b: Pt): Pt {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
+
+function paintPattern(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], kind: DrawingKind): void {
+  if (pts.length < 2) return;
+  const style = resolveFibStyleForKind(d);
+  const labels =
+    kind === "abcd"
+      ? ["A", "B", "C", "D"]
+      : kind === "trianglepattern"
+        ? ["A", "B", "C", "D"]
+        : kind === "headshoulders"
+          ? ["LS", "N", "H", "N", "RS", "E", "E"]
+          : kind === "threedrives"
+            ? ["0", "1", "2", "3", "4", "5", "6"]
+            : kind === "elliottimpulse"
+              ? ["0", "1", "2", "3", "4", "5"]
+              : kind === "elliottcorrection"
+                ? ["0", "A", "B", "C"]
+                : kind === "elliotttriangle"
+                  ? ["A", "B", "C", "D", "E"]
+                  : kind === "elliottdouble"
+                    ? ["W", "X", "Y"]
+                    : kind === "elliotttriple"
+                      ? ["W", "X", "Y", "X", "Z"]
+                      : ["X", "A", "B", "C", "D"];
+
+  // Fills
+  if (style.showBackground) {
+    if (kind === "trianglepattern" && pts.length >= 4) {
+      fillPoly(ctx, [pts[0], pts[1], pts[2]], "rgba(41,98,255,0.10)");
+      fillPoly(ctx, [pts[1], pts[2], pts[3]], "rgba(8,153,129,0.10)");
+    } else if ((kind === "xabcd" || kind === "cypher") && pts.length >= 5) {
+      fillPoly(ctx, [pts[0], pts[1], pts[2]], "rgba(41,98,255,0.12)");
+      fillPoly(ctx, [pts[1], pts[2], pts[3]], "rgba(171,71,188,0.10)");
+      fillPoly(ctx, [pts[2], pts[3], pts[4]], "rgba(8,153,129,0.12)");
+    } else if (kind === "abcd" && pts.length >= 4) {
+      fillPoly(ctx, [pts[0], pts[1], pts[2]], "rgba(41,98,255,0.12)");
+      fillPoly(ctx, [pts[1], pts[2], pts[3]], "rgba(8,153,129,0.12)");
+    } else if (kind === "headshoulders" && pts.length >= 5) {
+      fillPoly(ctx, [pts[0], pts[1], pts[2], pts[3], pts[4]], "rgba(242,54,69,0.08)");
+    } else if (kind.startsWith("elliott") && pts.length >= 3) {
+      fillPoly(ctx, pts.slice(0, Math.min(pts.length, 6)), "rgba(171,71,188,0.08)");
+    } else if (kind === "threedrives" && pts.length >= 5) {
+      fillPoly(ctx, pts.slice(0, 5), "rgba(41,98,255,0.08)");
+    }
+  }
+
+  // Neckline for H&S
+  if (kind === "headshoulders" && pts.length >= 5) {
+    applyLineStyle(ctx, "dashed");
+    ctx.strokeStyle = "#f23645";
+    ctx.lineWidth = Math.max(1, style.levelsWidth);
+    stroke(ctx, pts[1], pts[3]);
+    ctx.setLineDash([]);
+  }
+
+  // Elliott impulse channel (0-2 / 1-3 guides)
+  if (kind === "elliottimpulse" && pts.length >= 4 && style.showTrendLine) {
+    applyLineStyle(ctx, "dashed");
+    ctx.strokeStyle = style.trendColor;
+    ctx.lineWidth = 1;
+    stroke(ctx, pts[0], pts[2]);
+    if (pts[3]) stroke(ctx, pts[1], pts[3]);
+    ctx.setLineDash([]);
+  }
+
+  // Main polyline (+ close triangle)
+  applyLineStyle(ctx, style.levelsStyle);
+  ctx.strokeStyle = style.trendColor;
+  ctx.lineWidth = style.trendWidth;
+  ctx.beginPath();
+  pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+  if (kind === "trianglepattern" && pts.length >= 4) ctx.closePath();
+  ctx.stroke();
+
+  // Point labels
+  if (style.showLevels) {
+    ctx.font = CHART_FONT_BOLD;
+    pts.forEach((p, i) => {
+      ctx.fillStyle = style.trendColor;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#d1d4dc";
+      ctx.fillText(labels[i] ?? String(i), p.x + 6, p.y - 6);
+    });
+  }
+
+  // Ratio labels (price-based)
+  if (style.showPrices && d.points.length >= 3) {
+    ctx.font = AXIS_FONT;
+    ctx.fillStyle = "#b2b5be";
+    const P = d.points;
+    const put = (text: string, a: Pt, b: Pt) => {
+      const m = mid(a, b);
+      ctx.fillText(text, m.x + 4, m.y - 4);
+    };
+    if ((kind === "xabcd" || kind === "cypher") && pts.length >= 5 && P.length >= 5) {
+      const xa = priceDelta(P[0], P[1]);
+      const ab = priceDelta(P[1], P[2]);
+      const bc = priceDelta(P[2], P[3]);
+      const cd = priceDelta(P[3], P[4]);
+      const xb = priceDelta(P[0], P[2]);
+      const xd = priceDelta(P[0], P[4]);
+      put(`AB/XA ${ratioLabel(ab, xa)}`, pts[1], pts[2]);
+      put(`BC/AB ${ratioLabel(bc, ab)}`, pts[2], pts[3]);
+      put(`CD/BC ${ratioLabel(cd, bc)}`, pts[3], pts[4]);
+      put(`XB/XA ${ratioLabel(xb, xa)}`, pts[0], pts[2]);
+      put(`XD/XA ${ratioLabel(xd, xa)}`, pts[0], pts[4]);
+    } else if (kind === "abcd" && pts.length >= 4 && P.length >= 4) {
+      const ab = priceDelta(P[0], P[1]);
+      const bc = priceDelta(P[1], P[2]);
+      const cd = priceDelta(P[2], P[3]);
+      put(`AB ${formatFibRatio(ab)}`, pts[0], pts[1]);
+      put(`BC/AB ${ratioLabel(bc, ab)}`, pts[1], pts[2]);
+      put(`CD/AB ${ratioLabel(cd, ab)}`, pts[2], pts[3]);
+    } else if (kind === "threedrives" && pts.length >= 7 && P.length >= 7) {
+      const d1 = priceDelta(P[0], P[1]);
+      const d2 = priceDelta(P[2], P[3]);
+      const d3 = priceDelta(P[4], P[5]);
+      put(`D2/D1 ${ratioLabel(d2, d1)}`, pts[2], pts[3]);
+      put(`D3/D2 ${ratioLabel(d3, d2)}`, pts[4], pts[5]);
+    } else if (kind === "elliottimpulse" && pts.length >= 6 && P.length >= 6) {
+      const w1 = priceDelta(P[0], P[1]);
+      const w3 = priceDelta(P[2], P[3]);
+      const w5 = priceDelta(P[4], P[5]);
+      put(`3/1 ${ratioLabel(w3, w1)}`, pts[2], pts[3]);
+      put(`5/1 ${ratioLabel(w5, w1)}`, pts[4], pts[5]);
+    } else if (kind === "elliottcorrection" && pts.length >= 4 && P.length >= 4) {
+      const wa = priceDelta(P[0], P[1]);
+      const wb = priceDelta(P[1], P[2]);
+      const wc = priceDelta(P[2], P[3]);
+      put(`B/A ${ratioLabel(wb, wa)}`, pts[1], pts[2]);
+      put(`C/A ${ratioLabel(wc, wa)}`, pts[2], pts[3]);
+    }
+  }
+}
+
+function paintCycles(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rect: ViewRect, showInterval: boolean): void {
+  if (pts.length < 2) return;
+  const style = resolveFibStyleForKind(d);
+  const unit = pts[1].x - pts[0].x || 40;
+  const count = 24;
+  const start = style.extendLeft ? -Math.ceil((pts[0].x - rect.x) / Math.abs(unit || 1)) : 0;
+  const end = style.extendRight ? count : Math.max(2, count);
+  for (let i = start; i < end; i++) {
+    const x = pts[0].x + unit * i;
+    if (x < rect.x - 2 || x > rect.x + rect.w + 2) continue;
+    applyLineStyle(ctx, style.levelsStyle);
+    ctx.strokeStyle = i === 0 || i === 1 ? style.trendColor : "rgba(120,123,134,0.65)";
+    ctx.lineWidth = i === 0 || i === 1 ? style.trendWidth + 0.4 : style.levelsWidth;
+    stroke(ctx, { x, y: rect.y }, { x, y: rect.y + rect.h });
+    if (style.showLevels && (showInterval || i === 0 || i === 1) && i >= 0) {
+      ctx.fillStyle = i <= 1 ? style.trendColor : "#787b86";
+      ctx.font = AXIS_FONT;
+      ctx.fillText(String(i), x + 3, rect.y + 12);
+    }
+  }
+  if (style.showPrices) {
+    ctx.fillStyle = "#b2b5be";
+    ctx.font = AXIS_FONT;
+    ctx.fillText(`period ${Math.abs(unit).toFixed(0)}px`, pts[0].x + 4, rect.y + rect.h - 8);
+  }
+}
+
+function paintSine(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rect: ViewRect): void {
+  const style = resolveFibStyleForKind(d);
+  const amp = pts[1].y - pts[0].y;
+  const len = Math.abs(pts[1].x - pts[0].x) || 80;
+  if (style.showTrendLine) {
+    applyLineStyle(ctx, "dashed");
+    ctx.strokeStyle = "rgba(120,123,134,0.7)";
+    ctx.lineWidth = 1;
+    stroke(ctx, { x: rect.x, y: pts[0].y }, { x: rect.x + rect.w, y: pts[0].y });
+    ctx.setLineDash([]);
+  }
+  applyLineStyle(ctx, style.levelsStyle);
+  ctx.strokeStyle = style.trendColor;
+  ctx.lineWidth = style.trendWidth;
+  ctx.beginPath();
+  const xStart = style.extendLeft ? rect.x : pts[0].x;
+  const xEnd = style.extendRight ? rect.x + rect.w : Math.max(pts[0].x, pts[1].x) + len * 2;
+  let started = false;
+  for (let x = xStart; x <= xEnd; x += 2) {
+    const y = pts[0].y + amp * Math.sin(((x - pts[0].x) / len) * Math.PI * 2);
+    if (!started) {
+      ctx.moveTo(x, y);
+      started = true;
+    } else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  if (style.showLevels) {
+    ctx.fillStyle = style.trendColor;
+    ctx.beginPath();
+    ctx.arc(pts[0].x, pts[0].y, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(pts[1].x, pts[1].y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 function paintPriceRange(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rect: ViewRect, precision: number): void {
@@ -1721,63 +2022,3 @@ function paintArrowMark(ctx: CanvasRenderingContext2D, p: Pt, kind: DrawingKind)
   ctx.fill();
 }
 
-function paintPattern(ctx: CanvasRenderingContext2D, pts: Pt[], kind: DrawingKind): void {
-  if (pts.length < 2) return;
-  ctx.beginPath();
-  pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-  ctx.stroke();
-  const labels =
-    kind === "abcd"
-      ? ["A", "B", "C", "D"]
-      : kind.startsWith("elliott")
-        ? kind === "elliottimpulse"
-          ? ["0", "1", "2", "3", "4", "5"]
-          : kind === "elliottcorrection"
-            ? ["0", "A", "B", "C"]
-            : kind === "elliotttriangle"
-              ? ["A", "B", "C", "D", "E"]
-              : kind === "elliottdouble"
-                ? ["W", "X", "Y"]
-                : ["W", "X", "Y", "X", "Z"]
-        : kind === "headshoulders"
-          ? ["LS", "N", "H", "N", "RS"]
-          : kind === "threedrives"
-            ? ["0", "1", "2", "3", "4", "5", "6"]
-            : ["X", "A", "B", "C", "D"];
-  ctx.font = CHART_FONT_BOLD;
-  pts.forEach((p, i) => {
-    ctx.fillStyle = "#2962ff";
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#d1d4dc";
-    ctx.fillText(labels[i] ?? String(i), p.x + 6, p.y - 6);
-  });
-}
-
-function paintCycles(ctx: CanvasRenderingContext2D, pts: Pt[], rect: ViewRect, showInterval: boolean): void {
-  if (pts.length < 2) return;
-  const unit = pts[1].x - pts[0].x || 40;
-  for (let i = 0; i < 18; i++) {
-    const x = pts[0].x + unit * i;
-    ctx.strokeStyle = i === 0 || i === 1 ? "#2962ff" : "rgba(120,123,134,0.7)";
-    stroke(ctx, { x, y: rect.y }, { x, y: rect.y + rect.h });
-    if (showInterval && i > 0) {
-      ctx.fillStyle = "#787b86";
-      ctx.font = AXIS_FONT;
-      ctx.fillText(String(i), x + 3, rect.y + 12);
-    }
-  }
-}
-
-function paintSine(ctx: CanvasRenderingContext2D, pts: Pt[], rect: ViewRect): void {
-  const amp = pts[1].y - pts[0].y;
-  const len = Math.abs(pts[1].x - pts[0].x) || 80;
-  ctx.beginPath();
-  for (let x = pts[0].x; x < rect.x + rect.w; x += 2) {
-    const y = pts[0].y + amp * Math.sin(((x - pts[0].x) / len) * Math.PI * 2);
-    if (x === pts[0].x) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  }
-  ctx.stroke();
-}
