@@ -54,15 +54,15 @@ Forge already mirrors most **chrome**. Gaps are mostly **depth, data, and runtim
 
 | ID | Tag | Item | Action |
 | --- | --- | --- | --- |
-| GAP-11 | PARTIAL | IND tabs: Technicals / Financials / Community / Invite-only / Patterns | Financials + Patterns runnable; Community as importable scripts later |
-| GAP-12 | PARTIAL | Indicator Inputs tab | Per-study typed inputs matching TV (source, length, smoothing, …) |
-| GAP-13 | PARTIAL | Indicator Style tab | Every plot: color, width, style, precision, price line, track price |
-| GAP-14 | PARTIAL | Indicator Visibility tab | Per-TF buckets wired + enforced in paint | Polish UX to match TV Visibility tab denser layout |
-| GAP-15 | PARTIAL | Indicator source OHLC/HL2/HLC3/OHLC4 | Wire through all studies, not a subset |
-| GAP-16 | PARTIAL | Pine Editor add-to-chart | Beyond 4-keyword mapping; show compile errors |
-| GAP-17 | PARTIAL | Pine logs / profiler | Tie logs to real runtime; drop static stub lines |
-| GAP-18 | ADD | Invite-only / Paid scripts store UX | Optional OUT-adjacent; at least “not available” honesty in UI |
-| GAP-19 | ADD | On-chart indicator status line menu (⋯) full TV set | Settings / hide / visual order / move pane / pin scale / clone / copy / apply default — verify each |
+| GAP-11 | PARTIAL | IND tabs: Technicals / Financials / Community / Invite-only / Patterns | Financials demo series + Patterns tools wired; Community imports as built-in stand-ins; Invite stays locked |
+| GAP-12 | PARTIAL | Indicator Inputs tab | Source + per-study params + levels + pane; deeper typed widgets still open |
+| GAP-13 | PARTIAL | Indicator Style tab | Color/width/style + precision + price line + track price (single primary plot) |
+| GAP-14 | PARTIAL | Indicator Visibility tab | Buckets enforced in paint + denser All/None grid UX |
+| GAP-15 | PARTIAL | Indicator source OHLC/HL2/HLC3/OHLC4 | Threaded through MA/oscillator/channel family; inherent OHLC studies use source where close enters the formula |
+| GAP-16 | PARTIAL | Pine Editor add-to-chart | Broader ta.* map + hard compile errors (no silent SMA default) |
+| GAP-17 | PARTIAL | Pine logs / profiler | Logs stream from compile/runtime events; empty until first compile |
+| GAP-18 | PARTIAL | Invite-only / Paid scripts store UX | Locked badge + non-actionable invite tab; paid store still OUT |
+| GAP-19 | PARTIAL | On-chart indicator status line menu (⋯) full TV set | Settings, forward/back, front/back, clone, copy value, apply default, pane/scale/hide/remove |
 
 ---
 
@@ -139,8 +139,8 @@ Forge already mirrors most **chrome**. Gaps are mostly **depth, data, and runtim
 
 | ID | Tag | Item | Action |
 | --- | --- | --- | --- |
-| GAP-61 | PARTIAL | Pine Editor | Versioned tabs, save scripts, add-to-chart real |
-| GAP-62 | PARTIAL | Strategy Tester tabs | Overview / Performance / Trades / Ratios / Properties with numbers |
+| GAP-61 | PARTIAL | Pine Editor | Multi-tab scripts + localStorage save + add-to-chart via subset runtime |
+| GAP-62 | PARTIAL | Strategy Tester tabs | Distinct Overview / Performance / Trades / Ratios / Properties metrics |
 | GAP-63 | PARTIAL | Replay Trading dock | Paper fills / trade list during replay (TV Replay Trading) |
 | GAP-64 | MODIFY | Bar Replay chrome | Match TV Select bar / Random bar / Jump to realtime UX density |
 | GAP-65 | ADD | Bottom Stock Screener tab | TV has Screener as bottom tab too |

@@ -878,6 +878,11 @@ export default function App() {
           toolbarEngine?.setTool(tool);
           setIndOpen(false);
         }}
+        onPickStrategy={(strategyId) => {
+          window.dispatchEvent(new CustomEvent("forge:open-tester", { detail: { strategyId } }));
+          setBottomOpen(true);
+          setIndOpen(false);
+        }}
       />
       <AlertModal
         open={alertOpen}

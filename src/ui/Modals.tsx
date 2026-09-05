@@ -207,6 +207,7 @@ export function IndicatorModal({
   onClose,
   onPick,
   onPickTool,
+  onPickStrategy,
   favorites = [],
   onToggleFavorite,
   recent = [],
@@ -216,6 +217,7 @@ export function IndicatorModal({
   onClose: () => void;
   onPick: (kind: IndicatorKind) => void;
   onPickTool?: (tool: Tool) => void;
+  onPickStrategy?: (strategyId: string) => void;
   favorites?: string[];
   onToggleFavorite?: (id: string) => void;
   recent?: IndicatorKind[];
@@ -344,16 +346,30 @@ export function IndicatorModal({
     rowRefs.current[row.id]?.scrollIntoView({ block: "nearest" });
   }, [active, flatRows]);
 
-  const actionable = (item: (typeof INDICATOR_CATALOG)[number]) => !!(item.kind || item.tool);
+  const strategyMap: Record<string, string> = {
+    "strat:ma-cross": "ma_cross",
+    "strat:rsi-revert": "rsi_revert",
+    "strat:macd-trend": "macd_trend",
+    "strat:breakout": "donchian_break",
+  };
+
+  const actionable = (item: (typeof INDICATOR_CATALOG)[number]) => {
+    if (item.tab === "invite") return false;
+    return !!(item.kind || item.tool || strategyMap[item.id]);
+  };
 
   const tryPick = (item: (typeof INDICATOR_CATALOG)[number]) => {
+    if (item.tab === "invite") return;
     if (item.kind) {
       onPick(item.kind);
       return;
     }
     if (item.tool) {
       onPickTool?.(item.tool);
+      return;
     }
+    const sid = strategyMap[item.id];
+    if (sid) onPickStrategy?.(sid);
   };
 
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -384,11 +400,11 @@ export function IndicatorModal({
   let rowIndex = -1;
   const emptyHint =
     tab === "invite"
-      ? "Invite-only scripts require an access grant. Preview entries stay listed until unlocked."
+      ? "Invite-only scripts stay locked until an access grant is available. Nothing here can be added to the chart."
       : tab === "financials"
-        ? "Financial metrics are listed for Supercharts parity. Symbol fundamentals wire-up comes later."
+        ? "No matching financial metrics. Demo series use price-derived studies until a fundamentals feed lands."
         : tab === "community"
-          ? "Community scripts are catalogued here. Publishing/sync remains OUT."
+          ? "No matching community scripts. Listed scripts import as built-in study stand-ins (publish/sync remains OUT)."
           : "No indicators found.";
 
   return (
@@ -470,10 +486,13 @@ export function IndicatorModal({
                         <td>
                           <strong>{highlight(item.label, q.trim())}</strong>
                           {alreadyOn ? <span className="ind-badge on-chart">On chart</span> : null}
-                          {!canAct ? <span className="ind-badge">Preview</span> : null}
+                          {item.tab === "invite" ? <span className="ind-badge locked">Locked</span> : null}
+                          {item.tab !== "invite" && !canAct ? <span className="ind-badge">Preview</span> : null}
                           {item.tool && !item.kind ? <span className="ind-badge arm">Draw</span> : null}
                           {item.role === "strategy" ? <span className="ind-badge strat">Strategy</span> : null}
-                          {item.role === "metric" ? <span className="ind-badge metric">Metric</span> : null}
+                          {item.role === "metric" && item.kind ? <span className="ind-badge metric">Demo</span> : null}
+                          {item.role === "metric" && !item.kind ? <span className="ind-badge metric">Metric</span> : null}
+                          {item.role === "script" && item.kind ? <span className="ind-badge">Import</span> : null}
                         </td>
                         <td>{highlight(item.group, q.trim())}</td>
                         <td>{item.author ?? (item.tab === "technicals" ? "Built-in" : item.tab === "patterns" ? "Built-in" : "—")}</td>

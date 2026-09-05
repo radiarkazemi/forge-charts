@@ -200,6 +200,12 @@ export type IndicatorInstance = {
   collapsed?: boolean;
   /** Interval-bucket visibility; omitted means all on (GAP-14). */
   visibility?: IndicatorVisibility;
+  /** Legend / axis value decimals (GAP-13). Default = symbol precision. */
+  precision?: number;
+  /** Draw last-value horizontal price line (GAP-13). */
+  priceLine?: boolean;
+  /** Keep last value labeled on the price scale (GAP-13). */
+  trackPrice?: boolean;
 };
 
 
