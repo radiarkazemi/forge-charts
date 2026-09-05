@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import { indicatorInputs, indicatorTitle, toolLabelForDraw } from "../catalog";
 import type { ChartEngine } from "../engine/ChartEngine";
-import { defaultFibChannelStyle, defaultFibExtensionStyle, defaultFibRetraceStyle, formatFibRatio, resolveFibChannelStyle, resolveFibExtStyle, resolveFibStyle } from "../engine/drawings";
+import {
+  defaultFibStyleForKind,
+  formatFibRatio,
+  resolveFibStyleForKind,
+} from "../engine/drawings";
 import type {
   ChartSource,
   Drawing,
@@ -234,7 +238,7 @@ function DrawingPropertiesDialog({ engine, drawing }: { engine: ChartEngine | nu
       </div>
       {tab === "Style" ? (
         <div className="ind-tab-panel">
-          {drawing.kind === "fib" || drawing.kind === "fibext" || drawing.kind === "fibchannel" ? (
+          {FIB_STYLE_KINDS.has(drawing.kind) ? (
             <FibRetraceStylePanel engine={engine} drawing={drawing} />
           ) : (
             <>
@@ -386,16 +390,31 @@ function DrawingPropertiesDialog({ engine, drawing }: { engine: ChartEngine | nu
   );
 }
 
+const FIB_STYLE_KINDS = new Set([
+  "fib",
+  "fibext",
+  "fibchannel",
+  "fibtimezone",
+  "fibfan",
+  "fibtime",
+  "fibcircles",
+  "fibspiral",
+  "fibarcs",
+  "fibwedge",
+  "pitchfan",
+  "pitchfork",
+  "schiff",
+  "modschiff",
+  "insidepitchfork",
+  "gannbox",
+  "gannsquare",
+  "gannsquarefixed",
+  "gannfan",
+]);
+
 function FibRetraceStylePanel({ engine, drawing }: { engine: ChartEngine | null; drawing: Drawing }) {
-  const isExt = drawing.kind === "fibext";
-  const isChannel = drawing.kind === "fibchannel";
-  const fib = isExt
-    ? resolveFibExtStyle(drawing)
-    : isChannel
-      ? resolveFibChannelStyle(drawing)
-      : resolveFibStyle(drawing);
-  const resetDefaults = () =>
-    isExt ? defaultFibExtensionStyle() : isChannel ? defaultFibChannelStyle() : defaultFibRetraceStyle();
+  const fib = resolveFibStyleForKind(drawing);
+  const resetDefaults = () => defaultFibStyleForKind(drawing.kind) ?? fib;
 
   const patchFib = (next: Partial<FibRetraceStyle>) => {
     engine?.updateDrawing(drawing.id, { fib: { ...fib, ...next } });
@@ -406,7 +425,14 @@ function FibRetraceStylePanel({ engine, drawing }: { engine: ChartEngine | null;
     patchFib({ levels });
   };
 
-  const trendLabel = isExt ? "Trend lines (A–B / B–C)" : isChannel ? "Base trend line (A–B)" : "Trend line";
+  const trendLabel =
+    drawing.kind === "fibext"
+      ? "Trend lines (A–B / B–C)"
+      : drawing.kind === "fibchannel" || drawing.kind.startsWith("pitch") || drawing.kind.includes("schiff")
+        ? "Base / median guide"
+        : drawing.kind.startsWith("gann")
+          ? "Anchor line"
+          : "Trend line";
 
   return (
     <div className="fib-style-panel">

@@ -99,21 +99,21 @@ Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
 | D-FI-01 | Fib Retracement | MATCH | Supercharts defaults: 0 / 0.236 / 0.382 / 0.5 / 0.618 / 0.786 / 1 / 1.618 / 2.618 / 3.618 / 4.236, trend line, fills, labels `0.618 (price)`, extend L/R, reverse |
 | D-FI-02 | Trend-Based Fib Extension | MATCH | 3-point A–B–C geometry; defaults 0 / 0.618 / 1 / 1.272 / 1.618 / 2 / 2.618 / 3.618 / 4.236; fills; `1.618 (price)` labels; extend / reverse / Style tab |
 | D-FI-03 | Fib Channel | MATCH | 3-point A–B base + C width; defaults 0 / 0.236 / 0.382 / 0.5 / 0.618 / 0.786 / 1 / 1.618 / 2.618; parallel levels; fills; labels; extend / reverse / Style tab |
-| D-FI-04 | Fib Time Zone | PARTIAL |
-| D-FI-05 | Fib Speed Resistance Fan | PARTIAL |
-| D-FI-06 | Trend-Based Fib Time | PARTIAL |
-| D-FI-07 | Fib Circles | PARTIAL |
-| D-FI-08 | Fib Spiral | PARTIAL |
-| D-FI-09 | Fib Speed Resistance Arcs | PARTIAL |
-| D-FI-10 | Fib Wedge | PARTIAL |
-| D-FI-11 | Pitchfan | PARTIAL |
-| D-FI-12 | Pitchfork | PARTIAL |
-| D-FI-13 | Schiff Pitchfork | PARTIAL |
-| D-FI-14 | Modified Schiff Pitchfork | PARTIAL |
-| D-FI-15 | Inside Pitchfork | PARTIAL |
-| D-FI-16 | Gann Box | PARTIAL |
-| D-FI-17 | Gann Square | PARTIAL |
-| D-FI-18 | Gann Fan | PARTIAL |
+| D-FI-04 | Fib Time Zone | MATCH | Fibonacci sequence zones 0–55; labels; reverse; Style tab |
+| D-FI-05 | Fib Speed Resistance Fan | MATCH | Fan rays at 0 / 0.236 / 0.382 / 0.5 / 0.618 / 0.786 / 1; extend; labels; Style tab |
+| D-FI-06 | Trend-Based Fib Time | MATCH | 3-point A–B–C time projections; defaults 0 / 0.382 / 0.5 / 0.618 / 1 / 1.272 / 1.618 / 2.618 |
+| D-FI-07 | Fib Circles | MATCH | Concentric circles at Fib radii; fills; labels; Style tab |
+| D-FI-08 | Fib Spiral | MATCH | Golden spiral from A–B radius; reverse; Style color/width |
+| D-FI-09 | Fib Speed Resistance Arcs | MATCH | Semicircle arcs at fan ratios; labels; Style tab |
+| D-FI-10 | Fib Wedge | MATCH | Rays from origin across A–B chord at Fib ratios; Style tab |
+| D-FI-11 | Pitchfan | MATCH | Pitchfork origin + fan rays at level ratios; Style tab |
+| D-FI-12 | Pitchfork | MATCH | Median + parallels at 0 / 0.25 / 0.5 / 0.75 / 1; extend; Style tab |
+| D-FI-13 | Schiff Pitchfork | MATCH | Schiff origin; same level set + Style tab |
+| D-FI-14 | Modified Schiff Pitchfork | MATCH | Modified Schiff origin; same level set + Style tab |
+| D-FI-15 | Inside Pitchfork | MATCH | Inside origin; same level set + Style tab |
+| D-FI-16 | Gann Box | MATCH | Grid at 0 / 0.25 / 0.333 / 0.5 / 0.667 / 0.75 / 1 + diagonals; Style tab |
+| D-FI-17 | Gann Square | MATCH | Square-constrained Gann grid + diagonals; Style tab |
+| D-FI-18 | Gann Fan | MATCH | Fan rays 1/8…8/1 with 1/1 emphasis; labels; Style tab |
 | D-FI-19 | Gann Square Fixed | PARTIAL |
 
 ### 2.4 Patterns
