@@ -1,6 +1,6 @@
 import { distToLine, distToSegment, formatPrice } from "./math";
 import { AXIS_FONT, CHART_FONT, CHART_FONT_BOLD } from "./theme";
-import type { Bar, Drawing, DrawingKind, Tool } from "./types";
+import type { Bar, Drawing, DrawingKind, FibLevelStyle, FibRetraceStyle, LineStyle, Tool } from "./types";
 
 export type Pt = { x: number; y: number };
 export type ViewRect = { x: number; y: number; w: number; h: number };
@@ -82,40 +82,316 @@ export function neededPoints(kind: DrawingKind): number {
   }
 }
 
-type FibLvl = { ratio: number; color: string; fill: string };
-
-const FIB_RETRACE: FibLvl[] = [
-  { ratio: 0, color: "#787b86", fill: "rgba(120,123,134,0.10)" },
-  { ratio: 0.236, color: "#f23645", fill: "rgba(242,54,69,0.08)" },
-  { ratio: 0.382, color: "#81c784", fill: "rgba(129,199,132,0.08)" },
-  { ratio: 0.5, color: "#4caf50", fill: "rgba(76,175,80,0.08)" },
-  { ratio: 0.618, color: "#089981", fill: "rgba(8,153,129,0.12)" },
-  { ratio: 0.786, color: "#26a69a", fill: "rgba(38,166,154,0.08)" },
-  { ratio: 1, color: "#2962ff", fill: "rgba(41,98,255,0.08)" },
-  { ratio: 1.618, color: "#2962ff", fill: "rgba(41,98,255,0.05)" },
-  { ratio: 2.618, color: "#f57c00", fill: "rgba(245,124,0,0.05)" },
-  { ratio: 3.618, color: "#ab47bc", fill: "rgba(171,71,188,0.05)" },
-  { ratio: 4.236, color: "#e91e63", fill: "rgba(233,30,99,0.05)" },
+/** Supercharts default Fib Retracement levels (D-FI-01). */
+const DEFAULT_FIB_LEVELS: FibLevelStyle[] = [
+  { ratio: 0, visible: true, color: "#787b86", fill: "rgba(120,123,134,0.12)" },
+  { ratio: 0.236, visible: true, color: "#f23645", fill: "rgba(242,54,69,0.10)" },
+  { ratio: 0.382, visible: true, color: "#81c784", fill: "rgba(129,199,132,0.10)" },
+  { ratio: 0.5, visible: true, color: "#4caf50", fill: "rgba(76,175,80,0.10)" },
+  { ratio: 0.618, visible: true, color: "#089981", fill: "rgba(8,153,129,0.14)" },
+  { ratio: 0.786, visible: true, color: "#26a69a", fill: "rgba(38,166,154,0.10)" },
+  { ratio: 1, visible: true, color: "#2962ff", fill: "rgba(41,98,255,0.10)" },
+  { ratio: 1.618, visible: true, color: "#2962ff", fill: "rgba(41,98,255,0.06)" },
+  { ratio: 2.618, visible: true, color: "#f57c00", fill: "rgba(245,124,0,0.06)" },
+  { ratio: 3.618, visible: true, color: "#ab47bc", fill: "rgba(171,71,188,0.06)" },
+  { ratio: 4.236, visible: true, color: "#e91e63", fill: "rgba(233,30,99,0.06)" },
 ];
 
-const FIB_EXT: FibLvl[] = [
-  { ratio: 0, color: "#787b86", fill: "rgba(120,123,134,0.08)" },
-  { ratio: 0.618, color: "#089981", fill: "rgba(8,153,129,0.10)" },
-  { ratio: 1, color: "#2962ff", fill: "rgba(41,98,255,0.10)" },
-  { ratio: 1.272, color: "#26a69a", fill: "rgba(38,166,154,0.08)" },
-  { ratio: 1.618, color: "#ab47bc", fill: "rgba(171,71,188,0.08)" },
-  { ratio: 2, color: "#42a5f5", fill: "rgba(66,165,245,0.06)" },
-  { ratio: 2.618, color: "#f57c00", fill: "rgba(245,124,0,0.08)" },
-  { ratio: 3.618, color: "#ef5350", fill: "rgba(239,83,80,0.06)" },
-  { ratio: 4.236, color: "#e91e63", fill: "rgba(233,30,99,0.05)" },
+export function defaultFibRetraceStyle(): FibRetraceStyle {
+  return {
+    levels: DEFAULT_FIB_LEVELS.map((l) => ({ ...l })),
+    showTrendLine: true,
+    trendColor: "#5b9cf6",
+    trendWidth: 1,
+    trendStyle: "dashed",
+    extendLeft: false,
+    extendRight: true,
+    reverse: false,
+    showBackground: true,
+    showPrices: true,
+    showLevels: true,
+    levelsWidth: 1,
+    levelsStyle: "solid",
+  };
+}
+
+export function resolveFibStyle(d: Drawing): FibRetraceStyle {
+  const base = defaultFibRetraceStyle();
+  if (!d.fib) return base;
+  return {
+    ...base,
+    ...d.fib,
+    levels: (d.fib.levels?.length ? d.fib.levels : base.levels).map((l) => ({ ...l })),
+  };
+}
+
+/** Supercharts default Trend-Based Fib Extension levels (D-FI-02). */
+const DEFAULT_FIB_EXT_LEVELS: FibLevelStyle[] = [
+  { ratio: 0, visible: true, color: "#787b86", fill: "rgba(120,123,134,0.10)" },
+  { ratio: 0.618, visible: true, color: "#089981", fill: "rgba(8,153,129,0.12)" },
+  { ratio: 1, visible: true, color: "#2962ff", fill: "rgba(41,98,255,0.12)" },
+  { ratio: 1.272, visible: true, color: "#26a69a", fill: "rgba(38,166,154,0.10)" },
+  { ratio: 1.618, visible: true, color: "#ab47bc", fill: "rgba(171,71,188,0.12)" },
+  { ratio: 2, visible: true, color: "#42a5f5", fill: "rgba(66,165,245,0.08)" },
+  { ratio: 2.618, visible: true, color: "#f57c00", fill: "rgba(245,124,0,0.10)" },
+  { ratio: 3.618, visible: true, color: "#ef5350", fill: "rgba(239,83,80,0.08)" },
+  { ratio: 4.236, visible: true, color: "#e91e63", fill: "rgba(233,30,99,0.06)" },
 ];
+
+export function defaultFibExtensionStyle(): FibRetraceStyle {
+  return {
+    levels: DEFAULT_FIB_EXT_LEVELS.map((l) => ({ ...l })),
+    showTrendLine: true,
+    trendColor: "#5b9cf6",
+    trendWidth: 1,
+    trendStyle: "dashed",
+    extendLeft: false,
+    extendRight: true,
+    reverse: false,
+    showBackground: true,
+    showPrices: true,
+    showLevels: true,
+    levelsWidth: 1,
+    levelsStyle: "solid",
+  };
+}
+
+export function resolveFibExtStyle(d: Drawing): FibRetraceStyle {
+  const base = defaultFibExtensionStyle();
+  if (!d.fib) return base;
+  return {
+    ...base,
+    ...d.fib,
+    levels: (d.fib.levels?.length ? d.fib.levels : base.levels).map((l) => ({ ...l })),
+  };
+}
+
+export function defaultFibStyleForKind(kind: DrawingKind): FibRetraceStyle | undefined {
+  switch (kind) {
+    case "fib":
+      return defaultFibRetraceStyle();
+    case "fibext":
+      return defaultFibExtensionStyle();
+    case "fibchannel":
+      return defaultFibChannelStyle();
+    case "fibtimezone":
+      return defaultFibTimeZoneStyle();
+    case "fibfan":
+      return defaultFibFanStyle();
+    case "fibtime":
+      return defaultFibTimeStyle();
+    case "fibcircles":
+      return defaultFibCirclesStyle();
+    case "fibspiral":
+      return defaultFibSpiralStyle();
+    case "fibarcs":
+      return defaultFibArcsStyle();
+    case "fibwedge":
+      return defaultFibWedgeStyle();
+    case "pitchfan":
+    case "pitchfork":
+    case "schiff":
+    case "modschiff":
+    case "insidepitchfork":
+      return defaultPitchforkStyle();
+    case "gannbox":
+    case "gannsquare":
+    case "gannsquarefixed":
+      return defaultGannBoxStyle();
+    case "gannfan":
+      return defaultGannFanStyle();
+    default:
+      return undefined;
+  }
+}
+
+export function resolveFibStyleForKind(d: Drawing): FibRetraceStyle {
+  const base = defaultFibStyleForKind(d.kind) ?? defaultFibRetraceStyle();
+  if (!d.fib) return base;
+  return {
+    ...base,
+    ...d.fib,
+    levels: (d.fib.levels?.length ? d.fib.levels : base.levels).map((l) => ({ ...l })),
+  };
+}
+
+/** Supercharts default Fib Channel levels (D-FI-03). */
+const DEFAULT_FIB_CHANNEL_LEVELS: FibLevelStyle[] = [
+  { ratio: 0, visible: true, color: "#787b86", fill: "rgba(120,123,134,0.10)" },
+  { ratio: 0.236, visible: true, color: "#f23645", fill: "rgba(242,54,69,0.08)" },
+  { ratio: 0.382, visible: true, color: "#81c784", fill: "rgba(129,199,132,0.10)" },
+  { ratio: 0.5, visible: true, color: "#4caf50", fill: "rgba(76,175,80,0.10)" },
+  { ratio: 0.618, visible: true, color: "#089981", fill: "rgba(8,153,129,0.12)" },
+  { ratio: 0.786, visible: true, color: "#26a69a", fill: "rgba(38,166,154,0.08)" },
+  { ratio: 1, visible: true, color: "#2962ff", fill: "rgba(41,98,255,0.10)" },
+  { ratio: 1.618, visible: true, color: "#ab47bc", fill: "rgba(171,71,188,0.08)" },
+  { ratio: 2.618, visible: true, color: "#f57c00", fill: "rgba(245,124,0,0.06)" },
+];
+
+export function defaultFibChannelStyle(): FibRetraceStyle {
+  return fibStyleBase(DEFAULT_FIB_CHANNEL_LEVELS);
+}
+
+export function resolveFibChannelStyle(d: Drawing): FibRetraceStyle {
+  return resolveFibStyleForKind({ ...d, kind: "fibchannel" });
+}
+
+function fibStyleBase(levels: FibLevelStyle[]): FibRetraceStyle {
+  return {
+    levels: levels.map((l) => ({ ...l })),
+    showTrendLine: true,
+    trendColor: "#5b9cf6",
+    trendWidth: 1,
+    trendStyle: "dashed",
+    extendLeft: false,
+    extendRight: true,
+    reverse: false,
+    showBackground: true,
+    showPrices: true,
+    showLevels: true,
+    levelsWidth: 1,
+    levelsStyle: "solid",
+  };
+}
+
+/** D-FI-04 Fib Time Zone — Fibonacci sequence multipliers of the base interval. */
+const DEFAULT_FIB_TIMEZONE_LEVELS: FibLevelStyle[] = [
+  { ratio: 0, visible: true, color: "#787b86", fill: "rgba(120,123,134,0.08)" },
+  { ratio: 1, visible: true, color: "#f23645", fill: "rgba(242,54,69,0.06)" },
+  { ratio: 2, visible: true, color: "#81c784", fill: "rgba(129,199,132,0.06)" },
+  { ratio: 3, visible: true, color: "#4caf50", fill: "rgba(76,175,80,0.06)" },
+  { ratio: 5, visible: true, color: "#089981", fill: "rgba(8,153,129,0.08)" },
+  { ratio: 8, visible: true, color: "#26a69a", fill: "rgba(38,166,154,0.06)" },
+  { ratio: 13, visible: true, color: "#2962ff", fill: "rgba(41,98,255,0.06)" },
+  { ratio: 21, visible: true, color: "#ab47bc", fill: "rgba(171,71,188,0.06)" },
+  { ratio: 34, visible: true, color: "#f57c00", fill: "rgba(245,124,0,0.05)" },
+  { ratio: 55, visible: true, color: "#e91e63", fill: "rgba(233,30,99,0.05)" },
+];
+export function defaultFibTimeZoneStyle(): FibRetraceStyle {
+  return fibStyleBase(DEFAULT_FIB_TIMEZONE_LEVELS);
+}
+
+/** D-FI-05 Fib Speed Resistance Fan */
+const DEFAULT_FIB_FAN_LEVELS: FibLevelStyle[] = [
+  { ratio: 0, visible: true, color: "#787b86", fill: "rgba(120,123,134,0.06)" },
+  { ratio: 0.236, visible: true, color: "#f23645", fill: "rgba(242,54,69,0.06)" },
+  { ratio: 0.382, visible: true, color: "#81c784", fill: "rgba(129,199,132,0.08)" },
+  { ratio: 0.5, visible: true, color: "#4caf50", fill: "rgba(76,175,80,0.08)" },
+  { ratio: 0.618, visible: true, color: "#089981", fill: "rgba(8,153,129,0.10)" },
+  { ratio: 0.786, visible: true, color: "#26a69a", fill: "rgba(38,166,154,0.06)" },
+  { ratio: 1, visible: true, color: "#2962ff", fill: "rgba(41,98,255,0.08)" },
+];
+export function defaultFibFanStyle(): FibRetraceStyle {
+  return fibStyleBase(DEFAULT_FIB_FAN_LEVELS);
+}
+
+/** D-FI-06 Trend-Based Fib Time */
+const DEFAULT_FIB_TIME_LEVELS: FibLevelStyle[] = [
+  { ratio: 0, visible: true, color: "#787b86", fill: "rgba(120,123,134,0.08)" },
+  { ratio: 0.382, visible: true, color: "#81c784", fill: "rgba(129,199,132,0.08)" },
+  { ratio: 0.5, visible: true, color: "#4caf50", fill: "rgba(76,175,80,0.08)" },
+  { ratio: 0.618, visible: true, color: "#089981", fill: "rgba(8,153,129,0.10)" },
+  { ratio: 1, visible: true, color: "#2962ff", fill: "rgba(41,98,255,0.10)" },
+  { ratio: 1.272, visible: true, color: "#26a69a", fill: "rgba(38,166,154,0.08)" },
+  { ratio: 1.618, visible: true, color: "#ab47bc", fill: "rgba(171,71,188,0.10)" },
+  { ratio: 2.618, visible: true, color: "#f57c00", fill: "rgba(245,124,0,0.08)" },
+];
+export function defaultFibTimeStyle(): FibRetraceStyle {
+  return fibStyleBase(DEFAULT_FIB_TIME_LEVELS);
+}
+
+/** D-FI-07 Fib Circles */
+const DEFAULT_FIB_CIRCLE_LEVELS: FibLevelStyle[] = [
+  { ratio: 0.236, visible: true, color: "#f23645", fill: "rgba(242,54,69,0.05)" },
+  { ratio: 0.382, visible: true, color: "#81c784", fill: "rgba(129,199,132,0.06)" },
+  { ratio: 0.5, visible: true, color: "#4caf50", fill: "rgba(76,175,80,0.06)" },
+  { ratio: 0.618, visible: true, color: "#089981", fill: "rgba(8,153,129,0.08)" },
+  { ratio: 0.786, visible: true, color: "#26a69a", fill: "rgba(38,166,154,0.06)" },
+  { ratio: 1, visible: true, color: "#2962ff", fill: "rgba(41,98,255,0.08)" },
+  { ratio: 1.618, visible: true, color: "#ab47bc", fill: "rgba(171,71,188,0.06)" },
+  { ratio: 2.618, visible: true, color: "#f57c00", fill: "rgba(245,124,0,0.05)" },
+];
+export function defaultFibCirclesStyle(): FibRetraceStyle {
+  return fibStyleBase(DEFAULT_FIB_CIRCLE_LEVELS);
+}
+
+/** D-FI-08 Fib Spiral — color/width via style; single path */
+const DEFAULT_FIB_SPIRAL_LEVELS: FibLevelStyle[] = [
+  { ratio: 1, visible: true, color: "#2962ff", fill: "rgba(41,98,255,0.06)" },
+  { ratio: 1.618, visible: true, color: "#089981", fill: "rgba(8,153,129,0.06)" },
+];
+export function defaultFibSpiralStyle(): FibRetraceStyle {
+  return fibStyleBase(DEFAULT_FIB_SPIRAL_LEVELS);
+}
+
+/** D-FI-09 Fib Speed Resistance Arcs */
+export function defaultFibArcsStyle(): FibRetraceStyle {
+  return fibStyleBase(DEFAULT_FIB_FAN_LEVELS.filter((l) => l.ratio > 0));
+}
+
+/** D-FI-10 Fib Wedge */
+export function defaultFibWedgeStyle(): FibRetraceStyle {
+  return fibStyleBase(DEFAULT_FIB_FAN_LEVELS);
+}
+
+/** D-FI-11…15 Pitchfork family median parallels */
+const DEFAULT_PITCH_LEVELS: FibLevelStyle[] = [
+  { ratio: 0, visible: true, color: "#26a69a", fill: "rgba(38,166,154,0.06)" },
+  { ratio: 0.25, visible: true, color: "#787b86", fill: "rgba(120,123,134,0.05)" },
+  { ratio: 0.5, visible: true, color: "#2962ff", fill: "rgba(41,98,255,0.08)" },
+  { ratio: 0.75, visible: true, color: "#787b86", fill: "rgba(120,123,134,0.05)" },
+  { ratio: 1, visible: true, color: "#ef5350", fill: "rgba(239,83,80,0.06)" },
+];
+export function defaultPitchforkStyle(): FibRetraceStyle {
+  return fibStyleBase(DEFAULT_PITCH_LEVELS);
+}
+
+/** D-FI-16…17 Gann Box / Square grid */
+const DEFAULT_GANN_BOX_LEVELS: FibLevelStyle[] = [
+  { ratio: 0, visible: true, color: "#787b86", fill: "rgba(120,123,134,0.05)" },
+  { ratio: 0.25, visible: true, color: "#81c784", fill: "rgba(129,199,132,0.05)" },
+  { ratio: 0.333, visible: true, color: "#26a69a", fill: "rgba(38,166,154,0.05)" },
+  { ratio: 0.5, visible: true, color: "#2962ff", fill: "rgba(41,98,255,0.08)" },
+  { ratio: 0.667, visible: true, color: "#ab47bc", fill: "rgba(171,71,188,0.05)" },
+  { ratio: 0.75, visible: true, color: "#f57c00", fill: "rgba(245,124,0,0.05)" },
+  { ratio: 1, visible: true, color: "#787b86", fill: "rgba(120,123,134,0.05)" },
+];
+export function defaultGannBoxStyle(): FibRetraceStyle {
+  return fibStyleBase(DEFAULT_GANN_BOX_LEVELS);
+}
+
+/** D-FI-18 Gann Fan */
+const DEFAULT_GANN_FAN_LEVELS: FibLevelStyle[] = [
+  { ratio: 0.125, visible: true, color: "#787b86", fill: "rgba(120,123,134,0.04)" },
+  { ratio: 0.25, visible: true, color: "#81c784", fill: "rgba(129,199,132,0.05)" },
+  { ratio: 0.333, visible: true, color: "#26a69a", fill: "rgba(38,166,154,0.05)" },
+  { ratio: 0.5, visible: true, color: "#4caf50", fill: "rgba(76,175,80,0.05)" },
+  { ratio: 1, visible: true, color: "#f23645", fill: "rgba(242,54,69,0.08)" },
+  { ratio: 2, visible: true, color: "#4caf50", fill: "rgba(76,175,80,0.05)" },
+  { ratio: 3, visible: true, color: "#26a69a", fill: "rgba(38,166,154,0.05)" },
+  { ratio: 4, visible: true, color: "#81c784", fill: "rgba(129,199,132,0.05)" },
+  { ratio: 8, visible: true, color: "#787b86", fill: "rgba(120,123,134,0.04)" },
+];
+export function defaultGannFanStyle(): FibRetraceStyle {
+  return fibStyleBase(DEFAULT_GANN_FAN_LEVELS);
+}
+
+export function formatFibRatio(ratio: number): string {
+  if (Number.isInteger(ratio)) return String(ratio);
+  const fixed = ratio.toFixed(3).replace(/\.?0+$/, "");
+  return fixed || "0";
+}
 
 const FIB_TIME = [0, 1, 2, 3, 5, 8, 13, 21, 34, 55];
-const GANN_RATIOS = [1 / 8, 1 / 4, 1 / 3, 1 / 2, 1, 2, 3, 4, 8];
 const GANN_LABELS = ["1/8", "1/4", "1/3", "1/2", "1/1", "2/1", "3/1", "4/1", "8/1"];
 const FAN_RATIOS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
-const BOX_RATIOS = [0, 0.25, 0.382, 0.5, 0.618, 0.75, 1];
 const HIT = 9;
+
+function applyLineStyle(ctx: CanvasRenderingContext2D, style: LineStyle | undefined): void {
+  if (style === "dashed") ctx.setLineDash([6, 4]);
+  else if (style === "dotted") ctx.setLineDash([2, 3]);
+  else ctx.setLineDash([]);
+}
 
 export function paintDrawing(
   ctx: CanvasRenderingContext2D,
@@ -142,18 +418,18 @@ export function paintDrawing(
   const kind = d.kind;
   if (kind === "fib") paintFibRetrace(ctx, d, pts, rect, precision, selected);
   else if (kind === "fibext") paintFibExtension(ctx, d, pts, rect, precision, selected);
-  else if (kind === "fibchannel") paintFibChannel(ctx, pts, rect, selected);
-  else if (kind === "fibtimezone") paintFibTimeZone(ctx, pts, rect);
-  else if (kind === "fibfan") paintFibFan(ctx, pts, rect);
-  else if (kind === "fibtime") paintFibTime(ctx, pts, rect);
-  else if (kind === "fibcircles") paintFibCircles(ctx, pts);
-  else if (kind === "fibspiral") paintFibSpiral(ctx, pts);
-  else if (kind === "fibarcs") paintFibArcs(ctx, pts);
-  else if (kind === "fibwedge") paintFibWedge(ctx, pts);
-  else if (kind === "gannfan") paintGannFan(ctx, pts, rect);
-  else if (kind === "gannbox" || kind === "gannsquare" || kind === "gannsquarefixed") paintGannBox(ctx, pts, kind);
+  else if (kind === "fibchannel") paintFibChannel(ctx, d, pts, rect, precision, selected);
+  else if (kind === "fibtimezone") paintFibTimeZone(ctx, d, pts, rect, selected);
+  else if (kind === "fibfan") paintFibFan(ctx, d, pts, rect, selected);
+  else if (kind === "fibtime") paintFibTime(ctx, d, pts, rect, selected);
+  else if (kind === "fibcircles") paintFibCircles(ctx, d, pts, selected);
+  else if (kind === "fibspiral") paintFibSpiral(ctx, d, pts, selected);
+  else if (kind === "fibarcs") paintFibArcs(ctx, d, pts, selected);
+  else if (kind === "fibwedge") paintFibWedge(ctx, d, pts, rect, selected);
+  else if (kind === "gannfan") paintGannFan(ctx, d, pts, rect, selected);
+  else if (kind === "gannbox" || kind === "gannsquare" || kind === "gannsquarefixed") paintGannBox(ctx, d, pts, kind, selected);
   else if (kind === "pitchfork" || kind === "schiff" || kind === "modschiff" || kind === "insidepitchfork" || kind === "pitchfan")
-    paintPitchfork(ctx, pts, rect, kind);
+    paintPitchfork(ctx, d, pts, rect, kind, selected);
   else if (kind === "hline") stroke(ctx, { x: rect.x, y: pts[0].y }, { x: rect.x + rect.w, y: pts[0].y });
   else if (kind === "vline") stroke(ctx, { x: pts[0].x, y: rect.y }, { x: pts[0].x, y: rect.y + rect.h });
   else if (kind === "horzray") stroke(ctx, pts[0], { x: rect.x + rect.w, y: pts[0].y });
@@ -229,21 +505,60 @@ export function hitTestDrawing(d: Drawing, pts: Pt[], x: number, y: number, rect
   if (kind === "hline" || kind === "horzray") return Math.abs(y - pts[0].y) < HIT && (kind === "hline" || x >= pts[0].x - HIT);
   if (kind === "vline") return Math.abs(x - pts[0].x) < HIT;
   if (kind === "crossline") return Math.abs(y - pts[0].y) < HIT || Math.abs(x - pts[0].x) < HIT;
+  if (kind === "fibchannel" && pts.length >= 2) {
+    const style = resolveFibChannelStyle(d);
+    const a = pts[0];
+    const b = pts[1];
+    const c = pts[2];
+    let ox = c ? c.x - a.x : 0;
+    let oy = c ? c.y - a.y : (b.y - a.y) * 0.25;
+    if (style.reverse) {
+      ox = -ox;
+      oy = -oy;
+    }
+    if (style.showTrendLine && distToSegment(x, y, a.x, a.y, b.x, b.y) < HIT) return true;
+    return style.levels.some((lvl) => {
+      if (!lvl.visible) return false;
+      const p = { x: a.x + ox * lvl.ratio, y: a.y + oy * lvl.ratio };
+      const q = { x: b.x + ox * lvl.ratio, y: b.y + oy * lvl.ratio };
+      const { s, e } = extendedEnds(p, q, rect, style.extendLeft, style.extendRight);
+      return distToSegment(x, y, s.x, s.y, e.x, e.y) < HIT;
+    });
+  }
   if (kind === "fib" && pts.length >= 2) {
+    const style = resolveFibStyle(d);
+    const a = style.reverse ? pts[1] : pts[0];
+    const b = style.reverse ? pts[0] : pts[1];
     const xL = Math.min(pts[0].x, pts[1].x);
-    const xR = rect.x + rect.w;
-    if (distToSegment(x, y, pts[0].x, pts[0].y, pts[1].x, pts[1].y) < HIT) return true;
-    return FIB_RETRACE.some((lvl) => {
-      const ly = pts[0].y + (pts[1].y - pts[0].y) * lvl.ratio;
-      return distToSegment(x, y, xL, ly, xR, ly) < HIT;
+    const xBox = Math.max(pts[0].x, pts[1].x);
+    const x0 = style.extendLeft ? rect.x : xL;
+    const x1 = style.extendRight ? rect.x + rect.w : xBox;
+    if (style.showTrendLine && distToSegment(x, y, pts[0].x, pts[0].y, pts[1].x, pts[1].y) < HIT) return true;
+    return style.levels.some((lvl) => {
+      if (!lvl.visible) return false;
+      const ly = a.y + (b.y - a.y) * lvl.ratio;
+      return distToSegment(x, y, x0, ly, x1, ly) < HIT;
     });
   }
   if (kind === "fibext" && pts.length >= 3) {
-    const xL = Math.min(pts[0].x, pts[1].x, pts[2].x);
-    const dy = pts[1].y - pts[0].y;
-    return FIB_EXT.some((lvl) => {
-      const ly = pts[2].y + dy * lvl.ratio;
-      return distToSegment(x, y, xL, ly, rect.x + rect.w, ly) < HIT;
+    const style = resolveFibExtStyle(d);
+    const a = pts[0];
+    const b = pts[1];
+    const c = pts[2];
+    const sign = style.reverse ? -1 : 1;
+    const dy = (b.y - a.y) * sign;
+    const xL = Math.min(a.x, b.x, c.x);
+    const xBox = Math.max(a.x, b.x, c.x);
+    const x0 = style.extendLeft ? rect.x : xL;
+    const x1 = style.extendRight ? rect.x + rect.w : xBox;
+    if (style.showTrendLine) {
+      if (distToSegment(x, y, a.x, a.y, b.x, b.y) < HIT) return true;
+      if (distToSegment(x, y, b.x, b.y, c.x, c.y) < HIT) return true;
+    }
+    return style.levels.some((lvl) => {
+      if (!lvl.visible) return false;
+      const ly = c.y + dy * lvl.ratio;
+      return distToSegment(x, y, x0, ly, x1, ly) < HIT;
     });
   }
   if (kind === "fibtimezone" && pts.length >= 2) {
@@ -295,15 +610,21 @@ function handle(ctx: CanvasRenderingContext2D, p: Pt): void {
   ctx.restore();
 }
 
-function extend(ctx: CanvasRenderingContext2D, a: Pt, b: Pt, rect: ViewRect, left: boolean, right: boolean): void {
+function extendedEnds(a: Pt, b: Pt, rect: ViewRect, left: boolean, right: boolean): { s: Pt; e: Pt } {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const len = Math.hypot(dx, dy) || 1;
   const ux = dx / len;
   const uy = dy / len;
   const reach = Math.hypot(rect.w, rect.h) * 2;
-  const s = left ? { x: a.x - ux * reach, y: a.y - uy * reach } : a;
-  const e = right ? { x: b.x + ux * reach, y: b.y + uy * reach } : b;
+  return {
+    s: left ? { x: a.x - ux * reach, y: a.y - uy * reach } : { ...a },
+    e: right ? { x: b.x + ux * reach, y: b.y + uy * reach } : { ...b },
+  };
+}
+
+function extend(ctx: CanvasRenderingContext2D, a: Pt, b: Pt, rect: ViewRect, left: boolean, right: boolean): void {
+  const { s, e } = extendedEnds(a, b, rect, left, right);
   stroke(ctx, s, e);
 }
 
@@ -326,152 +647,358 @@ function paintFibRetrace(
   selected: boolean,
 ): void {
   if (pts.length < 2) return;
-  const a = pts[0];
-  const b = pts[1];
-  const xL = Math.min(a.x, b.x);
-  const xBox = Math.max(a.x, b.x);
-  const xR = rect.x + rect.w;
-  const p0 = d.points[0].price;
-  const p1 = d.points[1].price;
-  for (let i = 0; i < FIB_RETRACE.length - 1; i++) {
-    const y0 = a.y + (b.y - a.y) * FIB_RETRACE[i].ratio;
-    const y1 = a.y + (b.y - a.y) * FIB_RETRACE[i + 1].ratio;
-    ctx.fillStyle = FIB_RETRACE[i].fill;
-    ctx.fillRect(xL, Math.min(y0, y1), xR - xL, Math.abs(y1 - y0) || 1);
+  const style = resolveFibStyle(d);
+  const aPt = style.reverse ? pts[1] : pts[0];
+  const bPt = style.reverse ? pts[0] : pts[1];
+  const p0 = style.reverse ? d.points[1].price : d.points[0].price;
+  const p1 = style.reverse ? d.points[0].price : d.points[1].price;
+  const xL = Math.min(pts[0].x, pts[1].x);
+  const xBox = Math.max(pts[0].x, pts[1].x);
+  const x0 = style.extendLeft ? rect.x : xL;
+  const x1 = style.extendRight ? rect.x + rect.w : xBox;
+  const visible = style.levels.filter((l) => l.visible).sort((u, v) => u.ratio - v.ratio);
+
+  if (style.showBackground && visible.length >= 2) {
+    for (let i = 0; i < visible.length - 1; i++) {
+      const y0 = aPt.y + (bPt.y - aPt.y) * visible[i].ratio;
+      const y1 = aPt.y + (bPt.y - aPt.y) * visible[i + 1].ratio;
+      ctx.fillStyle = visible[i].fill;
+      ctx.fillRect(x0, Math.min(y0, y1), Math.max(1, x1 - x0), Math.abs(y1 - y0) || 1);
+    }
   }
-  ctx.save();
-  ctx.setLineDash([5, 4]);
-  ctx.strokeStyle = selected ? "#2962ff" : "#5b9cf6";
-  ctx.lineWidth = 1;
-  stroke(ctx, a, b);
-  ctx.restore();
+
+  if (style.showTrendLine) {
+    ctx.save();
+    applyLineStyle(ctx, style.trendStyle);
+    ctx.strokeStyle = selected ? "#2962ff" : style.trendColor;
+    ctx.lineWidth = style.trendWidth;
+    stroke(ctx, pts[0], pts[1]);
+    ctx.restore();
+  }
+
   ctx.font = AXIS_FONT;
   ctx.textAlign = "left";
-  for (const lvl of FIB_RETRACE) {
-    const y = a.y + (b.y - a.y) * lvl.ratio;
+  for (const lvl of visible) {
+    const y = aPt.y + (bPt.y - aPt.y) * lvl.ratio;
     const price = p0 + (p1 - p0) * lvl.ratio;
+    ctx.save();
+    applyLineStyle(ctx, style.levelsStyle);
     ctx.strokeStyle = lvl.color;
-    ctx.lineWidth = lvl.ratio === 0 || lvl.ratio === 1 || lvl.ratio === 0.618 ? 1.4 : 1;
-    stroke(ctx, { x: xL, y }, { x: xR, y });
+    ctx.lineWidth =
+      style.levelsWidth * (lvl.ratio === 0 || lvl.ratio === 1 || Math.abs(lvl.ratio - 0.618) < 1e-6 ? 1.35 : 1);
+    stroke(ctx, { x: x0, y }, { x: x1, y });
+    ctx.restore();
+
+    if (!style.showLevels && !style.showPrices) continue;
+    const parts: string[] = [];
+    if (style.showLevels) parts.push(formatFibRatio(lvl.ratio));
+    if (style.showPrices) parts.push(`(${formatPrice(price, precision)})`);
+    const tag = parts.length === 2 ? `${parts[0]} ${parts[1]}` : parts[0];
     ctx.fillStyle = lvl.color;
-    const tag = `${lvl.ratio.toFixed(3)} (${formatPrice(price, precision)})`;
-    ctx.fillText(tag, xBox + 6 > xR - 90 ? xL + 6 : xBox + 6, y - 3);
+    const labelX = xBox + 6 > x1 - 80 ? x0 + 6 : xBox + 6;
+    ctx.fillText(tag, labelX, y - 3);
   }
 }
 
 function paintFibExtension(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rect: ViewRect, precision: number, selected: boolean): void {
   if (pts.length < 2) return;
+  const style = resolveFibExtStyle(d);
   const a = pts[0];
   const b = pts[1];
   const c = pts[2] ?? b;
-  ctx.save();
-  ctx.setLineDash([4, 3]);
-  ctx.strokeStyle = selected ? "#2962ff" : "#5b9cf6";
-  stroke(ctx, a, b);
-  if (pts.length >= 3) stroke(ctx, b, c);
-  ctx.restore();
-  if (pts.length < 3) return;
-  const xL = Math.min(a.x, b.x, c.x);
-  const xR = rect.x + rect.w;
-  const range = d.points[1].price - d.points[0].price;
-  const base = d.points[2].price;
-  const dy = b.y - a.y;
-  ctx.font = AXIS_FONT;
-  for (let i = 0; i < FIB_EXT.length - 1; i++) {
-    const y0 = c.y + dy * FIB_EXT[i].ratio;
-    const y1 = c.y + dy * FIB_EXT[i + 1].ratio;
-    ctx.fillStyle = FIB_EXT[i].fill;
-    ctx.fillRect(xL, Math.min(y0, y1), xR - xL, Math.abs(y1 - y0) || 1);
+
+  if (style.showTrendLine) {
+    ctx.save();
+    applyLineStyle(ctx, style.trendStyle);
+    ctx.strokeStyle = selected ? "#2962ff" : style.trendColor;
+    ctx.lineWidth = style.trendWidth;
+    stroke(ctx, a, b);
+    if (pts.length >= 3) stroke(ctx, b, c);
+    ctx.restore();
   }
-  for (const lvl of FIB_EXT) {
+
+  if (pts.length < 3 || d.points.length < 3) return;
+
+  const sign = style.reverse ? -1 : 1;
+  const range = (d.points[1].price - d.points[0].price) * sign;
+  const base = d.points[2].price;
+  const dy = (b.y - a.y) * sign;
+  const xL = Math.min(a.x, b.x, c.x);
+  const xBox = Math.max(a.x, b.x, c.x);
+  const x0 = style.extendLeft ? rect.x : xL;
+  const x1 = style.extendRight ? rect.x + rect.w : xBox;
+  const visible = style.levels.filter((l) => l.visible).sort((u, v) => u.ratio - v.ratio);
+
+  if (style.showBackground && visible.length >= 2) {
+    for (let i = 0; i < visible.length - 1; i++) {
+      const y0 = c.y + dy * visible[i].ratio;
+      const y1 = c.y + dy * visible[i + 1].ratio;
+      ctx.fillStyle = visible[i].fill;
+      ctx.fillRect(x0, Math.min(y0, y1), Math.max(1, x1 - x0), Math.abs(y1 - y0) || 1);
+    }
+  }
+
+  ctx.font = AXIS_FONT;
+  ctx.textAlign = "left";
+  for (const lvl of visible) {
     const y = c.y + dy * lvl.ratio;
+    const price = base + range * lvl.ratio;
+    ctx.save();
+    applyLineStyle(ctx, style.levelsStyle);
     ctx.strokeStyle = lvl.color;
-    stroke(ctx, { x: xL, y }, { x: xR, y });
+    ctx.lineWidth =
+      style.levelsWidth *
+      (lvl.ratio === 0 || lvl.ratio === 1 || Math.abs(lvl.ratio - 1.618) < 1e-6 ? 1.35 : 1);
+    stroke(ctx, { x: x0, y }, { x: x1, y });
+    ctx.restore();
+
+    if (!style.showLevels && !style.showPrices) continue;
+    const parts: string[] = [];
+    if (style.showLevels) parts.push(formatFibRatio(lvl.ratio));
+    if (style.showPrices) parts.push(`(${formatPrice(price, precision)})`);
+    const tag = parts.length === 2 ? `${parts[0]} ${parts[1]}` : parts[0];
     ctx.fillStyle = lvl.color;
-    ctx.fillText(`${lvl.ratio.toFixed(3)} (${formatPrice(base + range * lvl.ratio, precision)})`, xL + 6, y - 3);
+    const labelX = xBox + 6 > x1 - 80 ? x0 + 6 : xBox + 6;
+    ctx.fillText(tag, labelX, y - 3);
   }
 }
 
-function paintFibChannel(ctx: CanvasRenderingContext2D, pts: Pt[], rect: ViewRect, selected: boolean): void {
+function paintFibChannel(
+  ctx: CanvasRenderingContext2D,
+  d: Drawing,
+  pts: Pt[],
+  rect: ViewRect,
+  precision: number,
+  selected: boolean,
+): void {
   if (pts.length < 2) return;
+  const style = resolveFibChannelStyle(d);
   const a = pts[0];
   const b = pts[1];
   const c = pts[2];
-  const ox = c ? c.x - a.x : 0;
-  const oy = c ? c.y - a.y : (b.y - a.y) * 0.25;
-  ctx.save();
-  ctx.setLineDash([4, 3]);
-  ctx.strokeStyle = selected ? "#2962ff" : "#5b9cf6";
-  stroke(ctx, a, b);
-  ctx.restore();
-  for (const lvl of FAN_RATIOS) {
-    const p = { x: a.x + ox * lvl, y: a.y + oy * lvl };
-    const q = { x: b.x + ox * lvl, y: b.y + oy * lvl };
-    ctx.strokeStyle = FIB_RETRACE[Math.min(FIB_RETRACE.length - 1, Math.round(lvl * 6))].color;
-    extend(ctx, p, q, rect, false, true);
+  let ox = c ? c.x - a.x : 0;
+  let oy = c ? c.y - a.y : (b.y - a.y) * 0.25;
+  if (style.reverse) {
+    ox = -ox;
+    oy = -oy;
+  }
+
+  if (style.showTrendLine) {
+    ctx.save();
+    applyLineStyle(ctx, style.trendStyle);
+    ctx.strokeStyle = selected ? "#2962ff" : style.trendColor;
+    ctx.lineWidth = style.trendWidth;
+    stroke(ctx, a, b);
+    ctx.restore();
+  }
+
+  const visible = style.levels.filter((l) => l.visible).sort((u, v) => u.ratio - v.ratio);
+  const p0 = d.points[0]?.price ?? 0;
+  const pC = d.points[2]?.price ?? p0;
+  const priceDelta = style.reverse ? p0 - pC : pC - p0;
+
+  if (style.showBackground && visible.length >= 2) {
+    for (let i = 0; i < visible.length - 1; i++) {
+      const r0 = visible[i].ratio;
+      const r1 = visible[i + 1].ratio;
+      const p0pt = { x: a.x + ox * r0, y: a.y + oy * r0 };
+      const q0pt = { x: b.x + ox * r0, y: b.y + oy * r0 };
+      const p1pt = { x: a.x + ox * r1, y: a.y + oy * r1 };
+      const q1pt = { x: b.x + ox * r1, y: b.y + oy * r1 };
+      const e0 = extendedEnds(p0pt, q0pt, rect, style.extendLeft, style.extendRight);
+      const e1 = extendedEnds(p1pt, q1pt, rect, style.extendLeft, style.extendRight);
+      ctx.fillStyle = visible[i].fill;
+      ctx.beginPath();
+      ctx.moveTo(e0.s.x, e0.s.y);
+      ctx.lineTo(e0.e.x, e0.e.y);
+      ctx.lineTo(e1.e.x, e1.e.y);
+      ctx.lineTo(e1.s.x, e1.s.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  ctx.font = AXIS_FONT;
+  ctx.textAlign = "left";
+  for (const lvl of visible) {
+    const p = { x: a.x + ox * lvl.ratio, y: a.y + oy * lvl.ratio };
+    const q = { x: b.x + ox * lvl.ratio, y: b.y + oy * lvl.ratio };
+    const { s, e } = extendedEnds(p, q, rect, style.extendLeft, style.extendRight);
+    ctx.save();
+    applyLineStyle(ctx, style.levelsStyle);
+    ctx.strokeStyle = lvl.color;
+    ctx.lineWidth =
+      style.levelsWidth * (lvl.ratio === 0 || lvl.ratio === 1 || Math.abs(lvl.ratio - 0.618) < 1e-6 ? 1.35 : 1);
+    stroke(ctx, s, e);
+    ctx.restore();
+
+    if (!style.showLevels && !style.showPrices) continue;
+    const price = p0 + priceDelta * lvl.ratio;
+    const parts: string[] = [];
+    if (style.showLevels) parts.push(formatFibRatio(lvl.ratio));
+    if (style.showPrices) parts.push(`(${formatPrice(price, precision)})`);
+    const tag = parts.length === 2 ? `${parts[0]} ${parts[1]}` : parts[0];
+    ctx.fillStyle = lvl.color;
+    ctx.fillText(tag, e.x + 6, e.y - 3);
   }
 }
 
-function paintFibTimeZone(ctx: CanvasRenderingContext2D, pts: Pt[], rect: ViewRect): void {
+function paintFibTimeZone(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rect: ViewRect, selected: boolean): void {
   if (pts.length < 2) return;
-  const unit = pts[1].x - pts[0].x || 1;
+  const style = resolveFibStyleForKind(d);
+  const unit = (pts[1].x - pts[0].x) * (style.reverse ? -1 : 1) || 1;
+  if (style.showTrendLine) {
+    ctx.save();
+    applyLineStyle(ctx, style.trendStyle);
+    ctx.strokeStyle = selected ? "#2962ff" : style.trendColor;
+    ctx.lineWidth = style.trendWidth;
+    stroke(ctx, pts[0], pts[1]);
+    ctx.restore();
+  }
   ctx.font = AXIS_FONT;
-  FIB_TIME.forEach((n, i) => {
-    const x = pts[0].x + unit * n;
-    ctx.strokeStyle = FIB_RETRACE[i % FIB_RETRACE.length].color;
+  for (const lvl of style.levels) {
+    if (!lvl.visible) continue;
+    const x = pts[0].x + unit * lvl.ratio;
+    ctx.save();
+    applyLineStyle(ctx, style.levelsStyle);
+    ctx.strokeStyle = lvl.color;
+    ctx.lineWidth = style.levelsWidth;
     stroke(ctx, { x, y: rect.y }, { x, y: rect.y + rect.h });
-    ctx.fillStyle = ctx.strokeStyle;
-    ctx.fillText(String(n), x + 4, rect.y + 14);
-  });
+    ctx.restore();
+    if (style.showLevels) {
+      ctx.fillStyle = lvl.color;
+      ctx.fillText(formatFibRatio(lvl.ratio), x + 4, rect.y + 14);
+    }
+  }
 }
 
-function paintFibFan(ctx: CanvasRenderingContext2D, pts: Pt[], rect: ViewRect): void {
+function paintFibFan(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rect: ViewRect, selected: boolean): void {
   if (pts.length < 2) return;
+  const style = resolveFibStyleForKind(d);
   const a = pts[0];
   const b = pts[1];
-  FAN_RATIOS.forEach((lvl, i) => {
-    ctx.strokeStyle = FIB_RETRACE[i % FIB_RETRACE.length].color;
-    extend(ctx, a, { x: b.x, y: a.y + (b.y - a.y) * lvl }, rect, false, true);
-    extend(ctx, a, { x: a.x + (b.x - a.x) * lvl, y: b.y }, rect, false, true);
-  });
+  const dx = (b.x - a.x) * (style.reverse ? -1 : 1);
+  const dy = (b.y - a.y) * (style.reverse ? -1 : 1);
+  if (style.showTrendLine) {
+    ctx.save();
+    applyLineStyle(ctx, style.trendStyle);
+    ctx.strokeStyle = selected ? "#2962ff" : style.trendColor;
+    ctx.lineWidth = style.trendWidth;
+    stroke(ctx, a, b);
+    ctx.restore();
+  }
+  ctx.font = AXIS_FONT;
+  for (const lvl of style.levels) {
+    if (!lvl.visible) continue;
+    ctx.save();
+    applyLineStyle(ctx, style.levelsStyle);
+    ctx.strokeStyle = lvl.color;
+    ctx.lineWidth = style.levelsWidth * (Math.abs(lvl.ratio - 0.618) < 1e-6 || lvl.ratio === 1 ? 1.35 : 1);
+    extend(ctx, a, { x: a.x + dx, y: a.y + dy * lvl.ratio }, rect, style.extendLeft, style.extendRight);
+    extend(ctx, a, { x: a.x + dx * lvl.ratio, y: a.y + dy }, rect, style.extendLeft, style.extendRight);
+    ctx.restore();
+    if (style.showLevels) {
+      ctx.fillStyle = lvl.color;
+      ctx.fillText(formatFibRatio(lvl.ratio), a.x + dx * 0.72, a.y + dy * lvl.ratio * 0.72);
+    }
+  }
 }
 
-function paintFibTime(ctx: CanvasRenderingContext2D, pts: Pt[], rect: ViewRect): void {
+function paintFibTime(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rect: ViewRect, selected: boolean): void {
   if (pts.length < 2) return;
+  const style = resolveFibStyleForKind(d);
   const a = pts[0];
   const b = pts[1];
   const c = pts[2] ?? b;
-  const unit = b.x - a.x || 1;
-  [0, 0.382, 0.618, 1, 1.272, 1.618, 2.618].forEach((lvl, i) => {
-    const x = c.x + unit * lvl;
-    ctx.strokeStyle = FIB_RETRACE[i % FIB_RETRACE.length].color;
+  const unit = (b.x - a.x) * (style.reverse ? -1 : 1) || 1;
+  if (style.showTrendLine) {
+    ctx.save();
+    applyLineStyle(ctx, style.trendStyle);
+    ctx.strokeStyle = selected ? "#2962ff" : style.trendColor;
+    ctx.lineWidth = style.trendWidth;
+    stroke(ctx, a, b);
+    if (pts.length >= 3) stroke(ctx, b, c);
+    ctx.restore();
+  }
+  ctx.font = AXIS_FONT;
+  for (const lvl of style.levels) {
+    if (!lvl.visible) continue;
+    const x = c.x + unit * lvl.ratio;
+    ctx.save();
+    applyLineStyle(ctx, style.levelsStyle);
+    ctx.strokeStyle = lvl.color;
+    ctx.lineWidth = style.levelsWidth;
     stroke(ctx, { x, y: rect.y }, { x, y: rect.y + rect.h });
-    ctx.fillStyle = ctx.strokeStyle;
-    ctx.font = AXIS_FONT;
-    ctx.fillText(lvl.toFixed(3), x + 4, rect.y + 14);
-  });
+    ctx.restore();
+    if (style.showLevels) {
+      ctx.fillStyle = lvl.color;
+      ctx.fillText(formatFibRatio(lvl.ratio), x + 4, rect.y + 14);
+    }
+  }
 }
 
-function paintFibCircles(ctx: CanvasRenderingContext2D, pts: Pt[]): void {
+function paintFibCircles(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], selected: boolean): void {
   if (pts.length < 2) return;
-  const r = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
-  FAN_RATIOS.filter((v) => v > 0).concat([1.618, 2.618]).forEach((lvl, i) => {
-    ctx.strokeStyle = FIB_RETRACE[i % FIB_RETRACE.length].color;
+  const style = resolveFibStyleForKind(d);
+  const r = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y) || 1;
+  if (style.showTrendLine) {
+    ctx.save();
+    applyLineStyle(ctx, style.trendStyle);
+    ctx.strokeStyle = selected ? "#2962ff" : style.trendColor;
+    ctx.lineWidth = style.trendWidth;
+    stroke(ctx, pts[0], pts[1]);
+    ctx.restore();
+  }
+  const visible = style.levels.filter((l) => l.visible && l.ratio > 0).sort((u, v) => u.ratio - v.ratio);
+  if (style.showBackground) {
+    for (let i = 0; i < visible.length - 1; i++) {
+      ctx.beginPath();
+      ctx.arc(pts[0].x, pts[0].y, r * visible[i + 1].ratio, 0, Math.PI * 2);
+      ctx.arc(pts[0].x, pts[0].y, r * visible[i].ratio, 0, Math.PI * 2, true);
+      ctx.fillStyle = visible[i].fill;
+      ctx.fill();
+    }
+  }
+  ctx.font = AXIS_FONT;
+  for (const lvl of visible) {
+    ctx.save();
+    applyLineStyle(ctx, style.levelsStyle);
+    ctx.strokeStyle = lvl.color;
+    ctx.lineWidth = style.levelsWidth;
     ctx.beginPath();
-    ctx.arc(pts[0].x, pts[0].y, r * lvl, 0, Math.PI * 2);
+    ctx.arc(pts[0].x, pts[0].y, r * lvl.ratio, 0, Math.PI * 2);
     ctx.stroke();
-  });
+    ctx.restore();
+    if (style.showLevels) {
+      ctx.fillStyle = lvl.color;
+      ctx.fillText(formatFibRatio(lvl.ratio), pts[0].x + r * lvl.ratio + 4, pts[0].y);
+    }
+  }
 }
 
-function paintFibSpiral(ctx: CanvasRenderingContext2D, pts: Pt[]): void {
+function paintFibSpiral(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], selected: boolean): void {
   if (pts.length < 2) return;
+  const style = resolveFibStyleForKind(d);
   const a = pts[0];
   const b = pts[1];
   const r0 = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-  const ang0 = Math.atan2(b.y - a.y, b.x - a.x);
+  const ang0 = Math.atan2(b.y - a.y, b.x - a.x) + (style.reverse ? Math.PI : 0);
   const phi = Math.log(1.618) / (Math.PI / 2);
+  if (style.showTrendLine) {
+    ctx.save();
+    applyLineStyle(ctx, style.trendStyle);
+    ctx.strokeStyle = selected ? "#2962ff" : style.trendColor;
+    ctx.lineWidth = style.trendWidth;
+    stroke(ctx, a, b);
+    ctx.restore();
+  }
+  const color = style.levels.find((l) => l.visible)?.color ?? "#2962ff";
+  ctx.save();
+  applyLineStyle(ctx, style.levelsStyle);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = style.levelsWidth * 1.2;
   ctx.beginPath();
-  for (let i = 0; i <= 360; i++) {
+  for (let i = 0; i <= 420; i++) {
     const t = (i / 360) * Math.PI * 3.5;
     const r = r0 * Math.exp(phi * t);
     const x = a.x + r * Math.cos(ang0 + t);
@@ -480,47 +1007,110 @@ function paintFibSpiral(ctx: CanvasRenderingContext2D, pts: Pt[]): void {
     else ctx.lineTo(x, y);
   }
   ctx.stroke();
+  ctx.restore();
 }
 
-function paintFibArcs(ctx: CanvasRenderingContext2D, pts: Pt[]): void {
+function paintFibArcs(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], selected: boolean): void {
   if (pts.length < 2) return;
-  const r = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+  const style = resolveFibStyleForKind(d);
+  const r = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y) || 1;
   const ang = Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x);
-  FAN_RATIOS.filter((v) => v > 0).forEach((lvl, i) => {
-    ctx.strokeStyle = FIB_RETRACE[i % FIB_RETRACE.length].color;
+  const sweep = style.reverse ? -1 : 1;
+  if (style.showTrendLine) {
+    ctx.save();
+    applyLineStyle(ctx, style.trendStyle);
+    ctx.strokeStyle = selected ? "#2962ff" : style.trendColor;
+    ctx.lineWidth = style.trendWidth;
+    stroke(ctx, pts[0], pts[1]);
+    ctx.restore();
+  }
+  ctx.font = AXIS_FONT;
+  for (const lvl of style.levels) {
+    if (!lvl.visible || lvl.ratio <= 0) continue;
+    ctx.save();
+    applyLineStyle(ctx, style.levelsStyle);
+    ctx.strokeStyle = lvl.color;
+    ctx.lineWidth = style.levelsWidth;
     ctx.beginPath();
-    ctx.arc(pts[0].x, pts[0].y, r * lvl, ang - Math.PI / 2, ang + Math.PI / 2);
+    ctx.arc(pts[0].x, pts[0].y, r * lvl.ratio, ang - (Math.PI / 2) * sweep, ang + (Math.PI / 2) * sweep, sweep < 0);
     ctx.stroke();
-  });
+    ctx.restore();
+    if (style.showLevels) {
+      const lx = pts[0].x + r * lvl.ratio * Math.cos(ang);
+      const ly = pts[0].y + r * lvl.ratio * Math.sin(ang);
+      ctx.fillStyle = lvl.color;
+      ctx.fillText(formatFibRatio(lvl.ratio), lx + 4, ly);
+    }
+  }
 }
 
-function paintFibWedge(ctx: CanvasRenderingContext2D, pts: Pt[]): void {
+function paintFibWedge(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rect: ViewRect, selected: boolean): void {
   if (pts.length < 2) return;
+  const style = resolveFibStyleForKind(d);
   const o = pts[0];
   const a = pts[1];
   const b = pts[2] ?? { x: a.x, y: o.y };
-  FAN_RATIOS.forEach((lvl, i) => {
-    ctx.strokeStyle = FIB_RETRACE[i % FIB_RETRACE.length].color;
-    stroke(ctx, o, { x: a.x + (b.x - a.x) * lvl, y: a.y + (b.y - a.y) * lvl });
-  });
-}
-
-function paintGannFan(ctx: CanvasRenderingContext2D, pts: Pt[], rect: ViewRect): void {
-  if (pts.length < 2) return;
-  const dx = pts[1].x - pts[0].x;
-  const dy = pts[1].y - pts[0].y;
+  if (style.showTrendLine) {
+    ctx.save();
+    applyLineStyle(ctx, style.trendStyle);
+    ctx.strokeStyle = selected ? "#2962ff" : style.trendColor;
+    ctx.lineWidth = style.trendWidth;
+    extend(ctx, o, a, rect, false, style.extendRight);
+    extend(ctx, o, b, rect, false, style.extendRight);
+    ctx.restore();
+  }
   ctx.font = AXIS_FONT;
-  GANN_RATIOS.forEach((r, i) => {
-    ctx.strokeStyle = i === 4 ? "#f23645" : "#787b86";
-    ctx.lineWidth = i === 4 ? 1.6 : 1;
-    extend(ctx, pts[0], { x: pts[0].x + dx, y: pts[0].y + dy * r }, rect, false, true);
-    ctx.fillStyle = ctx.strokeStyle;
-    ctx.fillText(GANN_LABELS[i], pts[0].x + dx * 0.55, pts[0].y + dy * r * 0.55);
+  for (const lvl of style.levels) {
+    if (!lvl.visible) continue;
+    const t = style.reverse ? 1 - lvl.ratio : lvl.ratio;
+    const p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+    ctx.save();
+    applyLineStyle(ctx, style.levelsStyle);
+    ctx.strokeStyle = lvl.color;
+    ctx.lineWidth = style.levelsWidth;
+    extend(ctx, o, p, rect, false, style.extendRight);
+    ctx.restore();
+    if (style.showLevels) {
+      ctx.fillStyle = lvl.color;
+      ctx.fillText(formatFibRatio(lvl.ratio), o.x + (p.x - o.x) * 0.75 + 4, o.y + (p.y - o.y) * 0.75);
+    }
+  }
+}
+
+function paintGannFan(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rect: ViewRect, selected: boolean): void {
+  if (pts.length < 2) return;
+  const style = resolveFibStyleForKind(d);
+  const dx = (pts[1].x - pts[0].x) * (style.reverse ? -1 : 1);
+  const dy = (pts[1].y - pts[0].y) * (style.reverse ? -1 : 1);
+  if (style.showTrendLine) {
+    ctx.save();
+    applyLineStyle(ctx, style.trendStyle);
+    ctx.strokeStyle = selected ? "#2962ff" : style.trendColor;
+    ctx.lineWidth = style.trendWidth;
+    stroke(ctx, pts[0], pts[1]);
+    ctx.restore();
+  }
+  ctx.font = AXIS_FONT;
+  style.levels.forEach((lvl, i) => {
+    if (!lvl.visible) return;
+    const isOne = Math.abs(lvl.ratio - 1) < 1e-6;
+    ctx.save();
+    applyLineStyle(ctx, style.levelsStyle);
+    ctx.strokeStyle = isOne ? "#f23645" : lvl.color;
+    ctx.lineWidth = style.levelsWidth * (isOne ? 1.6 : 1);
+    extend(ctx, pts[0], { x: pts[0].x + dx, y: pts[0].y + dy * lvl.ratio }, rect, style.extendLeft, style.extendRight);
+    ctx.restore();
+    if (style.showLevels) {
+      const label = GANN_LABELS[i] ?? formatFibRatio(lvl.ratio);
+      ctx.fillStyle = ctx.strokeStyle = isOne ? "#f23645" : lvl.color;
+      ctx.fillText(label, pts[0].x + dx * 0.55, pts[0].y + dy * lvl.ratio * 0.55);
+    }
   });
 }
 
-function paintGannBox(ctx: CanvasRenderingContext2D, pts: Pt[], kind: DrawingKind): void {
+function paintGannBox(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], kind: DrawingKind, selected: boolean): void {
   if (pts.length < 2) return;
+  const style = resolveFibStyleForKind(d);
   let x0 = Math.min(pts[0].x, pts[1].x);
   let y0 = Math.min(pts[0].y, pts[1].y);
   let w = Math.abs(pts[1].x - pts[0].x);
@@ -529,19 +1119,28 @@ function paintGannBox(ctx: CanvasRenderingContext2D, pts: Pt[], kind: DrawingKin
     const s = kind === "gannsquarefixed" ? Math.min(w, h) || 80 : Math.max(w, h) || 80;
     w = s;
     h = s;
-    if (pts[1].x < pts[0].x) x0 = pts[0].x - s;
-    else x0 = pts[0].x;
-    if (pts[1].y < pts[0].y) y0 = pts[0].y - s;
-    else y0 = pts[0].y;
+    x0 = pts[1].x < pts[0].x ? pts[0].x - s : pts[0].x;
+    y0 = pts[1].y < pts[0].y ? pts[0].y - s : pts[0].y;
   }
-  ctx.strokeStyle = "#787b86";
+  ctx.save();
+  applyLineStyle(ctx, style.levelsStyle);
+  ctx.strokeStyle = selected ? "#2962ff" : style.trendColor;
+  ctx.lineWidth = style.trendWidth;
   ctx.strokeRect(x0, y0, w, h);
-  ctx.strokeStyle = "rgba(120,123,134,0.55)";
-  for (const r of BOX_RATIOS) {
+  ctx.restore();
+  for (const lvl of style.levels) {
+    if (!lvl.visible) continue;
+    const r = style.reverse ? 1 - lvl.ratio : lvl.ratio;
+    ctx.save();
+    applyLineStyle(ctx, style.levelsStyle);
+    ctx.strokeStyle = lvl.color;
+    ctx.lineWidth = style.levelsWidth * (Math.abs(lvl.ratio - 0.5) < 1e-6 ? 1.35 : 1);
     stroke(ctx, { x: x0 + w * r, y: y0 }, { x: x0 + w * r, y: y0 + h });
     stroke(ctx, { x: x0, y: y0 + h * r }, { x: x0 + w, y: y0 + h * r });
+    ctx.restore();
   }
   ctx.strokeStyle = "#f23645";
+  ctx.lineWidth = 1.2;
   stroke(ctx, { x: x0, y: y0 + h }, { x: x0 + w, y: y0 });
   stroke(ctx, { x: x0, y: y0 }, { x: x0 + w, y: y0 + h });
 }
@@ -554,39 +1153,86 @@ function pitchOrigin(kind: DrawingKind, p1: Pt, p2: Pt, p3: Pt): Pt {
   return p1;
 }
 
-function paintPitchfork(ctx: CanvasRenderingContext2D, pts: Pt[], rect: ViewRect, kind: DrawingKind): void {
+function paintPitchfork(
+  ctx: CanvasRenderingContext2D,
+  d: Drawing,
+  pts: Pt[],
+  rect: ViewRect,
+  kind: DrawingKind,
+  selected: boolean,
+): void {
   if (pts.length < 3) {
     if (pts.length >= 2) stroke(ctx, pts[0], pts[1]);
     return;
   }
+  const style = resolveFibStyleForKind(d);
   const [p1, p2, p3] = pts;
   const mid = { x: (p2.x + p3.x) / 2, y: (p2.y + p3.y) / 2 };
   const o = pitchOrigin(kind, p1, p2, p3);
-  const dx = mid.x - o.x;
-  const dy = mid.y - o.y;
-  ctx.strokeStyle = "#2962ff";
-  extend(ctx, o, mid, rect, true, true);
-  ctx.strokeStyle = "#26a69a";
-  extend(ctx, p2, { x: p2.x + dx, y: p2.y + dy }, rect, false, true);
-  ctx.strokeStyle = "#ef5350";
-  extend(ctx, p3, { x: p3.x + dx, y: p3.y + dy }, rect, false, true);
-  stroke(ctx, p2, p3);
+  const dx = (mid.x - o.x) * (style.reverse ? -1 : 1);
+  const dy = (mid.y - o.y) * (style.reverse ? -1 : 1);
+
+  if (style.showTrendLine) {
+    ctx.save();
+    applyLineStyle(ctx, style.trendStyle);
+    ctx.strokeStyle = selected ? "#2962ff" : style.trendColor;
+    ctx.lineWidth = style.trendWidth;
+    stroke(ctx, p2, p3);
+    ctx.restore();
+  }
+
+  const median = style.levels.find((l) => Math.abs(l.ratio - 0.5) < 1e-6) ?? style.levels[2];
+  ctx.save();
+  applyLineStyle(ctx, style.levelsStyle);
+  ctx.strokeStyle = median?.color ?? "#2962ff";
+  ctx.lineWidth = style.levelsWidth * 1.4;
+  extend(ctx, o, { x: o.x + dx, y: o.y + dy }, rect, style.extendLeft, style.extendRight);
+  ctx.restore();
+
   if (kind === "pitchfan") {
-    FAN_RATIOS.forEach((lvl) => {
-      const s = { x: p2.x + (p3.x - p2.x) * lvl, y: p2.y + (p3.y - p2.y) * lvl };
-      ctx.strokeStyle = "rgba(209,212,220,0.45)";
-      extend(ctx, o, s, rect, false, true);
-    });
+    for (const lvl of style.levels) {
+      if (!lvl.visible) continue;
+      const s = { x: p2.x + (p3.x - p2.x) * lvl.ratio, y: p2.y + (p3.y - p2.y) * lvl.ratio };
+      ctx.save();
+      applyLineStyle(ctx, style.levelsStyle);
+      ctx.strokeStyle = lvl.color;
+      ctx.lineWidth = style.levelsWidth;
+      extend(ctx, o, s, rect, false, style.extendRight);
+      ctx.restore();
+      if (style.showLevels) {
+        ctx.fillStyle = lvl.color;
+        ctx.font = AXIS_FONT;
+        ctx.fillText(formatFibRatio(lvl.ratio), o.x + (s.x - o.x) * 0.7, o.y + (s.y - o.y) * 0.7);
+      }
+    }
   } else {
-    [0.25, 0.5, 0.75].forEach((lvl) => {
-      ctx.setLineDash([3, 3]);
-      ctx.strokeStyle = "rgba(120,123,134,0.7)";
-      const a = { x: p2.x + (mid.x - p2.x) * lvl, y: p2.y + (mid.y - p2.y) * lvl };
-      const b = { x: p3.x + (mid.x - p3.x) * lvl, y: p3.y + (mid.y - p3.y) * lvl };
-      extend(ctx, a, { x: a.x + dx, y: a.y + dy }, rect, false, true);
-      extend(ctx, b, { x: b.x + dx, y: b.y + dy }, rect, false, true);
-      ctx.setLineDash([]);
-    });
+    const upper = style.levels.find((l) => l.ratio === 0) ?? style.levels[0];
+    const lower = style.levels.find((l) => l.ratio === 1) ?? style.levels[style.levels.length - 1];
+    ctx.save();
+    applyLineStyle(ctx, style.levelsStyle);
+    ctx.strokeStyle = upper.color;
+    ctx.lineWidth = style.levelsWidth;
+    extend(ctx, p2, { x: p2.x + dx, y: p2.y + dy }, rect, false, style.extendRight);
+    ctx.strokeStyle = lower.color;
+    extend(ctx, p3, { x: p3.x + dx, y: p3.y + dy }, rect, false, style.extendRight);
+    ctx.restore();
+    for (const lvl of style.levels) {
+      if (!lvl.visible || lvl.ratio === 0 || lvl.ratio === 1 || Math.abs(lvl.ratio - 0.5) < 1e-6) continue;
+      const a = { x: p2.x + (mid.x - p2.x) * lvl.ratio * 2, y: p2.y + (mid.y - p2.y) * lvl.ratio * 2 };
+      const b = { x: p3.x + (mid.x - p3.x) * (1 - lvl.ratio) * 2, y: p3.y + (mid.y - p3.y) * (1 - lvl.ratio) * 2 };
+      // Parallel at ratio between p2-mid and p3-mid
+      const fromP2 = { x: p2.x + (mid.x - p2.x) * lvl.ratio, y: p2.y + (mid.y - p2.y) * lvl.ratio };
+      const fromP3 = { x: p3.x + (mid.x - p3.x) * lvl.ratio, y: p3.y + (mid.y - p3.y) * lvl.ratio };
+      ctx.save();
+      applyLineStyle(ctx, "dashed");
+      ctx.strokeStyle = lvl.color;
+      ctx.lineWidth = style.levelsWidth;
+      extend(ctx, fromP2, { x: fromP2.x + dx, y: fromP2.y + dy }, rect, false, style.extendRight);
+      extend(ctx, fromP3, { x: fromP3.x + dx, y: fromP3.y + dy }, rect, false, style.extendRight);
+      ctx.restore();
+      void a;
+      void b;
+    }
   }
 }
 

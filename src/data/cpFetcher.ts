@@ -185,9 +185,12 @@ export function historyToBars(hist: CpHistoryResponse): Bar[] {
     .sort((a, b) => a.time - b.time);
 }
 
-export function latestToBar(live: CpLatest): Bar {
+export function latestToBar(live: CpLatest, intervalSec = 60): Bar {
+  const closeTime = +live.bar_close_time;
+  const step = Math.max(1, intervalSec);
+  const openTime = Number.isFinite(closeTime) ? Math.floor((closeTime - 1) / step) * step : closeTime;
   return {
-    time: live.bar_close_time,
+    time: openTime,
     open: +live.open,
     high: +live.high,
     low: +live.low,
