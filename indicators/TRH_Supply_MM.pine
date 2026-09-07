@@ -1,22 +1,15 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
-// TRH | Liquidity Under Construction (Naeem / fractal model)
+// TRH | LQ Fractal — setup drawings (like your images), not signal stickers
 //
-// نقدینگی در حال ساخت — trade liquidity being built; later it becomes the
-// pool that sweeps everyone into the correct zone.
-// Same pattern nested across fractals (کون‌پشته‌کون).
+// Visual = Money Management / Position tool style:
+//   POI zone (Fresh / BB+FVG) · pink RISK box (E→S) · teal REWARD box (E→TP)
+//   tiny E / S tags · LQ line · optional MSS mark
 //
-// Bias: 4H + Daily  (or Daily + Monthly)
-// Stacks:
-//   1 — 15 — 4H — W
-//   5 — 1H — D  — MN
-//
-// A: MSS → New Fresh Zone → LQ build → sweep into zone → E proximal / S distal
-// B: MSS → BB + FVG → LQ build → sweep into zone
-// C: Major expansion in bias → internal fs sweep → continuation
+// نقدینگی در حال ساخت · fractal stacks · bias 4H+W or D+MN
 
 //@version=6
-indicator("TRH | LQ Fractal (Liquidity Under Construction)", shorttitle="TRH-LQ",
-     overlay=true, max_boxes_count=60, max_lines_count=160, max_labels_count=100,
+indicator("TRH | LQ Fractal Setups", shorttitle="TRH-LQ",
+     overlay=true, max_boxes_count=150, max_lines_count=200, max_labels_count=120,
      max_bars_back=5000)
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -26,8 +19,8 @@ indicator("TRH | LQ Fractal (Liquidity Under Construction)", shorttitle="TRH-LQ"
 grpStack = "Fractal Stack"
 stack = input.string("1 — 15 — 4H — W", "Active Stack",
      options=["1 — 15 — 4H — W", "5 — 1H — D — MN"], group=grpStack,
-     tooltip="Attach on ENTRY TF (1m for fast stack, 5m for slow).\nBias from 4H+D or D+MN.")
-requireBiasAlign = input.bool(true, "Only Trade With Bias", group=grpStack)
+     tooltip="Attach on ENTRY TF (1m fast / 5m slow).")
+requireBiasAlign = input.bool(true, "Only Setups With Bias", group=grpStack)
 biasMode = input.string("Candle + EMA", "Bias Method",
      options=["Candle + EMA", "Close vs Prior", "EMA only"], group=grpStack)
 
@@ -38,40 +31,45 @@ minZonePts     = input.float(1.50, "Min Zone Height (price)", step=0.1, group=gr
 maxZoneAtr     = input.float(2.20, "Max Zone Height (ATR×)", step=0.1, group=grpModel)
 lqTolAtr       = input.float(0.12, "Equal Hi/Lo Tol (ATR×)", step=0.01, group=grpModel)
 minLqTouches   = input.int(2, "Min Touches For LQ", minval=2, maxval=6, group=grpModel)
-requireLqSweep = input.bool(true, "Require LQ Sweep Into Zone", group=grpModel)
+requireLqSweep = input.bool(false, "Wait LQ Sweep Before Arming Setup", group=grpModel,
+     tooltip="OFF = draw full E/S/TP boxes as soon as Fresh Zone forms (like your images).\nON = only arm after LQ sweep into zone.")
 fsPadAtr       = input.float(0.05, "fs Beyond Swing (ATR×)", step=0.01, group=grpModel)
 fsMaxAtr       = input.float(0.55, "Max fs Depth (ATR×)", step=0.05, group=grpModel)
-cooldownBars   = input.int(20, "Cooldown Bars", minval=1, group=grpModel)
+cooldownBars   = input.int(15, "Cooldown Bars", minval=1, group=grpModel)
 slPadPts       = input.float(0.15, "SL Pad (price)", step=0.05, group=grpModel)
-rrTarget       = input.float(3.0, "Fallback RR", minval=1.0, step=0.5, group=grpModel)
-useErlTp       = input.bool(true, "TP Prefer Yesterday High/Low", group=grpModel)
+rrTarget       = input.float(3.0, "Reward Multiple (R)", minval=1.0, step=0.5, group=grpModel)
+useErlTp       = input.bool(true, "Stretch TP to Yesterday Hi/Lo If Farther", group=grpModel)
+setupWidth     = input.int(18, "Setup Box Width (bars)", minval=6, maxval=80, group=grpModel)
 
 grpPath = "Paths"
 useFreshZone = input.bool(true, "A — Fresh Zone after MSS", group=grpPath)
 useBbFvg     = input.bool(true, "B — BB + FVG", group=grpPath)
-useFsCont    = input.bool(true, "C — Internal fs Continuation", group=grpPath)
+useFsCont    = input.bool(true, "C — Internal fs", group=grpPath)
 
 grpDisp = "Display"
-showZones  = input.bool(true, "Show Zones", group=grpDisp)
-showLq     = input.bool(true, "Show LQ", group=grpDisp)
-showLabels = input.bool(true, "Labels", group=grpDisp)
+showPoi    = input.bool(true, "Show POI Zone", group=grpDisp)
+showSetup  = input.bool(true, "Show Risk / Reward Boxes (Position Tool)", group=grpDisp)
+showLq     = input.bool(true, "Show LQ Line", group=grpDisp)
+showES     = input.bool(true, "Show E / S Tags", group=grpDisp)
+showMssTag = input.bool(true, "Show Tiny MSS Tag", group=grpDisp)
 showPanel  = input.bool(true, "Panel", group=grpDisp)
-extendBars = input.int(40, "Extend (bars)", minval=5, group=grpDisp)
-supplyCol  = input.color(color.new(#EF5350, 78), "Supply", group=grpDisp)
-demandCol  = input.color(color.new(#26A69A, 78), "Demand", group=grpDisp)
+maxSetups  = input.int(8, "Keep Last N Setups", minval=1, maxval=20, group=grpDisp)
+poiSupCol  = input.color(color.new(#EF9A9A, 72), "POI Supply", group=grpDisp)
+poiDemCol  = input.color(color.new(#80CBC4, 72), "POI Demand", group=grpDisp)
+riskCol    = input.color(color.new(#EF5350, 72), "Risk Box (SL)", group=grpDisp)
+rewardCol  = input.color(color.new(#26A69A, 78), "Reward Box (TP)", group=grpDisp)
 lqCol      = input.color(#FFB74D, "LQ", group=grpDisp)
-entryCol   = input.color(#66BB6A, "Entry", group=grpDisp)
-slCol      = input.color(#EF5350, "Stop", group=grpDisp)
+entryCol   = input.color(#66BB6A, "E", group=grpDisp)
+slCol      = input.color(#EF5350, "S", group=grpDisp)
 mssCol     = input.color(#CE93D8, "MSS", group=grpDisp)
 
 // ═══════════════════════════════════════════════════════════════════════════
-// STACK + BIAS
+// BIAS
 // ═══════════════════════════════════════════════════════════════════════════
 
 isFast  = stack == "1 — 15 — 4H — W"
 biasTf  = isFast ? "240" : "D"
 macroTf = isFast ? "W" : "M"
-
 atr = ta.atr(14)
 
 f_tf_bias(string tf) =>
@@ -93,7 +91,6 @@ macroBias = f_tf_bias(macroTf)
 biasAligned = biasDir == macroBias
 biasOkLong  = not requireBiasAlign or (biasDir == 1 and biasAligned)
 biasOkShort = not requireBiasAlign or (biasDir == -1 and biasAligned)
-
 dayHi = request.security(syminfo.tickerid, "D", high[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 dayLo = request.security(syminfo.tickerid, "D", low[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
@@ -103,7 +100,6 @@ dayLo = request.security(syminfo.tickerid, "D", low[1], gaps=barmerge.gaps_off, 
 
 ph = ta.pivothigh(high, pivotLen, pivotLen)
 pl = ta.pivotlow(low, pivotLen, pivotLen)
-
 var float[] swingHi = array.new_float()
 var int[]   swingHiBar = array.new_int()
 var float[] swingLo = array.new_float()
@@ -115,7 +111,6 @@ if not na(ph)
     if array.size(swingHi) > 30
         array.shift(swingHi)
         array.shift(swingHiBar)
-
 if not na(pl)
     array.push(swingLo, pl)
     array.push(swingLoBar, bar_index - pivotLen)
@@ -127,8 +122,6 @@ lastHi  = array.size(swingHi) > 0 ? array.get(swingHi, array.size(swingHi) - 1) 
 lastLo  = array.size(swingLo) > 0 ? array.get(swingLo, array.size(swingLo) - 1) : float(na)
 lastHiB = array.size(swingHiBar) > 0 ? array.get(swingHiBar, array.size(swingHiBar) - 1) : int(na)
 lastLoB = array.size(swingLoBar) > 0 ? array.get(swingLoBar, array.size(swingLoBar) - 1) : int(na)
-prevHi  = array.size(swingHi) > 1 ? array.get(swingHi, array.size(swingHi) - 2) : float(na)
-prevLo  = array.size(swingLo) > 1 ? array.get(swingLo, array.size(swingLo) - 2) : float(na)
 
 f_eq_hi(float level, float tol) =>
     int n = 0
@@ -174,295 +167,311 @@ f_tp(int dir, float entry, float sl) =>
     tp
 
 // ═══════════════════════════════════════════════════════════════════════════
-// STATE (all mutations in global scope — Pine rule)
+// SETUP STORE (visual position-tool objects — no signal stickers)
 // ═══════════════════════════════════════════════════════════════════════════
 
-var int lastSignalBar = na
-var int zDir = 0
-var float zProx = na
-var float zDist = na
-var int zBirth = na
-var int zLeft = 0
-var int zArmed = 0
-var int zKind = 0
-var float zLq = na
-var int zMssBar = na
-var box zBox = na
-var line zE = na
-var line zS = na
-var label zTag = na
-var line zLqLine = na
-var label zLqLab = na
-var line zTpLine = na
+var int lastBirth = na
 
-var float sigEntry = na
-var float sigSl = na
-var float sigTp = na
-var int sigDir = 0
-var string sigPath = ""
+var int[]   sDir = array.new_int()
+var int[]   sKind = array.new_int()      // 1 fresh · 2 bb · 3 fs
+var int[]   sBirth = array.new_int()
+var float[] sProx = array.new_float()
+var float[] sDist = array.new_float()
+var float[] sEntry = array.new_float()
+var float[] sSl = array.new_float()
+var float[] sTp = array.new_float()
+var int[]   sLeft = array.new_int()
+var int[]   sArmed = array.new_int()
+var int[]   sDead = array.new_int()
+var float[] sLq = array.new_float()
+
+var box[]   poiBoxes = array.new_box()
+var box[]   riskBoxes = array.new_box()
+var box[]   rewardBoxes = array.new_box()
+var line[]  eLines = array.new_line()
+var line[]  sLines = array.new_line()
+var label[] eLabs = array.new_label()
+var label[] sLabs = array.new_label()
+var line[]  lqLines = array.new_line()
+var label[] lqLabs = array.new_label()
+
+f_can_birth() =>
+    na(lastBirth) or (bar_index - lastBirth) >= cooldownBars
+
+f_delete_setup(int i) =>
+    if i >= 0 and i < array.size(sDir)
+        box.delete(array.get(poiBoxes, i))
+        box.delete(array.get(riskBoxes, i))
+        box.delete(array.get(rewardBoxes, i))
+        line.delete(array.get(eLines, i))
+        line.delete(array.get(sLines, i))
+        label.delete(array.get(eLabs, i))
+        label.delete(array.get(sLabs, i))
+        line.delete(array.get(lqLines, i))
+        label.delete(array.get(lqLabs, i))
+
+f_shift_oldest() =>
+    if array.size(sDir) > 0
+        f_delete_setup(0)
+        array.shift(sDir)
+        array.shift(sKind)
+        array.shift(sBirth)
+        array.shift(sProx)
+        array.shift(sDist)
+        array.shift(sEntry)
+        array.shift(sSl)
+        array.shift(sTp)
+        array.shift(sLeft)
+        array.shift(sArmed)
+        array.shift(sDead)
+        array.shift(sLq)
+        array.shift(poiBoxes)
+        array.shift(riskBoxes)
+        array.shift(rewardBoxes)
+        array.shift(eLines)
+        array.shift(sLines)
+        array.shift(eLabs)
+        array.shift(sLabs)
+        array.shift(lqLines)
+        array.shift(lqLabs)
+
+// Create a full visual setup (returns birth bar for lastBirth assign in global scope)
+f_make_setup(int dir, int kind, float prox, float dist) =>
+    while array.size(sDir) >= maxSetups
+        f_shift_oldest()
+    int bi = bar_index
+    float entry = prox
+    float sl = dir == -1 ? dist + slPadPts : dist - slPadPts
+    float tp = f_tp(dir, entry, sl)
+    int x2 = bi + setupWidth
+    color poiC = dir == 1 ? poiDemCol : poiSupCol
+
+    box poi = showPoi ? box.new(bi, math.max(prox, dist), x2, math.min(prox, dist), border_color=color.new(poiC, 35), bgcolor=poiC, border_width=1) : na
+
+    // Position-tool geometry: RISK between entry↔SL, REWARD between entry↔TP
+    box risk = na
+    box rew = na
+    if showSetup
+        risk := box.new(bi, math.max(entry, sl), x2, math.min(entry, sl), border_color=color.new(riskCol, 40), bgcolor=riskCol, border_width=1)
+        rew := box.new(bi, math.max(entry, tp), x2, math.min(entry, tp), border_color=color.new(rewardCol, 45), bgcolor=rewardCol, border_width=1)
+
+    line el = line.new(bi, entry, x2, entry, color=entryCol, style=line.style_dashed, width=1)
+    line sln = line.new(bi, sl, x2, sl, color=slCol, style=line.style_dashed, width=1)
+    label elab = showES ? label.new(x2, entry, "E", style=label.style_label_left, color=color.new(entryCol, 100), textcolor=entryCol, size=size.small) : na
+    label slab = showES ? label.new(x2, sl, "S", style=label.style_label_left, color=color.new(slCol, 100), textcolor=slCol, size=size.small) : na
+
+    array.push(sDir, dir)
+    array.push(sKind, kind)
+    array.push(sBirth, bi)
+    array.push(sProx, prox)
+    array.push(sDist, dist)
+    array.push(sEntry, entry)
+    array.push(sSl, sl)
+    array.push(sTp, tp)
+    array.push(sLeft, 0)
+    array.push(sArmed, requireLqSweep ? 0 : 1)
+    array.push(sDead, 0)
+    array.push(sLq, float(na))
+    array.push(poiBoxes, poi)
+    array.push(riskBoxes, risk)
+    array.push(rewardBoxes, rew)
+    array.push(eLines, el)
+    array.push(sLines, sln)
+    array.push(eLabs, elab)
+    array.push(sLabs, slab)
+    array.push(lqLines, line(na))
+    array.push(lqLabs, label(na))
+    bi
 
 body = math.abs(close - open)
-canSig = na(lastSignalBar) or (bar_index - lastSignalBar) >= cooldownBars
-
 bearFvg = bar_index >= 2 and low[2] > high and (low[2] - high) >= math.max(atr * 0.15, minZonePts * 0.5)
 bullFvg = bar_index >= 2 and high[2] < low and (low - high[2]) >= math.max(atr * 0.15, minZonePts * 0.5)
 
-// ── MSS ────────────────────────────────────────────────────────────────────
 mssShort = biasOkShort and useFreshZone and not na(lastLo) and not na(lastHi) and not na(lastHiB) and not na(lastLoB) and lastHiB > lastLoB and close < lastLo and body >= atr * mssBodyAtr and close < open
 mssLong  = biasOkLong  and useFreshZone and not na(lastHi) and not na(lastLo) and not na(lastHiB) and not na(lastLoB) and lastLoB > lastHiB and close > lastHi and body >= atr * mssBodyAtr and close > open
 
-bornFresh = false
-bornBb = false
+born = false
 
-if mssShort and canSig
+// ── Path A: Fresh Zone setup boxes ─────────────────────────────────────────
+if mssShort and f_can_birth()
     [p, d, ok] = f_ob(-1, 8)
     if ok == 1 and f_zone_ok(p, d)
-        box.delete(zBox)
-        line.delete(zE)
-        line.delete(zS)
-        label.delete(zTag)
-        line.delete(zLqLine)
-        label.delete(zLqLab)
-        zBox := showZones ? box.new(bar_index, math.max(p, d), bar_index + 1, math.min(p, d), border_color=color.new(supplyCol, 20), bgcolor=supplyCol) : na
-        zE := line.new(bar_index, p, bar_index + extendBars, p, color=entryCol, style=line.style_dashed, width=2)
-        zS := line.new(bar_index, d, bar_index + extendBars, d, color=slCol, style=line.style_dashed, width=2)
-        zTag := showLabels ? label.new(bar_index + 2, (p + d) * 0.5, "Fresh Zone", style=label.style_label_left, color=color.new(supplyCol, 100), textcolor=supplyCol, size=size.small) : na
-        zDir := -1
-        zProx := p
-        zDist := d
-        zBirth := bar_index
-        zLeft := 0
-        zArmed := 0
-        zKind := 1
-        zLq := na
-        zMssBar := bar_index
-        bornFresh := true
-        if showLabels
-            label.new(bar_index, low, "MSS", style=label.style_label_up, color=color.new(mssCol, 40), textcolor=color.white, size=size.tiny)
+        lastBirth := f_make_setup(-1, 1, p, d)
+        born := true
+        if showMssTag
+            label.new(bar_index, low, "MSS", style=label.style_label_up, color=color.new(mssCol, 55), textcolor=color.white, size=size.tiny)
 
-if mssLong and canSig and not bornFresh
+if mssLong and f_can_birth() and not born
     [p, d, ok] = f_ob(1, 8)
     if ok == 1 and f_zone_ok(p, d)
-        box.delete(zBox)
-        line.delete(zE)
-        line.delete(zS)
-        label.delete(zTag)
-        line.delete(zLqLine)
-        label.delete(zLqLab)
-        zBox := showZones ? box.new(bar_index, math.max(p, d), bar_index + 1, math.min(p, d), border_color=color.new(demandCol, 20), bgcolor=demandCol) : na
-        zE := line.new(bar_index, p, bar_index + extendBars, p, color=entryCol, style=line.style_dashed, width=2)
-        zS := line.new(bar_index, d, bar_index + extendBars, d, color=slCol, style=line.style_dashed, width=2)
-        zTag := showLabels ? label.new(bar_index + 2, (p + d) * 0.5, "Fresh Zone", style=label.style_label_left, color=color.new(demandCol, 100), textcolor=demandCol, size=size.small) : na
-        zDir := 1
-        zProx := p
-        zDist := d
-        zBirth := bar_index
-        zLeft := 0
-        zArmed := 0
-        zKind := 1
-        zLq := na
-        zMssBar := bar_index
-        bornFresh := true
-        if showLabels
-            label.new(bar_index, high, "MSS", style=label.style_label_down, color=color.new(mssCol, 40), textcolor=color.white, size=size.tiny)
+        lastBirth := f_make_setup(1, 1, p, d)
+        born := true
+        if showMssTag
+            label.new(bar_index, high, "MSS", style=label.style_label_down, color=color.new(mssCol, 55), textcolor=color.white, size=size.tiny)
 
-// ── BB + FVG ───────────────────────────────────────────────────────────────
-if useBbFvg and biasOkLong and bullFvg and close > open and body >= atr * mssBodyAtr * 0.8 and canSig and not bornFresh
+// ── Path B: BB + FVG setup boxes ───────────────────────────────────────────
+if useBbFvg and biasOkLong and bullFvg and close > open and body >= atr * mssBodyAtr * 0.8 and f_can_birth() and not born
     if not na(lastHi) and close > lastHi
         float prox = low
         float dist = high[2]
         if f_zone_ok(prox, dist)
-            box.delete(zBox)
-            line.delete(zE)
-            line.delete(zS)
-            label.delete(zTag)
-            line.delete(zLqLine)
-            label.delete(zLqLab)
-            zBox := showZones ? box.new(bar_index, math.max(prox, dist), bar_index + 1, math.min(prox, dist), border_color=color.new(demandCol, 20), bgcolor=demandCol) : na
-            zE := line.new(bar_index, prox, bar_index + extendBars, prox, color=entryCol, style=line.style_dashed, width=2)
-            zS := line.new(bar_index, dist, bar_index + extendBars, dist, color=slCol, style=line.style_dashed, width=2)
-            zTag := showLabels ? label.new(bar_index + 2, (prox + dist) * 0.5, "BB + FVG", style=label.style_label_left, color=color.new(demandCol, 100), textcolor=demandCol, size=size.small) : na
-            zDir := 1
-            zProx := prox
-            zDist := dist
-            zBirth := bar_index
-            zLeft := 0
-            zArmed := 0
-            zKind := 2
-            zLq := na
-            zMssBar := bar_index
-            bornBb := true
+            lastBirth := f_make_setup(1, 2, prox, dist)
+            born := true
 
-if useBbFvg and biasOkShort and bearFvg and close < open and body >= atr * mssBodyAtr * 0.8 and canSig and not bornFresh and not bornBb
+if useBbFvg and biasOkShort and bearFvg and close < open and body >= atr * mssBodyAtr * 0.8 and f_can_birth() and not born
     if not na(lastLo) and close < lastLo
         float prox = high
         float dist = low[2]
         if f_zone_ok(prox, dist)
-            box.delete(zBox)
-            line.delete(zE)
-            line.delete(zS)
-            label.delete(zTag)
-            line.delete(zLqLine)
-            label.delete(zLqLab)
-            zBox := showZones ? box.new(bar_index, math.max(prox, dist), bar_index + 1, math.min(prox, dist), border_color=color.new(supplyCol, 20), bgcolor=supplyCol) : na
-            zE := line.new(bar_index, prox, bar_index + extendBars, prox, color=entryCol, style=line.style_dashed, width=2)
-            zS := line.new(bar_index, dist, bar_index + extendBars, dist, color=slCol, style=line.style_dashed, width=2)
-            zTag := showLabels ? label.new(bar_index + 2, (prox + dist) * 0.5, "BB + FVG", style=label.style_label_left, color=color.new(supplyCol, 100), textcolor=supplyCol, size=size.small) : na
-            zDir := -1
-            zProx := prox
-            zDist := dist
-            zBirth := bar_index
-            zLeft := 0
-            zArmed := 0
-            zKind := 2
-            zLq := na
-            zMssBar := bar_index
+            lastBirth := f_make_setup(-1, 2, prox, dist)
+            born := true
 
-// ── Manage active zone: leave → build LQ → sweep → fire ────────────────────
-firedNow = false
-
-if zDir != 0 and not na(zProx) and not na(zDist)
-    float loZ = math.min(zProx, zDist)
-    float hiZ = math.max(zProx, zDist)
-    float tol = atr * lqTolAtr
-
-    if showZones and not na(zBox)
-        box.set_right(zBox, bar_index + 1)
-    if not na(zE)
-        line.set_x2(zE, bar_index + extendBars)
-    if not na(zS)
-        line.set_x2(zS, bar_index + extendBars)
-
-    if zLeft == 0
-        if (zDir == -1 and close < loZ) or (zDir == 1 and close > hiZ)
-            zLeft := 1
-
-    // LQ under construction while price is away from the zone
-    if zLeft == 1 and zArmed == 0
-        if zDir == -1 and not na(lastHi) and lastHi < loZ and f_eq_hi(lastHi, tol) >= minLqTouches
-            zLq := lastHi
-            if showLq
-                line.delete(zLqLine)
-                label.delete(zLqLab)
-                zLqLine := line.new(math.max(zBirth, bar_index - 20), zLq, bar_index + extendBars, zLq, color=color.new(lqCol, 30), style=line.style_dotted, width=1)
-                zLqLab := label.new(bar_index, zLq, "LQ", style=label.style_label_left, color=color.new(lqCol, 100), textcolor=lqCol, size=size.tiny)
-        if zDir == 1 and not na(lastLo) and lastLo > hiZ and f_eq_lo(lastLo, tol) >= minLqTouches
-            zLq := lastLo
-            if showLq
-                line.delete(zLqLine)
-                label.delete(zLqLab)
-                zLqLine := line.new(math.max(zBirth, bar_index - 20), zLq, bar_index + extendBars, zLq, color=color.new(lqCol, 30), style=line.style_dotted, width=1)
-                zLqLab := label.new(bar_index, zLq, "LQ", style=label.style_label_left, color=color.new(lqCol, 100), textcolor=lqCol, size=size.tiny)
-
-    if zLeft == 1 and zArmed == 0 and canSig
-        bool atProx = zDir == -1 ? high >= zProx : low <= zProx
-        bool inZone = high >= loZ and low <= hiZ
-        bool swept = true
-        if requireLqSweep
-            if not na(zLq)
-                swept := zDir == -1 ? high >= zLq : low <= zLq
-            else
-                swept := not na(zMssBar) and (bar_index - zMssBar) >= pivotLen * 4
-
-        if atProx and inZone and swept
-            zArmed := 1
-            float entry = zProx
-            float sl = zDir == -1 ? zDist + slPadPts : zDist - slPadPts
-            float tp = f_tp(zDir, entry, sl)
-            string path = (zKind == 2 ? "B·BB+FVG" : "A·Fresh") + (zDir == 1 ? " LONG" : " SHORT")
-            sigDir := zDir
-            sigEntry := entry
-            sigSl := sl
-            sigTp := tp
-            sigPath := path
-            lastSignalBar := bar_index
-            firedNow := true
-            line.delete(zTpLine)
-            zTpLine := line.new(bar_index, tp, bar_index + extendBars, tp, color=color.new(#26A69A, 35), style=line.style_dotted, width=1)
-            if showLabels
-                label.new(bar_index, entry, path, style=zDir == 1 ? label.style_label_up : label.style_label_down, color=color.new(zDir == 1 ? demandCol : supplyCol, 25), textcolor=color.white, size=size.small)
-
-    if (zDir == -1 and close > zDist) or (zDir == 1 and close < zDist)
-        box.delete(zBox)
-        line.delete(zE)
-        line.delete(zS)
-        label.delete(zTag)
-        line.delete(zLqLine)
-        label.delete(zLqLab)
-        zDir := 0
-        zProx := na
-        zDist := na
-        zArmed := 0
-        zLeft := 0
-
-// ── Path C: fs continuation ────────────────────────────────────────────────
-if useFsCont and canSig and not firedNow
-    // Long: sweep prior swing low then reclaim
+// ── Path C: fs — draw setup at sweep reclaim (position boxes, not sticker) ─
+if useFsCont and f_can_birth() and not born
     if biasOkLong and not na(lastLo)
         float depth = lastLo - low
         bool sweptFs = low < lastLo - atr * fsPadAtr and depth > 0 and depth <= atr * fsMaxAtr
         bool reclaim = close > lastLo and close > open
         if sweptFs and reclaim
-            float entry = close
-            float sl = low - slPadPts
-            if math.abs(entry - sl) >= minZonePts * 0.5
-                float tp = f_tp(1, entry, sl)
-                sigDir := 1
-                sigEntry := entry
-                sigSl := sl
-                sigTp := tp
-                sigPath := "C·fs LONG"
-                lastSignalBar := bar_index
-                firedNow := true
-                if showLabels
-                    line.new(bar_index - 8, lastLo, bar_index + extendBars, lastLo, color=color.new(lqCol, 40), style=line.style_dotted)
+            float prox = close
+            float dist = low - slPadPts
+            if f_zone_ok(prox, dist) or math.abs(prox - dist) >= minZonePts * 0.5
+                // fs: entry near reclaim, SL under sweep low
+                lastBirth := f_make_setup(1, 3, prox, dist)
+                born := true
+                if showLq
+                    line.new(bar_index - 6, lastLo, bar_index + setupWidth, lastLo, color=color.new(lqCol, 35), style=line.style_dotted, width=1)
                     label.new(bar_index, lastLo, "fs", style=label.style_label_right, color=color.new(lqCol, 100), textcolor=lqCol, size=size.tiny)
-                    label.new(bar_index, entry, "C·fs LONG", style=label.style_label_up, color=color.new(demandCol, 25), textcolor=color.white, size=size.small)
 
-    if biasOkShort and not na(lastHi) and not firedNow
+    if biasOkShort and not na(lastHi) and not born
         float depth = high - lastHi
         bool sweptFs = high > lastHi + atr * fsPadAtr and depth > 0 and depth <= atr * fsMaxAtr
         bool reject = close < lastHi and close < open
         if sweptFs and reject
-            float entry = close
-            float sl = high + slPadPts
-            if math.abs(entry - sl) >= minZonePts * 0.5
-                float tp = f_tp(-1, entry, sl)
-                sigDir := -1
-                sigEntry := entry
-                sigSl := sl
-                sigTp := tp
-                sigPath := "C·fs SHORT"
-                lastSignalBar := bar_index
-                firedNow := true
-                if showLabels
-                    line.new(bar_index - 8, lastHi, bar_index + extendBars, lastHi, color=color.new(lqCol, 40), style=line.style_dotted)
+            float prox = close
+            float dist = high + slPadPts
+            if f_zone_ok(prox, dist) or math.abs(prox - dist) >= minZonePts * 0.5
+                lastBirth := f_make_setup(-1, 3, prox, dist)
+                born := true
+                if showLq
+                    line.new(bar_index - 6, lastHi, bar_index + setupWidth, lastHi, color=color.new(lqCol, 35), style=line.style_dotted, width=1)
                     label.new(bar_index, lastHi, "fs", style=label.style_label_right, color=color.new(lqCol, 100), textcolor=lqCol, size=size.tiny)
-                    label.new(bar_index, entry, "C·fs SHORT", style=label.style_label_down, color=color.new(supplyCol, 25), textcolor=color.white, size=size.small)
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ALERTS / PLOTS / PANEL
+// EXTEND / LQ / INVALIDATE live setups
 // ═══════════════════════════════════════════════════════════════════════════
 
-alertcondition(firedNow and sigDir == -1, "LQ Short", "TRH-LQ SHORT — نقدینگی جمع شد into zone")
-alertcondition(firedNow and sigDir == 1, "LQ Long", "TRH-LQ LONG — نقدینگی جمع شد into zone")
-alertcondition(mssShort, "MSS Short", "TRH-LQ MSS↓ fresh supply")
-alertcondition(mssLong, "MSS Long", "TRH-LQ MSS↑ fresh demand")
+nS = array.size(sDir)
+armedNow = false
+armedDir = 0
 
-plot(firedNow ? sigEntry : na, "E", color=entryCol, style=plot.style_circles, linewidth=3)
-plot(firedNow ? sigSl : na, "S", color=slCol, style=plot.style_circles, linewidth=2)
-plot(firedNow ? sigTp : na, "TP", color=#26A69A, style=plot.style_circles, linewidth=2)
+if nS > 0
+    for i = 0 to nS - 1
+        if array.get(sDead, i) == 0
+            int dir = array.get(sDir, i)
+            float prox = array.get(sProx, i)
+            float dist = array.get(sDist, i)
+            float entry = array.get(sEntry, i)
+            float sl = array.get(sSl, i)
+            float tp = array.get(sTp, i)
+            float loZ = math.min(prox, dist)
+            float hiZ = math.max(prox, dist)
+            int bi = array.get(sBirth, i)
+            int x2 = math.max(bar_index + 1, bi + setupWidth)
+
+            // Extend all boxes/lines like a live position tool
+            box poi = array.get(poiBoxes, i)
+            box risk = array.get(riskBoxes, i)
+            box rew = array.get(rewardBoxes, i)
+            if not na(poi)
+                box.set_right(poi, x2)
+            if not na(risk)
+                box.set_right(risk, x2)
+            if not na(rew)
+                box.set_right(rew, x2)
+            line.set_x2(array.get(eLines, i), x2)
+            line.set_x2(array.get(sLines, i), x2)
+            if showES
+                label labE = array.get(eLabs, i)
+                label labS = array.get(sLabs, i)
+                if not na(labE)
+                    label.set_x(labE, x2)
+                if not na(labS)
+                    label.set_x(labS, x2)
+
+            if array.get(sLeft, i) == 0
+                if (dir == -1 and close < loZ) or (dir == 1 and close > hiZ)
+                    array.set(sLeft, i, 1)
+
+            // LQ under construction
+            float tol = atr * lqTolAtr
+            if array.get(sLeft, i) == 1 and array.get(sArmed, i) == 0
+                if dir == -1 and not na(lastHi) and lastHi < loZ and f_eq_hi(lastHi, tol) >= minLqTouches
+                    array.set(sLq, i, lastHi)
+                    if showLq
+                        line.delete(array.get(lqLines, i))
+                        label.delete(array.get(lqLabs, i))
+                        array.set(lqLines, i, line.new(bi, lastHi, x2, lastHi, color=color.new(lqCol, 30), style=line.style_dotted, width=1))
+                        array.set(lqLabs, i, label.new(x2, lastHi, "LQ", style=label.style_label_left, color=color.new(lqCol, 100), textcolor=lqCol, size=size.tiny))
+                if dir == 1 and not na(lastLo) and lastLo > hiZ and f_eq_lo(lastLo, tol) >= minLqTouches
+                    array.set(sLq, i, lastLo)
+                    if showLq
+                        line.delete(array.get(lqLines, i))
+                        label.delete(array.get(lqLabs, i))
+                        array.set(lqLines, i, line.new(bi, lastLo, x2, lastLo, color=color.new(lqCol, 30), style=line.style_dotted, width=1))
+                        array.set(lqLabs, i, label.new(x2, lastLo, "LQ", style=label.style_label_left, color=color.new(lqCol, 100), textcolor=lqCol, size=size.tiny))
+
+            // Arm highlight (optional wait for LQ)
+            if requireLqSweep and array.get(sLeft, i) == 1 and array.get(sArmed, i) == 0
+                float lq = array.get(sLq, i)
+                bool atProx = dir == -1 ? high >= prox : low <= prox
+                bool swept = na(lq) ? (bar_index - bi) >= pivotLen * 4 : (dir == -1 ? high >= lq : low <= lq)
+                if atProx and swept
+                    array.set(sArmed, i, 1)
+                    armedNow := true
+                    armedDir := dir
+                    // Emphasize risk/reward when armed
+                    if not na(risk)
+                        box.set_bgcolor(risk, color.new(riskCol, 60))
+                    if not na(rew)
+                        box.set_bgcolor(rew, color.new(rewardCol, 65))
+
+            // Invalidate: close through distal / SL
+            bool blown = dir == -1 ? close > sl : close < sl
+            bool tpHit = dir == -1 ? low <= tp : high >= tp
+            if blown or tpHit
+                array.set(sDead, i, 1)
+                // Freeze right edge at this bar (keep history like your screenshots)
+                if not na(poi)
+                    box.set_right(poi, bar_index)
+                if not na(risk)
+                    box.set_right(risk, bar_index)
+                if not na(rew)
+                    box.set_right(rew, bar_index)
+                line.set_x2(array.get(eLines, i), bar_index)
+                line.set_x2(array.get(sLines, i), bar_index)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PANEL + ALERTS (no chart signal stickers)
+// ═══════════════════════════════════════════════════════════════════════════
+
+alertcondition(born and mssShort, "Fresh Supply Setup", "TRH-LQ fresh supply setup drawn")
+alertcondition(born and mssLong, "Fresh Demand Setup", "TRH-LQ fresh demand setup drawn")
+alertcondition(armedNow and armedDir == -1, "Short Armed", "TRH-LQ short setup armed (LQ collect)")
+alertcondition(armedNow and armedDir == 1, "Long Armed", "TRH-LQ long setup armed (LQ collect)")
 
 if showPanel
-    var table pan = table.new(position.top_right, 1, 7, bgcolor=color.new(#0D1117, 8), border_width=1)
+    var table pan = table.new(position.top_right, 1, 6, bgcolor=color.new(#0D1117, 10), border_width=1)
     if barstate.islast
         string biasTxt = biasDir == 1 ? "BUYER" : "SELLER"
         color biasC = biasDir == 1 ? #26A69A : #EF5350
-        table.cell(pan, 0, 0, "TRH LQ Fractal", text_color=color.white, text_size=size.small)
+        int live = 0
+        if array.size(sDead) > 0
+            for j = 0 to array.size(sDead) - 1
+                live += array.get(sDead, j) == 0 ? 1 : 0
+        table.cell(pan, 0, 0, "TRH LQ Setups", text_color=color.white, text_size=size.small)
         table.cell(pan, 0, 1, stack, text_color=#90A4AE, text_size=size.tiny)
-        table.cell(pan, 0, 2, "Bias " + biasTxt + " · " + biasTf + "/" + macroTf, text_color=biasC, text_size=size.small)
+        table.cell(pan, 0, 2, "Bias " + biasTxt, text_color=biasC, text_size=size.small)
         table.cell(pan, 0, 3, "نقدینگی در حال ساخت", text_color=lqCol, text_size=size.tiny)
-        string ztxt = zDir == 0 ? "No zone" : ((zKind == 2 ? "BB+FVG " : "Fresh ") + (zDir == 1 ? "DEMAND" : "SUPPLY"))
-        table.cell(pan, 0, 4, ztxt, text_color=#B0BEC5, text_size=size.tiny)
-        table.cell(pan, 0, 5, na(zLq) ? "LQ: building…" : "LQ " + str.tostring(zLq, format.mintick), text_color=lqCol, text_size=size.tiny)
-        table.cell(pan, 0, 6, str.length(sigPath) > 0 ? sigPath : "Wait MSS → zone → LQ sweep", text_color=#ECEFF1, text_size=size.tiny)
+        table.cell(pan, 0, 4, "Live setups: " + str.tostring(live), text_color=#B0BEC5, text_size=size.tiny)
+        table.cell(pan, 0, 5, "POI + Risk/Reward boxes", text_color=#78909C, text_size=size.tiny)
