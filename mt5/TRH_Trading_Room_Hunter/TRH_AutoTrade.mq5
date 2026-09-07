@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.53"
-#property description "TRH EA v3.53: trailing TP OFF by default — only SL→TP1 lock, never mid-way market close"
+#property version   "3.54"
+#property description "TRH EA v3.54: LIVE SL never inside structural distal (keep setup SL on market fills)"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -522,23 +522,53 @@ int PlaceSetupTrade(const TrhSetup &s, const double atrNow, const bool forceMark
 
    if(openMarketNow)
    {
-      // MARKET at current price (far from setup ENTRY, or forced)
+      // MARKET at current price (far from setup ENTRY, or forced).
+      // LIVE ENTRY may improve/worsen vs setup ENTRY, but LIVE SL must NEVER
+      // sit inside the structural distal — price can wick near Real SL without
+      // tagging it. Same-risk rebuild from a better fill used to pull SL toward
+      // price (short: below distal; long: above distal) and stop out early.
       double useEntry = NormalizeDouble(fillPx, _Digits);
-      double useSL = sl;
+      double structuralSL = sl;
+      double useSL = structuralSL;
       double useTP = tp;
-      double risk = MathAbs(entry - sl);
-      if(risk <= 0) risk = atrNow > 0 ? atrNow : _Point * 100;
 
-      // Keep geometry from live fill when price has moved
-      if(s.dir == 1)
+      long stopsLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      double minDist = MathMax(stopsLevel * point, point * 10);
+
+      // Broker min-distance may only WIDEN SL away from price — never tighten
+      // inside the setup distal.
+      if(InpFixLiveStops)
       {
-         useSL = useEntry - risk;
-         useTP = useEntry + risk * InpRiskReward;
+         if(s.dir == 1)
+         {
+            double brokerFloor = NormalizeDouble(bid - minDist, _Digits);
+            useSL = MathMin(structuralSL, brokerFloor);
+         }
+         else
+         {
+            double brokerCeil = NormalizeDouble(ask + minDist, _Digits);
+            useSL = MathMax(structuralSL, brokerCeil);
+         }
       }
-      else
+
+      double liveRisk = MathAbs(useEntry - useSL);
+      if(liveRisk <= _Point)
       {
-         useSL = useEntry + risk;
-         useTP = useEntry - risk * InpRiskReward;
+         g_workStatus = "zero risk @ market";
+         return 0;
+      }
+      if(s.dir == 1)
+         useTP = NormalizeDouble(useEntry + liveRisk * InpRiskReward, _Digits);
+      else
+         useTP = NormalizeDouble(useEntry - liveRisk * InpRiskReward, _Digits);
+
+      if(InpFixLiveStops)
+      {
+         if(s.dir == 1 && useTP <= ask + minDist)
+            useTP = NormalizeDouble(ask + minDist + liveRisk * InpRiskReward, _Digits);
+         if(s.dir == -1 && useTP >= bid - minDist)
+            useTP = NormalizeDouble(bid - minDist - liveRisk * InpRiskReward, _Digits);
       }
 
       if(!AdjustStops(s.dir, useEntry, useSL, useTP))
@@ -547,21 +577,11 @@ int PlaceSetupTrade(const TrhSetup &s, const double atrNow, const bool forceMark
          return 0;
       }
 
-      // Pad SL beyond live quote if broker would reject
-      long stopsLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
-      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-      double minDist = MathMax(stopsLevel * point, point * 10);
-      if(InpFixLiveStops)
-      {
-         if(s.dir == 1 && useSL >= bid - minDist)
-            useSL = NormalizeDouble(bid - minDist, _Digits);
-         if(s.dir == -1 && useSL <= ask + minDist)
-            useSL = NormalizeDouble(ask + minDist, _Digits);
-         if(s.dir == 1 && useTP <= ask + minDist)
-            useTP = NormalizeDouble(ask + minDist + risk * InpRiskReward, _Digits);
-         if(s.dir == -1 && useTP >= bid - minDist)
-            useTP = NormalizeDouble(bid - minDist - risk * InpRiskReward, _Digits);
-      }
+      // After AdjustStops, re-clamp so helpers cannot pull SL inside distal
+      if(s.dir == 1)
+         useSL = MathMin(useSL, structuralSL);
+      else
+         useSL = MathMax(useSL, structuralSL);
 
       if(s.dir == 1 && useSL >= bid)
       {
@@ -1151,7 +1171,7 @@ void UpdateComment(const TrhSetup &last, const int ageBars, const double lots)
    else if(InpSLProtectStyle == TRH_BE_STEP) beName = "BE-STEP";
 
    Comment(StringFormat(
-      "TRH EA v3.53 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
+      "TRH EA v3.54 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
       InpAutoTrade ? "ON" : "OFF",
       beName,
       last.dir == 1 ? "LONG" : "SHORT",
@@ -1169,7 +1189,7 @@ int OnInit()
 {
    if(TRH_ENGINE_VERSION < 234)
    {
-      Alert("TRH EA v3.53: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
+      Alert("TRH EA v3.54: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
             "). Copy NEW TRH_Engine.mqh into THIS EA folder and recompile. Need Engine >= 234.");
       return INIT_FAILED;
    }
@@ -1185,7 +1205,7 @@ int OnInit()
    if(!TradeAllowedOk())
       PrintFormat("TRH WARN: trading blocked — %s", g_workStatus);
 
-   PrintFormat("TRH AutoTrade v3.53 | Eng%d | Mode B kept with A | BE=%d | trailTP=%s | farMarket=%s | session=%s | adoptAge<=%d | %s %s",
+   PrintFormat("TRH AutoTrade v3.54 | Eng%d | Mode B kept with A | BE=%d | trailTP=%s | farMarket=%s | session=%s | adoptAge<=%d | %s %s",
       TRH_ENGINE_VERSION,
       (int)InpSLProtectStyle,
       InpTrailingTP ? "Y" : "N",
@@ -1194,7 +1214,7 @@ int OnInit()
       InpAdoptMaxAgeBars,
       _Symbol, EnumToString(_Period));
 
-   Comment("TRH EA v3.53 Eng" + IntegerToString(TRH_ENGINE_VERSION) +
+   Comment("TRH EA v3.54 Eng" + IntegerToString(TRH_ENGINE_VERSION) +
            "\nTrail TP OFF by default · SL→TP1 lock only");
    return INIT_SUCCEEDED;
 }
@@ -1260,7 +1280,7 @@ void OnTick()
    int n = TrhScanByMode(copied, t, o, h, l, c, cfg, (int)InpTradeMode, setups);
    if(n <= 0)
    {
-      Comment(StringFormat("TRH EA v3.53 %s — scanning...\nday %d | %s",
+      Comment(StringFormat("TRH EA v3.54 %s — scanning...\nday %d | %s",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades, g_workStatus));
       return;
    }

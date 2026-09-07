@@ -4,7 +4,7 @@ One folder with the **latest** MetaTrader 5 bots and TradingView Pine scripts.
 
 | Product | MT5 indicator | MT5 EA | Magic | What it trades |
 |---------|---------------|--------|-------|----------------|
-| **TRH · Trading Room Hunter** | **v2.36** / Eng **234** | **v3.53** | `260825` | Mode A sweep + Mode B FVG |
+| **TRH · Trading Room Hunter** | **v2.36** / Eng **234** | **v3.54** | `260825` | Mode A sweep + Mode B FVG |
 | **LH · Liquidity Hunter** | v1.21 / Eng **121** | **v1.21** | `270827` | RAID → CISD → MSS → FVG |
 | **TRH · Expansion Hunter** | — | — | — | TradingView strategy only |
 
@@ -12,7 +12,7 @@ One folder with the **latest** MetaTrader 5 bots and TradingView Pine scripts.
 
 After compile + attach:
 
-- TRH chart comment / panel → **EA v3.53** · indicator **v236 Eng234**
+- TRH chart comment / panel → **EA v3.54** · indicator **v236 Eng234**
 - LH panel → **v121** (not v120)
 
 If you still see **v2.33 / v3.50 / v3.51**, delete the old `.ex5`, recompile, reattach.
@@ -51,14 +51,11 @@ Simplest: copy **each product folder as-is** into **both** `Indicators` and `Exp
 Yes — two charts, one EA each. Magics differ (`260825` vs `270827`).  
 Watch opposite signals and stacked risk. Do not attach two EAs to the same chart.
 
-### TRH EA v3.53 (important)
+### TRH EA v3.54 (important)
 
-On pullback from TP2 the EA **only touches the same ticket**:
+**LIVE SL never sits inside Real SL.** Market fills keep the setup distal; broker may only *widen* the stop. Better entry no longer pulls LIVE SL toward price.
 
-- moves **SL to the first TP line**, or
-- `PositionClose` that ticket if price already came back through TP1
-
-It does **not** open a new Buy/Sell to “close”. Mode B setups are kept alongside Mode A (TV parity).
+Trailing TP is **OFF by default**. When ON, the EA **only touches the same ticket** (`SL → TP1` lock) — no mid-way market close, no extra Buy/Sell. Mode B setups are kept alongside Mode A (TV parity).
 
 ### LH v1.21 (important)
 
