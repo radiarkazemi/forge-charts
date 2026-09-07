@@ -20,20 +20,27 @@ grpStack = "Fractal Stack"
 stack = input.string("1 — 15 — 4H — W", "Active Stack",
      options=["1 — 15 — 4H — W", "5 — 1H — D — MN"], group=grpStack,
      tooltip="Attach on ENTRY chart (1m or 5m).\nUpper TFs = bias only.")
-requireBiasAlign = input.bool(true, "Only Setups With Bias", group=grpStack)
+requireBiasAlign = input.bool(true, "Only Setups With Bias TF", group=grpStack,
+     tooltip="Uses 4H (or Daily on slow stack) for buyer/seller.")
+requireMacroAgree = input.bool(false, "Also Require Macro TF Agree (W/MN)", group=grpStack,
+     tooltip="OFF recommended. ON was causing Bias SELLER with Live setups: 0 when Weekly disagreed.")
 biasMode = input.string("Candle + EMA", "Bias Method",
      options=["Candle + EMA", "Close vs Prior", "EMA only"], group=grpStack)
 
 grpModel = "Detection (chart TF)"
 pivotLen     = input.int(3, "Pivot Length", minval=2, maxval=8, group=grpModel)
-mssBodyAtr   = input.float(0.45, "Min MSS Body (ATR×)", step=0.05, group=grpModel)
-minZonePts   = input.float(2.0, "Min Zone Height (price)", step=0.1, group=grpModel)
-maxZoneAtr   = input.float(1.80, "Max Zone Height (ATR×)", step=0.1, group=grpModel)
+useFsPivots  = input.bool(true, "Primary: fs pivot supply/demand", group=grpModel,
+     tooltip="When bias=SELLER, each confirmed swing high becomes a red supply setup (like your fs peaks).")
+useMssPath   = input.bool(true, "Also: MSS fresh zone", group=grpModel)
+mssBodyAtr   = input.float(0.25, "Min MSS Body (ATR×)", step=0.05, group=grpModel)
+minZonePts   = input.float(0.80, "Min Zone Height (price)", step=0.1, group=grpModel)
+maxZoneAtr   = input.float(3.50, "Max Zone Height (ATR×)", step=0.1, group=grpModel)
 slPadPts     = input.float(0.10, "SL Pad Beyond Distal", step=0.05, group=grpModel)
-cooldownBars = input.int(25, "Cooldown Between Setups", minval=5, group=grpModel)
+cooldownBars = input.int(8, "Cooldown Between Setups", minval=1, group=grpModel)
 boxBars      = input.int(28, "Box Width (bars)", minval=8, maxval=80, group=grpModel)
 requireReturn = input.bool(false, "Teal Only After Return", group=grpModel,
-     tooltip="OFF = draw red+teal together when zone forms (like your screenshot).\nON = teal after retest.")
+     tooltip="OFF = draw red+teal together when zone forms (like your screenshot).")
+fsTag = input.bool(true, "Tag fs on pivot setups", group=grpModel)
 
 grpTp = "Structure TP (THIS chart — not Daily)"
 structBars = input.int(180, "Structure Lookback (bars)", minval=40, maxval=500, group=grpTp,
@@ -46,7 +53,7 @@ grpDisp = "Display"
 showPanel = input.bool(true, "Panel", group=grpDisp)
 showMss   = input.bool(true, "Tiny MSS Tag", group=grpDisp)
 showES    = input.bool(true, "E / S Tags", group=grpDisp)
-maxKeep   = input.int(4, "Keep Last N Setups", minval=1, maxval=8, group=grpDisp)
+maxKeep   = input.int(10, "Keep Last N Setups", minval=1, maxval=20, group=grpDisp)
 redCol    = input.color(color.new(#EF5350, 78), "Zone / Risk", group=grpDisp)
 tealCol   = input.color(color.new(#26A69A, 82), "Reward", group=grpDisp)
 eCol      = input.color(#66BB6A, "E", group=grpDisp)
@@ -80,8 +87,11 @@ f_bias(string tf) =>
 biasDir = f_bias(biasTf)
 macroBias = f_bias(macroTf)
 aligned = biasDir == macroBias
-okLong  = not requireBiasAlign or (biasDir == 1 and aligned)
-okShort = not requireBiasAlign or (biasDir == -1 and aligned)
+okLong  = not requireBiasAlign or biasDir == 1
+okShort = not requireBiasAlign or biasDir == -1
+if requireMacroAgree
+    okLong  := okLong and aligned
+    okShort := okShort and aligned
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CHART STRUCTURE TP — major SSL / BSL on THIS timeframe
@@ -209,10 +219,9 @@ f_shift() =>
         array.shift(eLab)
         array.shift(sLab)
 
-f_birth(int dir, float prox, float dist) =>
+f_birth_at(int dir, float prox, float dist, int bi) =>
     while array.size(dDir) >= maxKeep
         f_shift()
-    int bi = bar_index
     float entry = prox
     float sl = dir == -1 ? dist + slPadPts : dist - slPadPts
     float tp = f_tp(dir, entry, sl)
@@ -245,14 +254,41 @@ f_birth(int dir, float prox, float dist) =>
     bi
 
 body = math.abs(close - open)
-mssShort = okShort and not na(lastLo) and not na(lastHi) and not na(lastHiB) and not na(lastLoB) and lastHiB > lastLoB and close < lastLo and body >= atr * mssBodyAtr and close < open
-mssLong  = okLong  and not na(lastHi) and not na(lastLo) and not na(lastHiB) and not na(lastLoB) and lastLoB > lastHiB and close > lastHi and body >= atr * mssBodyAtr and close > open
-
 born = false
-if mssShort and f_can()
+
+// ── PRIMARY: fs pivot peaks (your screenshots) ─────────────────────────────
+if useFsPivots and f_can()
+    if okShort and not na(ph)
+        int pBar = bar_index - pivotLen
+        float dist = high[pivotLen]
+        float prox = math.min(open[pivotLen], close[pivotLen])
+        if dist - prox < minZonePts
+            prox := low[pivotLen]
+        if f_ok_zone(prox, dist)
+            lastBirth := f_birth_at(-1, prox, dist, pBar)
+            born := true
+            if fsTag
+                label.new(pBar, dist, "fs", style=label.style_label_down, color=color.new(#FFB74D, 40), textcolor=#FFB74D, size=size.tiny)
+    if okLong and not na(pl) and not born
+        int pBar = bar_index - pivotLen
+        float dist = low[pivotLen]
+        float prox = math.max(open[pivotLen], close[pivotLen])
+        if prox - dist < minZonePts
+            prox := high[pivotLen]
+        if f_ok_zone(prox, dist)
+            lastBirth := f_birth_at(1, prox, dist, pBar)
+            born := true
+            if fsTag
+                label.new(pBar, dist, "fs", style=label.style_label_up, color=color.new(#FFB74D, 40), textcolor=#FFB74D, size=size.tiny)
+
+// ── SECONDARY: MSS ─────────────────────────────────────────────────────────
+mssShort = useMssPath and okShort and not na(lastLo) and not na(lastHi) and not na(lastHiB) and not na(lastLoB) and lastHiB > lastLoB and close < lastLo and body >= atr * mssBodyAtr and close < open
+mssLong  = useMssPath and okLong  and not na(lastHi) and not na(lastLo) and not na(lastHiB) and not na(lastLoB) and lastLoB > lastHiB and close > lastHi and body >= atr * mssBodyAtr and close > open
+
+if mssShort and f_can() and not born
     [p, d, ok] = f_ob(-1, 8)
     if ok == 1 and f_ok_zone(p, d) and p > close
-        lastBirth := f_birth(-1, p, d)
+        lastBirth := f_birth_at(-1, p, d, bar_index)
         born := true
         if showMss
             label.new(bar_index, low, "MSS", style=label.style_label_up, color=color.new(mssCol, 50), textcolor=color.white, size=size.tiny)
@@ -260,7 +296,7 @@ if mssShort and f_can()
 if mssLong and f_can() and not born
     [p, d, ok] = f_ob(1, 8)
     if ok == 1 and f_ok_zone(p, d) and p < close
-        lastBirth := f_birth(1, p, d)
+        lastBirth := f_birth_at(1, p, d, bar_index)
         born := true
         if showMss
             label.new(bar_index, high, "MSS", style=label.style_label_down, color=color.new(mssCol, 50), textcolor=color.white, size=size.tiny)
@@ -323,16 +359,26 @@ if n > 0
                     array.set(rewBox, i, box.new(bi, math.max(entry, tp), x2, math.min(entry, tp),
                          border_color=color.new(tealCol, 45), bgcolor=tealCol, border_width=1))
 
+            // Invalidate only on clear SL breach (keep TP hits frozen on chart)
             bool stopHit = dir == -1 ? close > sl : close < sl
-            bool tpHit = array.get(dLive, i) == 1 and (dir == -1 ? low <= tp : high >= tp)
-            bool expired = (bar_index - bi) > boxBars * 4 and array.get(dLive, i) == 0
-            if stopHit or tpHit or expired
+            bool expired = (bar_index - bi) > boxBars * 6 and array.get(dLive, i) == 0
+            if stopHit or expired
                 array.set(dDead, i, 1)
                 if not na(zb)
                     box.set_right(zb, bar_index)
                 rb := array.get(rewBox, i)
                 if not na(rb)
                     box.set_right(rb, bar_index)
+            else
+                // Freeze right edge when TP structure is tagged — keep drawing visible
+                bool tpHit = array.get(dLive, i) == 1 and (dir == -1 ? low <= tp : high >= tp)
+                if tpHit
+                    array.set(dDead, i, 1)
+                    if not na(zb)
+                        box.set_right(zb, bar_index)
+                    rb := array.get(rewBox, i)
+                    if not na(rb)
+                        box.set_right(rb, bar_index)
 
 alertcondition(born and mssShort, "Supply Zone", "TRH-LQ supply zone · TP=chart SSL")
 alertcondition(born and mssLong, "Demand Zone", "TRH-LQ demand zone · TP=chart BSL")
@@ -345,8 +391,8 @@ if showPanel
         float sp = biasDir == -1 ? chartSsl : chartBsl
         table.cell(pan, 0, 0, "TRH LQ Setups", text_color=color.white, text_size=size.small)
         table.cell(pan, 0, 1, stack, text_color=#90A4AE, text_size=size.tiny)
-        table.cell(pan, 0, 2, "Bias " + biasTxt + " (" + biasTf + "/" + macroTf + ")", text_color=biasC, text_size=size.small)
+        table.cell(pan, 0, 2, "Bias " + biasTxt + " (" + biasTf + ")" + (aligned ? "" : " · macro≠"), text_color=biasC, text_size=size.small)
         table.cell(pan, 0, 3, "نقدینگی در حال ساخت", text_color=#FFB74D, text_size=size.tiny)
-        table.cell(pan, 0, 4, "Live setups: " + str.tostring(liveN), text_color=#B0BEC5, text_size=size.tiny)
+        table.cell(pan, 0, 4, "Live setups: " + str.tostring(liveN) + " · total " + str.tostring(array.size(dDir)), text_color=#B0BEC5, text_size=size.tiny)
         table.cell(pan, 0, 5, "TP = chart structure (not Daily)", text_color=#80CBC4, text_size=size.tiny)
-        table.cell(pan, 0, 6, "Structure " + str.tostring(sp, format.mintick), text_color=#78909C, text_size=size.tiny)
+        table.cell(pan, 0, 6, "Structure " + str.tostring(sp, format.mintick) + (okShort or okLong ? "" : " · BLOCKED"), text_color=#78909C, text_size=size.tiny)
