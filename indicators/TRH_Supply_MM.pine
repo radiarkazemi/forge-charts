@@ -90,8 +90,9 @@ f_tf_bias(string tf) =>
 
 biasDir = f_tf_bias(biasTf)
 macroBias = f_tf_bias(macroTf)
-biasOkLong  = not requireBiasAlign or biasDir == 1
-biasOkShort = not requireBiasAlign or biasDir == -1
+biasAligned = biasDir == macroBias
+biasOkLong  = not requireBiasAlign or (biasDir == 1 and biasAligned)
+biasOkShort = not requireBiasAlign or (biasDir == -1 and biasAligned)
 
 dayHi = request.security(syminfo.tickerid, "D", high[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 dayLo = request.security(syminfo.tickerid, "D", low[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
