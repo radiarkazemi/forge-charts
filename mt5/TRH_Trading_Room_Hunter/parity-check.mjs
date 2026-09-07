@@ -55,10 +55,13 @@ assert(sources["TRH_Trading_Room_Hunter.mq5"].includes("InpTradeMode = TRH_TM_BO
 assert(sources["TRH_AutoTrade.mq5"].includes("InpTradeMode = TRH_TM_BOTH"), "EA default A+B");
 assert(sources["TRH_AutoTrade.mq5"].includes("InpRiskReward      = 2.4"), "EA InpRiskReward=2.4");
 assert(sources["TRH_AutoTrade.mq5"].includes("InpSLProtectStyle = TRH_BE_OFF"), "EA default BE OFF (no risk-free)");
-assert(sources["TRH_AutoTrade.mq5"].includes("v3.40"), "EA version 3.40");
-assert(sources["TRH_Trading_Room_Hunter.mq5"].includes("TRH_IND_BUILD 235"), "Indicator build 235");
-assert(sources["TRH_Trading_Room_Hunter.mq5"].includes("TRH_MIN_ENGINE 233"), "Indicator requires Engine 233");
-assert(sources["TRH_Engine.mqh"].includes("TRH_ENGINE_VERSION 233"), "Engine version 233");
+assert(sources["TRH_AutoTrade.mq5"].includes("v3.54"), "EA version 3.54");
+assert(sources["TRH_AutoTrade.mq5"].includes("LIVE SL must NEVER"), "EA keeps structural SL on market fills");
+assert(sources["TRH_AutoTrade.mq5"].includes("MathMax(structuralSL, brokerCeil)"), "EA short SL only widens vs distal");
+assert(sources["TRH_AutoTrade.mq5"].includes("MathMin(structuralSL, brokerFloor)"), "EA long SL only widens vs distal");
+assert(sources["TRH_Trading_Room_Hunter.mq5"].includes("TRH_IND_BUILD 236"), "Indicator build 236");
+assert(sources["TRH_Trading_Room_Hunter.mq5"].includes("TRH_MIN_ENGINE 234"), "Indicator requires Engine 234");
+assert(sources["TRH_Engine.mqh"].includes("TRH_ENGINE_VERSION 234"), "Engine version 234");
 assert(sources["TRH_Trading_Room_Hunter.mq5"].includes("Always draw history"), "History forced on (ignore OnlyLast)");
 assert(sources["TRH_Engine.mqh"].includes("cfg.minFvgPoints    = 1.50"), "Engine absolute min FVG 1.50");
 assert(sources["TRH_Engine.mqh"].includes("cfg.minFvgAtr       = 0.45"), "Engine minFvg 0.45");
