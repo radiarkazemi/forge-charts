@@ -1,44 +1,39 @@
-# TRH Supply MM — Proximal Entry · Distal Stop · R Ladder
+# TRH LQ Fractal — Liquidity Under Construction
 
-Pine indicator that recreates the **Money Management Tool** geometry from your chart:
+Pine indicator for the **Naeem / نقدینگی در حال ساخت** model.
 
-| Label | Meaning |
-|-------|---------|
-| **E** | Entry at the **proximal** edge of the supply/demand zone |
-| **S** | Stop at the **distal** edge (price may wick near it without tagging it) |
-| **1 · 2 · 3 · 5** | Take-profit ladder at `n × R`, where `R = \|distal − proximal\|` |
+## Idea
 
-## What this setup is
+We trade **liquidity being built**. That liquidity later becomes the pool that sweeps everyone into the correct zone. Same pattern repeats nested across fractals (کون‌پشته‌کون).
 
-After a **displacement** (strong impulse), the last opposing candle (or the FVG left by the move) becomes a **supply / demand zone**. Price leaves the zone, then **returns to the proximal edge** → arm short (supply) or long (demand).
+## Bias
 
-This is **not** TRH Mode B (which enters at FVG mid / CE). Mode B keeps CE parity with the MT5 engine. Supply MM is a separate proximal-edge model.
+From **4H + Daily** (fast stack) or **Daily + Monthly** (slow stack) → buyer or seller. Setups only fire with bias (optional toggle).
 
-## Zone modes
+## Fractal stacks
 
-| Mode | Zone |
-|------|------|
-| **Order Block** (default) | Last bullish candle before a bearish displacement = supply · last bearish before bullish disp = demand |
-| **FVG** | 3-candle imbalance; entry still at **proximal** edge (bottom of bearish FVG / top of bullish FVG) |
-| **OB + FVG** | Both |
+| Stack | Entry chart | Structure | Bias | Macro |
+|-------|-------------|-----------|------|-------|
+| **1 — 15 — 4H — W** | attach on **1m** | 15m context | 4H | Weekly |
+| **5 — 1H — D — MN** | attach on **5m** | 1H context | Daily | Monthly |
 
-## How to use (TradingView)
+## Paths
 
-1. Pine Editor → paste `TRH_Supply_MM.pine` → Add to chart  
-2. Prefer Gold M1–M15 after a clear impulse (your screenshots)  
-3. Wait for **ARMED** in the panel when price revisits **E**  
-4. SL stays at **S** (distal) — do not pull Live SL inside the zone  
+| Path | Sequence |
+|------|----------|
+| **A Fresh Zone** | MSS → New Fresh Zone (OB) → leave → LQ equal hi/lo build → sweep into proximal → **E / S** |
+| **B BB + FVG** | Break + FVG zone → LQ build → sweep into zone |
+| **C fs** | In-bias continuation: sweep prior swing (`fs`) → reclaim → continue |
 
-## Relation to your other tools
+**E** = proximal edge · **S** = distal (+ pad) · **TP** prefers yesterday high/low (ERL) else RR.
 
-| Tool | Entry | SL | TP |
-|------|-------|----|----|
-| **Supply MM (this)** | Proximal edge | Distal edge | 1 / 2 / 3 / 5 R |
-| TRH Mode B | FVG mid (CE) | Beyond raid + FVG outer | Single ~2.4R |
-| LH | CE / CISD-in-FVG | Beyond raid | Single ~2.5R |
-| Expansion Hunter | Expansion base | Beyond raid (min 8pt) | Opposing liq / 4R |
+## Install
+
+1. Open [raw Pine](https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-supply-mm-992e/indicators/TRH_Supply_MM.pine)
+2. TradingView → Pine Editor → paste → Add to chart on **1m** (or **5m** for slow stack)
+3. Pick Active Stack in settings
 
 ## Alerts
 
-- `Supply MM Short Arm`
-- `Demand MM Long Arm`
+- `LQ Short` / `LQ Long`
+- `MSS Short` / `MSS Long`
