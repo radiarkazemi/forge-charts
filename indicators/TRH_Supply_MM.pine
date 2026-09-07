@@ -5,7 +5,7 @@
 //   R-ladder 1 · 2 · 3 · 5 where R = |distal − proximal|
 // Not Mode B CE (mid-gap). Proximal-edge money management only.
 
-//@version=5
+//@version=6
 indicator("TRH | Supply MM (Proximal E · Distal S · R Ladder)", shorttitle="TRH-SMM",
      overlay=true, max_boxes_count=80, max_lines_count=250, max_labels_count=160,
      max_bars_back=5000)
@@ -182,7 +182,7 @@ f_push_zone(int dir, float prox, float dist) =>
     array.push(l2, lb2)
     array.push(l3, lb3)
     array.push(l5, lb5)
-    lastBirth := bi
+    bi  // return birth bar — assign lastBirth in global scope (Pine forbids := on globals inside functions)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DETECT DISPLACEMENT → OB / FVG
@@ -220,12 +220,12 @@ f_recent_disp(int dir, int n) =>
 if bearDisp and allowShort and useOB and f_can_birth()
     [p, d, ok] = f_find_ob(-1)
     if ok == 1 and f_zone_ok(p, d) and p > close
-        f_push_zone(-1, p, d)
+        lastBirth := f_push_zone(-1, p, d)
 
 if bullDisp and allowLong and useOB and f_can_birth()
     [p, d, ok] = f_find_ob(1)
     if ok == 1 and f_zone_ok(p, d) and p < close
-        f_push_zone(1, p, d)
+        lastBirth := f_push_zone(1, p, d)
 
 bearFvg = bar_index >= 2 and low[2] > high and (low[2] - high) >= math.max(atr * minFvgAtr, minFvgPts)
 bullFvg = bar_index >= 2 and high[2] < low and (low - high[2]) >= math.max(atr * minFvgAtr, minFvgPts)
@@ -234,13 +234,13 @@ if useFVG and allowShort and bearFvg and f_recent_disp(-1, 3) and f_can_birth()
     float gapTop = low[2]
     float gapBot = high
     if f_zone_ok(gapBot, gapTop)
-        f_push_zone(-1, gapBot, gapTop)
+        lastBirth := f_push_zone(-1, gapBot, gapTop)
 
 if useFVG and allowLong and bullFvg and f_recent_disp(1, 3) and f_can_birth()
     float gapBot = high[2]
     float gapTop = low
     if f_zone_ok(gapTop, gapBot)
-        f_push_zone(1, gapTop, gapBot)
+        lastBirth := f_push_zone(1, gapTop, gapBot)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // UPDATE ZONES
