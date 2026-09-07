@@ -1,0 +1,326 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// TRH | Supply / Demand Money Management
+// Setup (Money Management Tool look):
+//   Displacement → Supply/Demand zone → Entry at PROXIMAL · SL at DISTAL
+//   R-ladder 1 · 2 · 3 · 5 where R = |distal − proximal|
+// Not Mode B CE (mid-gap). Proximal-edge money management only.
+
+//@version=5
+indicator("TRH | Supply MM (Proximal E · Distal S · R Ladder)", shorttitle="TRH-SMM",
+     overlay=true, max_boxes_count=80, max_lines_count=250, max_labels_count=160,
+     max_bars_back=5000)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+grpDir = "Direction"
+allowLong  = input.bool(true, "Allow Demand (Long)", group=grpDir)
+allowShort = input.bool(true, "Allow Supply (Short)", group=grpDir)
+
+grpZone = "Zone Source"
+zoneMode = input.string("Order Block", "Zone Type",
+     options=["Order Block", "FVG", "OB + FVG"], group=grpZone,
+     tooltip="Order Block = last opposing candle before displacement (Money Management Tool).\nFVG = imbalance; entry still at PROXIMAL edge (not CE mid).")
+minDispAtr   = input.float(0.70, "Min Displacement Body (ATR×)", step=0.05, group=grpZone)
+minCtxAtr    = input.float(0.40, "Min Impulse Range (ATR×)", step=0.05, group=grpZone)
+maxLookback  = input.int(8, "Bars To Find OB Before Disp", minval=1, maxval=20, group=grpZone)
+minFvgAtr    = input.float(0.25, "Min FVG (ATR×)", step=0.01, group=grpZone)
+minFvgPts    = input.float(1.50, "Min FVG (price)", step=0.05, group=grpZone)
+minZonePts   = input.float(2.00, "Min Zone Height (price)", step=0.10, group=grpZone,
+     tooltip="Reject tiny boxes. Gold example zone ≈ 3–4pts.")
+maxZoneAtr   = input.float(2.50, "Max Zone Height (ATR×)", step=0.1, group=grpZone)
+cooldownBars = input.int(25, "Cooldown After New Zone", minval=1, group=grpZone)
+
+grpTrade = "Arm / Fill"
+requireLeave = input.bool(true, "Require Leave Then Return", group=grpTrade,
+     tooltip="Price must leave the zone after creation, then return to proximal.")
+invalidateThru = input.bool(true, "Invalidate If Close Through Distal", group=grpTrade)
+extendBars   = input.int(50, "Extend Levels (bars)", minval=5, group=grpTrade)
+
+grpDisp = "Display"
+showHistory  = input.bool(true, "Show Historical Zones", group=grpDisp)
+showLabels   = input.bool(true, "Show E / S / R Labels", group=grpDisp)
+showPanel    = input.bool(true, "Info Panel", group=grpDisp)
+draw1R = input.bool(true, "Draw 1R", group=grpDisp)
+draw2R = input.bool(true, "Draw 2R", group=grpDisp)
+draw3R = input.bool(true, "Draw 3R", group=grpDisp)
+draw5R = input.bool(true, "Draw 5R", group=grpDisp)
+supplyCol = input.color(color.new(#EF5350, 78), "Supply Zone", group=grpDisp)
+demandCol = input.color(color.new(#26A69A, 78), "Demand Zone", group=grpDisp)
+entryCol  = input.color(#66BB6A, "Entry (E)", group=grpDisp)
+slCol     = input.color(#EF5350, "Stop (S)", group=grpDisp)
+tpCol     = input.color(#90A4AE, "R Targets", group=grpDisp)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════════════
+
+atr = ta.atr(14)
+body = math.abs(close - open)
+impulseRange = high - low
+
+useOB  = zoneMode == "Order Block" or zoneMode == "OB + FVG"
+useFVG = zoneMode == "FVG" or zoneMode == "OB + FVG"
+
+var int lastBirth = na
+
+// Per-zone drawings (newest last). Max 10 live zones.
+MAX_Z = 10
+var box[]   boxes = array.new_box()
+var line[]  eLines = array.new_line()
+var line[]  sLines = array.new_line()
+var label[] eLabs = array.new_label()
+var label[] sLabs = array.new_label()
+var line[]  t1 = array.new_line()
+var line[]  t2 = array.new_line()
+var line[]  t3 = array.new_line()
+var line[]  t5 = array.new_line()
+var label[] l1 = array.new_label()
+var label[] l2 = array.new_label()
+var label[] l3 = array.new_label()
+var label[] l5 = array.new_label()
+
+var int[]   zDir = array.new_int()
+var int[]   zBirth = array.new_int()
+var float[] zProx = array.new_float()
+var float[] zDist = array.new_float()
+var int[]   zLeft = array.new_int()
+var int[]   zArmed = array.new_int()
+var int[]   zDead = array.new_int()
+
+f_zone_ok(float prox, float dist) =>
+    float h = math.abs(dist - prox)
+    h >= minZonePts and h <= atr * maxZoneAtr and h > syminfo.mintick
+
+f_can_birth() =>
+    na(lastBirth) or (bar_index - lastBirth) >= cooldownBars
+
+f_delete_idx(int i) =>
+    if i >= 0 and i < array.size(boxes)
+        box.delete(array.get(boxes, i))
+        line.delete(array.get(eLines, i))
+        line.delete(array.get(sLines, i))
+        label.delete(array.get(eLabs, i))
+        label.delete(array.get(sLabs, i))
+        line.delete(array.get(t1, i))
+        line.delete(array.get(t2, i))
+        line.delete(array.get(t3, i))
+        line.delete(array.get(t5, i))
+        label.delete(array.get(l1, i))
+        label.delete(array.get(l2, i))
+        label.delete(array.get(l3, i))
+        label.delete(array.get(l5, i))
+
+f_shift_oldest() =>
+    if array.size(zDir) > 0
+        f_delete_idx(0)
+        array.shift(boxes)
+        array.shift(eLines)
+        array.shift(sLines)
+        array.shift(eLabs)
+        array.shift(sLabs)
+        array.shift(t1)
+        array.shift(t2)
+        array.shift(t3)
+        array.shift(t5)
+        array.shift(l1)
+        array.shift(l2)
+        array.shift(l3)
+        array.shift(l5)
+        array.shift(zDir)
+        array.shift(zBirth)
+        array.shift(zProx)
+        array.shift(zDist)
+        array.shift(zLeft)
+        array.shift(zArmed)
+        array.shift(zDead)
+
+f_mk_tp(int bi, float px, int dir, float R, float mult, bool on) =>
+    line ln = na
+    label lb = na
+    if on
+        float tp = dir == 1 ? px + R * mult : px - R * mult
+        ln := line.new(bi, tp, bi + extendBars, tp, color=tpCol, style=line.style_dotted, width=1)
+        if showLabels
+            lb := label.new(bi + extendBars, tp, str.tostring(mult),
+                 style=label.style_label_left, color=color.new(tpCol, 100), textcolor=tpCol, size=size.tiny)
+    [ln, lb]
+
+f_push_zone(int dir, float prox, float dist) =>
+    while array.size(zDir) >= MAX_Z
+        f_shift_oldest()
+    int bi = bar_index
+    float R = math.abs(dist - prox)
+    color zc = dir == 1 ? demandCol : supplyCol
+    array.push(zDir, dir)
+    array.push(zBirth, bi)
+    array.push(zProx, prox)
+    array.push(zDist, dist)
+    array.push(zLeft, requireLeave ? 0 : 1)
+    array.push(zArmed, 0)
+    array.push(zDead, 0)
+    array.push(boxes, box.new(bi, math.max(prox, dist), bi + 1, math.min(prox, dist),
+         border_color=color.new(zc, 25), bgcolor=zc))
+    array.push(eLines, line.new(bi, prox, bi + extendBars, prox, color=entryCol, style=line.style_dashed, width=2))
+    array.push(sLines, line.new(bi, dist, bi + extendBars, dist, color=slCol, style=line.style_dashed, width=2))
+    if showLabels
+        array.push(eLabs, label.new(bi + 2, prox, "E", style=label.style_label_left, color=color.new(entryCol, 100), textcolor=entryCol, size=size.normal))
+        array.push(sLabs, label.new(bi + 2, dist, "S", style=label.style_label_left, color=color.new(slCol, 100), textcolor=slCol, size=size.normal))
+    else
+        array.push(eLabs, label(na))
+        array.push(sLabs, label(na))
+    [ln1, lb1] = f_mk_tp(bi, prox, dir, R, 1.0, draw1R)
+    [ln2, lb2] = f_mk_tp(bi, prox, dir, R, 2.0, draw2R)
+    [ln3, lb3] = f_mk_tp(bi, prox, dir, R, 3.0, draw3R)
+    [ln5, lb5] = f_mk_tp(bi, prox, dir, R, 5.0, draw5R)
+    array.push(t1, ln1)
+    array.push(t2, ln2)
+    array.push(t3, ln3)
+    array.push(t5, ln5)
+    array.push(l1, lb1)
+    array.push(l2, lb2)
+    array.push(l3, lb3)
+    array.push(l5, lb5)
+    lastBirth := bi
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DETECT DISPLACEMENT → OB / FVG
+// ═══════════════════════════════════════════════════════════════════════════
+
+bearDisp = close < open and body >= atr * minDispAtr and impulseRange >= atr * minCtxAtr
+bullDisp = close > open and body >= atr * minDispAtr and impulseRange >= atr * minCtxAtr
+
+f_find_ob(int dir) =>
+    float prox = na
+    float dist = na
+    int found = 0
+    for k = 1 to maxLookback
+        if found == 0
+            bool opp = dir == -1 ? close[k] > open[k] : close[k] < open[k]
+            if opp
+                if dir == -1
+                    prox := low[k]
+                    dist := high[k]
+                else
+                    prox := high[k]
+                    dist := low[k]
+                found := 1
+    [prox, dist, found]
+
+f_recent_disp(int dir, int n) =>
+    bool hit = false
+    for k = 0 to n
+        if not hit
+            float b = math.abs(close[k] - open[k])
+            bool d = dir == -1 ? (close[k] < open[k] and b >= atr[k] * minDispAtr * 0.85) : (close[k] > open[k] and b >= atr[k] * minDispAtr * 0.85)
+            hit := d
+    hit
+
+if bearDisp and allowShort and useOB and f_can_birth()
+    [p, d, ok] = f_find_ob(-1)
+    if ok == 1 and f_zone_ok(p, d) and p > close
+        f_push_zone(-1, p, d)
+
+if bullDisp and allowLong and useOB and f_can_birth()
+    [p, d, ok] = f_find_ob(1)
+    if ok == 1 and f_zone_ok(p, d) and p < close
+        f_push_zone(1, p, d)
+
+bearFvg = bar_index >= 2 and low[2] > high and (low[2] - high) >= math.max(atr * minFvgAtr, minFvgPts)
+bullFvg = bar_index >= 2 and high[2] < low and (low - high[2]) >= math.max(atr * minFvgAtr, minFvgPts)
+
+if useFVG and allowShort and bearFvg and f_recent_disp(-1, 3) and f_can_birth()
+    float gapTop = low[2]
+    float gapBot = high
+    if f_zone_ok(gapBot, gapTop)
+        f_push_zone(-1, gapBot, gapTop)
+
+if useFVG and allowLong and bullFvg and f_recent_disp(1, 3) and f_can_birth()
+    float gapBot = high[2]
+    float gapTop = low
+    if f_zone_ok(gapTop, gapBot)
+        f_push_zone(1, gapTop, gapBot)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UPDATE ZONES
+// ═══════════════════════════════════════════════════════════════════════════
+
+armedNow = false
+armedDir = 0
+armedProx = float(na)
+armedDist = float(na)
+armedR = float(na)
+
+nZ = array.size(zDir)
+if nZ > 0
+    for i = 0 to nZ - 1
+        if array.get(zDead, i) == 0
+            int dir = array.get(zDir, i)
+            float prox = array.get(zProx, i)
+            float dist = array.get(zDist, i)
+            float loZ = math.min(prox, dist)
+            float hiZ = math.max(prox, dist)
+            int wasArmed = array.get(zArmed, i)
+
+            if array.get(zLeft, i) == 0
+                bool left = dir == -1 ? close < loZ : close > hiZ
+                if left
+                    array.set(zLeft, i, 1)
+
+            if array.get(zLeft, i) == 1 and wasArmed == 0
+                bool touched = dir == -1 ? (high >= prox and low <= hiZ) : (low <= prox and high >= loZ)
+                // Must actually reach proximal edge
+                bool atProx = dir == -1 ? high >= prox : low <= prox
+                if touched and atProx
+                    array.set(zArmed, i, 1)
+                    armedNow := true
+                    armedDir := dir
+                    armedProx := prox
+                    armedDist := dist
+                    armedR := math.abs(dist - prox)
+
+            if invalidateThru
+                bool blown = dir == -1 ? close > dist : close < dist
+                if blown
+                    array.set(zDead, i, 1)
+                    f_delete_idx(i)
+
+            if array.get(zDead, i) == 0
+                box.set_right(array.get(boxes, i), bar_index + 1)
+                line.set_x2(array.get(eLines, i), bar_index + extendBars)
+                line.set_x2(array.get(sLines, i), bar_index + extendBars)
+                if not na(array.get(t1, i))
+                    line.set_x2(array.get(t1, i), bar_index + extendBars)
+                if not na(array.get(t2, i))
+                    line.set_x2(array.get(t2, i), bar_index + extendBars)
+                if not na(array.get(t3, i))
+                    line.set_x2(array.get(t3, i), bar_index + extendBars)
+                if not na(array.get(t5, i))
+                    line.set_x2(array.get(t5, i), bar_index + extendBars)
+
+if not showHistory and nZ > 1
+    // keep only newest living zone visually — hide older boxes
+    for i = 0 to nZ - 2
+        if array.get(zDead, i) == 0
+            box.set_bgcolor(array.get(boxes, i), color.new(color.gray, 94))
+
+alertcondition(armedNow and armedDir == -1, "Supply MM Short Arm", "TRH-SMM SHORT · E proximal · S distal · R ladder")
+alertcondition(armedNow and armedDir == 1, "Demand MM Long Arm", "TRH-SMM LONG · E proximal · S distal · R ladder")
+
+if showPanel
+    var table pan = table.new(position.top_right, 1, 5, bgcolor=color.new(#111111, 12), border_width=1)
+    if barstate.islast
+        table.cell(pan, 0, 0, "TRH Supply MM", text_color=color.white, text_size=size.small)
+        table.cell(pan, 0, 1, "E = Proximal · S = Distal", text_color=#B0BEC5, text_size=size.tiny)
+        table.cell(pan, 0, 2, "Targets 1R · 2R · 3R · 5R", text_color=#B0BEC5, text_size=size.tiny)
+        table.cell(pan, 0, 3, "Zones " + str.tostring(array.size(zDir)) + " · " + zoneMode, text_color=#78909C, text_size=size.tiny)
+        if not na(armedProx)
+            string side = armedDir == 1 ? "LONG" : "SHORT"
+            table.cell(pan, 0, 4, side + " · R=" + str.tostring(armedR, format.mintick),
+                 text_color=armedDir == 1 ? #26A69A : #EF5350, text_size=size.small)
+        else
+            table.cell(pan, 0, 4, "Wait return to proximal", text_color=#78909C, text_size=size.tiny)
+
+plot(armedNow ? armedProx : na, "Armed E", color=entryCol, display=display.data_window)
+plot(armedNow ? armedDist : na, "Armed S", color=slCol, display=display.data_window)
