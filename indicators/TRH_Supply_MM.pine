@@ -90,8 +90,6 @@ f_tf_bias(string tf) =>
 
 biasDir = f_tf_bias(biasTf)
 macroBias = f_tf_bias(macroTf)
-// Prefer agreement; else lean on biasTf
-biasDir := biasDir == macroBias ? biasDir : biasDir
 biasOkLong  = not requireBiasAlign or biasDir == 1
 biasOkShort = not requireBiasAlign or biasDir == -1
 
