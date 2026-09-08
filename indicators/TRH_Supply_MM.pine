@@ -1,16 +1,11 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
-// TRH | Supply MM Pack + Clean Score
+// TRH | Forge Clean — Supply MM Pack + cinematic score UI
 //
-// Setup 1 (MM):     Displacement → OB/FVG → E/S · R ladder 1/2/3/5
-// Setup 2 (MSS):    Break of structure → Fresh Zone → retest · teal TP
-// Setup 3 (HTF+LQ): HTF zone → MSS → New Fresh Zone → LQ build → sweep into zone · teal TP
-// Setup 4 (BB+FVG): Sweep → MSS → Breaker Block + FVG confluence → retest · teal TP
-// Setup 5 (fs):     Fractal Sweep of fs level into pink zone → blue expansion
-// Clean Score:      0–100 · A/B/C/D · reject dirty zones · arm only clean entries
+// Setup 1–5 + Clean Score + Creative Forge UI (hero risk/reward plane + cockpit)
 // All stay enabled independently.
 
 //@version=6
-indicator("TRH | Supply MM Pack", shorttitle="TRH-SMM",
+indicator("TRH | Forge Clean", shorttitle="TRH-Forge",
      overlay=true, max_boxes_count=200, max_lines_count=350, max_labels_count=220,
      max_bars_back=5000)
 
@@ -119,19 +114,28 @@ clearEsLabels = input.bool(true, "Clear ENTRY/SL With Price", group=grpDisp,
 showPanel    = input.bool(true, "Info Panel", group=grpDisp)
 onlyBestVisual = input.bool(true, "Dim Non-Best Zones", group=grpDisp,
      tooltip="Full color only on the best live zone; others muted.")
+creativeUi   = input.bool(true, "Creative Forge UI (hero plane + cockpit)", group=grpDisp,
+     tooltip="Cinematic risk/reward plane on the best zone + richer score cockpit.")
+showHeroTp   = input.bool(true, "Hero Reward Runway (TP plane)", group=grpDisp,
+     tooltip="Soft reward box from ENTRY to structure TP on the best zone only.")
+showApproach = input.bool(true, "Show Distance-To-Entry When Waiting", group=grpDisp)
 draw1R = input.bool(false, "Draw 1R (Setup 1)", group=grpDisp)
 draw2R = input.bool(false, "Draw 2R (Setup 1)", group=grpDisp)
 draw3R = input.bool(false, "Draw 3R (Setup 1)", group=grpDisp)
 draw5R = input.bool(false, "Draw 5R (Setup 1)", group=grpDisp)
-supplyCol = input.color(color.new(#EF5350, 78), "Supply Zone", group=grpDisp)
-demandCol = input.color(color.new(#26A69A, 78), "Demand Zone", group=grpDisp)
-entryCol  = input.color(#00C853, "Entry (ENTRY)", group=grpDisp)
-slCol     = input.color(#FF1744, "Stop (SL)", group=grpDisp)
-tpCol     = input.color(#90A4AE, "R Targets", group=grpDisp)
-tealCol   = input.color(color.new(#26A69A, 88), "Teal TP", group=grpDisp)
-mssCol    = input.color(#CE93D8, "MSS Tag", group=grpDisp)
-htfCol    = input.color(color.new(#EF9A9A, 82), "HTF Zone", group=grpDisp)
-lqCol     = input.color(#FFB74D, "LQ", group=grpDisp)
+supplyCol = input.color(color.new(#E85D4C, 82), "Supply Zone", group=grpDisp)
+demandCol = input.color(color.new(#1FA97A, 82), "Demand Zone", group=grpDisp)
+entryCol  = input.color(#1FA97A, "Entry (ENTRY)", group=grpDisp)
+slCol     = input.color(#E85D4C, "Stop (SL)", group=grpDisp)
+tpCol     = input.color(#8A9A9B, "R Targets", group=grpDisp)
+tealCol   = input.color(color.new(#5B8A8A, 86), "Teal TP", group=grpDisp)
+mssCol    = input.color(#8B7E74, "MSS Tag", group=grpDisp)
+htfCol    = input.color(color.new(#C4A484, 84), "HTF Zone", group=grpDisp)
+lqCol     = input.color(#C6A75E, "LQ", group=grpDisp)
+inkCol    = input.color(#0B1220, "Cockpit Ink", group=grpDisp)
+brassCol  = input.color(#C6A75E, "Brass Accent (A-grade)", group=grpDisp)
+seaCol    = input.color(color.new(#5B8A8A, 78), "Reward Runway", group=grpDisp)
+riskFill  = input.color(color.new(#E85D4C, 78), "Risk Band Fill", group=grpDisp)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // STATE
@@ -278,6 +282,26 @@ f_grade(int sc) =>
 f_kind_name(int kind) =>
     kind == 0 ? "S1-MM" : kind == 1 ? "S2-MSS" : kind == 2 ? "S3-HTF/LQ" : kind == 3 ? "S4-BB+FVG" : "S5-fs"
 
+f_kind_story(int kind) =>
+    kind == 0 ? "Money Mgmt rail" : kind == 1 ? "MSS fresh pocket" : kind == 2 ? "HTF + LQ hunt" : kind == 3 ? "Breaker × FVG" : "Fractal sweep"
+
+f_score_bar(int sc) =>
+    int n = math.min(10, math.max(0, int(math.round(sc / 10.0))))
+    string filled = ""
+    string empty = ""
+    for i = 1 to 10
+        if i <= n
+            filled += "●"
+        else
+            empty += "○"
+    filled + empty
+
+f_grade_col(int sc) =>
+    sc >= 80 ? brassCol : sc >= 70 ? #D4B896 : sc >= 55 ? #C4A484 : #E85D4C
+
+f_phase(bool armed, bool left, int kind) =>
+    armed ? "ARMED ▶ FIRE" : left ? "HUNT · wait return" : kind == 4 ? "SWEEP LIVE" : "SCOUT · leave first"
+
 // Clean score 0–100 — higher = safer / cleaner entry
 f_score_zone(int dir, float prox, float dist, int kind, int lqN) =>
     int sc = kind == 3 ? 74 : kind == 2 ? 70 : kind == 1 ? 60 : kind == 0 ? 56 : 36
@@ -364,9 +388,10 @@ f_push_zone(int dir, float prox, float dist, int kind, float htfTop, float htfBo
             array.push(eLabs, label(na))
             array.push(sLabs, label(na))
         string g = f_grade(sc)
-        color gc = sc >= 80 ? #66BB6A : sc >= 70 ? #FFD54F : sc >= 55 ? #FFA726 : #EF5350
+        color gc = f_grade_col(sc)
         if showScoreTag and useCleanScore
-            array.push(scoreLabs, label.new(bi + 3, (prox + dist) * 0.5, g + " " + str.tostring(sc) + " · " + f_kind_name(kind), style=label.style_label_left, color=color.new(gc, 20), textcolor=color.white, size=size.small))
+            string badge = creativeUi ? ("◆ " + g + " · " + str.tostring(sc) + "\n" + f_kind_name(kind)) : (g + " " + str.tostring(sc) + " · " + f_kind_name(kind))
+            array.push(scoreLabs, label.new(bi + 3, (prox + dist) * 0.5, badge, style=label.style_label_left, color=color.new(gc, 10), textcolor=color.white, size=size.normal))
         else
             array.push(scoreLabs, label(na))
         bool doR = kind == 0 and sc >= minScoreArm
@@ -1030,13 +1055,16 @@ while array.size(zDir) > maxLiveZones
 
 nZ := array.size(zDir)
 
-// Dim non-best zones for clarity
+// Best live zone
 bestScore = -1
 bestKind = -1
 bestDir = 0
 bestProx = float(na)
 bestDist = float(na)
 bestIdx = -1
+bestArmed = false
+bestLeft = false
+bestAge = 0
 if nZ > 0
     for i = 0 to nZ - 1
         int sc = array.get(zScore, i)
@@ -1047,18 +1075,21 @@ if nZ > 0
             bestProx := array.get(zProx, i)
             bestDist := array.get(zDist, i)
             bestIdx := i
+            bestArmed := array.get(zArmed, i) == 1
+            bestLeft := array.get(zLeft, i) == 1
+            bestAge := bar_index - array.get(zBirth, i)
 
 if onlyBestVisual and nZ > 1 and bestIdx >= 0
     for i = 0 to nZ - 1
         if i != bestIdx
-            box.set_bgcolor(array.get(boxes, i), color.new(color.gray, 92))
-            box.set_border_color(array.get(boxes, i), color.new(color.gray, 70))
+            box.set_bgcolor(array.get(boxes, i), color.new(color.gray, 94))
+            box.set_border_color(array.get(boxes, i), color.new(color.gray, 80))
             if not na(array.get(eLines, i))
                 line.set_width(array.get(eLines, i), 1)
-                line.set_color(array.get(eLines, i), color.new(entryCol, 70))
+                line.set_color(array.get(eLines, i), color.new(entryCol, 75))
             if not na(array.get(sLines, i))
                 line.set_width(array.get(sLines, i), 1)
-                line.set_color(array.get(sLines, i), color.new(slCol, 70))
+                line.set_color(array.get(sLines, i), color.new(slCol, 75))
         else
             if not na(array.get(eLines, i))
                 line.set_width(array.get(eLines, i), 3)
@@ -1071,58 +1102,160 @@ if not showHistory and nZ > 1 and not onlyBestVisual
     for i = 0 to nZ - 2
         box.set_bgcolor(array.get(boxes, i), color.new(color.gray, 94))
 
-alertcondition(armedNow and armedDir == -1 and (not useCleanScore or armedScore >= minScoreArm), "Supply Short Arm", "TRH-SMM CLEAN SHORT · check score")
-alertcondition(armedNow and armedDir == 1 and (not useCleanScore or armedScore >= minScoreArm), "Demand Long Arm", "TRH-SMM CLEAN LONG · check score")
-alertcondition(mssBorn and mssSignalShort and not htfBorn, "MSS Fresh Supply", "TRH-SMM Setup2 MSS fresh supply zone")
-alertcondition(mssBorn and mssSignalLong and not htfBorn, "MSS Fresh Demand", "TRH-SMM Setup2 MSS fresh demand zone")
-alertcondition(htfBorn and mssSignalShort, "Setup3 HTF+LQ Supply", "TRH-SMM Setup3 HTF → Fresh → LQ supply")
-alertcondition(htfBorn and mssSignalLong, "Setup3 HTF+LQ Demand", "TRH-SMM Setup3 HTF → Fresh → LQ demand")
-alertcondition(armedNow and armedKind == 2 and armedDir == -1, "Setup3 Short Armed", "TRH-SMM Setup3 SHORT armed after LQ")
-alertcondition(armedNow and armedKind == 2 and armedDir == 1, "Setup3 Long Armed", "TRH-SMM Setup3 LONG armed after LQ")
-alertcondition(bbBorn and bbMssLong, "Setup4 BB+FVG Demand", "TRH-SMM Setup4 Sweep→MSS→BB+FVG demand")
-alertcondition(bbBorn and bbMssShort, "Setup4 BB+FVG Supply", "TRH-SMM Setup4 Sweep→MSS→BB+FVG supply")
-alertcondition(armedNow and armedKind == 3 and armedDir == 1, "Setup4 Long Armed", "TRH-SMM Setup4 LONG armed in BB+FVG")
-alertcondition(armedNow and armedKind == 3 and armedDir == -1, "Setup4 Short Armed", "TRH-SMM Setup4 SHORT armed in BB+FVG")
-alertcondition(fsBorn and fsArmedNow and armedDir == 1, "Setup5 fs Long", "TRH-SMM Setup5 fractal sweep LONG")
-alertcondition(fsBorn and fsArmedNow and armedDir == -1, "Setup5 fs Short", "TRH-SMM Setup5 fractal sweep SHORT")
-alertcondition(armedNow and armedScore >= 80, "Grade A Armed", "TRH-SMM GRADE A — cleanest entry")
+// ═══════════════════════════════════════════════════════════════════════════
+// CREATIVE HERO PLANE — one cinematic risk / entry / reward composition
+// ═══════════════════════════════════════════════════════════════════════════
+
+var box heroRisk = na
+var box heroTp = na
+var label heroPhase = na
+var label heroApproach = na
+var label heroTpLab = na
+
+bestTp = float(na)
+bestRisk = float(na)
+bestReward = float(na)
+bestRr = float(na)
+bestFresh = 0
+distToEntry = float(na)
+
+if bestIdx >= 0 and not na(bestProx) and not na(bestDist)
+    bestRisk := math.abs(bestDist - bestProx)
+    bestTp := f_struct_tp(bestDir, bestProx, bestDist)
+    bestReward := math.abs(bestTp - bestProx)
+    bestRr := bestRisk > 0 ? bestReward / bestRisk : 0.0
+    bestFresh := math.max(0, math.min(100, int(100.0 * (1.0 - bestAge / math.max(1.0, float(maxZoneAge))))))
+
+if barstate.islast
+    box.delete(heroRisk)
+    box.delete(heroTp)
+    label.delete(heroPhase)
+    label.delete(heroApproach)
+    label.delete(heroTpLab)
+    heroRisk := na
+    heroTp := na
+    heroPhase := na
+    heroApproach := na
+    heroTpLab := na
+
+    if creativeUi and bestIdx >= 0 and not na(bestProx) and not na(bestDist)
+        int x0 = array.get(zBirth, bestIdx)
+        int x1 = bar_index + extendBars
+
+        // Mute raw POI box — hero risk/reward planes carry the story
+        box.set_bgcolor(array.get(boxes, bestIdx), color.new(color.white, 100))
+        box.set_border_color(array.get(boxes, bestIdx), color.new(bestArmed ? brassCol : (bestDir == 1 ? entryCol : slCol), 35))
+        box.set_border_width(array.get(boxes, bestIdx), bestArmed ? 2 : 1)
+        box.set_right(array.get(boxes, bestIdx), x1)
+
+        // Risk plane ENTRY ↔ SL
+        heroRisk := box.new(x0, math.max(bestProx, bestDist), x1, math.min(bestProx, bestDist),
+             xloc.bar_index, extend.none, color.new(riskFill, 35), riskFill, 1)
+
+        // Reward runway ENTRY → structure TP
+        if showHeroTp and not na(bestTp)
+            heroTp := box.new(x0, math.max(bestProx, bestTp), x1, math.min(bestProx, bestTp),
+                 xloc.bar_index, extend.none, color.new(seaCol, 40), seaCol, 1)
+            heroTpLab := label.new(x1, bestTp, "TP " + str.tostring(bestTp, format.mintick) + " · " + str.tostring(bestRr, "#.0") + "R",
+                 xloc.bar_index, yloc.price, color.new(#5B8A8A, 0), label.style_label_left, color.white, size.normal)
+
+        string phase = f_phase(bestArmed, bestLeft, bestKind)
+        color phCol = bestArmed ? brassCol : bestLeft ? #D4B896 : #8A9A9B
+        heroPhase := label.new(x0, (bestProx + bestDist) * 0.5, phase, xloc.bar_index, yloc.price,
+             color.new(phCol, 5), bestDir == 1 ? label.style_label_up : label.style_label_down, color.white, size.small)
+
+        if showApproach and not bestArmed
+            distToEntry := bestDir == 1 ? bestProx - close : close - bestProx
+            if distToEntry > 0
+                heroApproach := label.new(bar_index + 1, close, "→ ENTRY " + str.tostring(math.abs(distToEntry), format.mintick) + " away",
+                     xloc.bar_index, yloc.price, color.new(inkCol, 15), label.style_label_left, brassCol, size.small)
+
+        if showLabels and not na(array.get(eLabs, bestIdx))
+            string eTxt = (bestArmed ? "▶ ENTRY " : "ENTRY ") + str.tostring(bestProx, format.mintick)
+            label.set_text(array.get(eLabs, bestIdx), eTxt)
+            label.set_color(array.get(eLabs, bestIdx), color.new(entryCol, bestArmed ? 0 : 15))
+            label.set_size(array.get(eLabs, bestIdx), size.large)
+        if showLabels and not na(array.get(sLabs, bestIdx))
+            label.set_text(array.get(sLabs, bestIdx), "SL " + str.tostring(bestDist, format.mintick) + " · risk " + str.tostring(bestRisk, format.mintick))
+            label.set_color(array.get(sLabs, bestIdx), color.new(slCol, 0))
+            label.set_size(array.get(sLabs, bestIdx), size.normal)
+        if showScoreTag and not na(array.get(scoreLabs, bestIdx))
+            string star = bestScore >= 80 ? "★ " : "◆ "
+            label.set_text(array.get(scoreLabs, bestIdx), star + f_grade(bestScore) + " · " + str.tostring(bestScore) + "\n" + f_kind_story(bestKind))
+            label.set_color(array.get(scoreLabs, bestIdx), color.new(f_grade_col(bestScore), 5))
+
+alertcondition(armedNow and armedDir == -1 and (not useCleanScore or armedScore >= minScoreArm), "Supply Short Arm", "TRH-Forge CLEAN SHORT")
+alertcondition(armedNow and armedDir == 1 and (not useCleanScore or armedScore >= minScoreArm), "Demand Long Arm", "TRH-Forge CLEAN LONG")
+alertcondition(mssBorn and mssSignalShort and not htfBorn, "MSS Fresh Supply", "TRH-Forge Setup2 MSS fresh supply")
+alertcondition(mssBorn and mssSignalLong and not htfBorn, "MSS Fresh Demand", "TRH-Forge Setup2 MSS fresh demand")
+alertcondition(htfBorn and mssSignalShort, "Setup3 HTF+LQ Supply", "TRH-Forge Setup3 HTF+LQ supply")
+alertcondition(htfBorn and mssSignalLong, "Setup3 HTF+LQ Demand", "TRH-Forge Setup3 HTF+LQ demand")
+alertcondition(armedNow and armedKind == 2 and armedDir == -1, "Setup3 Short Armed", "TRH-Forge Setup3 SHORT armed")
+alertcondition(armedNow and armedKind == 2 and armedDir == 1, "Setup3 Long Armed", "TRH-Forge Setup3 LONG armed")
+alertcondition(bbBorn and bbMssLong, "Setup4 BB+FVG Demand", "TRH-Forge Setup4 BB+FVG demand")
+alertcondition(bbBorn and bbMssShort, "Setup4 BB+FVG Supply", "TRH-Forge Setup4 BB+FVG supply")
+alertcondition(armedNow and armedKind == 3 and armedDir == 1, "Setup4 Long Armed", "TRH-Forge Setup4 LONG armed")
+alertcondition(armedNow and armedKind == 3 and armedDir == -1, "Setup4 Short Armed", "TRH-Forge Setup4 SHORT armed")
+alertcondition(fsBorn and fsArmedNow and armedDir == 1, "Setup5 fs Long", "TRH-Forge Setup5 fs LONG")
+alertcondition(fsBorn and fsArmedNow and armedDir == -1, "Setup5 fs Short", "TRH-Forge Setup5 fs SHORT")
+alertcondition(armedNow and armedScore >= 80, "Grade A Armed", "TRH-Forge ★ GRADE A — fire")
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FORGE COCKPIT — creative score dashboard
+// ═══════════════════════════════════════════════════════════════════════════
 
 if showPanel
-    var table pan = table.new(position.top_right, 1, 11, bgcolor=color.new(#111111, 12), border_width=1)
+    var table pan = table.new(position.top_right, 2, 12, bgcolor=color.new(inkCol, 8), border_width=1, border_color=color.new(brassCol, 60), frame_color=color.new(brassCol, 40), frame_width=1)
     if barstate.islast
-        table.cell(pan, 0, 0, "TRH Clean Score", text_color=color.white, text_size=size.small)
-        table.cell(pan, 0, 1, "A≥80 TAKE · B≥70 OK · C/D removed", text_color=#B0BEC5, text_size=size.tiny)
-        table.cell(pan, 0, 2, "Expired zones auto-removed · clear ENTRY/SL", text_color=#B0BEC5, text_size=size.tiny)
+        table.merge_cells(pan, 0, 0, 1, 0)
+        table.cell(pan, 0, 0, "TRH  ◈  FORGE", text_color=brassCol, text_size=size.normal, text_halign=text.align_center)
+        table.merge_cells(pan, 0, 1, 1, 1)
+        table.cell(pan, 0, 1, "clean entries · cinematic risk plane", text_color=#8A9A9B, text_size=size.tiny, text_halign=text.align_center)
+
         if bestScore >= 0
-            string sideB = bestDir == 1 ? "LONG" : "SHORT"
+            string sideB = bestDir == 1 ? "LONG ▲" : "SHORT ▼"
             string gB = f_grade(bestScore)
-            string rec = bestScore >= 80 ? "TAKE" : bestScore >= minScoreArm ? "OK / wait arm" : "WEAK — skip"
-            color rc = bestScore >= 80 ? #66BB6A : bestScore >= minScoreArm ? #FFD54F : #EF5350
-            table.cell(pan, 0, 3, "BEST " + gB + " " + str.tostring(bestScore) + " · " + f_kind_name(bestKind) + " " + sideB, text_color=rc, text_size=size.small)
-            table.cell(pan, 0, 4, "ENTRY " + str.tostring(bestProx, format.mintick) + "  ·  SL " + str.tostring(bestDist, format.mintick), text_color=color.white, text_size=size.small)
-            table.cell(pan, 0, 5, rec, text_color=rc, text_size=size.small)
+            color gc = f_grade_col(bestScore)
+            table.cell(pan, 0, 2, "GRADE", text_color=#8A9A9B, text_size=size.tiny)
+            table.cell(pan, 1, 2, gB + "  " + str.tostring(bestScore), text_color=gc, text_size=size.large)
+            table.merge_cells(pan, 0, 3, 1, 3)
+            table.cell(pan, 0, 3, f_score_bar(bestScore) + "  " + str.tostring(bestScore) + "/100", text_color=gc, text_size=size.small, text_halign=text.align_center)
+
+            table.cell(pan, 0, 4, "SETUP", text_color=#8A9A9B, text_size=size.tiny)
+            table.cell(pan, 1, 4, f_kind_name(bestKind) + "  " + sideB, text_color=color.white, text_size=size.small)
+            table.merge_cells(pan, 0, 5, 1, 5)
+            table.cell(pan, 0, 5, f_kind_story(bestKind), text_color=#D4B896, text_size=size.tiny, text_halign=text.align_center)
+
+            table.cell(pan, 0, 6, "ENTRY", text_color=entryCol, text_size=size.tiny)
+            table.cell(pan, 1, 6, str.tostring(bestProx, format.mintick), text_color=color.white, text_size=size.normal)
+            table.cell(pan, 0, 7, "SL", text_color=slCol, text_size=size.tiny)
+            table.cell(pan, 1, 7, str.tostring(bestDist, format.mintick), text_color=color.white, text_size=size.normal)
+
+            string rrTxt = not na(bestRr) ? str.tostring(bestRr, "#.00") + "R → " + str.tostring(bestTp, format.mintick) : "—"
+            table.cell(pan, 0, 8, "REWARD", text_color=#5B8A8A, text_size=size.tiny)
+            table.cell(pan, 1, 8, rrTxt, text_color=#B8D4D4, text_size=size.small)
+
+            string phase = f_phase(bestArmed or (armedNow and bestIdx >= 0), bestLeft, bestKind)
+            color pc = bestArmed or armedNow ? brassCol : #D4B896
+            table.merge_cells(pan, 0, 9, 1, 9)
+            table.cell(pan, 0, 9, phase, text_color=pc, text_size=size.small, text_halign=text.align_center, bgcolor=color.new(pc, 88))
+
+            table.cell(pan, 0, 10, "FRESH", text_color=#8A9A9B, text_size=size.tiny)
+            table.cell(pan, 1, 10, f_score_bar(bestFresh) + " " + str.tostring(bestFresh) + "%", text_color=#B0BEC5, text_size=size.tiny)
+            table.merge_cells(pan, 0, 11, 1, 11)
+            string verdict = bestScore >= 80 ? "★ TAKE — A-grade clean" : bestScore >= minScoreArm ? (bestArmed or armedNow ? "▶ ARMED — manage risk" : "◎ OK — wait arm trigger") : "✕ skip"
+            table.cell(pan, 0, 11, verdict + " · zones " + str.tostring(nZ) + "/" + str.tostring(maxLiveZones), text_color=bestScore >= 80 ? brassCol : #B0BEC5, text_size=size.tiny, text_halign=text.align_center)
         else
-            table.cell(pan, 0, 3, "No live zones", text_color=#78909C, text_size=size.tiny)
-            table.cell(pan, 0, 4, "Wait clean setup", text_color=#78909C, text_size=size.tiny)
-            table.cell(pan, 0, 5, "—", text_color=#78909C, text_size=size.tiny)
-        if armedNow and not na(armedProx)
-            string side = armedDir == 1 ? "LONG" : "SHORT"
-            string gA = f_grade(armedScore)
-            table.cell(pan, 0, 6, "ARMED " + gA + " " + str.tostring(armedScore) + " · " + f_kind_name(armedKind) + " " + side, text_color=armedScore >= minScoreArm ? #66BB6A : #EF5350, text_size=size.small)
-            table.cell(pan, 0, 7, "ENTRY " + str.tostring(armedProx, format.mintick) + "  ·  SL " + str.tostring(armedDist, format.mintick), text_color=color.white, text_size=size.small)
-        else
-            table.cell(pan, 0, 6, "Not armed — wait return / LQ", text_color=#78909C, text_size=size.tiny)
-            table.cell(pan, 0, 7, "Arm ≥ " + str.tostring(minScoreArm), text_color=#78909C, text_size=size.tiny)
-        table.cell(pan, 0, 8, "Live zones " + str.tostring(nZ) + " / max " + str.tostring(maxLiveZones), text_color=#78909C, text_size=size.tiny)
-        string on1 = useSetupMM ? "1" : "-"
-        string on2 = useSetupMss ? "2" : "-"
-        string on3 = useSetupHtf ? "3" : "-"
-        string on4 = useSetupBb ? "4" : "-"
-        string on5 = useSetupFs ? "5" : "-"
-        table.cell(pan, 0, 9, "Setups " + on1 + on2 + on3 + on4 + on5 + " · keep≥" + str.tostring(minScoreKeep), text_color=#78909C, text_size=size.tiny)
-        string row10 = bbBorn ? "New S4" : htfBorn ? "New S3" : mssBorn ? "New S2" : fsBorn ? "New S5" : "—"
-        table.cell(pan, 0, 10, row10, text_color=#B0BEC5, text_size=size.tiny)
+            table.merge_cells(pan, 0, 2, 1, 2)
+            table.cell(pan, 0, 2, "No live forge zone", text_color=#8A9A9B, text_size=size.small, text_halign=text.align_center)
+            table.merge_cells(pan, 0, 3, 1, 3)
+            table.cell(pan, 0, 3, "Waiting for B+ structure…", text_color=#5B8A8A, text_size=size.tiny, text_halign=text.align_center)
+            table.merge_cells(pan, 0, 4, 1, 4)
+            table.cell(pan, 0, 4, "SCOUT mode", text_color=#8A9A9B, text_size=size.tiny, text_halign=text.align_center)
+            table.merge_cells(pan, 0, 5, 1, 11)
+            table.cell(pan, 0, 5, " ", text_color=inkCol, text_size=size.tiny)
 
 plot(armedNow ? armedProx : na, "Armed ENTRY", color=entryCol, display=display.data_window)
 plot(armedNow ? armedDist : na, "Armed SL", color=slCol, display=display.data_window)
-plot(bestScore >= 0 ? bestScore : na, "Best Score", color=#FFD54F, display=display.data_window)
+plot(bestScore >= 0 ? bestScore : na, "Best Score", color=brassCol, display=display.data_window)
+plot(not na(bestRr) ? bestRr : na, "Best RR", color=seaCol, display=display.data_window)
