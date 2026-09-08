@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "3.54"
-#property description "TRH EA v3.54: LIVE SL never inside structural distal (keep setup SL on market fills)"
+#property version   "3.55"
+#property description "TRH EA v3.55: hard one-trade lock — no tick spam when price revisits TP1/ENTRY"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -88,7 +88,9 @@ input bool   InpLimitBeforeEntry  = true; // Near + before ENTRY → Stop into E
 input bool   InpMarketOnTouch     = true; // If pending sits, market when bar touches ENTRY
 input bool   InpCancelRunThrough  = true;
 input int    InpAdoptMaxAgeBars   = 20;   // Was 8 — gold dumps age out too fast
-input int    InpRetryEveryTicks   = 1;
+input int    InpRetryEveryTicks   = 5;    // Was 1 — every-tick retry spam-fired markets on gold
+input int    InpOrderCooldownSec  = 8;    // Hard silence after ANY successful OrderSend
+input bool   InpOneTradePerSetup  = true; // Mark setup done on send (no re-fire same barTime)
 input bool   InpFixLiveStops      = true; // Auto-pad SL/TP when live market would reject
 
 input group "TRH Detection (= Pine Mode A)"
@@ -153,7 +155,34 @@ datetime g_workAdopted    = 0;
 int      g_workTries      = 0;
 string   g_workStatus     = "";
 datetime g_doneSetupTime  = 0;
+datetime g_fillLockUntil  = 0;    // wall-clock lock after successful send
+ulong    g_lastSendMsc    = 0;    // GetTickCount64 stamp of last send
+bool     g_sendInFlight   = false; // true from OrderSend OK until work cleared
 ulong    g_trailLocked[];   // tickets already SL-locked to TP1 (do not re-fire)
+
+bool FillLockActive()
+{
+   if(g_sendInFlight) return true;
+   if(g_fillLockUntil > 0 && TimeCurrent() < g_fillLockUntil) return true;
+   if(g_lastSendMsc > 0)
+   {
+      ulong now = GetTickCount64();
+      if(now >= g_lastSendMsc && (now - g_lastSendMsc) < 2500)
+         return true; // 2.5s hard floor — PositionsTotal lag on gold
+   }
+   return false;
+}
+
+void MarkOrderSent(const datetime setupTime, const bool finalizeSetup)
+{
+   g_lastSendMsc = GetTickCount64();
+   g_fillLockUntil = TimeCurrent() + MathMax(InpOrderCooldownSec, 1);
+   g_sendInFlight = true;
+   // finalizeSetup=true for market fills (done forever). Pending stays convertible via MarketOnTouch.
+   if(finalizeSetup && InpOneTradePerSetup && setupTime > 0)
+      g_doneSetupTime = setupTime;
+   g_dayTrades++;
+}
 
 void BuildConfig(TrhConfig &cfg)
 {
@@ -442,10 +471,14 @@ void ClearWork(const string why)
       TrhModeLabel(g_work.setupMode),
       TimeToString(g_work.barTime, TIME_DATE|TIME_MINUTES),
       why);
-   g_doneSetupTime = g_work.barTime;
+   if(InpOneTradePerSetup && g_work.barTime > 0)
+      g_doneSetupTime = g_work.barTime;
+   else
+      g_doneSetupTime = g_work.barTime;
    g_workActive = false;
    g_workTries = 0;
    g_workStatus = why;
+   g_sendInFlight = false;
 }
 
 void AdoptWork(const TrhSetup &s)
@@ -467,6 +500,12 @@ void AdoptWork(const TrhSetup &s)
 int PlaceSetupTrade(const TrhSetup &s, const double atrNow, const bool forceMarket)
 {
    if(!InpAutoTrade) return -1;
+   // forceMarket (bar-touch conversion) may bypass cooldown; still never duplicate a finalized setup
+   if(!forceMarket && FillLockActive())
+   {
+      g_workStatus = "order lock (anti-spam)";
+      return 0;
+   }
    if(!TradeAllowedOk()) return 0;
    if(!SessionOk() || !DailyLimitsOk()) return 0;
    if(!SpreadOk(atrNow)) return 0;
@@ -474,6 +513,12 @@ int PlaceSetupTrade(const TrhSetup &s, const double atrNow, const bool forceMark
    {
       g_workStatus = "max open trades";
       return 0;
+   }
+   // Belt-and-suspenders: never open a 2nd ticket for a setup we already finalized
+   if(InpOneTradePerSetup && s.barTime > 0 && s.barTime == g_doneSetupTime)
+   {
+      g_workStatus = "setup already traded";
+      return -1;
    }
 
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
@@ -643,8 +688,7 @@ int PlaceSetupTrade(const TrhSetup &s, const double atrNow, const bool forceMark
       g_workTries++;
       if(ok)
       {
-         if(CountOurOrders() > 0)
-            g_dayTrades++;
+         MarkOrderSent(s.barTime, true); // market: done forever (anti-spam)
          g_workStatus = mode + " OK";
          PrintFormat("TRH %s %s lots=%s fill=%s Esetup=%s SL=%s TP=%s dist=%.2f try=%d",
             mode, s.dir == 1 ? "LONG" : "SHORT",
@@ -752,8 +796,8 @@ int PlaceSetupTrade(const TrhSetup &s, const double atrNow, const bool forceMark
 
    if(ok)
    {
-      if(CountOurOrders() > 0)
-         g_dayTrades++;
+      bool isMarket = (StringFind(mode, "MARKET") >= 0);
+      MarkOrderSent(s.barTime, isMarket);
       g_workStatus = mode + " OK";
       PrintFormat("TRH %s %s lots=%s E=%s SL=%s TP=%s dist=%.2f try=%d",
          mode, s.dir == 1 ? "LONG" : "SHORT",
@@ -779,7 +823,7 @@ int PlaceSetupTrade(const TrhSetup &s, const double atrNow, const bool forceMark
             : g_trade.Sell(lots, _Symbol, 0, sl, tp, comment);
          if(mok)
          {
-            g_dayTrades++;
+            MarkOrderSent(s.barTime, true);
             g_workStatus = "MARKET fallback OK";
             PrintFormat("TRH MARKET FALLBACK OK after pending reject");
             return 1;
@@ -1171,7 +1215,7 @@ void UpdateComment(const TrhSetup &last, const int ageBars, const double lots)
    else if(InpSLProtectStyle == TRH_BE_STEP) beName = "BE-STEP";
 
    Comment(StringFormat(
-      "TRH EA v3.54 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
+      "TRH EA v3.55 | %s | %s\nLatest %s %s age=%d\nE %s  SL %s  TP %s\npos=%d pend=%d day=%d lots~%s\n%s",
       InpAutoTrade ? "ON" : "OFF",
       beName,
       last.dir == 1 ? "LONG" : "SHORT",
@@ -1189,7 +1233,7 @@ int OnInit()
 {
    if(TRH_ENGINE_VERSION < 234)
    {
-      Alert("TRH EA v3.54: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
+      Alert("TRH EA v3.55: Engine outdated (v", IntegerToString(TRH_ENGINE_VERSION),
             "). Copy NEW TRH_Engine.mqh into THIS EA folder and recompile. Need Engine >= 234.");
       return INIT_FAILED;
    }
@@ -1205,8 +1249,10 @@ int OnInit()
    if(!TradeAllowedOk())
       PrintFormat("TRH WARN: trading blocked — %s", g_workStatus);
 
-   PrintFormat("TRH AutoTrade v3.54 | Eng%d | Mode B kept with A | BE=%d | trailTP=%s | farMarket=%s | session=%s | adoptAge<=%d | %s %s",
+   PrintFormat("TRH AutoTrade v3.55 | Eng%d | anti-spam lock=%ds retryEvery=%d | BE=%d | trailTP=%s | farMarket=%s | session=%s | adoptAge<=%d | %s %s",
       TRH_ENGINE_VERSION,
+      InpOrderCooldownSec,
+      InpRetryEveryTicks,
       (int)InpSLProtectStyle,
       InpTrailingTP ? "Y" : "N",
       InpFarOpenMarket ? "Y" : "N",
@@ -1214,8 +1260,8 @@ int OnInit()
       InpAdoptMaxAgeBars,
       _Symbol, EnumToString(_Period));
 
-   Comment("TRH EA v3.54 Eng" + IntegerToString(TRH_ENGINE_VERSION) +
-           "\nTrail TP OFF by default · SL→TP1 lock only");
+   Comment("TRH EA v3.55 Eng" + IntegerToString(TRH_ENGINE_VERSION) +
+           "\nOne-trade lock ON · no tick spam at TP1");
    return INIT_SUCCEEDED;
 }
 
@@ -1280,7 +1326,7 @@ void OnTick()
    int n = TrhScanByMode(copied, t, o, h, l, c, cfg, (int)InpTradeMode, setups);
    if(n <= 0)
    {
-      Comment(StringFormat("TRH EA v3.54 %s — scanning...\nday %d | %s",
+      Comment(StringFormat("TRH EA v3.55 %s — scanning...\nday %d | %s",
          InpAutoTrade ? "ON" : "OFF", g_dayTrades, g_workStatus));
       return;
    }
@@ -1295,7 +1341,8 @@ void OnTick()
       last.barTime != g_doneSetupTime &&
       (!g_workActive || last.barTime != g_work.barTime) &&
       ageBars <= InpAdoptMaxAgeBars &&
-      CountOurOrders() == 0)
+      CountOurOrders() == 0 &&
+      !FillLockActive())
    {
       bool replace = false;
       if(!g_workActive)
@@ -1334,7 +1381,7 @@ void OnTick()
             }
             int rcTouch = PlaceSetupTrade(g_work, atrNow, true);
             if(rcTouch == 1)
-               ClearWork("market on touch");
+               ClearWork("market on touch — one per setup");
             else if(rcTouch < 0)
                ClearWork(g_workStatus);
          }
@@ -1352,16 +1399,19 @@ void OnTick()
          int rc = PlaceSetupTrade(g_work, atrNow, false);
          if(rc == 1)
          {
-            if(CountOurPositions() > 0)
-               ClearWork("placed position");
-            else if(CountOurPendings() > 0)
+            if(CountOurPendings() > 0)
+            {
                g_workStatus = "pending parked @ ENTRY";
+               g_sendInFlight = false; // allow MarketOnTouch manage; cooldown still holds
+            }
+            else
+               ClearWork("order sent — one per setup");
          }
          else if(rc < 0)
          {
             ClearWork(g_workStatus);
          }
-         // rc == 0 → retry next tick (spread / session / order fail / SL pad)
+         // rc == 0 → retry later (spread / session / lock / SL pad)
       }
    }
 
