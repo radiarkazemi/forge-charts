@@ -56,8 +56,9 @@ mmLookMinutes = input.int(90, "MM Origin Window (minutes)", minval=20, maxval=48
 expireDeepR = input.float(1.20, "Expire Dead Hunt After (R past ENTRY)", minval=0.5, step=0.1, group=grpTheme,
      tooltip="Kill S1 HUNT rails when price already ran this far toward TP without a fill (stops 15m short @ 4437 while price sits on TP).")
 showThemeTag = input.bool(true, "Tag Theme-Locked Zones", group=grpTheme)
-lockMssToTheme = input.bool(true, "Also Lock S2/S3 To Theme TF", group=grpTheme,
-     tooltip="When ON, 1m will not invent a different S3 — it inherits the theme-TF fresh zone.")
+lockAllToTheme = input.bool(true, "One Setup Across Aligned TFs", group=grpTheme,
+     tooltip="ON (recommended): 1m/5m/15m show ONLY the shared theme rail — no local S1–S5 inventions.
+OFF: only S1 is theme-gated; other setups may still invent per TF.")
 
 grpMss = "Setup 2/3 — MSS / HTF / LQ"
 mssPivot     = input.int(3, "MSS Pivot Length", minval=2, maxval=8, group=grpMss)
@@ -201,6 +202,7 @@ var int[]   zLqN = array.new_int()    // equal touches toward LQ
 var int[]   zScore = array.new_int()  // 0–100 clean score
 var float[] zTp = array.new_float()   // frozen structure TP (set at birth, locked at arm)
 var int[]   zFrozen = array.new_int() // 1 = ENTRY/SL/TP locked (armed / in-trade)
+var int[]   zTheme = array.new_int()  // 1 = shared cross-TF theme rail
 var int themeTagBar = -999
 var label[] scoreLabs = array.new_label()
 var box[]   tealBoxes = array.new_box()
@@ -266,6 +268,7 @@ f_remove_at(int i) =>
         array.remove(zScore, i)
         array.remove(zTp, i)
         array.remove(zFrozen, i)
+        array.remove(zTheme, i)
         array.remove(scoreLabs, i)
         array.remove(tealBoxes, i)
         array.remove(htfBoxes, i)
@@ -334,12 +337,15 @@ f_struct_tp(int dir, float entry, float sl) =>
     tp
 
 // Lock ENTRY / SL / TP so live levels cannot drift mid-trade
+// Keeps an existing TP snapshot (theme TF / leave) — never recomputes after lock intent
 f_freeze_zone(int i) =>
     if i >= 0 and i < array.size(zDir) and array.get(zFrozen, i) == 0
-        float prox = array.get(zProx, i)
-        float dist = array.get(zDist, i)
-        int dir = array.get(zDir, i)
-        array.set(zTp, i, f_struct_tp(dir, prox, dist))
+        float curTp = array.get(zTp, i)
+        if na(curTp)
+            float prox = array.get(zProx, i)
+            float dist = array.get(zDist, i)
+            int dir = array.get(zDir, i)
+            array.set(zTp, i, f_struct_tp(dir, prox, dist))
         array.set(zFrozen, i, 1)
 
 
@@ -448,6 +454,7 @@ f_push_zone(int dir, float prox, float dist, int kind, float htfTop, float htfBo
         // fs may arm at birth → freeze immediately so levels cannot drift
         int fr0 = (kind == 4 and (not useCleanScore or sc >= minScoreArm)) ? 1 : 0
         array.push(zFrozen, fr0)
+        array.push(zTheme, 0)
         array.push(boxes, box.new(bi, math.max(prox, dist), bi + 1, math.min(prox, dist),
              border_color=color.new(zc, 15), bgcolor=zc, border_width=2))
         // Clear ENTRY / SL — solid thick lines + price labels
@@ -523,7 +530,7 @@ f_mm_look_bars() =>
 
 // Continuous theme rails — always expose the live origin demand/supply pocket
 // (not only on the displacement bar). Picks the actionable rail near price.
-// Returns [dir, prox, dist, kind]  kind 0=MM · 2=fresh demand/supply at extreme
+// Returns [dir, prox, dist, kind, tp] — geometry + TP all from theme TF
 f_mm_theme_pack() =>
     int look = f_mm_look_bars()
     float a = ta.atr(14)
@@ -588,9 +595,11 @@ f_mm_theme_pack() =>
             prox := supP
             dist := supD
             kind := 0
-    [dir, prox, dist, kind]
+    // Structure TP on the THEME TF so 1m/5m/15m share the same reward level
+    float tp = dir != 0 ? f_struct_tp(dir, prox, dist) : float(na)
+    [dir, prox, dist, kind, tp]
 
-[thDir, thProx, thDist, thKind] = request.security(syminfo.tickerid, themeActive ? themeTf : timeframe.period, f_mm_theme_pack(), barmerge.gaps_off, barmerge.lookahead_off)
+[thDir, thProx, thDist, thKind, thTp] = request.security(syminfo.tickerid, themeActive ? themeTf : timeframe.period, f_mm_theme_pack(), barmerge.gaps_off, barmerge.lookahead_off)
 
 var float themeProxLock = na
 var float themeDistLock = na
@@ -714,30 +723,50 @@ f_recent_disp(int dir, int n) =>
             hit := d
     hit
 
-// Theme rails (continuous): push/refresh the shared 5m origin zone on every TF.
-// Also runs on the theme TF itself so 5m is never empty while a rail is alive.
+// ONE shared theme rail across aligned TFs (1m/5m/15m → same ENTRY/SL/TP).
+// Sticky lock: once accepted, geometry never rewrites mid-trade; locals suppressed.
+bool localBirthOk = not (themeActive and lockAllToTheme)
+
 if themeActive and thDir != 0 and not na(thProx) and not na(thDist)
     bool sideOk = thDir == -1 ? allowShort : allowLong
     bool blown = thDir == -1 ? close > thDist : close < thDist
-    bool deep = thDir == -1 ? (thProx - close) >= math.abs(thDist - thProx) * expireDeepR : (close - thProx) >= math.abs(thDist - thProx) * expireDeepR
-    bool same = not na(themeProxLock) and themeDirLock == thDir and math.abs(themeProxLock - thProx) <= atr * 0.20 and math.abs(themeDistLock - thDist) <= atr * 0.20
+    float thRisk = math.abs(thDist - thProx)
+    bool deep = thRisk > 0 and (thDir == -1 ? (thProx - close) >= thRisk * expireDeepR : (close - thProx) >= thRisk * expireDeepR)
+    // Sticky: prefer the LOCKED rail identity, not the drifting pack prox
+    float stickProx = not na(themeProxLock) ? themeProxLock : thProx
+    float stickDist = not na(themeDistLock) ? themeDistLock : thDist
+    int stickDir = themeDirLock != 0 ? themeDirLock : thDir
+    float matchTol = math.max(thRisk * 0.35, syminfo.mintick * 10.0)
     bool haveLive = false
+    int liveZi = -1
     if array.size(zDir) > 0
         for zi = 0 to array.size(zDir) - 1
-            if array.get(zDead, zi) == 0 and array.get(zDir, zi) == thDir and math.abs(array.get(zProx, zi) - thProx) <= atr * 0.25
+            if array.get(zDead, zi) == 0 and array.get(zTheme, zi) == 1 and array.get(zDir, zi) == stickDir and math.abs(array.get(zProx, zi) - stickProx) <= matchTol
                 haveLive := true
-                // Keep distal synced ONLY while still hunting — never mid-trade
-                if not f_protect(zi)
-                    if thDir == 1 and thDist < array.get(zDist, zi)
-                        f_apply_distal(zi, thDir, thDist)
-                    if thDir == -1 and thDist > array.get(zDist, zi)
-                        f_apply_distal(zi, thDir, thDist)
-    // Always re-push theme when missing (fixes empty 5m SCOUT while demand rail is alive)
-    if sideOk and not blown and not deep and not haveLive and f_zone_ok(thProx, thDist)
+                liveZi := zi
+    // Clear stale locks when theme rail is gone
+    if not haveLive and themeDirLock != 0
+        themeProxLock := float(na)
+        themeDistLock := float(na)
+        themeDirLock := 0
+        themeKindLock := 0
+        stickProx := thProx
+        stickDist := thDist
+        stickDir := thDir
+    // Kill competing local setups so every TF shows only the shared rail
+    if lockAllToTheme and array.size(zDir) > 0
+        for zi = 0 to array.size(zDir) - 1
+            if array.get(zDead, zi) == 0 and array.get(zTheme, zi) == 0 and not f_protect(zi)
+                array.set(zDead, zi, 1)
+    // Push once — then FREEZE. No distal sync, no re-birth while live.
+    if not haveLive and sideOk and not blown and not deep and f_zone_ok(thProx, thDist)
         int useKind = thKind == 2 ? 2 : 0
         if useKind == 2 and not useSetupHtf and useSetupMss
             useKind := 1
-        if (useKind == 0 and useSetupMM) or (useKind == 1 and useSetupMss) or (useKind == 2 and useSetupHtf)
+        if useKind == 2 and not useSetupHtf and not useSetupMss and useSetupMM
+            useKind := 0
+        bool kindOk = (useKind == 0 and useSetupMM) or (useKind == 1 and useSetupMss) or (useKind == 2 and useSetupHtf) or useSetupMM
+        if kindOk
             int nb = f_push_zone(thDir, thProx, thDist, useKind, na, na)
             if nb >= 0
                 lastBirth := nb
@@ -745,13 +774,17 @@ if themeActive and thDir != 0 and not na(thProx) and not na(thDist)
                 themeDistLock := thDist
                 themeDirLock := thDir
                 themeKindLock := useKind
-                // Theme zones start left (price already left the origin after the dump/rally)
                 int idx = array.size(zDir) - 1
                 if idx >= 0
                     array.set(zLeft, idx, 1)
+                    array.set(zTheme, idx, 1)
+                    // Shared theme-TF TP (fallback to chart struct only if na)
+                    if not na(thTp)
+                        array.set(zTp, idx, thTp)
+                    f_freeze_zone(idx)
                 if showThemeTag and showLabels and bar_index != themeTagBar
                     themeTagBar := bar_index
-                    label.new(bar_index, thProx, "THEME " + themeTf, style=label.style_label_left, color=color.new(brassCol, 20), textcolor=color.white, size=size.tiny)
+                    label.new(bar_index, thProx, "THEME " + themeTf + " LOCK", style=label.style_label_left, color=color.new(brassCol, 20), textcolor=color.white, size=size.tiny)
 
 // Local S1 only when Theme Mode = Chart (independent TF)
 if useSetupMM and bearDisp and allowShort and useOB and not themeActive and f_can_birth()
@@ -850,8 +883,7 @@ mssSignalLong  = (useSetupMss or useSetupHtf) and allowLong  and not na(lastHi) 
 
 mssBorn = false
 htfBorn = false
-bool mssLocalOk = not (themeActive and lockMssToTheme)
-if mssSignalShort and mssLocalOk and f_can_birth()
+if mssSignalShort and localBirthOk and f_can_birth()
     [p, d, ok] = f_find_ob_origin(-1, mssObLookback)
     if ok == 1
         // Anchor SL to swing high if it is the true supply extreme
@@ -870,7 +902,7 @@ if mssSignalShort and mssLocalOk and f_can_birth()
                 if kind == 2 and showLabels
                     label.new(bar_index, p, "New Fresh Zone", style=label.style_label_left, color=color.new(supplyCol, 100), textcolor=#EF9A9A, size=size.tiny)
 
-if mssSignalLong and mssLocalOk and f_can_birth() and not mssBorn
+if mssSignalLong and localBirthOk and f_can_birth() and not mssBorn
     [p, d, ok] = f_find_ob_origin(1, mssObLookback)
     if ok == 1
         // Anchor SL to swing low if it is the true demand extreme
@@ -962,7 +994,7 @@ bbBorn = false
 bbMssLong = useSetupBb and allowLong and bar_index <= bullSweepUntil and not na(lastHi) and close > lastHi and body >= atr * mssBodyAtr and close > open
 bbMssShort = useSetupBb and allowShort and bar_index <= bearSweepUntil and not na(lastLo) and close < lastLo and body >= atr * mssBodyAtr and close < open
 
-if bbMssLong and f_can_birth()
+if bbMssLong and localBirthOk and f_can_birth()
     [bp, bd, bok] = f_find_ob(1)
     [gt, gb, gok] = f_find_fvg(1, 10)
     if bok == 1 and gok == 1
@@ -980,7 +1012,7 @@ if bbMssLong and f_can_birth()
                     if showBbTag
                         label.new(bar_index, zp, "BB + FVG", style=label.style_label_left, color=color.new(demandCol, 100), textcolor=#81D4FA, size=size.tiny)
 
-if bbMssShort and f_can_birth() and not bbBorn
+if bbMssShort and localBirthOk and f_can_birth() and not bbBorn
     [bp, bd, bok] = f_find_ob(-1)
     [gt, gb, gok] = f_find_fvg(-1, 10)
     if bok == 1 and gok == 1
@@ -1086,7 +1118,7 @@ armedKind = 0
 armedScore = 0
 
 // Long: wick below unused fs low, shallow, reclaim / close back above
-if useSetupFs and allowLong and f_can_fs()
+if useSetupFs and localBirthOk and allowLong and f_can_fs()
     int nL = array.size(fsLoPx)
     if nL > 0
         for i = 0 to nL - 1
@@ -1115,7 +1147,7 @@ if useSetupFs and allowLong and f_can_fs()
                                 armedScore := scFs
 
 // Short: wick above unused fs high
-if useSetupFs and allowShort and f_can_fs() and not fsBorn
+if useSetupFs and localBirthOk and allowShort and f_can_fs() and not fsBorn
     int nH = array.size(fsHiPx)
     if nH > 0
         for i = 0 to nH - 1
@@ -1425,35 +1457,28 @@ bestArmed = false
 bestLeft = false
 bestAge = 0
 if nZ > 0
-    // Prefer active HUNT / in-trade so cockpit ENTRY/SL/TP cannot jump mid-trade
+    // Prefer shared theme rail, then frozen/active — one setup across TFs
     int bestBoost = -1
     for i = 0 to nZ - 1
-        if f_active(i)
-            int sc = array.get(zScore, i) + (f_protect(i) ? 2000 : 1000)
-            if sc > bestBoost
-                bestBoost := sc
-                bestScore := array.get(zScore, i)
-                bestKind := array.get(zKind, i)
-                bestDir := array.get(zDir, i)
-                bestProx := array.get(zProx, i)
-                bestDist := array.get(zDist, i)
-                bestIdx := i
-                bestArmed := array.get(zArmed, i) == 1
-                bestLeft := array.get(zLeft, i) == 1
-                bestAge := bar_index - array.get(zBirth, i)
-    if bestIdx < 0
-        for i = 0 to nZ - 1
-            int sc = array.get(zScore, i)
-            if sc > bestScore
-                bestScore := sc
-                bestKind := array.get(zKind, i)
-                bestDir := array.get(zDir, i)
-                bestProx := array.get(zProx, i)
-                bestDist := array.get(zDist, i)
-                bestIdx := i
-                bestArmed := array.get(zArmed, i) == 1
-                bestLeft := array.get(zLeft, i) == 1
-                bestAge := bar_index - array.get(zBirth, i)
+        int sc = array.get(zScore, i)
+        int boost = sc
+        if themeActive and array.get(zTheme, i) == 1
+            boost += 5000
+        if f_protect(i)
+            boost += 2000
+        else if f_active(i)
+            boost += 1000
+        if boost > bestBoost
+            bestBoost := boost
+            bestScore := sc
+            bestKind := array.get(zKind, i)
+            bestDir := array.get(zDir, i)
+            bestProx := array.get(zProx, i)
+            bestDist := array.get(zDist, i)
+            bestIdx := i
+            bestArmed := array.get(zArmed, i) == 1
+            bestLeft := array.get(zLeft, i) == 1
+            bestAge := bar_index - array.get(zBirth, i)
 
 if onlyBestVisual and nZ > 1 and bestIdx >= 0
     for i = 0 to nZ - 1
@@ -1589,7 +1614,7 @@ if showPanel
         table.merge_cells(pan, 0, 0, 1, 0)
         table.cell(pan, 0, 0, "TRH  ◈  FORGE", text_color=brassCol, text_size=size.normal, text_halign=text.align_center)
         table.merge_cells(pan, 0, 1, 1, 1)
-        string themeTxt = themeMode == "Chart" ? "chart TF" : ("theme " + themeTf + (themeExternal ? " lock" : ""))
+        string themeTxt = themeMode == "Chart" ? "chart TF" : ("theme " + themeTf + (lockAllToTheme ? " · ONE SETUP" : (themeExternal ? " lock" : "")))
         table.cell(pan, 0, 1, themeTxt + " · clean MM rail", text_color=#8A9A9B, text_size=size.tiny, text_halign=text.align_center)
 
         if bestScore >= 0
