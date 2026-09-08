@@ -1443,7 +1443,8 @@ if showPanel
         table.merge_cells(pan, 0, 0, 1, 0)
         table.cell(pan, 0, 0, "TRH  ◈  FORGE", text_color=brassCol, text_size=size.normal, text_halign=text.align_center)
         table.merge_cells(pan, 0, 1, 1, 1)
-        table.cell(pan, 0, 1, "clean entries · cinematic risk plane", text_color=#8A9A9B, text_size=size.tiny, text_halign=text.align_center)
+        string themeTxt = themeMode == "Chart" ? "chart TF" : themeExternal ? ("theme " + themeTf + " lock") : ("theme " + (themeTf == "" ? timeframe.period : themeTf))
+        table.cell(pan, 0, 1, themeTxt + " · clean MM rail", text_color=#8A9A9B, text_size=size.tiny, text_halign=text.align_center)
 
         if bestScore >= 0
             string sideB = bestDir == 1 ? "LONG ▲" : "SHORT ▼"
