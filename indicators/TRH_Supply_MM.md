@@ -1,35 +1,22 @@
 # TRH Supply MM Pack + Clean Score
 
-Five setups + a **0–100 clean score** so you know which entry to take.
+Cleaner chart defaults: clear **ENTRY / SL** prices, auto-remove expired zones, max 3 live zones.
+
+## Visuals
+
+- Thick solid **ENTRY** (green) and **SL** (red) lines with price labels
+- Panel shows `ENTRY … · SL …` for the best zone
+- Expired removed when: close through SL · age · TP hit · weaker overlap
+- fs lines / HTF / teal TP / R-ladder **OFF** by default (less mess)
+- Keep score default **70** (C/D zones not drawn)
 
 ## Grades
 
 | Grade | Score | Action |
 |-------|-------|--------|
-| **A** | ≥ 80 | **TAKE** — cleanest |
-| **B** | ≥ 70 | OK — arm allowed (default) |
-| **C** | ≥ 55 | Weak — usually skip |
-| **D** | < 55 | **SKIP** — often rejected |
-
-## What raises / lowers score
-
-- **Higher base:** S4 BB+FVG · S3 HTF+LQ · then S2 · S1 · S5-fs (lowest)
-- **+** clean SL size (≈0.22–1.1 ATR) · RR ≥ 2 · displacement · LQ confirm · confluence
-- **−** tiny/huge SL · poor RR · mid-range chop · lone fs noise
-
-Defaults: reject zones &lt; 62 · arm only ≥ 70. Panel shows **BEST grade + TAKE/OK/SKIP**.
-
-## Setups
-
-| Setup | Trigger |
-|-------|---------|
-| 1 MM | Disp → OB/FVG · R ladder |
-| 2 MSS | Fresh zone retest · teal TP |
-| 3 HTF+LQ | Fresh + LQ sweep · teal TP |
-| 4 BB+FVG | Sweep → MSS → BB+FVG |
-| 5 fs | Fractal sweep · pink/blue |
-
-If you were hitting SL on cluttered 1m charts with all setups ON: take only **A/B**, prefer **S4 / S3**, turn off or ignore lone **S5-fs**.
+| **A** | ≥ 80 | TAKE |
+| **B** | ≥ 70 | OK |
+| **C/D** | &lt; 70 | Removed / skipped |
 
 ## Raw
 
