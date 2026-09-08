@@ -1150,25 +1150,26 @@ if barstate.islast
 
         // Risk plane ENTRY ↔ SL
         heroRisk := box.new(x0, math.max(bestProx, bestDist), x1, math.min(bestProx, bestDist),
-             xloc.bar_index, extend.none, color.new(riskFill, 35), riskFill, 1)
+             border_color=color.new(riskFill, 35), border_width=1, bgcolor=riskFill, extend=extend.none, xloc=xloc.bar_index)
 
         // Reward runway ENTRY → structure TP
         if showHeroTp and not na(bestTp)
             heroTp := box.new(x0, math.max(bestProx, bestTp), x1, math.min(bestProx, bestTp),
-                 xloc.bar_index, extend.none, color.new(seaCol, 40), seaCol, 1)
+                 border_color=color.new(seaCol, 40), border_width=1, bgcolor=seaCol, extend=extend.none, xloc=xloc.bar_index)
             heroTpLab := label.new(x1, bestTp, "TP " + str.tostring(bestTp, format.mintick) + " · " + str.tostring(bestRr, "#.0") + "R",
-                 xloc.bar_index, yloc.price, color.new(#5B8A8A, 0), label.style_label_left, color.white, size.normal)
+                 xloc=xloc.bar_index, yloc=yloc.price, color=color.new(#5B8A8A, 0), style=label.style_label_left, textcolor=color.white, size=size.normal)
 
         string phase = f_phase(bestArmed, bestLeft, bestKind)
         color phCol = bestArmed ? brassCol : bestLeft ? #D4B896 : #8A9A9B
-        heroPhase := label.new(x0, (bestProx + bestDist) * 0.5, phase, xloc.bar_index, yloc.price,
-             color.new(phCol, 5), bestDir == 1 ? label.style_label_up : label.style_label_down, color.white, size.small)
+        heroPhase := label.new(x0, (bestProx + bestDist) * 0.5, phase,
+             xloc=xloc.bar_index, yloc=yloc.price, color=color.new(phCol, 5),
+             style=bestDir == 1 ? label.style_label_up : label.style_label_down, textcolor=color.white, size=size.small)
 
         if showApproach and not bestArmed
             distToEntry := bestDir == 1 ? bestProx - close : close - bestProx
             if distToEntry > 0
                 heroApproach := label.new(bar_index + 1, close, "→ ENTRY " + str.tostring(math.abs(distToEntry), format.mintick) + " away",
-                     xloc.bar_index, yloc.price, color.new(inkCol, 15), label.style_label_left, brassCol, size.small)
+                     xloc=xloc.bar_index, yloc=yloc.price, color=color.new(inkCol, 15), style=label.style_label_left, textcolor=brassCol, size=size.small)
 
         if showLabels and not na(array.get(eLabs, bestIdx))
             string eTxt = (bestArmed ? "▶ ENTRY " : "ENTRY ") + str.tostring(bestProx, format.mintick)
