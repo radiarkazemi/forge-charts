@@ -57,8 +57,7 @@ expireDeepR = input.float(1.20, "Expire Dead Hunt After (R past ENTRY)", minval=
      tooltip="Kill S1 HUNT rails when price already ran this far toward TP without a fill (stops 15m short @ 4437 while price sits on TP).")
 showThemeTag = input.bool(true, "Tag Theme-Locked Zones", group=grpTheme)
 lockAllToTheme = input.bool(true, "One Setup Across Aligned TFs", group=grpTheme,
-     tooltip="ON (recommended): 1m/5m/15m show ONLY the shared theme rail — no local S1–S5 inventions.
-OFF: only S1 is theme-gated; other setups may still invent per TF.")
+     tooltip="ON (recommended): 1m/5m/15m show ONLY the shared theme rail — no local S1–S5 inventions.\nOFF: only S1 is theme-gated; other setups may still invent per TF.")
 
 grpMss = "Setup 2/3 — MSS / HTF / LQ"
 mssPivot     = input.int(3, "MSS Pivot Length", minval=2, maxval=8, group=grpMss)
