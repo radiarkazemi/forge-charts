@@ -14,7 +14,9 @@ Five setups on TradingView **and** a full MT5 Expert Advisor with smart autotrad
 
 Clean score A/B/C/D · Forge UI · auto-expire.
 
-**Mid-trade lock:** TP snapshots when HUNT starts (leave). First return to ENTRY freezes ENTRY/SL/TP (even C-grade). Theme rails and structure TP cannot rewrite a live/active setup. MT5 EA keeps adopted levels locked.
+**Cross-TF (Auto/Fixed):** 1m/5m/15m share **one** theme rail (default 5m). With **One Setup Across Aligned TFs** ON, local S1–S5 births are suppressed — every aligned chart shows the same ENTRY/SL/TP.
+
+**Mid-trade lock:** theme rail freezes ENTRY/SL/TP at birth (shared theme-TF TP). Levels do not rewrite while the rail is live.
 
 **Raw:** https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-supply-mm-992e/indicators/TRH_Supply_MM.pine
 

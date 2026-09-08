@@ -595,8 +595,31 @@ f_mm_theme_pack() =>
             prox := supP
             dist := supD
             kind := 0
-    // Structure TP on the THEME TF so 1m/5m/15m share the same reward level
-    float tp = dir != 0 ? f_struct_tp(dir, prox, dist) : float(na)
+    // Structure TP computed HERE on theme TF (shared across 1m/5m/15m)
+    float tp = float(na)
+    if dir != 0
+        float risk = math.abs(prox - dist)
+        tp := dir == 1 ? prox + risk * 2.5 : prox - risk * 2.5
+        float runExt = dir == 1 ? high[1] : low[1]
+        int ageExt = 1
+        int limTp = math.min(structBars, bar_index - 1)
+        int minAge = 8
+        if limTp >= minAge and risk > 0
+            for b = 1 to limTp
+                if dir == 1
+                    if high[b] >= runExt
+                        runExt := high[b]
+                        ageExt := b
+                    if ageExt >= minAge and runExt > prox and (runExt - prox) >= risk * minStructR
+                        tp := runExt
+                        break
+                else
+                    if low[b] <= runExt
+                        runExt := low[b]
+                        ageExt := b
+                    if ageExt >= minAge and runExt < prox and (prox - runExt) >= risk * minStructR
+                        tp := runExt
+                        break
     [dir, prox, dist, kind, tp]
 
 [thDir, thProx, thDist, thKind, thTp] = request.security(syminfo.tickerid, themeActive ? themeTf : timeframe.period, f_mm_theme_pack(), barmerge.gaps_off, barmerge.lookahead_off)
