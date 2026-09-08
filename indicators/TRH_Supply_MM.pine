@@ -528,74 +528,147 @@ f_mm_look_bars() =>
     int byClock = int(math.round(mmLookMinutes / math.max(1.0, mins)))
     math.max(6, math.min(80, byClock > 0 ? byClock : mmObLookback))
 
-// Continuous theme rails — always expose the live origin demand/supply pocket
-// (not only on the displacement bar). Picks the actionable rail near price.
-// Returns [dir, prox, dist, kind, tp] — geometry + TP all from theme TF
+// Shared theme setup pack (runs on theme TF via request.security).
+// Priority matches teaching samples:
+//   1) MSS → Fresh Supply/Demand (LQ / swing extreme as SL)  — your short example
+//   2) Fallback MM origin rail at swing extreme
+// Returns [dir, prox, dist, kind, tp]
 f_mm_theme_pack() =>
     int look = f_mm_look_bars()
     float a = ta.atr(14)
-    float sHi = ta.highest(high, look)
-    float sLo = ta.lowest(low, look)
-    float demP = na
-    float demD = na
-    float supP = na
-    float supD = na
-    float bestDem = 10e10
-    float bestSup = -10e10
-    int lim = math.min(look, bar_index - 1)
-    if lim >= 1
-        for k = 1 to lim
-            // Demand origin = deepest bearish candle near swing low
-            if close[k] < open[k] and low[k] <= bestDem
-                bestDem := low[k]
-                demP := high[k]
-                demD := low[k]
-            // Supply origin = highest bullish candle near swing high
-            if close[k] > open[k] and high[k] >= bestSup
-                bestSup := high[k]
-                supP := low[k]
-                supD := high[k]
-    float tol = a * mmOriginTolAtr
-    // Must sit on the extremes
-    if not na(demD) and demD > sLo + tol
-        demP := na
-        demD := na
-    if not na(supD) and supD < sHi - tol
-        supP := na
-        supD := na
-    // Anchor distal to true swing extreme
-    if not na(demD)
-        demD := math.min(demD, sLo)
-    if not na(supD)
-        supD := math.max(supD, sHi)
-    // Zone size gates (inline — Pine disallows nested UDFs here)
-    float demH = not na(demP) ? math.abs(demD - demP) : 0.0
-    float supH = not na(supP) ? math.abs(supD - supP) : 0.0
-    bool demOk = not na(demP) and demH >= minZonePts and demH <= a * maxZoneAtr and demH > syminfo.mintick and close > demD
-    bool supOk = not na(supP) and supH >= minZonePts and supH <= a * maxZoneAtr and supH > syminfo.mintick and close < supD
-    // Dead hunt: price already ran past ENTRY toward TP
-    if demOk and close - demP >= demH * expireDeepR
-        demOk := false
-    if supOk and supP - close >= supH * expireDeepR
-        supOk := false
+    float body = math.abs(close - open)
+    // --- pivots for MSS (no var arrays — security-safe) ---
+    float ph = ta.pivothigh(high, mssPivot, mssPivot)
+    float pl = ta.pivotlow(low, mssPivot, mssPivot)
+    float lastHi = ta.valuewhen(not na(ph), ph, 0)
+    float lastLo = ta.valuewhen(not na(pl), pl, 0)
+    float prevHi = ta.valuewhen(not na(ph), ph, 1)
+    float prevLo = ta.valuewhen(not na(pl), pl, 1)
+    int lastHiAge = ta.barssince(not na(ph))
+    int lastLoAge = ta.barssince(not na(pl))
+    // MSS short: most recent swing was a high, then close breaks last swing low
+    bool mssShort = not na(lastHi) and not na(lastLo) and not na(lastHiAge) and not na(lastLoAge) and lastHiAge < lastLoAge and close < lastLo and body >= a * mssBodyAtr and close < open
+    // MSS long: most recent swing was a low, then close breaks last swing high
+    bool mssLong = not na(lastHi) and not na(lastLo) and not na(lastHiAge) and not na(lastLoAge) and lastLoAge < lastHiAge and close > lastHi and body >= a * mssBodyAtr and close > open
+
     int dir = 0
     float prox = na
     float dist = na
     int kind = 0
-    if demOk or supOk
-        float demGap = demOk ? math.abs(close - demP) : 10e10
-        float supGap = supOk ? math.abs(close - supP) : 10e10
-        if demOk and (not supOk or demGap <= supGap)
-            dir := 1
-            prox := demP
-            dist := demD
-            kind := 2
-        else if supOk
+
+    // --- Setup 2/3: MSS → Fresh Zone (teaching short: LQ above / supply retest) ---
+    if mssShort and (useSetupMss or useSetupHtf)
+        // Highest bullish candle in lookback = supply origin (ENTRY = its low)
+        float bestExt = -10e10
+        float obP = na
+        float obD = na
+        int lim = math.min(mssObLookback, bar_index - 1)
+        if lim >= 1
+            for k = 1 to lim
+                if close[k] > open[k] and high[k] >= bestExt
+                    bestExt := high[k]
+                    obP := low[k]
+                    obD := high[k]
+        // SL above LQ / swing high (teaching: stop beyond the liquidity sweep)
+        float lqHi = ta.highest(high, math.max(mssObLookback, 8))
+        float distUse = obD
+        if not na(lastHi)
+            distUse := math.max(distUse, lastHi)
+        if not na(lqHi)
+            distUse := math.max(distUse, lqHi)
+        if not na(prevHi)
+            distUse := math.max(distUse, prevHi)
+        float h = not na(obP) ? math.abs(distUse - obP) : 0.0
+        bool ok = not na(obP) and h >= minZonePts and h <= a * maxZoneAtr and h > syminfo.mintick and obP > close
+        // Still hunting (not already 1.2R through ENTRY toward TP)
+        if ok and obP - close < h * expireDeepR
             dir := -1
-            prox := supP
-            dist := supD
-            kind := 0
-    // Structure TP computed HERE on theme TF (shared across 1m/5m/15m)
+            prox := obP
+            dist := distUse
+            kind := useSetupHtf ? 2 : 1
+
+    if dir == 0 and mssLong and (useSetupMss or useSetupHtf)
+        float bestExtL = 10e10
+        float obP = na
+        float obD = na
+        int limL = math.min(mssObLookback, bar_index - 1)
+        if limL >= 1
+            for k = 1 to limL
+                if close[k] < open[k] and low[k] <= bestExtL
+                    bestExtL := low[k]
+                    obP := high[k]
+                    obD := low[k]
+        float lqLo = ta.lowest(low, math.max(mssObLookback, 8))
+        float distUse = obD
+        if not na(lastLo)
+            distUse := math.min(distUse, lastLo)
+        if not na(lqLo)
+            distUse := math.min(distUse, lqLo)
+        if not na(prevLo)
+            distUse := math.min(distUse, prevLo)
+        float h = not na(obP) ? math.abs(distUse - obP) : 0.0
+        bool ok = not na(obP) and h >= minZonePts and h <= a * maxZoneAtr and h > syminfo.mintick and obP < close
+        if ok and close - obP < h * expireDeepR
+            dir := 1
+            prox := obP
+            dist := distUse
+            kind := useSetupHtf ? 2 : 1
+
+    // --- Fallback: MM origin rail at swing extreme ---
+    if dir == 0 and useSetupMM
+        float sHi = ta.highest(high, look)
+        float sLo = ta.lowest(low, look)
+        float demP = na
+        float demD = na
+        float supP = na
+        float supD = na
+        float bestDem = 10e10
+        float bestSup = -10e10
+        int limM = math.min(look, bar_index - 1)
+        if limM >= 1
+            for k = 1 to limM
+                if close[k] < open[k] and low[k] <= bestDem
+                    bestDem := low[k]
+                    demP := high[k]
+                    demD := low[k]
+                if close[k] > open[k] and high[k] >= bestSup
+                    bestSup := high[k]
+                    supP := low[k]
+                    supD := high[k]
+        float tol = a * mmOriginTolAtr
+        if not na(demD) and demD > sLo + tol
+            demP := na
+            demD := na
+        if not na(supD) and supD < sHi - tol
+            supP := na
+            supD := na
+        if not na(demD)
+            demD := math.min(demD, sLo)
+        if not na(supD)
+            supD := math.max(supD, sHi)
+        float demH = not na(demP) ? math.abs(demD - demP) : 0.0
+        float supH = not na(supP) ? math.abs(supD - supP) : 0.0
+        bool demOk = not na(demP) and demH >= minZonePts and demH <= a * maxZoneAtr and demH > syminfo.mintick and close > demD
+        bool supOk = not na(supP) and supH >= minZonePts and supH <= a * maxZoneAtr and supH > syminfo.mintick and close < supD
+        if demOk and close - demP >= demH * expireDeepR
+            demOk := false
+        if supOk and supP - close >= supH * expireDeepR
+            supOk := false
+        if demOk or supOk
+            float demGap = demOk ? math.abs(close - demP) : 10e10
+            float supGap = supOk ? math.abs(close - supP) : 10e10
+            if demOk and (not supOk or demGap <= supGap)
+                dir := 1
+                prox := demP
+                dist := demD
+                kind := 0
+            else if supOk
+                dir := -1
+                prox := supP
+                dist := supD
+                kind := 0
+
+    // Structure TP on theme TF (shared across aligned charts)
     float tp = float(na)
     if dir != 0
         float risk = math.abs(prox - dist)
@@ -807,7 +880,7 @@ if themeActive and thDir != 0 and not na(thProx) and not na(thDist)
                     f_freeze_zone(idx)
                 if showThemeTag and showLabels and bar_index != themeTagBar
                     themeTagBar := bar_index
-                    label.new(bar_index, thProx, "THEME " + themeTf + " LOCK", style=label.style_label_left, color=color.new(brassCol, 20), textcolor=color.white, size=size.tiny)
+                    label.new(bar_index, thProx, "THEME " + themeTf + " · " + f_kind_name(useKind), style=label.style_label_left, color=color.new(brassCol, 20), textcolor=color.white, size=size.tiny)
 
 // Local S1 only when Theme Mode = Chart (independent TF)
 if useSetupMM and bearDisp and allowShort and useOB and not themeActive and f_can_birth()
