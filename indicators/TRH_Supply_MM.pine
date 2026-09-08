@@ -1,14 +1,16 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
-// TRH | Supply MM + MSS Fresh + HTF/LQ
+// TRH | Supply MM + MSS + HTF/LQ + BB/FVG + Fractal Sweep
 //
 // Setup 1 (MM):     Displacement → OB/FVG → E/S · R ladder 1/2/3/5
 // Setup 2 (MSS):    Break of structure → Fresh Zone → retest · teal TP
 // Setup 3 (HTF+LQ): HTF zone → MSS → New Fresh Zone → LQ build → sweep into zone · teal TP
+// Setup 4 (BB+FVG): Sweep → MSS → Breaker Block + FVG confluence → retest · teal TP
+// Setup 5 (fs):     Fractal Sweep of fs level into pink zone → blue expansion
 // All stay enabled independently.
 
 //@version=6
-indicator("TRH | Supply MM + MSS + HTF/LQ", shorttitle="TRH-SMM",
-     overlay=true, max_boxes_count=150, max_lines_count=280, max_labels_count=180,
+indicator("TRH | Supply MM Pack", shorttitle="TRH-SMM",
+     overlay=true, max_boxes_count=200, max_lines_count=350, max_labels_count=220,
      max_bars_back=5000)
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -24,7 +26,11 @@ useSetupMM  = input.bool(true, "Setup 1 — Supply MM (disp → OB/FVG · R ladd
 useSetupMss = input.bool(true, "Setup 2 — MSS Fresh Zone", group=grpSetups,
      tooltip="MSS → fresh zone at origin → retest E/S · teal TP.")
 useSetupHtf = input.bool(true, "Setup 3 — HTF → MSS → Fresh → LQ sweep", group=grpSetups,
-     tooltip="Your new image: HTF zone context → MSS → New Fresh Zone → liquidity (LQ) builds → sweep LQ into fresh zone → short/long.")
+     tooltip="HTF zone context → MSS → New Fresh Zone → liquidity (LQ) builds → sweep LQ into fresh zone → short/long.")
+useSetupBb  = input.bool(true, "Setup 4 — Sweep → MSS → BB + FVG", group=grpSetups,
+     tooltip="Liquidity sweep → MSS → Breaker Block + Fair Value Gap confluence → retest.")
+useSetupFs  = input.bool(true, "Setup 5 — Fractal Sweep (fs)", group=grpSetups,
+     tooltip="fs level at swing → wick sweep into pink zone → blue expansion TP.")
 
 grpZone = "Setup 1 — Zone Source"
 zoneMode = input.string("Order Block", "Zone Type",
@@ -54,6 +60,25 @@ showMssTag   = input.bool(true, "Show MSS Tag", group=grpMss)
 showHtfZone  = input.bool(true, "Show HTF Zone (Setup 3)", group=grpMss)
 showLqLine   = input.bool(true, "Show LQ Line (Setup 3)", group=grpMss)
 showTealTp   = input.bool(true, "Show Teal Structure TP Box", group=grpMss)
+
+grpBb = "Setup 4 — BB + FVG"
+sweepLookback = input.int(18, "Sweep Memory (bars)", minval=5, maxval=60, group=grpBb,
+     tooltip="How long a liquidity sweep stays valid before MSS + BB/FVG.")
+bbFvgPadAtr   = input.float(0.35, "BB↔FVG Near Tol (ATR×)", step=0.05, group=grpBb,
+     tooltip="If BB and FVG do not overlap, still allow when within this distance.")
+showBbTag     = input.bool(true, "Show BB + FVG Label", group=grpBb)
+
+grpFs = "Setup 5 — Fractal Sweep"
+fsPivot       = input.int(2, "fs Pivot Length", minval=1, maxval=6, group=grpFs)
+fsMaxDepthAtr = input.float(0.85, "Max Sweep Depth (ATR×)", step=0.05, group=grpFs,
+     tooltip="Reject deep stop-runs; image sweeps are shallow wicks below fs.")
+fsMinDepthPts = input.float(0.10, "Min Sweep Depth (price)", step=0.05, group=grpFs)
+fsCooldown    = input.int(8, "fs Cooldown (bars)", minval=1, group=grpFs)
+showFsLine    = input.bool(true, "Show fs Level Lines", group=grpFs)
+showErlTag    = input.bool(true, "Show Major ERL Tag", group=grpFs)
+fsPinkCol     = input.color(color.new(#EF9A9A, 72), "Sweep Zone (pink)", group=grpFs)
+fsBlueCol     = input.color(color.new(#81D4FA, 78), "Expansion TP (blue)", group=grpFs)
+fsLineCol     = input.color(#90A4AE, "fs Line", group=grpFs)
 
 grpTrade = "Arm / Fill"
 requireLeave = input.bool(true, "Require Leave Then Return", group=grpTrade,
@@ -95,7 +120,7 @@ useFVG = zoneMode == "FVG" or zoneMode == "OB + FVG"
 var int lastBirth = na
 
 // Per-zone drawings (newest last). Max 10 live zones.
-MAX_Z = 10
+MAX_Z = 14
 var box[]   boxes = array.new_box()
 var line[]  eLines = array.new_line()
 var line[]  sLines = array.new_line()
@@ -111,7 +136,7 @@ var label[] l3 = array.new_label()
 var label[] l5 = array.new_label()
 
 var int[]   zDir = array.new_int()
-var int[]   zKind = array.new_int()   // 0=MM · 1=MSS · 2=HTF+LQ
+var int[]   zKind = array.new_int()   // 0=MM · 1=MSS · 2=HTF+LQ · 3=BB+FVG · 4=fs
 var int[]   zBirth = array.new_int()
 var float[] zProx = array.new_float()
 var float[] zDist = array.new_float()
@@ -203,20 +228,22 @@ f_struct_tp(int dir, float entry, float sl) =>
         tp := chartBsl
     tp
 
-// kind: 0=MM · 1=MSS · 2=HTF+LQ  | htfTop/htfBot used for Setup 3 context box
+// kind: 0=MM · 1=MSS · 2=HTF+LQ · 3=BB+FVG · 4=fs
+// htfTop/htfBot: Setup 3 HTF box; for kind 4 unused
 f_push_zone(int dir, float prox, float dist, int kind, float htfTop, float htfBot) =>
     while array.size(zDir) >= MAX_Z
         f_shift_oldest()
     int bi = bar_index
     float R = math.abs(dist - prox)
-    color zc = dir == 1 ? demandCol : supplyCol
+    color zc = kind == 4 ? fsPinkCol : dir == 1 ? demandCol : supplyCol
     array.push(zDir, dir)
     array.push(zKind, kind)
     array.push(zBirth, bi)
     array.push(zProx, prox)
     array.push(zDist, dist)
-    array.push(zLeft, requireLeave ? 0 : 1)
-    array.push(zArmed, 0)
+    // Setup 5 arms on the sweep itself (no leave→return)
+    array.push(zLeft, kind == 4 ? 1 : (requireLeave ? 0 : 1))
+    array.push(zArmed, kind == 4 ? 1 : 0)
     array.push(zDead, 0)
     array.push(zLq, float(na))
     array.push(zLqN, 0)
@@ -243,12 +270,13 @@ f_push_zone(int dir, float prox, float dist, int kind, float htfTop, float htfBo
     array.push(l2, lb2)
     array.push(l3, lb3)
     array.push(l5, lb5)
-    // Teal TP for Setup 2 and 3
+    // Structure / expansion TP for Setups 2–5
     box tb = na
-    if (kind == 1 or kind == 2) and showTealTp
+    if (kind == 1 or kind == 2 or kind == 3 or kind == 4) and showTealTp
         float tp = f_struct_tp(dir, prox, dist)
+        color tc = kind == 4 ? fsBlueCol : tealCol
         tb := box.new(bi, math.max(prox, tp), bi + extendBars, math.min(prox, tp),
-             border_color=color.new(tealCol, 40), bgcolor=tealCol, border_width=1)
+             border_color=color.new(tc, 40), bgcolor=tc, border_width=1)
     array.push(tealBoxes, tb)
     // HTF context zone for Setup 3
     box hb = na
@@ -400,15 +428,248 @@ if mssSignalLong and f_can_birth() and not mssBorn
             label.new(bar_index, p, "New Fresh Zone", style=label.style_label_left, color=color.new(demandCol, 100), textcolor=#80CBC4, size=size.tiny)
 
 // ═══════════════════════════════════════════════════════════════════════════
-// UPDATE ZONES
+// SETUP 4 — Sweep → MSS → BB + FVG confluence
 // ═══════════════════════════════════════════════════════════════════════════
 
+var int bullSweepUntil = -1
+var int bearSweepUntil = -1
+var float lastBullSweepLo = na
+var float lastBearSweepHi = na
+
+// Wick sweep of prior swing, then reclaim
+if useSetupBb and not na(lastLo) and low < lastLo and close > lastLo
+    bullSweepUntil := bar_index + sweepLookback
+    lastBullSweepLo := low
+if useSetupBb and not na(lastHi) and high > lastHi and close < lastHi
+    bearSweepUntil := bar_index + sweepLookback
+    lastBearSweepHi := high
+
+f_find_fvg(int dir, int look) =>
+    float gTop = na
+    float gBot = na
+    int ok = 0
+    for k = 0 to look
+        if ok == 0
+            if dir == 1 and high[k + 2] < low[k]
+                float gap = low[k] - high[k + 2]
+                if gap >= math.max(atr[k] * minFvgAtr, minFvgPts)
+                    gTop := low[k]
+                    gBot := high[k + 2]
+                    ok := 1
+            if dir == -1 and low[k + 2] > high[k]
+                float gapB = low[k + 2] - high[k]
+                if gapB >= math.max(atr[k] * minFvgAtr, minFvgPts)
+                    gTop := low[k + 2]
+                    gBot := high[k]
+                    ok := 1
+    [gTop, gBot, ok]
+
+f_bb_fvg_zone(int dir, float bbProx, float bbDist, float gTop, float gBot) =>
+    float zTop = math.max(bbProx, bbDist)
+    float zBot = math.min(bbProx, bbDist)
+    float oTop = math.min(zTop, gTop)
+    float oBot = math.max(zBot, gBot)
+    float prox = na
+    float dist = na
+    int ok = 0
+    if oTop > oBot
+        // True overlap
+        if dir == 1
+            prox := oTop
+            dist := oBot
+        else
+            prox := oBot
+            dist := oTop
+        ok := 1
+    else
+        // Near: merge when gaps are small
+        float gap = oBot - oTop  // positive when separated
+        if gap <= atr * bbFvgPadAtr
+            float mTop = math.max(zTop, gTop)
+            float mBot = math.min(zBot, gBot)
+            if dir == 1
+                prox := mTop
+                dist := mBot
+            else
+                prox := mBot
+                dist := mTop
+            ok := 1
+    [prox, dist, ok]
+
+bbBorn = false
+bbMssLong = useSetupBb and allowLong and bar_index <= bullSweepUntil and not na(lastHi) and close > lastHi and body >= atr * mssBodyAtr and close > open
+bbMssShort = useSetupBb and allowShort and bar_index <= bearSweepUntil and not na(lastLo) and close < lastLo and body >= atr * mssBodyAtr and close < open
+
+if bbMssLong and f_can_birth()
+    [bp, bd, bok] = f_find_ob(1)
+    [gt, gb, gok] = f_find_fvg(1, 10)
+    if bok == 1 and gok == 1
+        [zp, zd, zok] = f_bb_fvg_zone(1, bp, bd, gt, gb)
+        if zok == 1 and f_zone_ok(zp, zd) and zp < close
+            // Distal prefers sweep low when available
+            float distUse = not na(lastBullSweepLo) ? math.min(zd, lastBullSweepLo) : zd
+            if f_zone_ok(zp, distUse)
+                lastBirth := f_push_zone(1, zp, distUse, 3, na, na)
+                bbBorn := true
+                if showMssTag
+                    label.new(bar_index, high, "MSS", style=label.style_label_down, color=color.new(mssCol, 45), textcolor=color.white, size=size.tiny)
+                if showBbTag
+                    label.new(bar_index, zp, "BB + FVG", style=label.style_label_left, color=color.new(demandCol, 100), textcolor=#81D4FA, size=size.tiny)
+
+if bbMssShort and f_can_birth() and not bbBorn
+    [bp, bd, bok] = f_find_ob(-1)
+    [gt, gb, gok] = f_find_fvg(-1, 10)
+    if bok == 1 and gok == 1
+        [zp, zd, zok] = f_bb_fvg_zone(-1, bp, bd, gt, gb)
+        if zok == 1 and f_zone_ok(zp, zd) and zp > close
+            float distUse = not na(lastBearSweepHi) ? math.max(zd, lastBearSweepHi) : zd
+            if f_zone_ok(zp, distUse)
+                lastBirth := f_push_zone(-1, zp, distUse, 3, na, na)
+                bbBorn := true
+                if showMssTag
+                    label.new(bar_index, low, "MSS", style=label.style_label_up, color=color.new(mssCol, 45), textcolor=color.white, size=size.tiny)
+                if showBbTag
+                    label.new(bar_index, zp, "BB + FVG", style=label.style_label_left, color=color.new(supplyCol, 100), textcolor=#EF9A9A, size=size.tiny)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SETUP 5 — Fractal Sweep (fs) → pink zone + blue expansion
+// ═══════════════════════════════════════════════════════════════════════════
+
+fsPh = ta.pivothigh(high, fsPivot, fsPivot)
+fsPl = ta.pivotlow(low, fsPivot, fsPivot)
+var float[] fsHiPx = array.new_float()
+var int[]   fsHiBr = array.new_int()
+var int[]   fsHiUsed = array.new_int()
+var float[] fsLoPx = array.new_float()
+var int[]   fsLoBr = array.new_int()
+var int[]   fsLoUsed = array.new_int()
+var line[]  fsHiLines = array.new_line()
+var label[] fsHiLabs = array.new_label()
+var line[]  fsLoLines = array.new_line()
+var label[] fsLoLabs = array.new_label()
+var int lastFsBirth = na
+var float majorErl = na
+var int majorErlBar = na
+
+f_can_fs() =>
+    na(lastFsBirth) or (bar_index - lastFsBirth) >= fsCooldown
+
+if useSetupFs and not na(fsPh)
+    array.push(fsHiPx, fsPh)
+    array.push(fsHiBr, bar_index - fsPivot)
+    array.push(fsHiUsed, 0)
+    line lnH = showFsLine ? line.new(bar_index - fsPivot, fsPh, bar_index, fsPh, color=fsLineCol, style=line.style_solid, width=1) : line(na)
+    label lbH = showFsLine and showLabels ? label.new(bar_index - fsPivot, fsPh, "fs", style=label.style_label_down, color=color.new(fsLineCol, 100), textcolor=fsLineCol, size=size.tiny) : label(na)
+    array.push(fsHiLines, lnH)
+    array.push(fsHiLabs, lbH)
+    if array.size(fsHiPx) > 12
+        line.delete(array.get(fsHiLines, 0))
+        label.delete(array.get(fsHiLabs, 0))
+        array.shift(fsHiPx)
+        array.shift(fsHiBr)
+        array.shift(fsHiUsed)
+        array.shift(fsHiLines)
+        array.shift(fsHiLabs)
+
+if useSetupFs and not na(fsPl)
+    array.push(fsLoPx, fsPl)
+    array.push(fsLoBr, bar_index - fsPivot)
+    array.push(fsLoUsed, 0)
+    line lnL = showFsLine ? line.new(bar_index - fsPivot, fsPl, bar_index, fsPl, color=fsLineCol, style=line.style_solid, width=1) : line(na)
+    label lbL = showFsLine and showLabels ? label.new(bar_index - fsPivot, fsPl, "fs", style=label.style_label_up, color=color.new(fsLineCol, 100), textcolor=fsLineCol, size=size.tiny) : label(na)
+    array.push(fsLoLines, lnL)
+    array.push(fsLoLabs, lbL)
+    // Major ERL = deepest recent swing low
+    if na(majorErl) or fsPl < majorErl
+        majorErl := fsPl
+        majorErlBar := bar_index - fsPivot
+        if showErlTag
+            label.new(bar_index - fsPivot, fsPl, "Major ERL", style=label.style_label_up, color=color.new(fsPinkCol, 40), textcolor=color.white, size=size.tiny)
+    if array.size(fsLoPx) > 12
+        line.delete(array.get(fsLoLines, 0))
+        label.delete(array.get(fsLoLabs, 0))
+        array.shift(fsLoPx)
+        array.shift(fsLoBr)
+        array.shift(fsLoUsed)
+        array.shift(fsLoLines)
+        array.shift(fsLoLabs)
+
+// Extend active fs lines
+if useSetupFs
+    int nFsL = array.size(fsLoPx)
+    if nFsL > 0
+        for i = 0 to nFsL - 1
+            if array.get(fsLoUsed, i) == 0 and not na(array.get(fsLoLines, i))
+                line.set_x2(array.get(fsLoLines, i), bar_index)
+    int nFsH = array.size(fsHiPx)
+    if nFsH > 0
+        for i = 0 to nFsH - 1
+            if array.get(fsHiUsed, i) == 0 and not na(array.get(fsHiLines, i))
+                line.set_x2(array.get(fsHiLines, i), bar_index)
+
+fsBorn = false
+fsArmedNow = false
+
+// Declare arm state before Setup 5 may set it on the sweep bar
 armedNow = false
 armedDir = 0
 armedProx = float(na)
 armedDist = float(na)
 armedR = float(na)
 armedKind = 0
+
+// Long: wick below unused fs low, shallow, reclaim / close back above
+if useSetupFs and allowLong and f_can_fs()
+    int nL = array.size(fsLoPx)
+    if nL > 0
+        for i = 0 to nL - 1
+            if not fsBorn and array.get(fsLoUsed, i) == 0
+                float fsLv = array.get(fsLoPx, i)
+                int fsB = array.get(fsLoBr, i)
+                if bar_index > fsB + fsPivot and low < fsLv and close >= fsLv
+                    float depth = fsLv - low
+                    if depth >= fsMinDepthPts and depth <= atr * fsMaxDepthAtr
+                        float prox = fsLv
+                        float distUse = low
+                        lastFsBirth := f_push_zone(1, prox, distUse, 4, na, na)
+                        array.set(fsLoUsed, i, 1)
+                        fsBorn := true
+                        fsArmedNow := true
+                        armedNow := true
+                        armedDir := 1
+                        armedProx := prox
+                        armedDist := distUse
+                        armedR := math.abs(distUse - prox)
+                        armedKind := 4
+
+// Short: wick above unused fs high
+if useSetupFs and allowShort and f_can_fs() and not fsBorn
+    int nH = array.size(fsHiPx)
+    if nH > 0
+        for i = 0 to nH - 1
+            if not fsBorn and array.get(fsHiUsed, i) == 0
+                float fsLv = array.get(fsHiPx, i)
+                int fsB = array.get(fsHiBr, i)
+                if bar_index > fsB + fsPivot and high > fsLv and close <= fsLv
+                    float depth = high - fsLv
+                    if depth >= fsMinDepthPts and depth <= atr * fsMaxDepthAtr
+                        float prox = fsLv
+                        float dist = high
+                        lastFsBirth := f_push_zone(-1, prox, dist, 4, na, na)
+                        array.set(fsHiUsed, i, 1)
+                        fsBorn := true
+                        fsArmedNow := true
+                        armedNow := true
+                        armedDir := -1
+                        armedProx := prox
+                        armedDist := dist
+                        armedR := math.abs(dist - prox)
+                        armedKind := 4
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UPDATE ZONES
+// ═══════════════════════════════════════════════════════════════════════════
+
 lqReady = false
 lqBuilding = false
 
@@ -430,8 +691,9 @@ if nZ > 0
                 if left
                     array.set(zLeft, i, 1)
 
-            // After leave: Setup 3 builds LQ; Setup 1/2 arm on return to proximal
-            if array.get(zLeft, i) == 1 and wasArmed == 0
+            // After leave: Setup 3 builds LQ; Setup 1/2/4 arm on return to proximal
+            // Setup 5 already armed at birth
+            if array.get(zLeft, i) == 1 and wasArmed == 0 and kind != 4
                 if kind == 2
                     float lq = array.get(zLq, i)
                     int touches = array.get(zLqN, i)
@@ -536,12 +798,13 @@ if nZ > 0
                 if not na(array.get(t5, i))
                     line.set_x2(array.get(t5, i), bar_index + extendBars)
 
-                // Extend / refresh teal structure TP for Setup 2 & 3
-                if (kind == 1 or kind == 2) and showTealTp
+                // Extend / refresh structure TP for Setups 2–5
+                if (kind == 1 or kind == 2 or kind == 3 or kind == 4) and showTealTp
                     float tp = f_struct_tp(dir, prox, dist)
+                    color tc = kind == 4 ? fsBlueCol : tealCol
                     box.delete(array.get(tealBoxes, i))
                     array.set(tealBoxes, i, box.new(array.get(zBirth, i), math.max(prox, tp), bar_index + extendBars, math.min(prox, tp),
-                         border_color=color.new(tealCol, 40), bgcolor=tealCol, border_width=1))
+                         border_color=color.new(tc, 40), bgcolor=tc, border_width=1))
 
                 // Extend HTF context + LQ for Setup 3
                 if kind == 2
@@ -567,27 +830,36 @@ alertcondition(htfBorn and mssSignalShort, "Setup3 HTF+LQ Supply", "TRH-SMM Setu
 alertcondition(htfBorn and mssSignalLong, "Setup3 HTF+LQ Demand", "TRH-SMM Setup3 HTF → Fresh → LQ demand")
 alertcondition(armedNow and armedKind == 2 and armedDir == -1, "Setup3 Short Armed", "TRH-SMM Setup3 SHORT armed after LQ")
 alertcondition(armedNow and armedKind == 2 and armedDir == 1, "Setup3 Long Armed", "TRH-SMM Setup3 LONG armed after LQ")
+alertcondition(bbBorn and bbMssLong, "Setup4 BB+FVG Demand", "TRH-SMM Setup4 Sweep→MSS→BB+FVG demand")
+alertcondition(bbBorn and bbMssShort, "Setup4 BB+FVG Supply", "TRH-SMM Setup4 Sweep→MSS→BB+FVG supply")
+alertcondition(armedNow and armedKind == 3 and armedDir == 1, "Setup4 Long Armed", "TRH-SMM Setup4 LONG armed in BB+FVG")
+alertcondition(armedNow and armedKind == 3 and armedDir == -1, "Setup4 Short Armed", "TRH-SMM Setup4 SHORT armed in BB+FVG")
+alertcondition(fsBorn and fsArmedNow and armedDir == 1, "Setup5 fs Long", "TRH-SMM Setup5 fractal sweep LONG")
+alertcondition(fsBorn and fsArmedNow and armedDir == -1, "Setup5 fs Short", "TRH-SMM Setup5 fractal sweep SHORT")
 
 if showPanel
-    var table pan = table.new(position.top_right, 1, 7, bgcolor=color.new(#111111, 12), border_width=1)
+    var table pan = table.new(position.top_right, 1, 8, bgcolor=color.new(#111111, 12), border_width=1)
     if barstate.islast
-        table.cell(pan, 0, 0, "TRH MM + MSS + HTF/LQ", text_color=color.white, text_size=size.small)
-        table.cell(pan, 0, 1, "1 MM · 2 MSS Fresh · 3 HTF+LQ", text_color=#B0BEC5, text_size=size.tiny)
-        table.cell(pan, 0, 2, "E proximal · S distal · teal = structure TP", text_color=#B0BEC5, text_size=size.tiny)
+        table.cell(pan, 0, 0, "TRH Supply MM Pack", text_color=color.white, text_size=size.small)
+        table.cell(pan, 0, 1, "1 MM · 2 MSS · 3 HTF/LQ · 4 BB+FVG · 5 fs", text_color=#B0BEC5, text_size=size.tiny)
+        table.cell(pan, 0, 2, "E proximal · S distal · teal/blue = structure TP", text_color=#B0BEC5, text_size=size.tiny)
         string on1 = useSetupMM ? "ON" : "off"
         string on2 = useSetupMss ? "ON" : "off"
         string on3 = useSetupHtf ? "ON" : "off"
-        table.cell(pan, 0, 3, "S1 " + on1 + " · S2 " + on2 + " · S3 " + on3 + " · z " + str.tostring(array.size(zDir)), text_color=#78909C, text_size=size.tiny)
+        string on4 = useSetupBb ? "ON" : "off"
+        string on5 = useSetupFs ? "ON" : "off"
+        table.cell(pan, 0, 3, "S1 " + on1 + " S2 " + on2 + " S3 " + on3 + " S4 " + on4 + " S5 " + on5, text_color=#78909C, text_size=size.tiny)
+        table.cell(pan, 0, 4, "zones " + str.tostring(array.size(zDir)), text_color=#78909C, text_size=size.tiny)
         if not na(armedProx)
             string side = armedDir == 1 ? "LONG" : "SHORT"
-            string ktag = armedKind == 2 ? "S3" : armedKind == 1 ? "S2" : "S1"
-            table.cell(pan, 0, 4, "ARMED " + ktag + " " + side + " · R=" + str.tostring(armedR, format.mintick),
+            string ktag = armedKind == 4 ? "S5" : armedKind == 3 ? "S4" : armedKind == 2 ? "S3" : armedKind == 1 ? "S2" : "S1"
+            table.cell(pan, 0, 5, "ARMED " + ktag + " " + side + " · R=" + str.tostring(armedR, format.mintick),
                  text_color=armedDir == 1 ? #26A69A : #EF5350, text_size=size.small)
         else
-            table.cell(pan, 0, 4, "Wait leave → return" + (useSetupHtf ? " (+ LQ)" : ""), text_color=#78909C, text_size=size.tiny)
-        string row5 = htfBorn ? "Setup 3 Fresh Zone" : mssBorn ? "Setup 2 Fresh Zone" : "—"
-        table.cell(pan, 0, 5, row5, text_color=htfBorn ? #EF9A9A : mssCol, text_size=size.tiny)
-        table.cell(pan, 0, 6, lqReady ? "LQ ready (≥ equal touches)" : lqBuilding ? "LQ building…" : "LQ waiting", text_color=lqCol, text_size=size.tiny)
+            table.cell(pan, 0, 5, "Wait setup arm", text_color=#78909C, text_size=size.tiny)
+        string row6 = bbBorn ? "Setup 4 BB+FVG" : htfBorn ? "Setup 3 Fresh" : mssBorn ? "Setup 2 Fresh" : fsBorn ? "Setup 5 fs sweep" : "—"
+        table.cell(pan, 0, 6, row6, text_color=bbBorn ? #81D4FA : htfBorn ? #EF9A9A : mssCol, text_size=size.tiny)
+        table.cell(pan, 0, 7, lqReady ? "LQ ready" : lqBuilding ? "LQ building…" : useSetupFs ? "fs levels live" : "—", text_color=lqCol, text_size=size.tiny)
 
 plot(armedNow ? armedProx : na, "Armed E", color=entryCol, display=display.data_window)
 plot(armedNow ? armedDist : na, "Armed S", color=slCol, display=display.data_window)

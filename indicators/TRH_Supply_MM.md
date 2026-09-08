@@ -1,19 +1,21 @@
-# TRH Supply MM + MSS + HTF/LQ
+# TRH Supply MM Pack
 
-Three setups on one indicator (all kept; toggles independent):
+Five setups on one indicator (all kept; toggles independent):
 
 | Setup | Trigger | Visual |
 |-------|---------|--------|
 | **1 — Supply MM** | Displacement → OB / FVG | Zone + E/S + R ladder 1/2/3/5 |
-| **2 — MSS Fresh** | Break of structure → fresh zone | Zone + E/S + **teal TP to chart structure** |
-| **3 — HTF + LQ** | HTF zone → MSS → New Fresh Zone → LQ build → sweep into zone | HTF box + Fresh Zone + **LQ** line + E/S + teal TP |
+| **2 — MSS Fresh** | Break of structure → fresh zone | Zone + E/S + teal structure TP |
+| **3 — HTF + LQ** | HTF zone → MSS → New Fresh Zone → LQ build → sweep | HTF box + Fresh Zone + LQ + E/S + teal TP |
+| **4 — BB + FVG** | Liquidity sweep → MSS → Breaker Block + FVG confluence | `BB + FVG` zone + E/S + teal TP |
+| **5 — Fractal Sweep (fs)** | `fs` swing level → shallow wick sweep | Pink sweep zone + blue expansion TP · Major ERL tag |
 
-Shared rules: **proximal E · distal S**. Arm after leave → return (Setup 3 prefers LQ sweep into the fresh zone).
+Shared rules: **proximal E · distal S**.
 
-When Setup 3 is ON, MSS births use the richer HTF+LQ path (supersedes Setup 2 on the same signal). Turn Setup 3 off to use plain Setup 2 retests.
+- Setups 1–4 arm after leave → return (Setup 3 prefers LQ sweep).
+- Setup 5 arms **on the sweep** (pink box = risk, blue = expansion).
+- When Setup 3 is ON, MSS births use the HTF+LQ path (supersedes plain Setup 2 on the same signal).
 
 ## Raw
 
 https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-supply-mm-992e/indicators/TRH_Supply_MM.pine
-
-Toggles: `Setup 1 — Supply MM`, `Setup 2 — MSS Fresh Zone`, `Setup 3 — HTF → MSS → Fresh → LQ sweep`.
