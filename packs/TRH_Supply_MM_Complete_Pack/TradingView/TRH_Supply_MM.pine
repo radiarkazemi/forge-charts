@@ -1173,11 +1173,6 @@ if nZ > 0
                     array.set(zLeft, i, 1)
                     // Snapshot TP at leave so reward does not drift while HUNT runs
                     array.set(zTp, i, f_struct_tp(dir, prox, dist))
-            // Early market entry while HUNT: price already past ENTRY toward TP → lock SL/TP now
-            if array.get(zLeft, i) == 1 and array.get(zFrozen, i) == 0
-                bool pastEntry = dir == 1 ? close > prox : close < prox
-                if pastEntry
-                    f_freeze_zone(i)
 
             // After leave: Setup 3 builds LQ; Setup 1/2/4 arm on return to proximal
             // Setup 5 already armed at birth (if score clean enough)
@@ -1310,8 +1305,8 @@ if nZ > 0
             if array.get(zDead, i) == 0 and not f_protect(i) and (bar_index - array.get(zBirth, i)) >= maxZoneAge
                 array.set(zDead, i, 1)
 
-            // Expire dead HUNT — price already ran toward TP past ENTRY without fill
-            if array.get(zDead, i) == 0 and not f_protect(i)
+            // Expire dead HUNT only while still scouting (never after leave — price may already be in trade)
+            if array.get(zDead, i) == 0 and array.get(zLeft, i) == 0 and not f_protect(i)
                 float riskZ = math.abs(dist - prox)
                 float past = dir == -1 ? (prox - close) : (close - prox)
                 if riskZ > 0 and past >= riskZ * expireDeepR
