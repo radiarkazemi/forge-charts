@@ -46,8 +46,11 @@ grpMss = "Setup 2/3 — MSS / HTF / LQ"
 mssPivot     = input.int(3, "MSS Pivot Length", minval=2, maxval=8, group=grpMss)
 mssBodyAtr   = input.float(0.35, "Min MSS Body (ATR×)", step=0.05, group=grpMss)
 structBars   = input.int(120, "Structure TP Lookback (bars)", minval=30, maxval=400, group=grpMss,
-     tooltip="Teal reward box targets major swing low (shorts) / high (longs) on THIS chart.")
-minStructR   = input.float(1.5, "Min Structure Distance (R)", minval=1.0, step=0.1, group=grpMss)
+     tooltip="Scan THIS chart for the NEAREST swing that clears Min Structure Distance (not the farthest extreme).")
+minStructR   = input.float(1.5, "Min Structure Distance (R)", minval=1.0, step=0.1, group=grpMss,
+     tooltip="TP = first/nearest structure ≥ this many R from ENTRY. Stops giant 5R runways to far HTF highs.")
+mssObLookback = input.int(14, "Fresh Zone OB Lookback", minval=4, maxval=40, group=grpMss,
+     tooltip="Bars to search for the ORIGIN opposing candle (deepest demand / highest supply) after MSS — not a mid-impulse pullback.")
 lqTolAtr     = input.float(0.12, "LQ Equal Hi/Lo Tol (ATR×)", step=0.01, group=grpMss)
 minLqTouches = input.int(2, "Min Equal Touches For LQ", minval=2, maxval=6, group=grpMss)
 lqFallbackBars = input.int(20, "Arm Without LQ After N Bars", minval=5, group=grpMss,
@@ -144,8 +147,6 @@ riskFill  = input.color(color.new(#E85D4C, 78), "Risk Band Fill", group=grpDisp)
 atr = ta.atr(14)
 body = math.abs(close - open)
 impulseRange = high - low
-chartSsl = ta.lowest(low[1], structBars)
-chartBsl = ta.highest(high[1], structBars)
 rngHi30 = ta.highest(high, 30)
 rngLo30 = ta.lowest(low, 30)
 
@@ -267,13 +268,24 @@ f_mk_tp(int bi, float px, int dir, float R, float mult, bool on) =>
                  style=label.style_label_left, color=color.new(tpCol, 100), textcolor=tpCol, size=size.tiny)
     [ln, lb]
 
+// Nearest structure TP (not farthest chart extreme — that stretched TP to 5R+ HTF highs)
 f_struct_tp(int dir, float entry, float sl) =>
     float risk = math.abs(entry - sl)
     float tp = dir == 1 ? entry + risk * 2.5 : entry - risk * 2.5
-    if dir == -1 and not na(chartSsl) and chartSsl < entry and (entry - chartSsl) >= risk * minStructR
-        tp := chartSsl
-    if dir == 1 and not na(chartBsl) and chartBsl > entry and (chartBsl - entry) >= risk * minStructR
-        tp := chartBsl
+    float runExt = dir == 1 ? high[1] : low[1]
+    int lim = math.min(structBars, bar_index - 1)
+    if lim >= 5 and risk > 0
+        for b = 1 to lim
+            if dir == 1
+                runExt := math.max(runExt, high[b])
+                if runExt > entry and (runExt - entry) >= risk * minStructR
+                    tp := runExt
+                    break
+            else
+                runExt := math.min(runExt, low[b])
+                if runExt < entry and (entry - runExt) >= risk * minStructR
+                    tp := runExt
+                    break
     tp
 
 f_grade(int sc) =>
@@ -450,6 +462,56 @@ f_find_ob(int dir) =>
                 found := 1
     [prox, dist, found]
 
+// MSS / S3 fresh zone: ORIGIN opposing candle (deepest demand / highest supply),
+// not the most-recent mid-impulse pullback (that floated ENTRY above the real pocket).
+f_find_ob_origin(int dir, int look) =>
+    float prox = na
+    float dist = na
+    int found = 0
+    float bestExt = dir == 1 ? 10e10 : -10e10
+    int lim = math.min(look, bar_index - 1)
+    if lim >= 1
+        for k = 1 to lim
+            bool opp = dir == -1 ? close[k] > open[k] : close[k] < open[k]
+            if opp
+                if dir == 1
+                    // Long: deepest bearish candle = demand origin
+                    if low[k] <= bestExt
+                        bestExt := low[k]
+                        prox := high[k]
+                        dist := low[k]
+                        found := 1
+                else
+                    // Short: highest bullish candle = supply origin
+                    if high[k] >= bestExt
+                        bestExt := high[k]
+                        prox := low[k]
+                        dist := high[k]
+                        found := 1
+    [prox, dist, found]
+
+// Widen SL to a deeper sweep / swing while keeping proximal ENTRY
+f_apply_distal(int i, int dir, float newDist) =>
+    float prox = array.get(zProx, i)
+    float cur = array.get(zDist, i)
+    float out = cur
+    bool wider = dir == 1 ? (newDist < cur) : (newDist > cur)
+    if wider and f_zone_ok(prox, newDist)
+        array.set(zDist, i, newDist)
+        box.set_top(array.get(boxes, i), math.max(prox, newDist))
+        box.set_bottom(array.get(boxes, i), math.min(prox, newDist))
+        line.set_y1(array.get(sLines, i), newDist)
+        line.set_y2(array.get(sLines, i), newDist)
+        if showLabels and not na(array.get(sLabs, i))
+            label.set_y(array.get(sLabs, i), newDist)
+            label.set_text(array.get(sLabs, i), f_es_text("SL", newDist))
+        int sc = useCleanScore ? f_score_zone(dir, prox, newDist, array.get(zKind, i), array.get(zLqN, i)) : array.get(zScore, i)
+        array.set(zScore, i, sc)
+        if showScoreTag and useCleanScore and not na(array.get(scoreLabs, i))
+            label.set_text(array.get(scoreLabs, i), f_grade(sc) + " " + str.tostring(sc) + " · " + f_kind_name(array.get(zKind, i)))
+        out := newDist
+    out
+
 f_recent_disp(int dir, int n) =>
     bool hit = false
     for k = 0 to n
@@ -543,37 +605,42 @@ mssSignalLong  = (useSetupMss or useSetupHtf) and allowLong  and not na(lastHi) 
 mssBorn = false
 htfBorn = false
 if mssSignalShort and f_can_birth()
-    [p, d, ok] = f_find_ob(-1)
-    if ok == 1 and f_zone_ok(p, d) and p > close
-        // Prefer full Setup 3 when enabled; else Setup 2
-        int kind = useSetupHtf ? 2 : 1
-        float htfTop = lastHi
-        float htfBot = lastHi - atr * 0.7
-        int nb = f_push_zone(-1, p, d, kind, htfTop, htfBot)
-        if nb >= 0
-            lastBirth := nb
-            mssBorn := true
-            htfBorn := kind == 2
-            if showMssTag
-                label.new(bar_index, low, "MSS", style=label.style_label_up, color=color.new(mssCol, 45), textcolor=color.white, size=size.tiny)
-            if kind == 2 and showLabels
-                label.new(bar_index, p, "New Fresh Zone", style=label.style_label_left, color=color.new(supplyCol, 100), textcolor=#EF9A9A, size=size.tiny)
+    [p, d, ok] = f_find_ob_origin(-1, mssObLookback)
+    if ok == 1
+        // Anchor SL to swing high if it is the true supply extreme
+        float distUse = not na(lastHi) ? math.max(d, lastHi) : d
+        if f_zone_ok(p, distUse) and p > close
+            int kind = useSetupHtf ? 2 : 1
+            float htfTop = lastHi
+            float htfBot = lastHi - atr * 0.7
+            int nb = f_push_zone(-1, p, distUse, kind, htfTop, htfBot)
+            if nb >= 0
+                lastBirth := nb
+                mssBorn := true
+                htfBorn := kind == 2
+                if showMssTag
+                    label.new(bar_index, low, "MSS", style=label.style_label_up, color=color.new(mssCol, 45), textcolor=color.white, size=size.tiny)
+                if kind == 2 and showLabels
+                    label.new(bar_index, p, "New Fresh Zone", style=label.style_label_left, color=color.new(supplyCol, 100), textcolor=#EF9A9A, size=size.tiny)
 
 if mssSignalLong and f_can_birth() and not mssBorn
-    [p, d, ok] = f_find_ob(1)
-    if ok == 1 and f_zone_ok(p, d) and p < close
-        int kind = useSetupHtf ? 2 : 1
-        float htfBot = lastLo
-        float htfTop = lastLo + atr * 0.7
-        int nb = f_push_zone(1, p, d, kind, htfTop, htfBot)
-        if nb >= 0
-            lastBirth := nb
-            mssBorn := true
-            htfBorn := kind == 2
-            if showMssTag
-                label.new(bar_index, high, "MSS", style=label.style_label_down, color=color.new(mssCol, 45), textcolor=color.white, size=size.tiny)
-            if kind == 2 and showLabels
-                label.new(bar_index, p, "New Fresh Zone", style=label.style_label_left, color=color.new(demandCol, 100), textcolor=#80CBC4, size=size.tiny)
+    [p, d, ok] = f_find_ob_origin(1, mssObLookback)
+    if ok == 1
+        // Anchor SL to swing low if it is the true demand extreme
+        float distUse = not na(lastLo) ? math.min(d, lastLo) : d
+        if f_zone_ok(p, distUse) and p < close
+            int kind = useSetupHtf ? 2 : 1
+            float htfBot = lastLo
+            float htfTop = lastLo + atr * 0.7
+            int nb = f_push_zone(1, p, distUse, kind, htfTop, htfBot)
+            if nb >= 0
+                lastBirth := nb
+                mssBorn := true
+                htfBorn := kind == 2
+                if showMssTag
+                    label.new(bar_index, high, "MSS", style=label.style_label_down, color=color.new(mssCol, 45), textcolor=color.white, size=size.tiny)
+                if kind == 2 and showLabels
+                    label.new(bar_index, p, "New Fresh Zone", style=label.style_label_left, color=color.new(demandCol, 100), textcolor=#80CBC4, size=size.tiny)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SETUP 4 — Sweep → MSS → BB + FVG confluence
@@ -886,6 +953,10 @@ if nZ > 0
                         bool swept = not na(lq) and touches >= minLqTouches and high > lq
                         bool inZn = high >= prox and low <= hiZ
                         bool fallback = (bar_index - array.get(zBirth, i)) >= lqFallbackBars and inZn and touches >= 1
+                        // Hunt wick beyond OB → widen SL to true extreme (teaching sample)
+                        if high > dist
+                            dist := f_apply_distal(i, dir, high)
+                            hiZ := math.max(prox, dist)
                         if scoreOk and inZn and (swept or fallback)
                             array.set(zArmed, i, 1)
                             armedNow := true
@@ -917,6 +988,10 @@ if nZ > 0
                         bool sweptB = not na(lq) and touches >= minLqTouches and low < lq
                         bool inZnB = low <= prox and high >= loZ
                         bool fallbackB = (bar_index - array.get(zBirth, i)) >= lqFallbackBars and inZnB and touches >= 1
+                        // LQ hunt wick below demand → SL under the true low (your 4385 sample)
+                        if low < dist
+                            dist := f_apply_distal(i, dir, low)
+                            loZ := math.min(prox, dist)
                         if scoreOk and inZnB and (sweptB or fallbackB)
                             array.set(zArmed, i, 1)
                             armedNow := true
