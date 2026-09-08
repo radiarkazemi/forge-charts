@@ -856,10 +856,15 @@ if themeActive and thDir != 0 and not na(thProx) and not na(thDist)
                 array.set(zDead, zi, 1)
     // Push once — then FREEZE. No distal sync, no re-birth while live.
     if not haveLive and sideOk and not blown and not deep and f_zone_ok(thProx, thDist)
-        int useKind = thKind == 2 ? 2 : 0
+        // Keep theme pack kind: 0=MM · 1=MSS Fresh · 2=HTF+LQ (teaching short)
+        int useKind = thKind
         if useKind == 2 and not useSetupHtf and useSetupMss
             useKind := 1
         if useKind == 2 and not useSetupHtf and not useSetupMss and useSetupMM
+            useKind := 0
+        if useKind == 1 and not useSetupMss and useSetupHtf
+            useKind := 2
+        if useKind == 1 and not useSetupMss and not useSetupHtf and useSetupMM
             useKind := 0
         bool kindOk = (useKind == 0 and useSetupMM) or (useKind == 1 and useSetupMss) or (useKind == 2 and useSetupHtf) or useSetupMM
         if kindOk
