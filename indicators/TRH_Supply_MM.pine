@@ -1,13 +1,14 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
-// TRH | Supply MM + MSS Fresh Zone
+// TRH | Supply MM + MSS Fresh + HTF/LQ
 //
-// Setup 1 (MM):  Displacement → OB/FVG → E proximal · S distal · R ladder 1/2/3/5
-// Setup 2 (MSS): Break of structure → Fresh Zone at origin → retest E/S · teal TP = structure
-// Both stay enabled independently.
+// Setup 1 (MM):     Displacement → OB/FVG → E/S · R ladder 1/2/3/5
+// Setup 2 (MSS):    Break of structure → Fresh Zone → retest · teal TP
+// Setup 3 (HTF+LQ): HTF zone → MSS → New Fresh Zone → LQ build → sweep into zone · teal TP
+// All stay enabled independently.
 
 //@version=6
-indicator("TRH | Supply MM + MSS Fresh", shorttitle="TRH-SMM",
-     overlay=true, max_boxes_count=120, max_lines_count=250, max_labels_count=160,
+indicator("TRH | Supply MM + MSS + HTF/LQ", shorttitle="TRH-SMM",
+     overlay=true, max_boxes_count=150, max_lines_count=280, max_labels_count=180,
      max_bars_back=5000)
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -20,8 +21,10 @@ allowShort = input.bool(true, "Allow Supply (Short)", group=grpDir)
 
 grpSetups = "Which Setups"
 useSetupMM  = input.bool(true, "Setup 1 — Supply MM (disp → OB/FVG · R ladder)", group=grpSetups)
-useSetupMss = input.bool(true, "Setup 2 — MSS Fresh Zone (your new image)", group=grpSetups,
-     tooltip="After price breaks a swing (MSS), mark the fresh supply/demand at the origin of that move.\nWait for retest of proximal E · SL at distal S · teal TP at chart structure.")
+useSetupMss = input.bool(true, "Setup 2 — MSS Fresh Zone", group=grpSetups,
+     tooltip="MSS → fresh zone at origin → retest E/S · teal TP.")
+useSetupHtf = input.bool(true, "Setup 3 — HTF → MSS → Fresh → LQ sweep", group=grpSetups,
+     tooltip="Your new image: HTF zone context → MSS → New Fresh Zone → liquidity (LQ) builds → sweep LQ into fresh zone → short/long.")
 
 grpZone = "Setup 1 — Zone Source"
 zoneMode = input.string("Order Block", "Zone Type",
@@ -37,14 +40,20 @@ minZonePts   = input.float(2.00, "Min Zone Height (price)", step=0.10, group=grp
 maxZoneAtr   = input.float(2.50, "Max Zone Height (ATR×)", step=0.1, group=grpZone)
 cooldownBars = input.int(25, "Cooldown After New Zone", minval=1, group=grpZone)
 
-grpMss = "Setup 2 — MSS Fresh"
+grpMss = "Setup 2/3 — MSS / HTF / LQ"
 mssPivot     = input.int(3, "MSS Pivot Length", minval=2, maxval=8, group=grpMss)
 mssBodyAtr   = input.float(0.35, "Min MSS Body (ATR×)", step=0.05, group=grpMss)
 structBars   = input.int(120, "Structure TP Lookback (bars)", minval=30, maxval=400, group=grpMss,
      tooltip="Teal reward box targets major swing low (shorts) / high (longs) on THIS chart.")
 minStructR   = input.float(1.5, "Min Structure Distance (R)", minval=1.0, step=0.1, group=grpMss)
+lqTolAtr     = input.float(0.12, "LQ Equal Hi/Lo Tol (ATR×)", step=0.01, group=grpMss)
+minLqTouches = input.int(2, "Min Equal Touches For LQ", minval=2, maxval=6, group=grpMss)
+lqFallbackBars = input.int(20, "Arm Without LQ After N Bars", minval=5, group=grpMss,
+     tooltip="If equal LQ never forms, still allow retest arm after this many bars (Setup 3).")
 showMssTag   = input.bool(true, "Show MSS Tag", group=grpMss)
-showTealTp   = input.bool(true, "Show Teal Structure TP Box (Setup 2)", group=grpMss)
+showHtfZone  = input.bool(true, "Show HTF Zone (Setup 3)", group=grpMss)
+showLqLine   = input.bool(true, "Show LQ Line (Setup 3)", group=grpMss)
+showTealTp   = input.bool(true, "Show Teal Structure TP Box", group=grpMss)
 
 grpTrade = "Arm / Fill"
 requireLeave = input.bool(true, "Require Leave Then Return", group=grpTrade,
@@ -65,8 +74,10 @@ demandCol = input.color(color.new(#26A69A, 78), "Demand Zone", group=grpDisp)
 entryCol  = input.color(#66BB6A, "Entry (E)", group=grpDisp)
 slCol     = input.color(#EF5350, "Stop (S)", group=grpDisp)
 tpCol     = input.color(#90A4AE, "R Targets", group=grpDisp)
-tealCol   = input.color(color.new(#26A69A, 82), "MSS Teal TP", group=grpDisp)
+tealCol   = input.color(color.new(#26A69A, 82), "Teal TP", group=grpDisp)
 mssCol    = input.color(#CE93D8, "MSS Tag", group=grpDisp)
+htfCol    = input.color(color.new(#EF9A9A, 82), "HTF Zone", group=grpDisp)
+lqCol     = input.color(#FFB74D, "LQ", group=grpDisp)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // STATE
@@ -75,6 +86,8 @@ mssCol    = input.color(#CE93D8, "MSS Tag", group=grpDisp)
 atr = ta.atr(14)
 body = math.abs(close - open)
 impulseRange = high - low
+chartSsl = ta.lowest(low[1], structBars)
+chartBsl = ta.highest(high[1], structBars)
 
 useOB  = zoneMode == "Order Block" or zoneMode == "OB + FVG"
 useFVG = zoneMode == "FVG" or zoneMode == "OB + FVG"
@@ -98,14 +111,19 @@ var label[] l3 = array.new_label()
 var label[] l5 = array.new_label()
 
 var int[]   zDir = array.new_int()
-var int[]   zKind = array.new_int()   // 0 = Setup1 MM · 1 = Setup2 MSS
+var int[]   zKind = array.new_int()   // 0=MM · 1=MSS · 2=HTF+LQ
 var int[]   zBirth = array.new_int()
 var float[] zProx = array.new_float()
 var float[] zDist = array.new_float()
 var int[]   zLeft = array.new_int()
 var int[]   zArmed = array.new_int()
 var int[]   zDead = array.new_int()
-var box[]   tealBoxes = array.new_box()  // Setup2 structure TP only
+var float[] zLq = array.new_float()
+var int[]   zLqN = array.new_int()    // equal touches toward LQ
+var box[]   tealBoxes = array.new_box()
+var box[]   htfBoxes = array.new_box()
+var line[]  lqLines = array.new_line()
+var label[] lqLabs = array.new_label()
 
 f_zone_ok(float prox, float dist) =>
     float h = math.abs(dist - prox)
@@ -130,6 +148,9 @@ f_delete_idx(int i) =>
         label.delete(array.get(l3, i))
         label.delete(array.get(l5, i))
         box.delete(array.get(tealBoxes, i))
+        box.delete(array.get(htfBoxes, i))
+        line.delete(array.get(lqLines, i))
+        label.delete(array.get(lqLabs, i))
 
 f_shift_oldest() =>
     if array.size(zDir) > 0
@@ -155,7 +176,12 @@ f_shift_oldest() =>
         array.shift(zLeft)
         array.shift(zArmed)
         array.shift(zDead)
+        array.shift(zLq)
+        array.shift(zLqN)
         array.shift(tealBoxes)
+        array.shift(htfBoxes)
+        array.shift(lqLines)
+        array.shift(lqLabs)
 
 f_mk_tp(int bi, float px, int dir, float R, float mult, bool on) =>
     line ln = na
@@ -170,17 +196,15 @@ f_mk_tp(int bi, float px, int dir, float R, float mult, bool on) =>
 
 f_struct_tp(int dir, float entry, float sl) =>
     float risk = math.abs(entry - sl)
-    float ssl = ta.lowest(low[1], structBars)
-    float bsl = ta.highest(high[1], structBars)
     float tp = dir == 1 ? entry + risk * 2.5 : entry - risk * 2.5
-    if dir == -1 and not na(ssl) and ssl < entry and (entry - ssl) >= risk * minStructR
-        tp := ssl
-    if dir == 1 and not na(bsl) and bsl > entry and (bsl - entry) >= risk * minStructR
-        tp := bsl
+    if dir == -1 and not na(chartSsl) and chartSsl < entry and (entry - chartSsl) >= risk * minStructR
+        tp := chartSsl
+    if dir == 1 and not na(chartBsl) and chartBsl > entry and (chartBsl - entry) >= risk * minStructR
+        tp := chartBsl
     tp
 
-// kind: 0 = Setup1 MM (R ladder) · 1 = Setup2 MSS (teal structure TP)
-f_push_zone(int dir, float prox, float dist, int kind) =>
+// kind: 0=MM · 1=MSS · 2=HTF+LQ  | htfTop/htfBot used for Setup 3 context box
+f_push_zone(int dir, float prox, float dist, int kind, float htfTop, float htfBot) =>
     while array.size(zDir) >= MAX_Z
         f_shift_oldest()
     int bi = bar_index
@@ -194,18 +218,18 @@ f_push_zone(int dir, float prox, float dist, int kind) =>
     array.push(zLeft, requireLeave ? 0 : 1)
     array.push(zArmed, 0)
     array.push(zDead, 0)
+    array.push(zLq, float(na))
+    array.push(zLqN, 0)
     array.push(boxes, box.new(bi, math.max(prox, dist), bi + 1, math.min(prox, dist),
          border_color=color.new(zc, 25), bgcolor=zc))
     array.push(eLines, line.new(bi, prox, bi + extendBars, prox, color=entryCol, style=line.style_dashed, width=2))
     array.push(sLines, line.new(bi, dist, bi + extendBars, dist, color=slCol, style=line.style_dashed, width=2))
     if showLabels
-        string et = kind == 1 ? "E" : "E"
-        array.push(eLabs, label.new(bi + 2, prox, et, style=label.style_label_left, color=color.new(entryCol, 100), textcolor=entryCol, size=size.normal))
+        array.push(eLabs, label.new(bi + 2, prox, "E", style=label.style_label_left, color=color.new(entryCol, 100), textcolor=entryCol, size=size.normal))
         array.push(sLabs, label.new(bi + 2, dist, "S", style=label.style_label_left, color=color.new(slCol, 100), textcolor=slCol, size=size.normal))
     else
         array.push(eLabs, label(na))
         array.push(sLabs, label(na))
-    // R ladder only for Setup 1
     bool doR = kind == 0
     [ln1, lb1] = f_mk_tp(bi, prox, dir, R, 1.0, doR and draw1R)
     [ln2, lb2] = f_mk_tp(bi, prox, dir, R, 2.0, doR and draw2R)
@@ -219,14 +243,24 @@ f_push_zone(int dir, float prox, float dist, int kind) =>
     array.push(l2, lb2)
     array.push(l3, lb3)
     array.push(l5, lb5)
-    // Teal structure TP box for Setup 2
+    // Teal TP for Setup 2 and 3
     box tb = na
-    if kind == 1 and showTealTp
+    if (kind == 1 or kind == 2) and showTealTp
         float tp = f_struct_tp(dir, prox, dist)
         tb := box.new(bi, math.max(prox, tp), bi + extendBars, math.min(prox, tp),
              border_color=color.new(tealCol, 40), bgcolor=tealCol, border_width=1)
     array.push(tealBoxes, tb)
-    bi  // return birth bar — assign lastBirth in global scope
+    // HTF context zone for Setup 3
+    box hb = na
+    if kind == 2 and showHtfZone and not na(htfTop) and not na(htfBot)
+        hb := box.new(bi - 15, math.max(htfTop, htfBot), bi + extendBars, math.min(htfTop, htfBot),
+             border_color=color.new(htfCol, 35), bgcolor=htfCol, border_width=1)
+        if showLabels
+            label.new(bi - 14, (htfTop + htfBot) * 0.5, "HTF Zone", style=label.style_label_right, color=color.new(htfCol, 100), textcolor=#EF9A9A, size=size.tiny)
+    array.push(htfBoxes, hb)
+    array.push(lqLines, line(na))
+    array.push(lqLabs, label(na))
+    bi
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SETUP 1 — DETECT DISPLACEMENT → OB / FVG
@@ -264,12 +298,12 @@ f_recent_disp(int dir, int n) =>
 if useSetupMM and bearDisp and allowShort and useOB and f_can_birth()
     [p, d, ok] = f_find_ob(-1)
     if ok == 1 and f_zone_ok(p, d) and p > close
-        lastBirth := f_push_zone(-1, p, d, 0)
+        lastBirth := f_push_zone(-1, p, d, 0, na, na)
 
 if useSetupMM and bullDisp and allowLong and useOB and f_can_birth()
     [p, d, ok] = f_find_ob(1)
     if ok == 1 and f_zone_ok(p, d) and p < close
-        lastBirth := f_push_zone(1, p, d, 0)
+        lastBirth := f_push_zone(1, p, d, 0, na, na)
 
 bearFvg = bar_index >= 2 and low[2] > high and (low[2] - high) >= math.max(atr * minFvgAtr, minFvgPts)
 bullFvg = bar_index >= 2 and high[2] < low and (low - high[2]) >= math.max(atr * minFvgAtr, minFvgPts)
@@ -278,17 +312,16 @@ if useSetupMM and useFVG and allowShort and bearFvg and f_recent_disp(-1, 3) and
     float gapTop = low[2]
     float gapBot = high
     if f_zone_ok(gapBot, gapTop)
-        lastBirth := f_push_zone(-1, gapBot, gapTop, 0)
+        lastBirth := f_push_zone(-1, gapBot, gapTop, 0, na, na)
 
 if useSetupMM and useFVG and allowLong and bullFvg and f_recent_disp(1, 3) and f_can_birth()
     float gapBot = high[2]
     float gapTop = low
     if f_zone_ok(gapTop, gapBot)
-        lastBirth := f_push_zone(1, gapTop, gapBot, 0)
+        lastBirth := f_push_zone(1, gapTop, gapBot, 0, na, na)
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SETUP 2 — MSS → Fresh Zone (new image)
-// Break swing low (short) / swing high (long) → OB at origin of that move
+// SETUP 2 / 3 — MSS → Fresh Zone  (+ HTF + LQ for Setup 3)
 // ═══════════════════════════════════════════════════════════════════════════
 
 ph = ta.pivothigh(high, mssPivot, mssPivot)
@@ -316,26 +349,55 @@ lastLo = array.size(loPx) > 0 ? array.get(loPx, array.size(loPx) - 1) : float(na
 lastHiB = array.size(hiBr) > 0 ? array.get(hiBr, array.size(hiBr) - 1) : int(na)
 lastLoB = array.size(loBr) > 0 ? array.get(loBr, array.size(loBr) - 1) : int(na)
 
-// Bearish MSS: after a swing high, close breaks last swing low with body
-mssShort = useSetupMss and allowShort and not na(lastLo) and not na(lastHi) and not na(lastHiB) and not na(lastLoB) and lastHiB > lastLoB and close < lastLo and body >= atr * mssBodyAtr and close < open
-mssLong  = useSetupMss and allowLong  and not na(lastHi) and not na(lastLo) and not na(lastHiB) and not na(lastLoB) and lastLoB > lastHiB and close > lastHi and body >= atr * mssBodyAtr and close > open
+f_eq_hi(float level, float tol) =>
+    int n = 0
+    int sz = array.size(hiPx)
+    if sz > 0
+        for i = 0 to sz - 1
+            n += math.abs(array.get(hiPx, i) - level) <= tol ? 1 : 0
+    n
+
+f_eq_lo(float level, float tol) =>
+    int n = 0
+    int sz = array.size(loPx)
+    if sz > 0
+        for i = 0 to sz - 1
+            n += math.abs(array.get(loPx, i) - level) <= tol ? 1 : 0
+    n
+
+mssSignalShort = (useSetupMss or useSetupHtf) and allowShort and not na(lastLo) and not na(lastHi) and not na(lastHiB) and not na(lastLoB) and lastHiB > lastLoB and close < lastLo and body >= atr * mssBodyAtr and close < open
+mssSignalLong  = (useSetupMss or useSetupHtf) and allowLong  and not na(lastHi) and not na(lastLo) and not na(lastHiB) and not na(lastLoB) and lastLoB > lastHiB and close > lastHi and body >= atr * mssBodyAtr and close > open
 
 mssBorn = false
-if mssShort and f_can_birth()
+htfBorn = false
+if mssSignalShort and f_can_birth()
     [p, d, ok] = f_find_ob(-1)
     if ok == 1 and f_zone_ok(p, d) and p > close
-        lastBirth := f_push_zone(-1, p, d, 1)
+        // Prefer full Setup 3 when enabled; else Setup 2
+        int kind = useSetupHtf ? 2 : 1
+        float htfTop = lastHi
+        float htfBot = lastHi - atr * 0.7
+        lastBirth := f_push_zone(-1, p, d, kind, htfTop, htfBot)
         mssBorn := true
+        htfBorn := kind == 2
         if showMssTag
             label.new(bar_index, low, "MSS", style=label.style_label_up, color=color.new(mssCol, 45), textcolor=color.white, size=size.tiny)
+        if kind == 2 and showLabels
+            label.new(bar_index, p, "New Fresh Zone", style=label.style_label_left, color=color.new(supplyCol, 100), textcolor=#EF9A9A, size=size.tiny)
 
-if mssLong and f_can_birth() and not mssBorn
+if mssSignalLong and f_can_birth() and not mssBorn
     [p, d, ok] = f_find_ob(1)
     if ok == 1 and f_zone_ok(p, d) and p < close
-        lastBirth := f_push_zone(1, p, d, 1)
+        int kind = useSetupHtf ? 2 : 1
+        float htfBot = lastLo
+        float htfTop = lastLo + atr * 0.7
+        lastBirth := f_push_zone(1, p, d, kind, htfTop, htfBot)
         mssBorn := true
+        htfBorn := kind == 2
         if showMssTag
             label.new(bar_index, high, "MSS", style=label.style_label_down, color=color.new(mssCol, 45), textcolor=color.white, size=size.tiny)
+        if kind == 2 and showLabels
+            label.new(bar_index, p, "New Fresh Zone", style=label.style_label_left, color=color.new(demandCol, 100), textcolor=#80CBC4, size=size.tiny)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // UPDATE ZONES
@@ -346,34 +408,114 @@ armedDir = 0
 armedProx = float(na)
 armedDist = float(na)
 armedR = float(na)
+armedKind = 0
+lqReady = false
+lqBuilding = false
 
 nZ = array.size(zDir)
 if nZ > 0
     for i = 0 to nZ - 1
         if array.get(zDead, i) == 0
             int dir = array.get(zDir, i)
+            int kind = array.get(zKind, i)
             float prox = array.get(zProx, i)
             float dist = array.get(zDist, i)
             float loZ = math.min(prox, dist)
             float hiZ = math.max(prox, dist)
             int wasArmed = array.get(zArmed, i)
+            float atrL = atr > 0 ? atr : syminfo.mintick
 
             if array.get(zLeft, i) == 0
                 bool left = dir == -1 ? close < loZ : close > hiZ
                 if left
                     array.set(zLeft, i, 1)
 
+            // After leave: Setup 3 builds LQ; Setup 1/2 arm on return to proximal
             if array.get(zLeft, i) == 1 and wasArmed == 0
-                bool touched = dir == -1 ? (high >= prox and low <= hiZ) : (low <= prox and high >= loZ)
-                // Must actually reach proximal edge
-                bool atProx = dir == -1 ? high >= prox : low <= prox
-                if touched and atProx
-                    array.set(zArmed, i, 1)
-                    armedNow := true
-                    armedDir := dir
-                    armedProx := prox
-                    armedDist := dist
-                    armedR := math.abs(dist - prox)
+                if kind == 2
+                    float lq = array.get(zLq, i)
+                    int touches = array.get(zLqN, i)
+                    if dir == -1
+                        // Buy-side LQ = equal highs under / into Fresh Zone
+                        if high >= prox - atrL * lqTolAtr * 2.0
+                            if na(lq)
+                                array.set(zLq, i, high)
+                                array.set(zLqN, i, 1)
+                            else if math.abs(high - lq) <= atrL * lqTolAtr
+                                array.set(zLq, i, (lq * touches + high) / (touches + 1.0))
+                                array.set(zLqN, i, touches + 1)
+                            else if high > lq + atrL * lqTolAtr
+                                array.set(zLq, i, high)
+                                array.set(zLqN, i, 1)
+                        lq := array.get(zLq, i)
+                        touches := array.get(zLqN, i)
+                        bool swept = not na(lq) and touches >= minLqTouches and high > lq
+                        bool inZn = high >= prox and low <= hiZ
+                        bool fallback = (bar_index - array.get(zBirth, i)) >= lqFallbackBars and inZn and touches >= 1
+                        if inZn and (swept or fallback)
+                            array.set(zArmed, i, 1)
+                            armedNow := true
+                            armedDir := dir
+                            armedProx := prox
+                            armedDist := dist
+                            armedR := math.abs(dist - prox)
+                            armedKind := 2
+                            lqReady := swept
+                    else
+                        if low <= prox + atrL * lqTolAtr * 2.0
+                            if na(lq)
+                                array.set(zLq, i, low)
+                                array.set(zLqN, i, 1)
+                            else if math.abs(low - lq) <= atrL * lqTolAtr
+                                array.set(zLq, i, (lq * touches + low) / (touches + 1.0))
+                                array.set(zLqN, i, touches + 1)
+                            else if low < lq - atrL * lqTolAtr
+                                array.set(zLq, i, low)
+                                array.set(zLqN, i, 1)
+                        lq := array.get(zLq, i)
+                        touches := array.get(zLqN, i)
+                        bool sweptB = not na(lq) and touches >= minLqTouches and low < lq
+                        bool inZnB = low <= prox and high >= loZ
+                        bool fallbackB = (bar_index - array.get(zBirth, i)) >= lqFallbackBars and inZnB and touches >= 1
+                        if inZnB and (sweptB or fallbackB)
+                            array.set(zArmed, i, 1)
+                            armedNow := true
+                            armedDir := dir
+                            armedProx := prox
+                            armedDist := dist
+                            armedR := math.abs(dist - prox)
+                            armedKind := 2
+                            lqReady := sweptB
+
+                    // Draw / refresh LQ line while waiting / arming
+                    if showLqLine and not na(array.get(zLq, i))
+                        lqBuilding := array.get(zLqN, i) >= 1
+                        if array.get(zLqN, i) >= minLqTouches
+                            lqReady := true
+                        int x0l = array.get(zBirth, i)
+                        float lqPx = array.get(zLq, i)
+                        line ln = array.get(lqLines, i)
+                        if na(ln)
+                            array.set(lqLines, i, line.new(x0l, lqPx, bar_index, lqPx, color=lqCol, style=line.style_dashed, width=2))
+                            if showLabels
+                                array.set(lqLabs, i, label.new(bar_index + 1, lqPx, "LQ", style=label.style_label_left, color=color.new(lqCol, 100), textcolor=lqCol, size=size.tiny))
+                        else
+                            line.set_xy1(ln, x0l, lqPx)
+                            line.set_xy2(ln, bar_index, lqPx)
+                            label lbq = array.get(lqLabs, i)
+                            if not na(lbq)
+                                label.set_xy(lbq, bar_index + 1, lqPx)
+                else
+                    bool touched = dir == -1 ? (high >= prox and low <= hiZ) : (low <= prox and high >= loZ)
+                    bool atProx = dir == -1 ? high >= prox : low <= prox
+                    if touched and atProx
+                        array.set(zArmed, i, 1)
+                        armedNow := true
+                        armedDir := dir
+                        armedProx := prox
+                        armedDist := dist
+                        armedR := math.abs(dist - prox)
+                        armedKind := kind
 
             if invalidateThru
                 bool blown = dir == -1 ? close > dist : close < dist
@@ -393,13 +535,23 @@ if nZ > 0
                     line.set_x2(array.get(t3, i), bar_index + extendBars)
                 if not na(array.get(t5, i))
                     line.set_x2(array.get(t5, i), bar_index + extendBars)
-                // Extend / refresh teal structure TP for Setup 2
-                if array.get(zKind, i) == 1 and showTealTp
-                    box tb = array.get(tealBoxes, i)
+
+                // Extend / refresh teal structure TP for Setup 2 & 3
+                if (kind == 1 or kind == 2) and showTealTp
                     float tp = f_struct_tp(dir, prox, dist)
-                    box.delete(tb)
+                    box.delete(array.get(tealBoxes, i))
                     array.set(tealBoxes, i, box.new(array.get(zBirth, i), math.max(prox, tp), bar_index + extendBars, math.min(prox, tp),
                          border_color=color.new(tealCol, 40), bgcolor=tealCol, border_width=1))
+
+                // Extend HTF context + LQ for Setup 3
+                if kind == 2
+                    box hb = array.get(htfBoxes, i)
+                    if not na(hb)
+                        box.set_right(hb, bar_index + extendBars)
+                    if showLqLine and not na(array.get(zLq, i)) and not na(array.get(lqLines, i))
+                        line.set_xy2(array.get(lqLines, i), bar_index, array.get(zLq, i))
+                        if not na(array.get(lqLabs, i))
+                            label.set_xy(array.get(lqLabs, i), bar_index + 1, array.get(zLq, i))
 
 if not showHistory and nZ > 1
     // keep only newest living zone visually — hide older boxes
@@ -409,25 +561,33 @@ if not showHistory and nZ > 1
 
 alertcondition(armedNow and armedDir == -1, "Supply Short Arm", "TRH-SMM SHORT · E proximal · S distal")
 alertcondition(armedNow and armedDir == 1, "Demand Long Arm", "TRH-SMM LONG · E proximal · S distal")
-alertcondition(mssBorn and mssShort, "MSS Fresh Supply", "TRH-SMM Setup2 MSS fresh supply zone")
-alertcondition(mssBorn and mssLong, "MSS Fresh Demand", "TRH-SMM Setup2 MSS fresh demand zone")
+alertcondition(mssBorn and mssSignalShort and not htfBorn, "MSS Fresh Supply", "TRH-SMM Setup2 MSS fresh supply zone")
+alertcondition(mssBorn and mssSignalLong and not htfBorn, "MSS Fresh Demand", "TRH-SMM Setup2 MSS fresh demand zone")
+alertcondition(htfBorn and mssSignalShort, "Setup3 HTF+LQ Supply", "TRH-SMM Setup3 HTF → Fresh → LQ supply")
+alertcondition(htfBorn and mssSignalLong, "Setup3 HTF+LQ Demand", "TRH-SMM Setup3 HTF → Fresh → LQ demand")
+alertcondition(armedNow and armedKind == 2 and armedDir == -1, "Setup3 Short Armed", "TRH-SMM Setup3 SHORT armed after LQ")
+alertcondition(armedNow and armedKind == 2 and armedDir == 1, "Setup3 Long Armed", "TRH-SMM Setup3 LONG armed after LQ")
 
 if showPanel
-    var table pan = table.new(position.top_right, 1, 6, bgcolor=color.new(#111111, 12), border_width=1)
+    var table pan = table.new(position.top_right, 1, 7, bgcolor=color.new(#111111, 12), border_width=1)
     if barstate.islast
-        table.cell(pan, 0, 0, "TRH Supply MM + MSS", text_color=color.white, text_size=size.small)
-        table.cell(pan, 0, 1, "1: MM R-ladder · 2: MSS Fresh+teal", text_color=#B0BEC5, text_size=size.tiny)
-        table.cell(pan, 0, 2, "E = Proximal · S = Distal", text_color=#B0BEC5, text_size=size.tiny)
+        table.cell(pan, 0, 0, "TRH MM + MSS + HTF/LQ", text_color=color.white, text_size=size.small)
+        table.cell(pan, 0, 1, "1 MM · 2 MSS Fresh · 3 HTF+LQ", text_color=#B0BEC5, text_size=size.tiny)
+        table.cell(pan, 0, 2, "E proximal · S distal · teal = structure TP", text_color=#B0BEC5, text_size=size.tiny)
         string on1 = useSetupMM ? "ON" : "off"
         string on2 = useSetupMss ? "ON" : "off"
-        table.cell(pan, 0, 3, "S1 " + on1 + " · S2 " + on2 + " · zones " + str.tostring(array.size(zDir)), text_color=#78909C, text_size=size.tiny)
+        string on3 = useSetupHtf ? "ON" : "off"
+        table.cell(pan, 0, 3, "S1 " + on1 + " · S2 " + on2 + " · S3 " + on3 + " · z " + str.tostring(array.size(zDir)), text_color=#78909C, text_size=size.tiny)
         if not na(armedProx)
             string side = armedDir == 1 ? "LONG" : "SHORT"
-            table.cell(pan, 0, 4, "ARMED " + side + " · R=" + str.tostring(armedR, format.mintick),
+            string ktag = armedKind == 2 ? "S3" : armedKind == 1 ? "S2" : "S1"
+            table.cell(pan, 0, 4, "ARMED " + ktag + " " + side + " · R=" + str.tostring(armedR, format.mintick),
                  text_color=armedDir == 1 ? #26A69A : #EF5350, text_size=size.small)
         else
-            table.cell(pan, 0, 4, "Wait return to proximal", text_color=#78909C, text_size=size.tiny)
-        table.cell(pan, 0, 5, mssBorn ? "MSS Fresh zone created" : "—", text_color=mssCol, text_size=size.tiny)
+            table.cell(pan, 0, 4, "Wait leave → return" + (useSetupHtf ? " (+ LQ)" : ""), text_color=#78909C, text_size=size.tiny)
+        string row5 = htfBorn ? "Setup 3 Fresh Zone" : mssBorn ? "Setup 2 Fresh Zone" : "—"
+        table.cell(pan, 0, 5, row5, text_color=htfBorn ? #EF9A9A : mssCol, text_size=size.tiny)
+        table.cell(pan, 0, 6, lqReady ? "LQ ready (≥ equal touches)" : lqBuilding ? "LQ building…" : "LQ waiting", text_color=lqCol, text_size=size.tiny)
 
 plot(armedNow ? armedProx : na, "Armed E", color=entryCol, display=display.data_window)
 plot(armedNow ? armedDist : na, "Armed S", color=slCol, display=display.data_window)

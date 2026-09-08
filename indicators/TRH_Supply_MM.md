@@ -1,21 +1,19 @@
-# TRH Supply MM — Proximal Entry · Distal Stop · R Ladder
+# TRH Supply MM + MSS + HTF/LQ
 
-Pine indicator that recreates the **Money Management Tool** geometry:
+Three setups on one indicator (all kept; toggles independent):
 
-| Label | Meaning |
-|-------|---------|
-| **E** | Entry at the **proximal** edge of the supply/demand zone |
-| **S** | Stop at the **distal** edge |
-| **1 · 2 · 3 · 5** | Take-profit ladder at `n × R`, where `R = \|distal − proximal\|` |
+| Setup | Trigger | Visual |
+|-------|---------|--------|
+| **1 — Supply MM** | Displacement → OB / FVG | Zone + E/S + R ladder 1/2/3/5 |
+| **2 — MSS Fresh** | Break of structure → fresh zone | Zone + E/S + **teal TP to chart structure** |
+| **3 — HTF + LQ** | HTF zone → MSS → New Fresh Zone → LQ build → sweep into zone | HTF box + Fresh Zone + **LQ** line + E/S + teal TP |
 
-## Model
+Shared rules: **proximal E · distal S**. Arm after leave → return (Setup 3 prefers LQ sweep into the fresh zone).
 
-After a **displacement**, the last opposing candle (or FVG) becomes a supply/demand zone. Price leaves, then returns to proximal → arm.
-
-Zone modes: **Order Block** (default) · **FVG** · **OB + FVG**
+When Setup 3 is ON, MSS births use the richer HTF+LQ path (supersedes Setup 2 on the same signal). Turn Setup 3 off to use plain Setup 2 retests.
 
 ## Raw
 
 https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-supply-mm-992e/indicators/TRH_Supply_MM.pine
 
-TradingView → Pine Editor → paste → Add to chart.
+Toggles: `Setup 1 — Supply MM`, `Setup 2 — MSS Fresh Zone`, `Setup 3 — HTF → MSS → Fresh → LQ sweep`.
