@@ -80,6 +80,18 @@ fsPinkCol     = input.color(color.new(#EF9A9A, 72), "Sweep Zone (pink)", group=g
 fsBlueCol     = input.color(color.new(#81D4FA, 78), "Expansion TP (blue)", group=grpFs)
 fsLineCol     = input.color(#90A4AE, "fs Line", group=grpFs)
 
+grpScore = "Clean Score (avoid dirty SL)"
+useCleanScore = input.bool(true, "Enable Scoring System", group=grpScore,
+     tooltip="Scores each zone 0–100 and grades A/B/C/D so you only take cleaner entries.")
+rejectLowScore = input.bool(true, "Reject Zones Below Keep Score", group=grpScore,
+     tooltip="Do not draw dirty zones at all (stops the 14-zone clutter / weak SL hits).")
+minScoreKeep = input.int(62, "Min Score To Keep Zone", minval=0, maxval=100, group=grpScore)
+minScoreArm  = input.int(70, "Min Score To Arm / Alert", minval=0, maxval=100, group=grpScore,
+     tooltip="Even if drawn, only ARM when score ≥ this. A≈80+ · B≈70+ · C≈55+ · D=skip.")
+showScoreTag = input.bool(true, "Show Score Tag On Zone", group=grpScore)
+hideFsNoise  = input.bool(true, "Stricter Score For fs (Setup 5)", group=grpScore,
+     tooltip="fs alone is noisy — needs higher confluence/RR to pass. Likely cause of quick SL hits.")
+
 grpTrade = "Arm / Fill"
 requireLeave = input.bool(true, "Require Leave Then Return", group=grpTrade,
      tooltip="Price must leave the zone after creation, then return to proximal.")
@@ -113,6 +125,8 @@ body = math.abs(close - open)
 impulseRange = high - low
 chartSsl = ta.lowest(low[1], structBars)
 chartBsl = ta.highest(high[1], structBars)
+rngHi30 = ta.highest(high, 30)
+rngLo30 = ta.lowest(low, 30)
 
 useOB  = zoneMode == "Order Block" or zoneMode == "OB + FVG"
 useFVG = zoneMode == "FVG" or zoneMode == "OB + FVG"
@@ -145,6 +159,8 @@ var int[]   zArmed = array.new_int()
 var int[]   zDead = array.new_int()
 var float[] zLq = array.new_float()
 var int[]   zLqN = array.new_int()    // equal touches toward LQ
+var int[]   zScore = array.new_int()  // 0–100 clean score
+var label[] scoreLabs = array.new_label()
 var box[]   tealBoxes = array.new_box()
 var box[]   htfBoxes = array.new_box()
 var line[]  lqLines = array.new_line()
@@ -176,6 +192,7 @@ f_delete_idx(int i) =>
         box.delete(array.get(htfBoxes, i))
         line.delete(array.get(lqLines, i))
         label.delete(array.get(lqLabs, i))
+        label.delete(array.get(scoreLabs, i))
 
 f_shift_oldest() =>
     if array.size(zDir) > 0
@@ -203,6 +220,8 @@ f_shift_oldest() =>
         array.shift(zDead)
         array.shift(zLq)
         array.shift(zLqN)
+        array.shift(zScore)
+        array.shift(scoreLabs)
         array.shift(tealBoxes)
         array.shift(htfBoxes)
         array.shift(lqLines)
@@ -228,67 +247,133 @@ f_struct_tp(int dir, float entry, float sl) =>
         tp := chartBsl
     tp
 
-// kind: 0=MM · 1=MSS · 2=HTF+LQ · 3=BB+FVG · 4=fs
-// htfTop/htfBot: Setup 3 HTF box; for kind 4 unused
-f_push_zone(int dir, float prox, float dist, int kind, float htfTop, float htfBot) =>
-    while array.size(zDir) >= MAX_Z
-        f_shift_oldest()
-    int bi = bar_index
-    float R = math.abs(dist - prox)
-    color zc = kind == 4 ? fsPinkCol : dir == 1 ? demandCol : supplyCol
-    array.push(zDir, dir)
-    array.push(zKind, kind)
-    array.push(zBirth, bi)
-    array.push(zProx, prox)
-    array.push(zDist, dist)
-    // Setup 5 arms on the sweep itself (no leave→return)
-    array.push(zLeft, kind == 4 ? 1 : (requireLeave ? 0 : 1))
-    array.push(zArmed, kind == 4 ? 1 : 0)
-    array.push(zDead, 0)
-    array.push(zLq, float(na))
-    array.push(zLqN, 0)
-    array.push(boxes, box.new(bi, math.max(prox, dist), bi + 1, math.min(prox, dist),
-         border_color=color.new(zc, 25), bgcolor=zc))
-    array.push(eLines, line.new(bi, prox, bi + extendBars, prox, color=entryCol, style=line.style_dashed, width=2))
-    array.push(sLines, line.new(bi, dist, bi + extendBars, dist, color=slCol, style=line.style_dashed, width=2))
-    if showLabels
-        array.push(eLabs, label.new(bi + 2, prox, "E", style=label.style_label_left, color=color.new(entryCol, 100), textcolor=entryCol, size=size.normal))
-        array.push(sLabs, label.new(bi + 2, dist, "S", style=label.style_label_left, color=color.new(slCol, 100), textcolor=slCol, size=size.normal))
+f_grade(int sc) =>
+    sc >= 80 ? "A" : sc >= 70 ? "B" : sc >= 55 ? "C" : "D"
+
+f_kind_name(int kind) =>
+    kind == 0 ? "S1-MM" : kind == 1 ? "S2-MSS" : kind == 2 ? "S3-HTF/LQ" : kind == 3 ? "S4-BB+FVG" : "S5-fs"
+
+// Clean score 0–100 — higher = safer / cleaner entry
+f_score_zone(int dir, float prox, float dist, int kind, int lqN) =>
+    int sc = kind == 3 ? 74 : kind == 2 ? 70 : kind == 1 ? 60 : kind == 0 ? 56 : 36
+    if hideFsNoise and kind == 4
+        sc -= 8
+    float risk = math.abs(dist - prox)
+    float atrX = atr > 0 ? risk / atr : 1.0
+    // Clean SL size (not tiny wick, not huge bag)
+    if atrX >= 0.22 and atrX <= 1.10
+        sc += 14
+    else if atrX < 0.12 or atrX > 2.20
+        sc -= 22
+    else if atrX > 1.50 or atrX < 0.18
+        sc -= 10
+    float tp = f_struct_tp(dir, prox, dist)
+    float reward = math.abs(tp - prox)
+    float rr = risk > 0 ? reward / risk : 0.0
+    if rr >= 3.0
+        sc += 14
+    else if rr >= 2.0
+        sc += 9
+    else if rr >= 1.5
+        sc += 3
     else
-        array.push(eLabs, label(na))
-        array.push(sLabs, label(na))
-    bool doR = kind == 0
-    [ln1, lb1] = f_mk_tp(bi, prox, dir, R, 1.0, doR and draw1R)
-    [ln2, lb2] = f_mk_tp(bi, prox, dir, R, 2.0, doR and draw2R)
-    [ln3, lb3] = f_mk_tp(bi, prox, dir, R, 3.0, doR and draw3R)
-    [ln5, lb5] = f_mk_tp(bi, prox, dir, R, 5.0, doR and draw5R)
-    array.push(t1, ln1)
-    array.push(t2, ln2)
-    array.push(t3, ln3)
-    array.push(t5, ln5)
-    array.push(l1, lb1)
-    array.push(l2, lb2)
-    array.push(l3, lb3)
-    array.push(l5, lb5)
-    // Structure / expansion TP for Setups 2–5
-    box tb = na
-    if (kind == 1 or kind == 2 or kind == 3 or kind == 4) and showTealTp
-        float tp = f_struct_tp(dir, prox, dist)
-        color tc = kind == 4 ? fsBlueCol : tealCol
-        tb := box.new(bi, math.max(prox, tp), bi + extendBars, math.min(prox, tp),
-             border_color=color.new(tc, 40), bgcolor=tc, border_width=1)
-    array.push(tealBoxes, tb)
-    // HTF context zone for Setup 3
-    box hb = na
-    if kind == 2 and showHtfZone and not na(htfTop) and not na(htfBot)
-        hb := box.new(bi - 15, math.max(htfTop, htfBot), bi + extendBars, math.min(htfTop, htfBot),
-             border_color=color.new(htfCol, 35), bgcolor=htfCol, border_width=1)
+        sc -= 14
+    // Impulse quality on birth bar
+    if body >= atr * minDispAtr
+        sc += 6
+    else if body < atr * 0.20
+        sc -= 6
+    if kind == 2 and lqN >= minLqTouches
+        sc += 12
+    // Confluence: another live zone same direction nearby
+    int n = array.size(zDir)
+    if n > 0
+        for j = 0 to n - 1
+            if array.get(zDead, j) == 0 and array.get(zDir, j) == dir and array.get(zKind, j) != kind
+                float jp = array.get(zProx, j)
+                if math.abs(jp - prox) <= atr * 0.55
+                    sc += 10
+    // Mid-chop penalty: proximal inside recent range center
+    float hiN = rngHi30
+    float loN = rngLo30
+    float mid = (hiN + loN) * 0.5
+    float rng = hiN - loN
+    if rng > atr and math.abs(prox - mid) < rng * 0.18
+        sc -= 8
+    math.min(100, math.max(0, sc))
+
+// kind: 0=MM · 1=MSS · 2=HTF+LQ · 3=BB+FVG · 4=fs
+// returns bar_index on success, -1 if rejected as dirty
+f_push_zone(int dir, float prox, float dist, int kind, float htfTop, float htfBot) =>
+    int sc = useCleanScore ? f_score_zone(dir, prox, dist, kind, 0) : 75
+    int out = -1
+    if not (useCleanScore and rejectLowScore and sc < minScoreKeep)
+        while array.size(zDir) >= MAX_Z
+            f_shift_oldest()
+        int bi = bar_index
+        float R = math.abs(dist - prox)
+        color zc = kind == 4 ? fsPinkCol : dir == 1 ? demandCol : supplyCol
+        // Mute C/D visually even if kept
+        if useCleanScore and sc < minScoreArm
+            zc := color.new(zc, 90)
+        array.push(zDir, dir)
+        array.push(zKind, kind)
+        array.push(zBirth, bi)
+        array.push(zProx, prox)
+        array.push(zDist, dist)
+        array.push(zLeft, kind == 4 ? 1 : (requireLeave ? 0 : 1))
+        array.push(zArmed, kind == 4 and (not useCleanScore or sc >= minScoreArm) ? 1 : 0)
+        array.push(zDead, 0)
+        array.push(zLq, float(na))
+        array.push(zLqN, 0)
+        array.push(zScore, sc)
+        array.push(boxes, box.new(bi, math.max(prox, dist), bi + 1, math.min(prox, dist),
+             border_color=color.new(zc, 25), bgcolor=zc))
+        array.push(eLines, line.new(bi, prox, bi + extendBars, prox, color=entryCol, style=line.style_dashed, width=2))
+        array.push(sLines, line.new(bi, dist, bi + extendBars, dist, color=slCol, style=line.style_dashed, width=2))
         if showLabels
-            label.new(bi - 14, (htfTop + htfBot) * 0.5, "HTF Zone", style=label.style_label_right, color=color.new(htfCol, 100), textcolor=#EF9A9A, size=size.tiny)
-    array.push(htfBoxes, hb)
-    array.push(lqLines, line(na))
-    array.push(lqLabs, label(na))
-    bi
+            array.push(eLabs, label.new(bi + 2, prox, "E", style=label.style_label_left, color=color.new(entryCol, 100), textcolor=entryCol, size=size.normal))
+            array.push(sLabs, label.new(bi + 2, dist, "S", style=label.style_label_left, color=color.new(slCol, 100), textcolor=slCol, size=size.normal))
+        else
+            array.push(eLabs, label(na))
+            array.push(sLabs, label(na))
+        string g = f_grade(sc)
+        color gc = sc >= 80 ? #66BB6A : sc >= 70 ? #FFD54F : sc >= 55 ? #FFA726 : #EF5350
+        if showScoreTag and useCleanScore
+            array.push(scoreLabs, label.new(bi + 3, (prox + dist) * 0.5, g + " " + str.tostring(sc) + " · " + f_kind_name(kind), style=label.style_label_left, color=color.new(gc, 20), textcolor=color.white, size=size.small))
+        else
+            array.push(scoreLabs, label(na))
+        bool doR = kind == 0 and sc >= minScoreArm
+        [ln1, lb1] = f_mk_tp(bi, prox, dir, R, 1.0, doR and draw1R)
+        [ln2, lb2] = f_mk_tp(bi, prox, dir, R, 2.0, doR and draw2R)
+        [ln3, lb3] = f_mk_tp(bi, prox, dir, R, 3.0, doR and draw3R)
+        [ln5, lb5] = f_mk_tp(bi, prox, dir, R, 5.0, doR and draw5R)
+        array.push(t1, ln1)
+        array.push(t2, ln2)
+        array.push(t3, ln3)
+        array.push(t5, ln5)
+        array.push(l1, lb1)
+        array.push(l2, lb2)
+        array.push(l3, lb3)
+        array.push(l5, lb5)
+        box tb = na
+        if (kind == 1 or kind == 2 or kind == 3 or kind == 4) and showTealTp and (not useCleanScore or sc >= minScoreArm)
+            float tp = f_struct_tp(dir, prox, dist)
+            color tc = kind == 4 ? fsBlueCol : tealCol
+            tb := box.new(bi, math.max(prox, tp), bi + extendBars, math.min(prox, tp),
+                 border_color=color.new(tc, 40), bgcolor=tc, border_width=1)
+        array.push(tealBoxes, tb)
+        box hb = na
+        if kind == 2 and showHtfZone and not na(htfTop) and not na(htfBot)
+            hb := box.new(bi - 15, math.max(htfTop, htfBot), bi + extendBars, math.min(htfTop, htfBot),
+                 border_color=color.new(htfCol, 35), bgcolor=htfCol, border_width=1)
+            if showLabels
+                label.new(bi - 14, (htfTop + htfBot) * 0.5, "HTF Zone", style=label.style_label_right, color=color.new(htfCol, 100), textcolor=#EF9A9A, size=size.tiny)
+        array.push(htfBoxes, hb)
+        array.push(lqLines, line(na))
+        array.push(lqLabs, label(na))
+        out := bi
+    out
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SETUP 1 — DETECT DISPLACEMENT → OB / FVG
@@ -326,12 +411,16 @@ f_recent_disp(int dir, int n) =>
 if useSetupMM and bearDisp and allowShort and useOB and f_can_birth()
     [p, d, ok] = f_find_ob(-1)
     if ok == 1 and f_zone_ok(p, d) and p > close
-        lastBirth := f_push_zone(-1, p, d, 0, na, na)
+        int nb = f_push_zone(-1, p, d, 0, na, na)
+        if nb >= 0
+            lastBirth := nb
 
 if useSetupMM and bullDisp and allowLong and useOB and f_can_birth()
     [p, d, ok] = f_find_ob(1)
     if ok == 1 and f_zone_ok(p, d) and p < close
-        lastBirth := f_push_zone(1, p, d, 0, na, na)
+        int nb = f_push_zone(1, p, d, 0, na, na)
+        if nb >= 0
+            lastBirth := nb
 
 bearFvg = bar_index >= 2 and low[2] > high and (low[2] - high) >= math.max(atr * minFvgAtr, minFvgPts)
 bullFvg = bar_index >= 2 and high[2] < low and (low - high[2]) >= math.max(atr * minFvgAtr, minFvgPts)
@@ -340,13 +429,17 @@ if useSetupMM and useFVG and allowShort and bearFvg and f_recent_disp(-1, 3) and
     float gapTop = low[2]
     float gapBot = high
     if f_zone_ok(gapBot, gapTop)
-        lastBirth := f_push_zone(-1, gapBot, gapTop, 0, na, na)
+        int nb = f_push_zone(-1, gapBot, gapTop, 0, na, na)
+        if nb >= 0
+            lastBirth := nb
 
 if useSetupMM and useFVG and allowLong and bullFvg and f_recent_disp(1, 3) and f_can_birth()
     float gapBot = high[2]
     float gapTop = low
     if f_zone_ok(gapTop, gapBot)
-        lastBirth := f_push_zone(1, gapTop, gapBot, 0, na, na)
+        int nb = f_push_zone(1, gapTop, gapBot, 0, na, na)
+        if nb >= 0
+            lastBirth := nb
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SETUP 2 / 3 — MSS → Fresh Zone  (+ HTF + LQ for Setup 3)
@@ -405,13 +498,15 @@ if mssSignalShort and f_can_birth()
         int kind = useSetupHtf ? 2 : 1
         float htfTop = lastHi
         float htfBot = lastHi - atr * 0.7
-        lastBirth := f_push_zone(-1, p, d, kind, htfTop, htfBot)
-        mssBorn := true
-        htfBorn := kind == 2
-        if showMssTag
-            label.new(bar_index, low, "MSS", style=label.style_label_up, color=color.new(mssCol, 45), textcolor=color.white, size=size.tiny)
-        if kind == 2 and showLabels
-            label.new(bar_index, p, "New Fresh Zone", style=label.style_label_left, color=color.new(supplyCol, 100), textcolor=#EF9A9A, size=size.tiny)
+        int nb = f_push_zone(-1, p, d, kind, htfTop, htfBot)
+        if nb >= 0
+            lastBirth := nb
+            mssBorn := true
+            htfBorn := kind == 2
+            if showMssTag
+                label.new(bar_index, low, "MSS", style=label.style_label_up, color=color.new(mssCol, 45), textcolor=color.white, size=size.tiny)
+            if kind == 2 and showLabels
+                label.new(bar_index, p, "New Fresh Zone", style=label.style_label_left, color=color.new(supplyCol, 100), textcolor=#EF9A9A, size=size.tiny)
 
 if mssSignalLong and f_can_birth() and not mssBorn
     [p, d, ok] = f_find_ob(1)
@@ -419,13 +514,15 @@ if mssSignalLong and f_can_birth() and not mssBorn
         int kind = useSetupHtf ? 2 : 1
         float htfBot = lastLo
         float htfTop = lastLo + atr * 0.7
-        lastBirth := f_push_zone(1, p, d, kind, htfTop, htfBot)
-        mssBorn := true
-        htfBorn := kind == 2
-        if showMssTag
-            label.new(bar_index, high, "MSS", style=label.style_label_down, color=color.new(mssCol, 45), textcolor=color.white, size=size.tiny)
-        if kind == 2 and showLabels
-            label.new(bar_index, p, "New Fresh Zone", style=label.style_label_left, color=color.new(demandCol, 100), textcolor=#80CBC4, size=size.tiny)
+        int nb = f_push_zone(1, p, d, kind, htfTop, htfBot)
+        if nb >= 0
+            lastBirth := nb
+            mssBorn := true
+            htfBorn := kind == 2
+            if showMssTag
+                label.new(bar_index, high, "MSS", style=label.style_label_down, color=color.new(mssCol, 45), textcolor=color.white, size=size.tiny)
+            if kind == 2 and showLabels
+                label.new(bar_index, p, "New Fresh Zone", style=label.style_label_left, color=color.new(demandCol, 100), textcolor=#80CBC4, size=size.tiny)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SETUP 4 — Sweep → MSS → BB + FVG confluence
@@ -509,12 +606,14 @@ if bbMssLong and f_can_birth()
             // Distal prefers sweep low when available
             float distUse = not na(lastBullSweepLo) ? math.min(zd, lastBullSweepLo) : zd
             if f_zone_ok(zp, distUse)
-                lastBirth := f_push_zone(1, zp, distUse, 3, na, na)
-                bbBorn := true
-                if showMssTag
-                    label.new(bar_index, high, "MSS", style=label.style_label_down, color=color.new(mssCol, 45), textcolor=color.white, size=size.tiny)
-                if showBbTag
-                    label.new(bar_index, zp, "BB + FVG", style=label.style_label_left, color=color.new(demandCol, 100), textcolor=#81D4FA, size=size.tiny)
+                int nb = f_push_zone(1, zp, distUse, 3, na, na)
+                if nb >= 0
+                    lastBirth := nb
+                    bbBorn := true
+                    if showMssTag
+                        label.new(bar_index, high, "MSS", style=label.style_label_down, color=color.new(mssCol, 45), textcolor=color.white, size=size.tiny)
+                    if showBbTag
+                        label.new(bar_index, zp, "BB + FVG", style=label.style_label_left, color=color.new(demandCol, 100), textcolor=#81D4FA, size=size.tiny)
 
 if bbMssShort and f_can_birth() and not bbBorn
     [bp, bd, bok] = f_find_ob(-1)
@@ -524,12 +623,14 @@ if bbMssShort and f_can_birth() and not bbBorn
         if zok == 1 and f_zone_ok(zp, zd) and zp > close
             float distUse = not na(lastBearSweepHi) ? math.max(zd, lastBearSweepHi) : zd
             if f_zone_ok(zp, distUse)
-                lastBirth := f_push_zone(-1, zp, distUse, 3, na, na)
-                bbBorn := true
-                if showMssTag
-                    label.new(bar_index, low, "MSS", style=label.style_label_up, color=color.new(mssCol, 45), textcolor=color.white, size=size.tiny)
-                if showBbTag
-                    label.new(bar_index, zp, "BB + FVG", style=label.style_label_left, color=color.new(supplyCol, 100), textcolor=#EF9A9A, size=size.tiny)
+                int nb = f_push_zone(-1, zp, distUse, 3, na, na)
+                if nb >= 0
+                    lastBirth := nb
+                    bbBorn := true
+                    if showMssTag
+                        label.new(bar_index, low, "MSS", style=label.style_label_up, color=color.new(mssCol, 45), textcolor=color.white, size=size.tiny)
+                    if showBbTag
+                        label.new(bar_index, zp, "BB + FVG", style=label.style_label_left, color=color.new(supplyCol, 100), textcolor=#EF9A9A, size=size.tiny)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SETUP 5 — Fractal Sweep (fs) → pink zone + blue expansion
@@ -617,6 +718,7 @@ armedProx = float(na)
 armedDist = float(na)
 armedR = float(na)
 armedKind = 0
+armedScore = 0
 
 // Long: wick below unused fs low, shallow, reclaim / close back above
 if useSetupFs and allowLong and f_can_fs()
@@ -631,16 +733,21 @@ if useSetupFs and allowLong and f_can_fs()
                     if depth >= fsMinDepthPts and depth <= atr * fsMaxDepthAtr
                         float prox = fsLv
                         float distUse = low
-                        lastFsBirth := f_push_zone(1, prox, distUse, 4, na, na)
-                        array.set(fsLoUsed, i, 1)
-                        fsBorn := true
-                        fsArmedNow := true
-                        armedNow := true
-                        armedDir := 1
-                        armedProx := prox
-                        armedDist := distUse
-                        armedR := math.abs(distUse - prox)
-                        armedKind := 4
+                        int nb = f_push_zone(1, prox, distUse, 4, na, na)
+                        if nb >= 0
+                            lastFsBirth := nb
+                            array.set(fsLoUsed, i, 1)
+                            fsBorn := true
+                            int scFs = array.get(zScore, array.size(zScore) - 1)
+                            if not useCleanScore or scFs >= minScoreArm
+                                fsArmedNow := true
+                                armedNow := true
+                                armedDir := 1
+                                armedProx := prox
+                                armedDist := distUse
+                                armedR := math.abs(distUse - prox)
+                                armedKind := 4
+                                armedScore := scFs
 
 // Short: wick above unused fs high
 if useSetupFs and allowShort and f_can_fs() and not fsBorn
@@ -655,16 +762,21 @@ if useSetupFs and allowShort and f_can_fs() and not fsBorn
                     if depth >= fsMinDepthPts and depth <= atr * fsMaxDepthAtr
                         float prox = fsLv
                         float dist = high
-                        lastFsBirth := f_push_zone(-1, prox, dist, 4, na, na)
-                        array.set(fsHiUsed, i, 1)
-                        fsBorn := true
-                        fsArmedNow := true
-                        armedNow := true
-                        armedDir := -1
-                        armedProx := prox
-                        armedDist := dist
-                        armedR := math.abs(dist - prox)
-                        armedKind := 4
+                        int nb = f_push_zone(-1, prox, dist, 4, na, na)
+                        if nb >= 0
+                            lastFsBirth := nb
+                            array.set(fsHiUsed, i, 1)
+                            fsBorn := true
+                            int scFs = array.get(zScore, array.size(zScore) - 1)
+                            if not useCleanScore or scFs >= minScoreArm
+                                fsArmedNow := true
+                                armedNow := true
+                                armedDir := -1
+                                armedProx := prox
+                                armedDist := dist
+                                armedR := math.abs(dist - prox)
+                                armedKind := 4
+                                armedScore := scFs
 
 // ═══════════════════════════════════════════════════════════════════════════
 // UPDATE ZONES
@@ -692,8 +804,10 @@ if nZ > 0
                     array.set(zLeft, i, 1)
 
             // After leave: Setup 3 builds LQ; Setup 1/2/4 arm on return to proximal
-            // Setup 5 already armed at birth
+            // Setup 5 already armed at birth (if score clean enough)
             if array.get(zLeft, i) == 1 and wasArmed == 0 and kind != 4
+                int scNow = array.get(zScore, i)
+                bool scoreOk = not useCleanScore or scNow >= minScoreArm
                 if kind == 2
                     float lq = array.get(zLq, i)
                     int touches = array.get(zLqN, i)
@@ -711,10 +825,17 @@ if nZ > 0
                                 array.set(zLqN, i, 1)
                         lq := array.get(zLq, i)
                         touches := array.get(zLqN, i)
+                        // Refresh score with LQ progress
+                        int scLq = f_score_zone(dir, prox, dist, kind, touches)
+                        array.set(zScore, i, scLq)
+                        if showScoreTag and useCleanScore and not na(array.get(scoreLabs, i))
+                            string gL = f_grade(scLq)
+                            label.set_text(array.get(scoreLabs, i), gL + " " + str.tostring(scLq) + " · " + f_kind_name(kind))
+                        scoreOk := not useCleanScore or scLq >= minScoreArm
                         bool swept = not na(lq) and touches >= minLqTouches and high > lq
                         bool inZn = high >= prox and low <= hiZ
                         bool fallback = (bar_index - array.get(zBirth, i)) >= lqFallbackBars and inZn and touches >= 1
-                        if inZn and (swept or fallback)
+                        if scoreOk and inZn and (swept or fallback)
                             array.set(zArmed, i, 1)
                             armedNow := true
                             armedDir := dir
@@ -722,6 +843,7 @@ if nZ > 0
                             armedDist := dist
                             armedR := math.abs(dist - prox)
                             armedKind := 2
+                            armedScore := scLq
                             lqReady := swept
                     else
                         if low <= prox + atrL * lqTolAtr * 2.0
@@ -736,10 +858,15 @@ if nZ > 0
                                 array.set(zLqN, i, 1)
                         lq := array.get(zLq, i)
                         touches := array.get(zLqN, i)
+                        int scLqB = f_score_zone(dir, prox, dist, kind, touches)
+                        array.set(zScore, i, scLqB)
+                        if showScoreTag and useCleanScore and not na(array.get(scoreLabs, i))
+                            label.set_text(array.get(scoreLabs, i), f_grade(scLqB) + " " + str.tostring(scLqB) + " · " + f_kind_name(kind))
+                        scoreOk := not useCleanScore or scLqB >= minScoreArm
                         bool sweptB = not na(lq) and touches >= minLqTouches and low < lq
                         bool inZnB = low <= prox and high >= loZ
                         bool fallbackB = (bar_index - array.get(zBirth, i)) >= lqFallbackBars and inZnB and touches >= 1
-                        if inZnB and (sweptB or fallbackB)
+                        if scoreOk and inZnB and (sweptB or fallbackB)
                             array.set(zArmed, i, 1)
                             armedNow := true
                             armedDir := dir
@@ -747,6 +874,7 @@ if nZ > 0
                             armedDist := dist
                             armedR := math.abs(dist - prox)
                             armedKind := 2
+                            armedScore := scLqB
                             lqReady := sweptB
 
                     // Draw / refresh LQ line while waiting / arming
@@ -767,7 +895,7 @@ if nZ > 0
                             label lbq = array.get(lqLabs, i)
                             if not na(lbq)
                                 label.set_xy(lbq, bar_index + 1, lqPx)
-                else
+                else if scoreOk
                     bool touched = dir == -1 ? (high >= prox and low <= hiZ) : (low <= prox and high >= loZ)
                     bool atProx = dir == -1 ? high >= prox : low <= prox
                     if touched and atProx
@@ -778,6 +906,7 @@ if nZ > 0
                         armedDist := dist
                         armedR := math.abs(dist - prox)
                         armedKind := kind
+                        armedScore := scNow
 
             if invalidateThru
                 bool blown = dir == -1 ? close > dist : close < dist
@@ -822,8 +951,25 @@ if not showHistory and nZ > 1
         if array.get(zDead, i) == 0
             box.set_bgcolor(array.get(boxes, i), color.new(color.gray, 94))
 
-alertcondition(armedNow and armedDir == -1, "Supply Short Arm", "TRH-SMM SHORT · E proximal · S distal")
-alertcondition(armedNow and armedDir == 1, "Demand Long Arm", "TRH-SMM LONG · E proximal · S distal")
+// Best live clean zone (for panel guidance)
+bestScore = -1
+bestKind = -1
+bestDir = 0
+bestProx = float(na)
+bestIdx = -1
+if nZ > 0
+    for i = 0 to nZ - 1
+        if array.get(zDead, i) == 0
+            int sc = array.get(zScore, i)
+            if sc > bestScore
+                bestScore := sc
+                bestKind := array.get(zKind, i)
+                bestDir := array.get(zDir, i)
+                bestProx := array.get(zProx, i)
+                bestIdx := i
+
+alertcondition(armedNow and armedDir == -1 and (not useCleanScore or armedScore >= minScoreArm), "Supply Short Arm", "TRH-SMM CLEAN SHORT · check score")
+alertcondition(armedNow and armedDir == 1 and (not useCleanScore or armedScore >= minScoreArm), "Demand Long Arm", "TRH-SMM CLEAN LONG · check score")
 alertcondition(mssBorn and mssSignalShort and not htfBorn, "MSS Fresh Supply", "TRH-SMM Setup2 MSS fresh supply zone")
 alertcondition(mssBorn and mssSignalLong and not htfBorn, "MSS Fresh Demand", "TRH-SMM Setup2 MSS fresh demand zone")
 alertcondition(htfBorn and mssSignalShort, "Setup3 HTF+LQ Supply", "TRH-SMM Setup3 HTF → Fresh → LQ supply")
@@ -836,30 +982,42 @@ alertcondition(armedNow and armedKind == 3 and armedDir == 1, "Setup4 Long Armed
 alertcondition(armedNow and armedKind == 3 and armedDir == -1, "Setup4 Short Armed", "TRH-SMM Setup4 SHORT armed in BB+FVG")
 alertcondition(fsBorn and fsArmedNow and armedDir == 1, "Setup5 fs Long", "TRH-SMM Setup5 fractal sweep LONG")
 alertcondition(fsBorn and fsArmedNow and armedDir == -1, "Setup5 fs Short", "TRH-SMM Setup5 fractal sweep SHORT")
+alertcondition(armedNow and armedScore >= 80, "Grade A Armed", "TRH-SMM GRADE A — cleanest entry")
 
 if showPanel
-    var table pan = table.new(position.top_right, 1, 8, bgcolor=color.new(#111111, 12), border_width=1)
+    var table pan = table.new(position.top_right, 1, 10, bgcolor=color.new(#111111, 12), border_width=1)
     if barstate.islast
-        table.cell(pan, 0, 0, "TRH Supply MM Pack", text_color=color.white, text_size=size.small)
-        table.cell(pan, 0, 1, "1 MM · 2 MSS · 3 HTF/LQ · 4 BB+FVG · 5 fs", text_color=#B0BEC5, text_size=size.tiny)
-        table.cell(pan, 0, 2, "E proximal · S distal · teal/blue = structure TP", text_color=#B0BEC5, text_size=size.tiny)
-        string on1 = useSetupMM ? "ON" : "off"
-        string on2 = useSetupMss ? "ON" : "off"
-        string on3 = useSetupHtf ? "ON" : "off"
-        string on4 = useSetupBb ? "ON" : "off"
-        string on5 = useSetupFs ? "ON" : "off"
-        table.cell(pan, 0, 3, "S1 " + on1 + " S2 " + on2 + " S3 " + on3 + " S4 " + on4 + " S5 " + on5, text_color=#78909C, text_size=size.tiny)
-        table.cell(pan, 0, 4, "zones " + str.tostring(array.size(zDir)), text_color=#78909C, text_size=size.tiny)
-        if not na(armedProx)
-            string side = armedDir == 1 ? "LONG" : "SHORT"
-            string ktag = armedKind == 4 ? "S5" : armedKind == 3 ? "S4" : armedKind == 2 ? "S3" : armedKind == 1 ? "S2" : "S1"
-            table.cell(pan, 0, 5, "ARMED " + ktag + " " + side + " · R=" + str.tostring(armedR, format.mintick),
-                 text_color=armedDir == 1 ? #26A69A : #EF5350, text_size=size.small)
+        table.cell(pan, 0, 0, "TRH Clean Score", text_color=color.white, text_size=size.small)
+        table.cell(pan, 0, 1, "A≥80 TAKE · B≥70 OK · C weak · D skip", text_color=#B0BEC5, text_size=size.tiny)
+        table.cell(pan, 0, 2, "Prefer S4 BB+FVG / S3 HTF+LQ · avoid lone fs", text_color=#B0BEC5, text_size=size.tiny)
+        if bestScore >= 0
+            string sideB = bestDir == 1 ? "LONG" : "SHORT"
+            string gB = f_grade(bestScore)
+            string rec = bestScore >= 80 ? "TAKE" : bestScore >= minScoreArm ? "OK / wait arm" : bestScore >= 55 ? "WEAK — skip" : "SKIP"
+            color rc = bestScore >= 80 ? #66BB6A : bestScore >= minScoreArm ? #FFD54F : #EF5350
+            table.cell(pan, 0, 3, "BEST " + gB + " " + str.tostring(bestScore) + " · " + f_kind_name(bestKind) + " " + sideB, text_color=rc, text_size=size.small)
+            table.cell(pan, 0, 4, rec + (not na(bestProx) ? " @ " + str.tostring(bestProx, format.mintick) : ""), text_color=rc, text_size=size.small)
         else
-            table.cell(pan, 0, 5, "Wait setup arm", text_color=#78909C, text_size=size.tiny)
-        string row6 = bbBorn ? "Setup 4 BB+FVG" : htfBorn ? "Setup 3 Fresh" : mssBorn ? "Setup 2 Fresh" : fsBorn ? "Setup 5 fs sweep" : "—"
-        table.cell(pan, 0, 6, row6, text_color=bbBorn ? #81D4FA : htfBorn ? #EF9A9A : mssCol, text_size=size.tiny)
-        table.cell(pan, 0, 7, lqReady ? "LQ ready" : lqBuilding ? "LQ building…" : useSetupFs ? "fs levels live" : "—", text_color=lqCol, text_size=size.tiny)
+            table.cell(pan, 0, 3, "No live zones", text_color=#78909C, text_size=size.tiny)
+            table.cell(pan, 0, 4, "Wait clean setup", text_color=#78909C, text_size=size.tiny)
+        if armedNow and not na(armedProx)
+            string side = armedDir == 1 ? "LONG" : "SHORT"
+            string gA = f_grade(armedScore)
+            table.cell(pan, 0, 5, "ARMED " + gA + " " + str.tostring(armedScore) + " · " + f_kind_name(armedKind) + " " + side, text_color=armedScore >= minScoreArm ? #66BB6A : #EF5350, text_size=size.small)
+        else
+            table.cell(pan, 0, 5, "Not armed — wait return / LQ / score≥" + str.tostring(minScoreArm), text_color=#78909C, text_size=size.tiny)
+        table.cell(pan, 0, 6, "Keep≥" + str.tostring(minScoreKeep) + " · Arm≥" + str.tostring(minScoreArm) + " · zones " + str.tostring(array.size(zDir)), text_color=#78909C, text_size=size.tiny)
+        string on1 = useSetupMM ? "1" : "-"
+        string on2 = useSetupMss ? "2" : "-"
+        string on3 = useSetupHtf ? "3" : "-"
+        string on4 = useSetupBb ? "4" : "-"
+        string on5 = useSetupFs ? "5" : "-"
+        table.cell(pan, 0, 7, "Setups " + on1 + on2 + on3 + on4 + on5 + (useCleanScore ? " · score ON" : " · score off"), text_color=#78909C, text_size=size.tiny)
+        string tip = "Your SL hits: usually C/D or lone S5-fs — take only A/B"
+        table.cell(pan, 0, 8, tip, text_color=#FFAB91, text_size=size.tiny)
+        string row9 = bbBorn ? "New S4 BB+FVG" : htfBorn ? "New S3" : mssBorn ? "New S2" : fsBorn ? "New S5 fs" : lqReady ? "LQ ready" : "—"
+        table.cell(pan, 0, 9, row9, text_color=#B0BEC5, text_size=size.tiny)
 
 plot(armedNow ? armedProx : na, "Armed E", color=entryCol, display=display.data_window)
 plot(armedNow ? armedDist : na, "Armed S", color=slCol, display=display.data_window)
+plot(bestScore >= 0 ? bestScore : na, "Best Score", color=#FFD54F, display=display.data_window)

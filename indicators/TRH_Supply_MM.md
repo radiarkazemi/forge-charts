@@ -1,20 +1,35 @@
-# TRH Supply MM Pack
+# TRH Supply MM Pack + Clean Score
 
-Five setups on one indicator (all kept; toggles independent):
+Five setups + a **0–100 clean score** so you know which entry to take.
 
-| Setup | Trigger | Visual |
-|-------|---------|--------|
-| **1 — Supply MM** | Displacement → OB / FVG | Zone + E/S + R ladder 1/2/3/5 |
-| **2 — MSS Fresh** | Break of structure → fresh zone | Zone + E/S + teal structure TP |
-| **3 — HTF + LQ** | HTF zone → MSS → New Fresh Zone → LQ build → sweep | HTF box + Fresh Zone + LQ + E/S + teal TP |
-| **4 — BB + FVG** | Liquidity sweep → MSS → Breaker Block + FVG confluence | `BB + FVG` zone + E/S + teal TP |
-| **5 — Fractal Sweep (fs)** | `fs` swing level → shallow wick sweep | Pink sweep zone + blue expansion TP · Major ERL tag |
+## Grades
 
-Shared rules: **proximal E · distal S**.
+| Grade | Score | Action |
+|-------|-------|--------|
+| **A** | ≥ 80 | **TAKE** — cleanest |
+| **B** | ≥ 70 | OK — arm allowed (default) |
+| **C** | ≥ 55 | Weak — usually skip |
+| **D** | < 55 | **SKIP** — often rejected |
 
-- Setups 1–4 arm after leave → return (Setup 3 prefers LQ sweep).
-- Setup 5 arms **on the sweep** (pink box = risk, blue = expansion).
-- When Setup 3 is ON, MSS births use the HTF+LQ path (supersedes plain Setup 2 on the same signal).
+## What raises / lowers score
+
+- **Higher base:** S4 BB+FVG · S3 HTF+LQ · then S2 · S1 · S5-fs (lowest)
+- **+** clean SL size (≈0.22–1.1 ATR) · RR ≥ 2 · displacement · LQ confirm · confluence
+- **−** tiny/huge SL · poor RR · mid-range chop · lone fs noise
+
+Defaults: reject zones &lt; 62 · arm only ≥ 70. Panel shows **BEST grade + TAKE/OK/SKIP**.
+
+## Setups
+
+| Setup | Trigger |
+|-------|---------|
+| 1 MM | Disp → OB/FVG · R ladder |
+| 2 MSS | Fresh zone retest · teal TP |
+| 3 HTF+LQ | Fresh + LQ sweep · teal TP |
+| 4 BB+FVG | Sweep → MSS → BB+FVG |
+| 5 fs | Fractal sweep · pink/blue |
+
+If you were hitting SL on cluttered 1m charts with all setups ON: take only **A/B**, prefer **S4 / S3**, turn off or ignore lone **S5-fs**.
 
 ## Raw
 
