@@ -199,6 +199,9 @@ var int[]   zDead = array.new_int()
 var float[] zLq = array.new_float()
 var int[]   zLqN = array.new_int()    // equal touches toward LQ
 var int[]   zScore = array.new_int()  // 0–100 clean score
+var float[] zTp = array.new_float()   // frozen structure TP (set at birth, locked at arm)
+var int[]   zFrozen = array.new_int() // 1 = ENTRY/SL/TP locked (armed / in-trade)
+var int themeTagBar = -999
 var label[] scoreLabs = array.new_label()
 var box[]   tealBoxes = array.new_box()
 var box[]   htfBoxes = array.new_box()
@@ -261,15 +264,29 @@ f_remove_at(int i) =>
         array.remove(zLq, i)
         array.remove(zLqN, i)
         array.remove(zScore, i)
+        array.remove(zTp, i)
+        array.remove(zFrozen, i)
         array.remove(scoreLabs, i)
         array.remove(tealBoxes, i)
         array.remove(htfBoxes, i)
         array.remove(lqLines, i)
         array.remove(lqLabs, i)
 
+f_protect(int i) =>
+    i >= 0 and i < array.size(zDir) and (array.get(zArmed, i) == 1 or array.get(zFrozen, i) == 1)
+
 f_shift_oldest() =>
+    // Prefer dropping an unprotected zone so an in-trade setup survives
     if array.size(zDir) > 0
-        f_remove_at(0)
+        int drop = -1
+        for i = 0 to array.size(zDir) - 1
+            if not f_protect(i)
+                drop := i
+                break
+        if drop >= 0
+            f_remove_at(drop)
+        else
+            f_remove_at(0)
 
 f_es_text(string tag, float px) =>
     clearEsLabels ? tag + " " + str.tostring(px, format.mintick) : tag
@@ -310,6 +327,16 @@ f_struct_tp(int dir, float entry, float sl) =>
                     tp := runExt
                     break
     tp
+
+// Lock ENTRY / SL / TP so live levels cannot drift mid-trade
+f_freeze_zone(int i) =>
+    if i >= 0 and i < array.size(zDir) and array.get(zFrozen, i) == 0
+        float prox = array.get(zProx, i)
+        float dist = array.get(zDist, i)
+        int dir = array.get(zDir, i)
+        array.set(zTp, i, f_struct_tp(dir, prox, dist))
+        array.set(zFrozen, i, 1)
+
 
 f_grade(int sc) =>
     sc >= 80 ? "A" : sc >= 70 ? "B" : sc >= 55 ? "C" : "D"
@@ -411,6 +438,11 @@ f_push_zone(int dir, float prox, float dist, int kind, float htfTop, float htfBo
         array.push(zLq, float(na))
         array.push(zLqN, 0)
         array.push(zScore, sc)
+        float tp0 = f_struct_tp(dir, prox, dist)
+        array.push(zTp, tp0)
+        // fs may arm at birth → freeze immediately so levels cannot drift
+        int fr0 = (kind == 4 and (not useCleanScore or sc >= minScoreArm)) ? 1 : 0
+        array.push(zFrozen, fr0)
         array.push(boxes, box.new(bi, math.max(prox, dist), bi + 1, math.min(prox, dist),
              border_color=color.new(zc, 15), bgcolor=zc, border_width=2))
         // Clear ENTRY / SL — solid thick lines + price labels
@@ -650,23 +682,24 @@ f_apply_distal(int i, int dir, float newDist) =>
     float prox = array.get(zProx, i)
     float cur = array.get(zDist, i)
     float out = cur
-    bool wider = dir == 1 ? (newDist < cur) : (newDist > cur)
-    if wider and f_zone_ok(prox, newDist)
-        array.set(zDist, i, newDist)
-        box.set_top(array.get(boxes, i), math.max(prox, newDist))
-        box.set_bottom(array.get(boxes, i), math.min(prox, newDist))
-        line.set_y1(array.get(sLines, i), newDist)
-        line.set_y2(array.get(sLines, i), newDist)
-        if showLabels and not na(array.get(sLabs, i))
-            label.set_y(array.get(sLabs, i), newDist)
-            label.set_text(array.get(sLabs, i), f_es_text("SL", newDist))
-        int sc = useCleanScore ? f_score_zone(dir, prox, newDist, array.get(zKind, i), array.get(zLqN, i)) : array.get(zScore, i)
-        array.set(zScore, i, sc)
-        if showScoreTag and useCleanScore and not na(array.get(scoreLabs, i))
-            label.set_text(array.get(scoreLabs, i), f_grade(sc) + " " + str.tostring(sc) + " · " + f_kind_name(array.get(zKind, i)))
-        out := newDist
+    // Never move SL after the trade is live
+    if array.get(zArmed, i) == 0 and array.get(zFrozen, i) == 0
+        bool wider = dir == 1 ? (newDist < cur) : (newDist > cur)
+        if wider and f_zone_ok(prox, newDist)
+            array.set(zDist, i, newDist)
+            box.set_top(array.get(boxes, i), math.max(prox, newDist))
+            box.set_bottom(array.get(boxes, i), math.min(prox, newDist))
+            line.set_y1(array.get(sLines, i), newDist)
+            line.set_y2(array.get(sLines, i), newDist)
+            if showLabels and not na(array.get(sLabs, i))
+                label.set_y(array.get(sLabs, i), newDist)
+                label.set_text(array.get(sLabs, i), f_es_text("SL", newDist))
+            int sc = useCleanScore ? f_score_zone(dir, prox, newDist, array.get(zKind, i), array.get(zLqN, i)) : array.get(zScore, i)
+            array.set(zScore, i, sc)
+            if showScoreTag and useCleanScore and not na(array.get(scoreLabs, i))
+                label.set_text(array.get(scoreLabs, i), f_grade(sc) + " " + str.tostring(sc) + " · " + f_kind_name(array.get(zKind, i)))
+            out := newDist
     out
-
 f_recent_disp(int dir, int n) =>
     bool hit = false
     for k = 0 to n
@@ -688,11 +721,12 @@ if themeActive and thDir != 0 and not na(thProx) and not na(thDist)
         for zi = 0 to array.size(zDir) - 1
             if array.get(zDead, zi) == 0 and array.get(zDir, zi) == thDir and math.abs(array.get(zProx, zi) - thProx) <= atr * 0.25
                 haveLive := true
-                // Keep distal synced to theme swing extreme
-                if thDir == 1 and thDist < array.get(zDist, zi)
-                    f_apply_distal(zi, thDir, thDist)
-                if thDir == -1 and thDist > array.get(zDist, zi)
-                    f_apply_distal(zi, thDir, thDist)
+                // Keep distal synced ONLY while still hunting — never mid-trade
+                if not f_protect(zi)
+                    if thDir == 1 and thDist < array.get(zDist, zi)
+                        f_apply_distal(zi, thDir, thDist)
+                    if thDir == -1 and thDist > array.get(zDist, zi)
+                        f_apply_distal(zi, thDir, thDist)
     // Always re-push theme when missing (fixes empty 5m SCOUT while demand rail is alive)
     if sideOk and not blown and not deep and not haveLive and f_zone_ok(thProx, thDist)
         int useKind = thKind == 2 ? 2 : 0
@@ -710,7 +744,8 @@ if themeActive and thDir != 0 and not na(thProx) and not na(thDist)
                 int idx = array.size(zDir) - 1
                 if idx >= 0
                     array.set(zLeft, idx, 1)
-                if showThemeTag and showLabels
+                if showThemeTag and showLabels and bar_index != themeTagBar
+                    themeTagBar := bar_index
                     label.new(bar_index, thProx, "THEME " + themeTf, style=label.style_label_left, color=color.new(brassCol, 20), textcolor=color.white, size=size.tiny)
 
 // Local S1 only when Theme Mode = Chart (independent TF)
@@ -1123,6 +1158,10 @@ if nZ > 0
             int wasArmed = array.get(zArmed, i)
             float atrL = atr > 0 ? atr : syminfo.mintick
 
+            // Already in trade → lock levels once (catches prior arms / fs birth)
+            if wasArmed == 1 and array.get(zFrozen, i) == 0
+                f_freeze_zone(i)
+
             if array.get(zLeft, i) == 0
                 bool left = dir == -1 ? close < loZ : close > hiZ
                 if left
@@ -1164,16 +1203,19 @@ if nZ > 0
                         if high > dist
                             dist := f_apply_distal(i, dir, high)
                             hiZ := math.max(prox, dist)
-                        if scoreOk and inZn and (swept or fallback)
-                            array.set(zArmed, i, 1)
-                            armedNow := true
-                            armedDir := dir
-                            armedProx := prox
-                            armedDist := dist
-                            armedR := math.abs(dist - prox)
-                            armedKind := 2
-                            armedScore := scLq
-                            lqReady := swept
+                        // Hunt complete → lock levels even for C-grade (manual entries stay put)
+                        if inZn and (swept or fallback)
+                            f_freeze_zone(i)
+                            if scoreOk
+                                array.set(zArmed, i, 1)
+                                armedNow := true
+                                armedDir := dir
+                                armedProx := prox
+                                armedDist := dist
+                                armedR := math.abs(dist - prox)
+                                armedKind := 2
+                                armedScore := scLq
+                                lqReady := swept
                     else
                         if low <= prox + atrL * lqTolAtr * 2.0
                             if na(lq)
@@ -1199,16 +1241,18 @@ if nZ > 0
                         if low < dist
                             dist := f_apply_distal(i, dir, low)
                             loZ := math.min(prox, dist)
-                        if scoreOk and inZnB and (sweptB or fallbackB)
-                            array.set(zArmed, i, 1)
-                            armedNow := true
-                            armedDir := dir
-                            armedProx := prox
-                            armedDist := dist
-                            armedR := math.abs(dist - prox)
-                            armedKind := 2
-                            armedScore := scLqB
-                            lqReady := sweptB
+                        if inZnB and (sweptB or fallbackB)
+                            f_freeze_zone(i)
+                            if scoreOk
+                                array.set(zArmed, i, 1)
+                                armedNow := true
+                                armedDir := dir
+                                armedProx := prox
+                                armedDist := dist
+                                armedR := math.abs(dist - prox)
+                                armedKind := 2
+                                armedScore := scLqB
+                                lqReady := sweptB
 
                     // Draw / refresh LQ line while waiting / arming
                     if showLqLine and not na(array.get(zLq, i))
@@ -1228,38 +1272,41 @@ if nZ > 0
                             label lbq = array.get(lqLabs, i)
                             if not na(lbq)
                                 label.set_xy(lbq, bar_index + 1, lqPx)
-                else if scoreOk
+                else
                     bool touched = dir == -1 ? (high >= prox and low <= hiZ) : (low <= prox and high >= loZ)
                     bool atProx = dir == -1 ? high >= prox : low <= prox
                     if touched and atProx
-                        array.set(zArmed, i, 1)
-                        armedNow := true
-                        armedDir := dir
-                        armedProx := prox
-                        armedDist := dist
-                        armedR := math.abs(dist - prox)
-                        armedKind := kind
-                        armedScore := scNow
+                        // Return to ENTRY → lock geometry; arm alerts only when score is clean
+                        f_freeze_zone(i)
+                        if scoreOk
+                            array.set(zArmed, i, 1)
+                            armedNow := true
+                            armedDir := dir
+                            armedProx := prox
+                            armedDist := dist
+                            armedR := math.abs(dist - prox)
+                            armedKind := kind
+                            armedScore := scNow
 
             if invalidateThru
                 bool blown = dir == -1 ? close > dist : close < dist
                 if blown
                     array.set(zDead, i, 1)
 
-            // Expire on age
-            if array.get(zDead, i) == 0 and (bar_index - array.get(zBirth, i)) >= maxZoneAge
+            // Expire on age (never kill an in-trade freeze)
+            if array.get(zDead, i) == 0 and not f_protect(i) and (bar_index - array.get(zBirth, i)) >= maxZoneAge
                 array.set(zDead, i, 1)
 
             // Expire dead HUNT — price already ran toward TP past ENTRY without fill
-            if array.get(zDead, i) == 0
+            if array.get(zDead, i) == 0 and not f_protect(i)
                 float riskZ = math.abs(dist - prox)
                 float past = dir == -1 ? (prox - close) : (close - prox)
                 if riskZ > 0 and past >= riskZ * expireDeepR
                     array.set(zDead, i, 1)
 
-            // Expire on structure TP hit (armed or price already through target)
+            // Expire on structure TP hit — use frozen TP when locked
             if expireOnTp and array.get(zDead, i) == 0
-                float tpHit = f_struct_tp(dir, prox, dist)
+                float tpHit = array.get(zFrozen, i) == 1 ? array.get(zTp, i) : f_struct_tp(dir, prox, dist)
                 bool hitTp = dir == -1 ? low <= tpHit : high >= tpHit
                 if hitTp
                     array.set(zDead, i, 1)
@@ -1284,9 +1331,11 @@ if nZ > 0
                 if not na(array.get(t5, i))
                     line.set_x2(array.get(t5, i), bar_index + extendBars)
 
-                // Extend / refresh structure TP for Setups 2–5
+                // Extend / refresh structure TP for Setups 2–5 (frozen TP stays put mid-trade)
                 if (kind == 1 or kind == 2 or kind == 3 or kind == 4) and showTealTp
-                    float tp = f_struct_tp(dir, prox, dist)
+                    float tp = array.get(zFrozen, i) == 1 ? array.get(zTp, i) : f_struct_tp(dir, prox, dist)
+                    if array.get(zFrozen, i) == 0
+                        array.set(zTp, i, tp)
                     color tc = kind == 4 ? fsBlueCol : tealCol
                     box.delete(array.get(tealBoxes, i))
                     array.set(tealBoxes, i, box.new(array.get(zBirth, i), math.max(prox, tp), bar_index + extendBars, math.min(prox, tp),
@@ -1319,10 +1368,15 @@ if dedupeOverlap and array.size(zDir) > 1
                     bool overlap = loI <= hiJ and loJ <= hiI
                     bool near = math.abs(pi - pj) <= atr * 0.4
                     if overlap or near
-                        if array.get(zScore, i) >= array.get(zScore, j)
+                        if f_protect(i) and not f_protect(j)
                             array.set(zDead, j, 1)
-                        else
+                        else if f_protect(j) and not f_protect(i)
                             array.set(zDead, i, 1)
+                        else if not f_protect(i) and not f_protect(j)
+                            if array.get(zScore, i) >= array.get(zScore, j)
+                                array.set(zDead, j, 1)
+                            else
+                                array.set(zDead, i, 1)
 
 // Physically remove expired / dead zones (clean chart)
 if array.size(zDir) > 0
@@ -1332,14 +1386,18 @@ if array.size(zDir) > 0
 
 // Cap live zones to maxLiveZones (drop oldest/lowest score extras)
 while array.size(zDir) > maxLiveZones
-    // Prefer removing lowest score
-    int drop = 0
+    // Prefer removing lowest score unprotected zone
+    int drop = -1
     int worst = 999
     for i = 0 to array.size(zDir) - 1
+        if f_protect(i)
+            continue
         int sc = array.get(zScore, i)
         if sc < worst
             worst := sc
             drop := i
+    if drop < 0
+        break
     f_remove_at(drop)
 
 nZ := array.size(zDir)
@@ -1355,18 +1413,35 @@ bestArmed = false
 bestLeft = false
 bestAge = 0
 if nZ > 0
+    // Prefer in-trade (armed/frozen) so cockpit ENTRY/SL/TP cannot jump mid-trade
+    int bestBoost = -1
     for i = 0 to nZ - 1
-        int sc = array.get(zScore, i)
-        if sc > bestScore
-            bestScore := sc
-            bestKind := array.get(zKind, i)
-            bestDir := array.get(zDir, i)
-            bestProx := array.get(zProx, i)
-            bestDist := array.get(zDist, i)
-            bestIdx := i
-            bestArmed := array.get(zArmed, i) == 1
-            bestLeft := array.get(zLeft, i) == 1
-            bestAge := bar_index - array.get(zBirth, i)
+        if f_protect(i)
+            int sc = array.get(zScore, i) + 1000
+            if sc > bestBoost
+                bestBoost := sc
+                bestScore := array.get(zScore, i)
+                bestKind := array.get(zKind, i)
+                bestDir := array.get(zDir, i)
+                bestProx := array.get(zProx, i)
+                bestDist := array.get(zDist, i)
+                bestIdx := i
+                bestArmed := array.get(zArmed, i) == 1
+                bestLeft := array.get(zLeft, i) == 1
+                bestAge := bar_index - array.get(zBirth, i)
+    if bestIdx < 0
+        for i = 0 to nZ - 1
+            int sc = array.get(zScore, i)
+            if sc > bestScore
+                bestScore := sc
+                bestKind := array.get(zKind, i)
+                bestDir := array.get(zDir, i)
+                bestProx := array.get(zProx, i)
+                bestDist := array.get(zDist, i)
+                bestIdx := i
+                bestArmed := array.get(zArmed, i) == 1
+                bestLeft := array.get(zLeft, i) == 1
+                bestAge := bar_index - array.get(zBirth, i)
 
 if onlyBestVisual and nZ > 1 and bestIdx >= 0
     for i = 0 to nZ - 1
@@ -1410,7 +1485,9 @@ distToEntry = float(na)
 
 if bestIdx >= 0 and not na(bestProx) and not na(bestDist)
     bestRisk := math.abs(bestDist - bestProx)
-    bestTp := f_struct_tp(bestDir, bestProx, bestDist)
+    bestTp := array.get(zFrozen, bestIdx) == 1 ? array.get(zTp, bestIdx) : f_struct_tp(bestDir, bestProx, bestDist)
+    if array.get(zFrozen, bestIdx) == 0
+        array.set(zTp, bestIdx, bestTp)
     bestReward := math.abs(bestTp - bestProx)
     bestRr := bestRisk > 0 ? bestReward / bestRisk : 0.0
     bestFresh := math.max(0, math.min(100, int(100.0 * (1.0 - bestAge / math.max(1.0, float(maxZoneAge))))))
