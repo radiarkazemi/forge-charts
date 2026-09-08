@@ -5,7 +5,7 @@
 #ifndef SMM_ENGINE_MQH
 #define SMM_ENGINE_MQH
 
-#define SMM_ENGINE_VERSION 100
+#define SMM_ENGINE_VERSION 101
 #define SMM_MAX_ZONES      8
 #define SMM_MAX_PIVOTS     24
 #define SMM_ATR_LEN        14
@@ -35,6 +35,7 @@ struct SmmZone
    int      grade;     // 0=D 1=C 2=B 3=A
    bool     left;
    bool     armed;
+   bool     frozen;    // ENTRY/SL/TP locked — no mid-trade rewrite
    bool     dead;
    double   lq;
    int      lqN;
@@ -409,6 +410,7 @@ void SmmPushZone(SmmZone &zones[], const SmmConfig &c,
    zones[n].grade = SmmGradeFromScore(sc);
    zones[n].left = (kind == SMM_KIND_FS) ? true : !c.requireLeave;
    zones[n].armed = (kind == SMM_KIND_FS) && (!c.useCleanScore || sc >= c.minScoreArm);
+   zones[n].frozen = zones[n].armed; // fs armed at birth → lock immediately
    zones[n].dead = false;
    zones[n].lq = 0;
    zones[n].lqN = 0;
@@ -659,7 +661,13 @@ void SmmManageZones(SmmZone &zones[], const SmmConfig &c,
       if(!zones[i].left)
       {
          bool left = (dir == -1) ? (close[1] < loZ) : (close[1] > hiZ);
-         if(left) zones[i].left = true;
+         if(left)
+         {
+            zones[i].left = true;
+            // Snapshot TP at leave so reward does not drift while HUNT runs
+            if(!zones[i].frozen)
+               zones[i].tp = SmmStructTp(c, dir, prox, dist, high, low, rates);
+         }
       }
 
       if(zones[i].left && !zones[i].armed && kind != SMM_KIND_FS)
@@ -680,6 +688,13 @@ void SmmManageZones(SmmZone &zones[], const SmmConfig &c,
                   else if(high[1] > zones[i].lq + atr * c.lqTolAtr)
                   { zones[i].lq = high[1]; zones[i].lqN = 1; }
                }
+               // Hunt wick beyond OB → widen SL only before freeze
+               if(!zones[i].frozen && high[1] > dist)
+               {
+                  zones[i].distal = high[1];
+                  dist = high[1];
+                  hiZ = MathMax(prox, dist);
+               }
                zones[i].score = SmmScoreZone(c, dir, prox, dist, kind, zones[i].lqN, atr,
                                              zones[i].impulse, high, low, rates);
                zones[i].grade = SmmGradeFromScore(zones[i].score);
@@ -687,8 +702,14 @@ void SmmManageZones(SmmZone &zones[], const SmmConfig &c,
                bool swept = zones[i].lqN >= c.minLqTouches && high[1] > zones[i].lq;
                bool inZn = high[1] >= prox && low[1] <= hiZ;
                bool fallback = zones[i].age >= c.lqFallbackBars && inZn && zones[i].lqN >= 1;
-               if(scoreOk && inZn && (swept || fallback))
-                  zones[i].armed = true;
+               // First return into zone → lock levels
+               if(inZn)
+               {
+                  zones[i].frozen = true;
+                  zones[i].tp = SmmStructTp(c, dir, prox, dist, high, low, rates);
+                  if(scoreOk && (swept || fallback))
+                     zones[i].armed = true;
+               }
             }
             else
             {
@@ -703,6 +724,12 @@ void SmmManageZones(SmmZone &zones[], const SmmConfig &c,
                   else if(low[1] < zones[i].lq - atr * c.lqTolAtr)
                   { zones[i].lq = low[1]; zones[i].lqN = 1; }
                }
+               if(!zones[i].frozen && low[1] < dist)
+               {
+                  zones[i].distal = low[1];
+                  dist = low[1];
+                  loZ = MathMin(prox, dist);
+               }
                zones[i].score = SmmScoreZone(c, dir, prox, dist, kind, zones[i].lqN, atr,
                                              zones[i].impulse, high, low, rates);
                zones[i].grade = SmmGradeFromScore(zones[i].score);
@@ -710,15 +737,25 @@ void SmmManageZones(SmmZone &zones[], const SmmConfig &c,
                bool swept = zones[i].lqN >= c.minLqTouches && low[1] < zones[i].lq;
                bool inZn = low[1] <= prox && high[1] >= loZ;
                bool fallback = zones[i].age >= c.lqFallbackBars && inZn && zones[i].lqN >= 1;
-               if(scoreOk && inZn && (swept || fallback))
-                  zones[i].armed = true;
+               if(inZn)
+               {
+                  zones[i].frozen = true;
+                  zones[i].tp = SmmStructTp(c, dir, prox, dist, high, low, rates);
+                  if(scoreOk && (swept || fallback))
+                     zones[i].armed = true;
+               }
             }
          }
-         else if(scoreOk)
+         else
          {
             bool touched = (dir == -1) ? (high[1] >= prox && low[1] <= hiZ) : (low[1] <= prox && high[1] >= loZ);
             bool atProx = (dir == -1) ? (high[1] >= prox) : (low[1] <= prox);
-            if(touched && atProx) zones[i].armed = true;
+            if(touched && atProx)
+            {
+               zones[i].frozen = true;
+               zones[i].tp = SmmStructTp(c, dir, prox, dist, high, low, rates);
+               if(scoreOk) zones[i].armed = true;
+            }
          }
       }
 
@@ -727,20 +764,23 @@ void SmmManageZones(SmmZone &zones[], const SmmConfig &c,
          bool blown = (dir == -1) ? (close[1] > dist) : (close[1] < dist);
          if(blown) zones[i].dead = true;
       }
-      if(zones[i].age >= c.maxZoneAge) zones[i].dead = true;
-      if(zones[i].armed)
+      // Never age-kill an armed/frozen in-trade setup
+      if(!zones[i].armed && !zones[i].frozen && zones[i].age >= c.maxZoneAge)
+         zones[i].dead = true;
+      if(zones[i].armed || zones[i].frozen)
       {
          bool hitTp = (dir == -1) ? (low[1] <= zones[i].tp) : (high[1] >= zones[i].tp);
          if(hitTp) zones[i].dead = true;
       }
 
-      // Refresh TP
-      zones[i].tp = SmmStructTp(c, dir, prox, dist, high, low, rates);
-      zones[i].entry = prox;
-      zones[i].sl = dist;
+      // Refresh TP only while still scouting (not left / not frozen)
+      if(!zones[i].left && !zones[i].frozen && !zones[i].armed)
+         zones[i].tp = SmmStructTp(c, dir, prox, dist, high, low, rates);
+      zones[i].entry = zones[i].proximal;
+      zones[i].sl = zones[i].distal;
    }
 
-   // Dedupe overlap — keep higher score
+   // Dedupe overlap — keep higher score (never drop active HUNT / frozen trade)
    if(c.dedupeOverlap)
    {
       for(int i = ArraySize(zones) - 1; i >= 1; i--)
@@ -757,8 +797,15 @@ void SmmManageZones(SmmZone &zones[], const SmmConfig &c,
             bool near = MathAbs(zones[i].proximal - zones[j].proximal) <= atr * 0.4;
             if(overlap || near)
             {
-               if(zones[i].score >= zones[j].score) zones[j].dead = true;
-               else zones[i].dead = true;
+               bool actI = zones[i].left || zones[i].armed || zones[i].frozen;
+               bool actJ = zones[j].left || zones[j].armed || zones[j].frozen;
+               if(actI && !actJ) zones[j].dead = true;
+               else if(actJ && !actI) zones[i].dead = true;
+               else if(!actI && !actJ)
+               {
+                  if(zones[i].score >= zones[j].score) zones[j].dead = true;
+                  else zones[i].dead = true;
+               }
             }
          }
       }
@@ -775,12 +822,16 @@ void SmmManageZones(SmmZone &zones[], const SmmConfig &c,
       }
    }
 
-   // Cap live
+   // Cap live — never drop active HUNT / frozen trade
    while(ArraySize(zones) > c.maxLiveZones)
    {
-      int drop = 0, worst = 999;
+      int drop = -1, worst = 999;
       for(int i = 0; i < ArraySize(zones); i++)
+      {
+         if(zones[i].left || zones[i].armed || zones[i].frozen) continue;
          if(zones[i].score < worst) { worst = zones[i].score; drop = i; }
+      }
+      if(drop < 0) break;
       for(int k = drop; k < ArraySize(zones) - 1; k++)
          zones[k] = zones[k + 1];
       ArrayResize(zones, ArraySize(zones) - 1);
@@ -805,13 +856,17 @@ int SmmBestArmedIndex(const SmmZone &zones[], const SmmConfig &c)
 
 int SmmBestLiveIndex(const SmmZone &zones[])
 {
-   int best = -1, bestSc = -1;
+   // Prefer frozen/armed, then left HUNT, then highest score — stops cockpit jump mid-trade
+   int best = -1, bestBoost = -1;
    for(int i = 0; i < ArraySize(zones); i++)
    {
       if(zones[i].dead) continue;
-      if(zones[i].score > bestSc)
+      int boost = zones[i].score;
+      if(zones[i].armed || zones[i].frozen) boost += 2000;
+      else if(zones[i].left) boost += 1000;
+      if(boost > bestBoost)
       {
-         bestSc = zones[i].score;
+         bestBoost = boost;
          best = i;
       }
    }

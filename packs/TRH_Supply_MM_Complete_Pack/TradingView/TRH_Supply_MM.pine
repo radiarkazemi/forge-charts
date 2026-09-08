@@ -272,8 +272,13 @@ f_remove_at(int i) =>
         array.remove(lqLines, i)
         array.remove(lqLabs, i)
 
+// Hard lock: armed / frozen trade — never rewrite or replace mid-trade
 f_protect(int i) =>
     i >= 0 and i < array.size(zDir) and (array.get(zArmed, i) == 1 or array.get(zFrozen, i) == 1)
+
+// Soft active: HUNT in progress — keep cockpit on this setup so ENTRY cannot jump
+f_active(int i) =>
+    i >= 0 and i < array.size(zDir) and (array.get(zLeft, i) == 1 or f_protect(i))
 
 f_shift_oldest() =>
     // Prefer dropping an unprotected zone so an in-trade setup survives
@@ -1166,6 +1171,8 @@ if nZ > 0
                 bool left = dir == -1 ? close < loZ : close > hiZ
                 if left
                     array.set(zLeft, i, 1)
+                    // Snapshot TP at leave so reward does not drift while HUNT runs
+                    array.set(zTp, i, f_struct_tp(dir, prox, dist))
 
             // After leave: Setup 3 builds LQ; Setup 1/2/4 arm on return to proximal
             // Setup 5 already armed at birth (if score clean enough)
@@ -1203,10 +1210,10 @@ if nZ > 0
                         if high > dist
                             dist := f_apply_distal(i, dir, high)
                             hiZ := math.max(prox, dist)
-                        // Hunt complete → lock levels even for C-grade (manual entries stay put)
-                        if inZn and (swept or fallback)
+                        // First return into zone → lock levels (manual early entries stay put)
+                        if inZn
                             f_freeze_zone(i)
-                            if scoreOk
+                            if scoreOk and (swept or fallback)
                                 array.set(zArmed, i, 1)
                                 armedNow := true
                                 armedDir := dir
@@ -1241,9 +1248,10 @@ if nZ > 0
                         if low < dist
                             dist := f_apply_distal(i, dir, low)
                             loZ := math.min(prox, dist)
-                        if inZnB and (sweptB or fallbackB)
+                        // First return into zone → lock levels (manual early entries stay put)
+                        if inZnB
                             f_freeze_zone(i)
-                            if scoreOk
+                            if scoreOk and (sweptB or fallbackB)
                                 array.set(zArmed, i, 1)
                                 armedNow := true
                                 armedDir := dir
@@ -1304,9 +1312,9 @@ if nZ > 0
                 if riskZ > 0 and past >= riskZ * expireDeepR
                     array.set(zDead, i, 1)
 
-            // Expire on structure TP hit — use frozen TP when locked
+            // Expire on structure TP hit — use locked TP when left/frozen
             if expireOnTp and array.get(zDead, i) == 0
-                float tpHit = array.get(zFrozen, i) == 1 ? array.get(zTp, i) : f_struct_tp(dir, prox, dist)
+                float tpHit = (array.get(zFrozen, i) == 1 or array.get(zLeft, i) == 1) ? array.get(zTp, i) : f_struct_tp(dir, prox, dist)
                 bool hitTp = dir == -1 ? low <= tpHit : high >= tpHit
                 if hitTp
                     array.set(zDead, i, 1)
@@ -1331,10 +1339,10 @@ if nZ > 0
                 if not na(array.get(t5, i))
                     line.set_x2(array.get(t5, i), bar_index + extendBars)
 
-                // Extend / refresh structure TP for Setups 2–5 (frozen TP stays put mid-trade)
+                // Extend / refresh structure TP for Setups 2–5 (locked once left or frozen)
                 if (kind == 1 or kind == 2 or kind == 3 or kind == 4) and showTealTp
-                    float tp = array.get(zFrozen, i) == 1 ? array.get(zTp, i) : f_struct_tp(dir, prox, dist)
-                    if array.get(zFrozen, i) == 0
+                    float tp = (array.get(zFrozen, i) == 1 or array.get(zLeft, i) == 1) ? array.get(zTp, i) : f_struct_tp(dir, prox, dist)
+                    if array.get(zFrozen, i) == 0 and array.get(zLeft, i) == 0
                         array.set(zTp, i, tp)
                     color tc = kind == 4 ? fsBlueCol : tealCol
                     box.delete(array.get(tealBoxes, i))
@@ -1368,11 +1376,15 @@ if dedupeOverlap and array.size(zDir) > 1
                     bool overlap = loI <= hiJ and loJ <= hiI
                     bool near = math.abs(pi - pj) <= atr * 0.4
                     if overlap or near
-                        if f_protect(i) and not f_protect(j)
+                        if f_active(i) and not f_active(j)
+                            array.set(zDead, j, 1)
+                        else if f_active(j) and not f_active(i)
+                            array.set(zDead, i, 1)
+                        else if f_protect(i) and not f_protect(j)
                             array.set(zDead, j, 1)
                         else if f_protect(j) and not f_protect(i)
                             array.set(zDead, i, 1)
-                        else if not f_protect(i) and not f_protect(j)
+                        else if not f_active(i) and not f_active(j)
                             if array.get(zScore, i) >= array.get(zScore, j)
                                 array.set(zDead, j, 1)
                             else
@@ -1386,11 +1398,11 @@ if array.size(zDir) > 0
 
 // Cap live zones to maxLiveZones (drop oldest/lowest score extras)
 while array.size(zDir) > maxLiveZones
-    // Prefer removing lowest score unprotected zone
+    // Prefer removing lowest score inactive zone
     int drop = -1
     int worst = 999
     for i = 0 to array.size(zDir) - 1
-        if f_protect(i)
+        if f_active(i)
             continue
         int sc = array.get(zScore, i)
         if sc < worst
@@ -1413,11 +1425,11 @@ bestArmed = false
 bestLeft = false
 bestAge = 0
 if nZ > 0
-    // Prefer in-trade (armed/frozen) so cockpit ENTRY/SL/TP cannot jump mid-trade
+    // Prefer active HUNT / in-trade so cockpit ENTRY/SL/TP cannot jump mid-trade
     int bestBoost = -1
     for i = 0 to nZ - 1
-        if f_protect(i)
-            int sc = array.get(zScore, i) + 1000
+        if f_active(i)
+            int sc = array.get(zScore, i) + (f_protect(i) ? 2000 : 1000)
             if sc > bestBoost
                 bestBoost := sc
                 bestScore := array.get(zScore, i)
@@ -1485,8 +1497,8 @@ distToEntry = float(na)
 
 if bestIdx >= 0 and not na(bestProx) and not na(bestDist)
     bestRisk := math.abs(bestDist - bestProx)
-    bestTp := array.get(zFrozen, bestIdx) == 1 ? array.get(zTp, bestIdx) : f_struct_tp(bestDir, bestProx, bestDist)
-    if array.get(zFrozen, bestIdx) == 0
+    bestTp := (array.get(zFrozen, bestIdx) == 1 or array.get(zLeft, bestIdx) == 1) ? array.get(zTp, bestIdx) : f_struct_tp(bestDir, bestProx, bestDist)
+    if array.get(zFrozen, bestIdx) == 0 and array.get(zLeft, bestIdx) == 0
         array.set(zTp, bestIdx, bestTp)
     bestReward := math.abs(bestTp - bestProx)
     bestRr := bestRisk > 0 ? bestReward / bestRisk : 0.0

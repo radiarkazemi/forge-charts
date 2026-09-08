@@ -14,7 +14,7 @@ Five setups on TradingView **and** a full MT5 Expert Advisor with smart autotrad
 
 Clean score A/B/C/D · Forge UI · auto-expire.
 
-**Mid-trade lock:** once a setup returns to ENTRY (or arms), ENTRY / SL / TP freeze — theme rails and structure TP no longer rewrite live levels.
+**Mid-trade lock:** TP snapshots when HUNT starts (leave). First return to ENTRY freezes ENTRY/SL/TP (even C-grade). Theme rails and structure TP cannot rewrite a live/active setup. MT5 EA keeps adopted levels locked.
 
 **Raw:** https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/trh-supply-mm-992e/indicators/TRH_Supply_MM.pine
 

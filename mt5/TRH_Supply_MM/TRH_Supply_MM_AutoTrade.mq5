@@ -338,11 +338,12 @@ void ClearWork(const string why)
 void AdoptWork(const SmmZone &s)
 {
    g_work = s;
+   g_work.frozen = true;
    g_workActive = true;
    g_workAdopted = TimeCurrent();
    g_workTries = 0;
-   g_workStatus = "adopted — placing";
-   PrintFormat("SMM ADOPT %s %s grade=%s score=%d E=%s SL=%s TP=%s",
+   g_workStatus = "adopted — levels locked";
+   PrintFormat("SMM ADOPT %s %s grade=%s score=%d E=%s SL=%s TP=%s (LOCKED)",
       SmmKindName(s.kind), s.dir == 1 ? "LONG" : "SHORT",
       SmmGradeLetter(s.grade), s.score,
       DoubleToString(s.entry, _Digits),
@@ -605,14 +606,25 @@ void OnTick()
       SmmManageZones(g_zones, g_cfg, high, low, close, copied);
    }
 
-   // Keep work slot synced with engine (age / arm / expire)
+   // Keep work slot alive — NEVER rewrite adopted ENTRY/SL/TP mid-trade
    if(g_workActive)
    {
       int wi = SmmFindZoneIndex(g_zones, g_work);
       if(wi < 0)
          ClearWork("zone expired");
       else
-         g_work = g_zones[wi];
+      {
+         g_zones[wi].frozen = true;
+         g_work.age = g_zones[wi].age;
+         g_work.armed = g_zones[wi].armed;
+         g_work.frozen = true;
+         g_work.dead = g_zones[wi].dead;
+         g_work.score = g_zones[wi].score;
+         g_work.grade = g_zones[wi].grade;
+         g_work.lq = g_zones[wi].lq;
+         g_work.lqN = g_zones[wi].lqN;
+         // entry / sl / tp stay at AdoptWork values
+      }
    }
 
    // Adopt best armed setup (prefer Grade A over any B)
