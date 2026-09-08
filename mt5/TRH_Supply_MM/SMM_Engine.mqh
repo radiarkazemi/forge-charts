@@ -38,6 +38,7 @@ struct SmmZone
    bool     dead;
    double   lq;
    int      lqN;
+   double   impulse;   // birth body for score refresh
    datetime barTime;
    int      barIndex;
    int      age;
@@ -378,6 +379,20 @@ void SmmPushZone(SmmZone &zones[], const SmmConfig &c,
    int sc = c.useCleanScore
       ? SmmScoreZone(c, dir, prox, dist, kind, 0, atr, body, high, low, rates)
       : 75;
+   // Confluence: another live zone same direction nearby
+   if(c.useCleanScore && atr > 0)
+   {
+      for(int j = 0; j < ArraySize(zones); j++)
+      {
+         if(zones[j].dead || zones[j].dir != dir || zones[j].kind == kind) continue;
+         if(MathAbs(zones[j].proximal - prox) <= atr * 0.55)
+         {
+            sc += 10;
+            break;
+         }
+      }
+      if(sc > 100) sc = 100;
+   }
    if(c.useCleanScore && c.rejectLowScore && sc < c.minScoreKeep)
       return;
 
@@ -397,9 +412,24 @@ void SmmPushZone(SmmZone &zones[], const SmmConfig &c,
    zones[n].dead = false;
    zones[n].lq = 0;
    zones[n].lqN = 0;
+   zones[n].impulse = body;
    zones[n].barTime = t;
    zones[n].barIndex = barIndex;
    zones[n].age = 0;
+}
+
+int SmmFindZoneIndex(const SmmZone &zones[], const SmmZone &needle)
+{
+   for(int i = 0; i < ArraySize(zones); i++)
+   {
+      if(zones[i].dead) continue;
+      if(zones[i].barTime == needle.barTime &&
+         zones[i].kind == needle.kind &&
+         zones[i].dir == needle.dir &&
+         MathAbs(zones[i].proximal - needle.proximal) <= _Point * 2.0)
+         return i;
+   }
+   return -1;
 }
 
 //+------------------------------------------------------------------+
@@ -651,7 +681,7 @@ void SmmManageZones(SmmZone &zones[], const SmmConfig &c,
                   { zones[i].lq = high[1]; zones[i].lqN = 1; }
                }
                zones[i].score = SmmScoreZone(c, dir, prox, dist, kind, zones[i].lqN, atr,
-                                             MathAbs(close[1] - close[1]), high, low, rates);
+                                             zones[i].impulse, high, low, rates);
                zones[i].grade = SmmGradeFromScore(zones[i].score);
                scoreOk = !c.useCleanScore || zones[i].score >= c.minScoreArm;
                bool swept = zones[i].lqN >= c.minLqTouches && high[1] > zones[i].lq;
@@ -674,7 +704,7 @@ void SmmManageZones(SmmZone &zones[], const SmmConfig &c,
                   { zones[i].lq = low[1]; zones[i].lqN = 1; }
                }
                zones[i].score = SmmScoreZone(c, dir, prox, dist, kind, zones[i].lqN, atr,
-                                             MathAbs(close[1] - close[1]), high, low, rates);
+                                             zones[i].impulse, high, low, rates);
                zones[i].grade = SmmGradeFromScore(zones[i].score);
                scoreOk = !c.useCleanScore || zones[i].score >= c.minScoreArm;
                bool swept = zones[i].lqN >= c.minLqTouches && low[1] < zones[i].lq;

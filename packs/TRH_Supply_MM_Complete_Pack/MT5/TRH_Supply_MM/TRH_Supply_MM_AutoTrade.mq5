@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "TRH Forge"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "1.00"
+#property version   "1.01"
 #property description "TRH Supply MM Pack EA: S1–S5 + A/B score gate + smart autotrade"
 #property strict
 
@@ -146,7 +146,7 @@ int OnInit()
    g_trade.SetTypeFillingBySymbol(_Symbol);
    ArrayResize(g_zones, 0);
    g_dayStartEquity = AccountInfoDouble(ACCOUNT_EQUITY);
-   Comment("TRH Supply MM Pack EA v1.00 — waiting…");
+   Comment("TRH Supply MM Pack EA v1.01 — waiting…");
    return INIT_SUCCEEDED;
 }
 
@@ -605,18 +605,35 @@ void OnTick()
       SmmManageZones(g_zones, g_cfg, high, low, close, copied);
    }
 
-   // Adopt best armed setup
+   // Keep work slot synced with engine (age / arm / expire)
+   if(g_workActive)
+   {
+      int wi = SmmFindZoneIndex(g_zones, g_work);
+      if(wi < 0)
+         ClearWork("zone expired");
+      else
+         g_work = g_zones[wi];
+   }
+
+   // Adopt best armed setup (prefer Grade A over any B)
    if(InpAutoTrade && !g_workActive && CountOurOrders() == 0)
    {
       int idx = SmmBestArmedIndex(g_zones, g_cfg);
       if(idx >= 0)
       {
-         // Prefer A-grade if any armed A exists
          int prefer = idx;
+         bool preferIsA = (g_zones[prefer].score >= InpPreferGradeA);
          for(int i = 0; i < ArraySize(g_zones); i++)
          {
             if(!g_zones[i].armed || g_zones[i].dead) continue;
-            if(g_zones[i].score >= InpPreferGradeA && g_zones[i].score > g_zones[prefer].score)
+            if(g_cfg.useCleanScore && g_zones[i].score < g_cfg.minScoreArm) continue;
+            bool isA = (g_zones[i].score >= InpPreferGradeA);
+            if(isA && !preferIsA)
+            {
+               prefer = i;
+               preferIsA = true;
+            }
+            else if(isA == preferIsA && g_zones[i].score > g_zones[prefer].score)
                prefer = i;
          }
          SmmZone s = g_zones[prefer];
