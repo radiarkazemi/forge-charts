@@ -1417,36 +1417,45 @@ export class ChartEngine {
   }
 
   private newsBoltY(chartH: number): number {
-    return chartH + 11;
+    return chartH + 14;
   }
 
   private hitNews(x: number, y: number): ChartNewsItem[] | null {
     if (!this.showNews) return null;
     const layout = this.layout();
     const bars = this.plotBars();
-    if (Math.abs(y - this.newsBoltY(layout.chart.h)) > 12) return null;
+    if (Math.abs(y - this.newsBoltY(layout.chart.h)) > 14) return null;
     const clusters = this.newsClusters(bars.length ? bars : this.bars, layout.main);
     let best: { dist: number; items: ChartNewsItem[] } | null = null;
     for (const cluster of clusters) {
       const dist = Math.abs(cluster.x - x);
-      if (dist <= 9 && (!best || dist < best.dist)) best = { dist, items: cluster.items };
+      if (dist <= 10 && (!best || dist < best.dist)) best = { dist, items: cluster.items };
     }
     return best?.items ?? null;
   }
 
   private paintNews(layout: { main: Rect; chart: Rect }, bars: Bar[]): void {
-    if (!this.showNews) return;
     const ctx = this.ctx;
     const clusters = this.newsClusters(bars, layout.main);
+    this.canvas.dataset.newsCount = String(this.newsItems.length);
+    this.canvas.dataset.newsMarks = String(clusters.length);
+    if (!this.showNews) return;
     const hoverIds = new Set((this.hoverNews ?? []).map((item) => item.id));
     for (const cluster of clusters) {
       const active = cluster.items.some((item) => item.id === this.selectedNewsId || hoverIds.has(item.id));
-      this.paintBolt(cluster.x, this.newsBoltY(layout.chart.h), active ? "#e9b3ff" : NEWS_BOLT);
+      const color = active ? "#f3c4ff" : NEWS_BOLT;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cluster.x + 0.5, layout.chart.h - 7);
+      ctx.lineTo(cluster.x + 0.5, layout.chart.h + 5);
+      ctx.stroke();
+      this.paintBolt(cluster.x, this.newsBoltY(layout.chart.h), color);
       if (cluster.items.length > 1) {
-        ctx.fillStyle = active ? "#e9b3ff" : NEWS_BOLT;
+        ctx.fillStyle = color;
         ctx.font = "9px Trebuchet MS, Arial, sans-serif";
         ctx.textAlign = "left";
-        ctx.fillText(String(cluster.items.length), cluster.x + 6, this.newsBoltY(layout.chart.h) + 3);
+        ctx.fillText(String(cluster.items.length), cluster.x + 7, this.newsBoltY(layout.chart.h) + 3);
       }
     }
     const hover = this.hoverNews;
@@ -1476,6 +1485,7 @@ export class ChartEngine {
     const ctx = this.ctx;
     ctx.save();
     ctx.translate(x, y);
+    ctx.scale(1.35, 1.35);
     ctx.beginPath();
     ctx.moveTo(-2.2, -7);
     ctx.lineTo(3.2, -7);

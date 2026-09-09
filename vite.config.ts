@@ -6,6 +6,13 @@ function forgeNewsPlugin(): Plugin {
     name: "forge-tv-news",
     async configureServer(server: ViteDevServer) {
       if (process.env.NEWS_AUTOSTART === "0") return;
+      const origin = process.env.NEWS_ORIGIN || "http://127.0.0.1:8787";
+      try {
+        const res = await fetch(`${origin}/health`, { signal: AbortSignal.timeout(400) });
+        if (res.ok) return;
+      } catch {
+        /* start an in-process collector when the standalone server is down */
+      }
       const { createNewsService } = await import("./server/news/index.mjs");
       const service = createNewsService();
       service.start();
