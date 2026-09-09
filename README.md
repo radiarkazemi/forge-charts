@@ -4,6 +4,8 @@ Original Super Chart–style trading terminal. **Not** TradingView’s library �
 
 The UI follows Super Chart layout: product header, dense chart toolbar, drawing flyouts, widget dock, range presets, replay, and a Pine pane.
 
+Live **Latest news** lightning bolts come from TradingView News Flow. `npm run dev` starts the SQLite collector (`server/news`) and draws purple bolts on the time scale. Standalone: `npm run news:server`.
+
 ## Run
 
 ```bash

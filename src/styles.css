@@ -310,10 +310,15 @@ button { cursor: pointer; }
 }
 .widget-icons button.on, .widget-icons button:hover { background: var(--hover); color: var(--text); }
 
-.watch, .objects { list-style: none; margin: 0; padding: 0; }
-.watch li, .objects li { display: flex; justify-content: space-between; gap: 8px; padding: 8px; border-radius: 4px; cursor: pointer; }
-.watch li.on, .watch li:hover, .objects li.on, .objects li:hover { background: var(--hover); }
-.watch span, .watch small, .muted { color: var(--muted); font-size: 11px; }
+.watch, .objects, .news-list { list-style: none; margin: 0; padding: 0; }
+.watch li, .objects li, .news-list li { display: flex; justify-content: space-between; gap: 8px; padding: 8px; border-radius: 4px; cursor: pointer; }
+.watch li.on, .watch li:hover, .objects li.on, .objects li:hover, .news-list li.on, .news-list li:hover { background: var(--hover); }
+.watch span, .watch small, .muted, .news-list span { color: var(--muted); font-size: 11px; }
+.news-list li { align-items: flex-start; justify-content: flex-start; }
+.news-list .bolt { color: #c158ff; flex: 0 0 16px; line-height: 16px; }
+.news-list strong { display: block; font-size: 12px; font-weight: 600; line-height: 1.35; color: var(--text); }
+.news-list a { color: var(--accent); text-decoration: none; }
+.news-list a:hover { text-decoration: underline; }
 .up { color: var(--up); }
 .down { color: var(--down); }
 .objects button, .link { background: transparent; border: 0; color: var(--text); }

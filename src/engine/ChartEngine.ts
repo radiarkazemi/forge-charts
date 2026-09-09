@@ -7,6 +7,7 @@ import { atr, stoch, vwap, wma } from "./studies";
 import { AXIS_FONT, CHART_FONT, CHART_FONT_BOLD, palettes } from "./theme";
 import type {
   Bar,
+  ChartNewsItem,
   ChartPoint,
   ChartStyle,
   ChartType,
@@ -24,7 +25,8 @@ import type {
 } from "./types";
 
 const PRICE_AXIS = 78;
-const TIME_AXIS = 28;
+const TIME_AXIS = 36;
+const NEWS_BOLT = "#c158ff";
 const COLORS = ["#2962ff", "#ff6d00", "#26a69a", "#ab47bc", "#42a5f5", "#ec407a", "#ffca28"];
 const RANGE_SEC: Record<RangePreset, number> = {
   "1D": 86400,
@@ -95,6 +97,11 @@ export class ChartEngine {
   private listeners = new Set<Listener>();
   private raf = 0;
   private snapshot: EngineSnapshot;
+  private newsItems: ChartNewsItem[] = [];
+  private showNews = true;
+  private hoverNews: ChartNewsItem[] | null = null;
+  private selectedNewsId: string | null = null;
+  private newsPick: ((item: ChartNewsItem) => void) | null = null;
 
   constructor(container: HTMLElement, symbol: SymbolInfo) {
     this.container = container;
@@ -152,7 +159,43 @@ export class ChartEngine {
       rangePreset: this.rangePreset,
       autoScale: this.priceSpan == null,
       chartStyle: this.chartStyle,
+      showNews: this.showNews,
+      hoverNews: this.hoverNews,
+      selectedNewsId: this.selectedNewsId,
+      newsCount: this.newsItems.length,
     };
+  }
+
+  setNews(items: ChartNewsItem[]): void {
+    this.newsItems = items
+      .filter((item) => item?.id && Number.isFinite(item.published))
+      .sort((a, b) => a.published - b.published);
+    if (this.selectedNewsId && !this.newsItems.some((item) => item.id === this.selectedNewsId)) {
+      this.selectedNewsId = null;
+    }
+    this.emit();
+    this.draw();
+  }
+
+  setShowNews(show: boolean): void {
+    this.showNews = show;
+    if (!show) {
+      this.hoverNews = null;
+      this.selectedNewsId = null;
+    }
+    this.emit();
+    this.draw();
+  }
+
+  onNewsPick(handler: ((item: ChartNewsItem) => void) | null): void {
+    this.newsPick = handler;
+  }
+
+  selectNews(id: string | null): void {
+    this.selectedNewsId = id;
+    this.hoverNews = id ? this.newsItems.filter((item) => item.id === id) : null;
+    this.emit();
+    this.draw();
   }
 
   setBars(bars: Bar[]): void {
@@ -879,6 +922,7 @@ export class ChartEngine {
     for (const extra of layout.extras) this.paintPane(extra.rect, extra.ind, pal);
     if (!this.hideDrawings) this.paintDrawings(layout.main, bars.length ? bars : this.bars.slice(-40), range);
     this.paintAxes(layout, bars, range, pal);
+    this.paintNews(layout, bars.length ? bars : this.bars);
     this.paintCrosshair(layout, bars, range, pal);
     this.paintLegend(layout.main, pal);
   }
@@ -1359,6 +1403,93 @@ export class ChartEngine {
     ctx.stroke();
   }
 
+  private newsClusters(bars: Bar[], rect: Rect): { x: number; items: ChartNewsItem[] }[] {
+    if (!this.showNews || !this.newsItems.length || !bars.length) return [];
+    const clusters: { x: number; items: ChartNewsItem[] }[] = [];
+    for (const item of this.newsItems) {
+      const x = this.xOfTime(item.published, bars, rect);
+      if (x < rect.x - 10 || x > rect.x + rect.w + 10) continue;
+      const last = clusters.at(-1);
+      if (last && Math.abs(last.x - x) < 11) last.items.push(item);
+      else clusters.push({ x, items: [item] });
+    }
+    return clusters;
+  }
+
+  private newsBoltY(chartH: number): number {
+    return chartH + 11;
+  }
+
+  private hitNews(x: number, y: number): ChartNewsItem[] | null {
+    if (!this.showNews) return null;
+    const layout = this.layout();
+    const bars = this.plotBars();
+    if (Math.abs(y - this.newsBoltY(layout.chart.h)) > 12) return null;
+    const clusters = this.newsClusters(bars.length ? bars : this.bars, layout.main);
+    let best: { dist: number; items: ChartNewsItem[] } | null = null;
+    for (const cluster of clusters) {
+      const dist = Math.abs(cluster.x - x);
+      if (dist <= 9 && (!best || dist < best.dist)) best = { dist, items: cluster.items };
+    }
+    return best?.items ?? null;
+  }
+
+  private paintNews(layout: { main: Rect; chart: Rect }, bars: Bar[]): void {
+    if (!this.showNews) return;
+    const ctx = this.ctx;
+    const clusters = this.newsClusters(bars, layout.main);
+    const hoverIds = new Set((this.hoverNews ?? []).map((item) => item.id));
+    for (const cluster of clusters) {
+      const active = cluster.items.some((item) => item.id === this.selectedNewsId || hoverIds.has(item.id));
+      this.paintBolt(cluster.x, this.newsBoltY(layout.chart.h), active ? "#e9b3ff" : NEWS_BOLT);
+      if (cluster.items.length > 1) {
+        ctx.fillStyle = active ? "#e9b3ff" : NEWS_BOLT;
+        ctx.font = "9px Trebuchet MS, Arial, sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText(String(cluster.items.length), cluster.x + 6, this.newsBoltY(layout.chart.h) + 3);
+      }
+    }
+    const hover = this.hoverNews;
+    if (!hover?.length) return;
+    const latest = hover[hover.length - 1];
+    const x = this.xOfTime(latest.published, bars, layout.main);
+    const title = hover.length > 1 ? `${hover.length} headlines · ${latest.title}` : latest.title;
+    const when = new Date(latest.published * 1000).toISOString().replace("T", " ").slice(0, 16);
+    const line = `${when}  ${latest.providerName || "News"}`;
+    ctx.font = AXIS_FONT;
+    const w = Math.min(layout.chart.w - 16, Math.max(ctx.measureText(title).width, ctx.measureText(line).width) + 16);
+    const boxW = Math.max(160, w);
+    const bx = clamp(x - boxW / 2, 6, Math.max(6, layout.chart.w - boxW - 6));
+    const by = layout.chart.h - 46;
+    ctx.fillStyle = palettes[this.theme].panel;
+    ctx.strokeStyle = NEWS_BOLT;
+    ctx.fillRect(bx, by, boxW, 38);
+    ctx.strokeRect(bx, by, boxW, 38);
+    ctx.fillStyle = palettes[this.theme].text;
+    ctx.textAlign = "left";
+    ctx.fillText(title.slice(0, 72), bx + 8, by + 15);
+    ctx.fillStyle = palettes[this.theme].muted;
+    ctx.fillText(line, bx + 8, by + 30);
+  }
+
+  private paintBolt(x: number, y: number, color: string): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.beginPath();
+    ctx.moveTo(-2.2, -7);
+    ctx.lineTo(3.2, -7);
+    ctx.lineTo(0.2, -1.2);
+    ctx.lineTo(4.4, -1.2);
+    ctx.lineTo(-2.6, 7);
+    ctx.lineTo(0.4, 1.4);
+    ctx.lineTo(-4.4, 1.4);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.restore();
+  }
+
   private paintCrosshair(
     layout: { main: Rect; chart: Rect },
     bars: Bar[],
@@ -1479,7 +1610,8 @@ export class ChartEngine {
 
   private updateCursor(x: number, y: number): void {
     const zone = this.hitZone(x, y);
-    if (zone === "price") this.canvas.style.cursor = "ns-resize";
+    if (this.hitNews(x, y)) this.canvas.style.cursor = "pointer";
+    else if (zone === "price") this.canvas.style.cursor = "ns-resize";
     else if (zone === "time") this.canvas.style.cursor = "ew-resize";
     else if (this.tool === "cursor") this.canvas.style.cursor = "default";
     else {
@@ -1496,6 +1628,15 @@ export class ChartEngine {
     const { x, y } = this.local(e);
     this.mouse = { x, y };
     const zone = this.hitZone(x, y);
+    const newsHit = this.hitNews(x, y);
+    if (newsHit) {
+      this.hoverNews = newsHit;
+      this.selectedNewsId = newsHit[newsHit.length - 1].id;
+      this.newsPick?.(newsHit[newsHit.length - 1]);
+      this.emit();
+      this.draw();
+      return;
+    }
     if (zone === "price") {
       this.ensurePriceSpan();
       this.dragging = "priceAxis";
@@ -1577,6 +1718,10 @@ export class ChartEngine {
   private onMove = (e: PointerEvent): void => {
     const { x, y } = this.local(e);
     this.mouse = { x, y };
+    const nextHover = this.hitNews(x, y);
+    const hoverChanged =
+      (nextHover?.map((item) => item.id).join("|") ?? "") !== (this.hoverNews?.map((item) => item.id).join("|") ?? "");
+    if (hoverChanged) this.hoverNews = nextHover;
     if (!this.dragging) this.updateCursor(x, y);
     if (this.dragging === "priceAxis" && this.priceSpan != null && this.priceMid != null) {
       const dy = y - this.dragLastY;
@@ -1654,6 +1799,7 @@ export class ChartEngine {
 
   private onLeave = (): void => {
     this.mouse = null;
+    this.hoverNews = null;
     this.canvas.style.cursor = "crosshair";
     this.draw();
   };

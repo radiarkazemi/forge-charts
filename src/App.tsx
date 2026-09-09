@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { findSymbol } from "./data/feed";
 import { fetchHistory, fetchQuotes, subscribeLive } from "./data/market";
+import { subscribeSymbolNews } from "./data/news";
 import { ChartEngine } from "./engine/ChartEngine";
-import type { ChartStyle, IndicatorKind, Interval, SymbolInfo } from "./engine/types";
+import type { ChartNewsItem, ChartStyle, IndicatorKind, Interval, SymbolInfo } from "./engine/types";
 import { CHART_STYLE_KEY } from "./chartStyle";
 import { loadJson, saveJson } from "./persist";
 import { BottomDock } from "./ui/BottomDock";
@@ -38,6 +39,8 @@ export default function App() {
   const [widget, setWidget] = useState<WidgetId | null>("watchlist");
   const [bottomOpen, setBottomOpen] = useState(false);
   const [alerts, setAlerts] = useState<string[]>([]);
+  const [news, setNews] = useState<ChartNewsItem[]>([]);
+  const [selectedNewsId, setSelectedNewsId] = useState<string | null>(null);
   const [quotes, setQuotes] = useState<Record<string, { price: number; change: number }>>({});
   const [recentSymbols, setRecentSymbols] = useState<SymbolInfo[]>(loadRecentSymbols);
   const [indicatorFavorites, setIndicatorFavorites] = useState<string[]>(() => loadJson(IND_FAV_KEY, []));
@@ -124,6 +127,32 @@ export default function App() {
     const saved = loadJson<ChartStyle | null>(CHART_STYLE_KEY, null);
     if (saved) eng.applyChartStyle(saved);
   }, [engine]);
+
+  useEffect(() => {
+    const eng = engineRef.current;
+    if (!eng) return;
+    eng.onNewsPick((item) => {
+      setSelectedNewsId(item.id);
+      setWidget("news");
+    });
+    return () => eng.onNewsPick(null);
+  }, [engine]);
+
+  useEffect(() => {
+    const ticker = snap?.symbol.ticker;
+    const eng = engineRef.current;
+    if (!ticker || !eng) return;
+    setNews([]);
+    setSelectedNewsId(null);
+    eng.setNews([]);
+    const unsub = subscribeSymbolNews(ticker, (items) => {
+      setNews(items);
+      eng.setNews(items);
+    });
+    return () => {
+      unsub();
+    };
+  }, [snap?.symbol.ticker]);
 
   useEffect(() => {
     if (!snap?.chartStyle) return;
@@ -222,6 +251,12 @@ export default function App() {
           quotes={quotes}
           onPick={loadSymbol}
           alerts={alerts}
+          news={news}
+          selectedNewsId={selectedNewsId}
+          onSelectNews={(item) => {
+            setSelectedNewsId(item.id);
+            engineRef.current?.selectNews(item.id);
+          }}
         />
       </div>
       <BottomDock engine={engine} open={bottomOpen} onToggle={() => setBottomOpen((v) => !v)} />

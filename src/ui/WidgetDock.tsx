@@ -1,7 +1,7 @@
 import { UNIVERSE } from "../data/feed";
 import type { ChartEngine } from "../engine/ChartEngine";
+import type { ChartNewsItem, SymbolInfo } from "../engine/types";
 import { formatPrice, formatVolume } from "../engine/math";
-import type { SymbolInfo } from "../engine/types";
 import { useEngine } from "./useEngine";
 
 export type WidgetId = "watchlist" | "alerts" | "object" | "data" | "news" | "calendar";
@@ -11,7 +11,7 @@ const ICONS: { id: WidgetId; label: string; glyph: string }[] = [
   { id: "alerts", label: "Alerts", glyph: "⏰" },
   { id: "object", label: "Object tree", glyph: "▣" },
   { id: "data", label: "Data Window", glyph: "▤" },
-  { id: "news", label: "News", glyph: "◉" },
+  { id: "news", label: "News", glyph: "⚡" },
   { id: "calendar", label: "Calendar", glyph: "▦" },
 ];
 
@@ -22,9 +22,12 @@ type Props = {
   quotes: Record<string, { price: number; change: number }>;
   onPick: (s: SymbolInfo) => void;
   alerts: string[];
+  news: ChartNewsItem[];
+  selectedNewsId: string | null;
+  onSelectNews: (item: ChartNewsItem) => void;
 };
 
-export function WidgetDock({ engine, active, onActive, quotes, onPick, alerts }: Props) {
+export function WidgetDock({ engine, active, onActive, quotes, onPick, alerts, news, selectedNewsId, onSelectNews }: Props) {
   const snap = useEngine(engine);
   const bar = snap?.hover ?? snap?.last;
   return (
@@ -119,10 +122,41 @@ export function WidgetDock({ engine, active, onActive, quotes, onPick, alerts }:
             </ul>
           ) : null}
           {active === "news" ? (
-            <ul className="objects">
-              <li>Fed holds rates — markets mixed</li>
-              <li>{snap?.symbol.ticker} liquidity stays elevated</li>
-              <li>Dollar index ticks higher into the close</li>
+            <ul className="news-list">
+              {news.length ? (
+                news.map((item) => (
+                  <li
+                    key={item.id}
+                    className={selectedNewsId === item.id ? "on" : ""}
+                    onClick={() => onSelectNews(item)}
+                  >
+                    <span className="bolt" aria-hidden>
+                      ⚡
+                    </span>
+                    <div>
+                      <strong>{item.title}</strong>
+                      <span>
+                        {item.providerName || "News"} · {formatNewsTime(item.published)}
+                        {item.storyUrl || item.link ? (
+                          <>
+                            {" · "}
+                            <a
+                              href={item.storyUrl || item.link || "#"}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              story
+                            </a>
+                          </>
+                        ) : null}
+                      </span>
+                    </div>
+                  </li>
+                ))
+              ) : (
+                <li className="muted">Waiting for TradingView headlines…</li>
+              )}
             </ul>
           ) : null}
           {active === "calendar" ? (
@@ -148,4 +182,13 @@ export function WidgetDock({ engine, active, onActive, quotes, onPick, alerts }:
       </nav>
     </div>
   );
+}
+
+function formatNewsTime(unix: number): string {
+  const ms = unix * 1000;
+  const delta = Date.now() - ms;
+  if (delta < 60_000) return "just now";
+  if (delta < 3_600_000) return `${Math.max(1, Math.floor(delta / 60_000))}m ago`;
+  if (delta < 86_400_000) return `${Math.max(1, Math.floor(delta / 3_600_000))}h ago`;
+  return new Date(ms).toISOString().replace("T", " ").slice(0, 16);
 }

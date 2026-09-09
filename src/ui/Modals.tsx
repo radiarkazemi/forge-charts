@@ -514,6 +514,18 @@ export function SettingsModal({
           </label>
         </div>
         <p className="hint">Scale, magnet, and grid are also on the chart overlays and drawing toolbar.</p>
+        <div className="settings-block">
+          <h3>Events</h3>
+          <label className="row">
+            Latest news
+            <input
+              type="checkbox"
+              checked={snap?.showNews ?? true}
+              onChange={(e) => engine?.setShowNews(e.target.checked)}
+            />
+          </label>
+          <p className="hint">Purple lightning bolts on the time scale come from TradingView News Flow for this symbol.</p>
+        </div>
         <button className="primary" onClick={onClose}>
           Done
         </button>
