@@ -9,3 +9,4 @@ dist/
 .env.*
 !.env.example
 indicators/.trh-alert-state.json
+server/news/data/

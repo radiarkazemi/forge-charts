@@ -310,10 +310,28 @@ button { cursor: pointer; }
 }
 .widget-icons button.on, .widget-icons button:hover { background: var(--hover); color: var(--text); }
 
-.watch, .objects { list-style: none; margin: 0; padding: 0; }
-.watch li, .objects li { display: flex; justify-content: space-between; gap: 8px; padding: 8px; border-radius: 4px; cursor: pointer; }
-.watch li.on, .watch li:hover, .objects li.on, .objects li:hover { background: var(--hover); }
-.watch span, .watch small, .muted { color: var(--muted); font-size: 11px; }
+.watch, .objects, .news-list { list-style: none; margin: 0; padding: 0; }
+.watch li, .objects li, .news-list li { display: flex; justify-content: space-between; gap: 8px; padding: 8px; border-radius: 4px; cursor: pointer; }
+.watch li.on, .watch li:hover, .objects li.on, .objects li:hover, .news-list li.on, .news-list li:hover { background: var(--hover); }
+.watch span, .watch small, .muted, .news-list span { color: var(--muted); font-size: 11px; }
+.news-list li { align-items: flex-start; justify-content: flex-start; }
+.news-list .bolt { color: #c158ff; flex: 0 0 16px; line-height: 16px; }
+.news-list strong { display: block; font-size: 12px; font-weight: 600; line-height: 1.35; color: var(--text); }
+.news-list a { color: var(--accent); text-decoration: none; }
+.news-list a:hover { text-decoration: underline; }
+.cal-list { list-style: none; margin: 0; padding: 0; }
+.cal-list li { display: flex; gap: 8px; align-items: flex-start; padding: 8px; border-radius: 4px; cursor: pointer; }
+.cal-list li:hover, .cal-list li.on { background: var(--hover); }
+.cal-list strong { display: block; font-size: 12px; font-weight: 600; line-height: 1.35; color: var(--text); }
+.cal-list span { color: var(--muted); font-size: 11px; }
+.cal-list a { color: var(--accent); text-decoration: none; }
+.cal-list a:hover { text-decoration: underline; }
+.cal-dot { width: 8px; height: 8px; border-radius: 1px; margin-top: 5px; flex: 0 0 8px; background: #787b86; }
+.cal-dot.high { background: #f23645; }
+.cal-dot.medium { background: #ff9800; }
+.cal-dot.low { background: #fdd835; }
+.cal-list li.impact-high { box-shadow: inset 2px 0 0 #f23645; }
+.cal-list li.impact-medium { box-shadow: inset 2px 0 0 #ff9800; }
 .up { color: var(--up); }
 .down { color: var(--down); }
 .objects button, .link { background: transparent; border: 0; color: var(--text); }
