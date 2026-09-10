@@ -156,6 +156,7 @@ export type ChartCalendarEvent = {
   title: string;
   timeUnix: number;
   currency: string | null;
+  countryName?: string | null;
   impact: "high" | "medium" | "low" | "holiday";
   category: string;
   eventFamily: string;

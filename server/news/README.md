@@ -23,6 +23,7 @@ Optional env:
 | `NEWS_DB_PATH` | `server/news/data/news.sqlite` | SQLite file |
 | `NEWS_POLL_MS` | `15000` | Re-fetch hot symbols |
 | `NEWS_LANG` | `en` | Headline language |
+| `CALENDAR_POLL_MS` | `120000` | Re-fetch Forex Factory calendar |
 
 `symbol` is a Forge ticker (`XAUUSD`, `BTCUSD`, `EURUSD`, `AAPL`, …). Mapped symbols live in `symbols.mjs`. Requesting a ticker also marks it “hot” so it is polled about every 15s.
 
@@ -62,16 +63,33 @@ curl 'http://127.0.0.1:8787/ingest?symbol=XAUUSD'   # force a TradingView pull
 
 ## Forex Factory calendar (separate collection)
 
-Economic releases (NFP, CPI, PPI, GDP, rate decisions, claims, …) live in the `calendar` table, not `news`. Source is the JSON/CSV Forex Factory publishes from [the calendar page](https://www.forexfactory.com/calendar).
+Economic releases (NFP, CPI, PPI, GDP, rate decisions, claims, …) live in the **`calendar` collection**, not `news`. Source is the JSON/CSV Forex Factory publishes from [the calendar page](https://www.forexfactory.com/calendar) (`nfs.faireconomy.media`). The HTML page itself is Cloudflare-protected; do not scrape it.
 
 ```bash
 curl 'http://127.0.0.1:8787/calendar?symbol=XAUUSD'
 curl 'http://127.0.0.1:8787/calendar?impact=high'
 curl 'http://127.0.0.1:8787/calendar?family=cpi'
+curl 'http://127.0.0.1:8787/calendar?category=labor'
 curl 'http://127.0.0.1:8787/calendar/ingest'
 ```
 
-Each row is classified: `impact` (high/medium/low/holiday), `category` (labor, inflation, growth, central_bank, …), `eventFamily` (`nfp`, `cpi`, `core_cpi`, `interest_rate`, …), plus `datetime`, `forecast`, `previous`, `actual` (when FF publishes it), `status` (upcoming/live/released), and `relatedTickers`.
+Omit `limit` to get up to 500 rows (`impact=high` is not capped at 1). Default time window is **now−7d … now+14d** (`from` / `to` Unix seconds override). `impact` is a **minimum**: `high` = red-folder only, `medium` = medium+high, `low` = everything except holidays.
+
+Each row is classified before insert:
+
+| Field | Meaning |
+| --- | --- |
+| `datetime` / `timeUnix` | Release time (ISO + Unix seconds) |
+| `currency` / `countryName` | FF currency (USD, EUR, …) and resolved country (German CPI → Germany) |
+| `impact` / `impactRank` | `high` 3, `medium` 2, `low` 1, `holiday` 0 |
+| `category` | `labor`, `inflation`, `growth`, `central_bank`, `consumer`, … |
+| `eventFamily` | Specific print: `nfp`, `core_cpi`, `cpi`, `interest_rate`, `jobless_claims`, … |
+| `forecast` / `previous` / `actual` | Consensus, prior, and print when FF publishes it |
+| `status` | `upcoming` / `live` / `released` |
+| `relatedTickers` | Forge symbols that should show the event (USD CPI → `XAUUSD`, `USCPI`, FX; ECB rate → `EURUSD` + gold) |
+| `url` | Forex Factory event link |
+
+Gold (`XAUUSD`) gets USD market holidays plus high/medium USD events, NFP/CPI/FOMC-style families, and high/medium Eurozone/UK/Japan/China macro (ECB, UK GDP, …).
 
 Realtime: `GET /calendar/stream?symbol=XAUUSD` (SSE events `hello`, `calendar`, `ping`). Polled about every 2 minutes (`CALENDAR_POLL_MS`).
 

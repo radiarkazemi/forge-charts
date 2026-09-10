@@ -109,6 +109,7 @@ function toChartCalendar(item: CalendarApiItem): ChartCalendarEvent {
     title: item.title,
     timeUnix: item.timeUnix,
     currency: item.currency,
+    countryName: item.countryName ?? null,
     impact: item.impact,
     category: item.category,
     eventFamily: item.eventFamily,

@@ -193,9 +193,9 @@ export function openNewsDb(filePath) {
     SELECT * FROM calendar
     WHERE time_unix >= $fromUnix AND time_unix <= $toUnix
       AND impact_rank >= $minImpact
-      AND ($ticker = '' OR related_tickers LIKE $tickerLike)
-      AND ($family = '' OR event_family = $family)
-      AND ($category = '' OR category = $category)
+      AND ($hasTicker = 0 OR related_tickers LIKE $tickerLike)
+      AND ($family = '' OR event_family = $familyMatch)
+      AND ($category = '' OR category = $categoryMatch)
     ORDER BY time_unix ASC, impact_rank DESC
     LIMIT $limit
   `);
@@ -317,7 +317,7 @@ export function openNewsDb(filePath) {
     },
     listCalendar(opts = {}) {
       const now = Math.floor(Date.now() / 1000);
-      const fromUnix = opts.fromUnix ?? now - 3 * 86400;
+      const fromUnix = opts.fromUnix ?? now - 7 * 86400;
       const toUnix = opts.toUnix ?? now + 14 * 86400;
       const minImpact = opts.minImpact ?? 0;
       const ticker = (opts.ticker || "").toUpperCase();
@@ -329,10 +329,12 @@ export function openNewsDb(filePath) {
           $fromUnix: fromUnix,
           $toUnix: toUnix,
           $minImpact: minImpact,
-          $ticker: ticker,
-          $tickerLike: ticker ? `%${ticker}%` : "%",
+          $hasTicker: ticker ? 1 : 0,
+          $tickerLike: ticker ? `%"${ticker}"%` : "%",
           $family: family,
+          $familyMatch: family,
           $category: category,
+          $categoryMatch: category,
           $limit: limit,
         })
         .map(calendarRow);

@@ -191,7 +191,11 @@ export function WidgetDock({
                         {item.title}
                       </strong>
                       <span>
-                        {formatCalTime(item.timeUnix)} · {item.category}
+                        {item.impact.toUpperCase()}
+                        {item.countryName ? ` · ${item.countryName}` : ""}
+                        {` · ${formatCalTime(item.timeUnix)}`}
+                        {item.category ? ` · ${formatFamily(item.category)}` : ""}
+                        {item.eventFamily ? ` · ${formatFamily(item.eventFamily)}` : ""}
                         {item.forecast ? ` · F ${item.forecast}` : ""}
                         {item.previous ? ` · P ${item.previous}` : ""}
                         {item.actual ? ` · A ${item.actual}` : ""}
@@ -228,6 +232,10 @@ export function WidgetDock({
       </nav>
     </div>
   );
+}
+
+function formatFamily(value: string): string {
+  return value.replace(/_/g, " ");
 }
 
 function formatCalTime(unix: number): string {

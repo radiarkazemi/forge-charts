@@ -402,6 +402,7 @@ function json(res, body, status = 200) {
 }
 
 function clampInt(raw, fallback, min, max) {
+  if (raw == null || raw === "") return fallback;
   const n = Number(raw);
   if (!Number.isFinite(n)) return fallback;
   return Math.min(max, Math.max(min, Math.floor(n)));
