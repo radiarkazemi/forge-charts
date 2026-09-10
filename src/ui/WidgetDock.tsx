@@ -1,7 +1,7 @@
 import { UNIVERSE } from "../data/feed";
 import type { ChartEngine } from "../engine/ChartEngine";
-import type { ChartNewsItem, SymbolInfo } from "../engine/types";
 import { formatPrice, formatVolume } from "../engine/math";
+import type { ChartCalendarEvent, ChartNewsItem, SymbolInfo } from "../engine/types";
 import { useEngine } from "./useEngine";
 
 export type WidgetId = "watchlist" | "alerts" | "object" | "data" | "news" | "calendar";
@@ -25,9 +25,25 @@ type Props = {
   news: ChartNewsItem[];
   selectedNewsId: string | null;
   onSelectNews: (item: ChartNewsItem) => void;
+  calendar: ChartCalendarEvent[];
+  selectedCalendarId: string | null;
+  onSelectCalendar: (item: ChartCalendarEvent) => void;
 };
 
-export function WidgetDock({ engine, active, onActive, quotes, onPick, alerts, news, selectedNewsId, onSelectNews }: Props) {
+export function WidgetDock({
+  engine,
+  active,
+  onActive,
+  quotes,
+  onPick,
+  alerts,
+  news,
+  selectedNewsId,
+  onSelectNews,
+  calendar,
+  selectedCalendarId,
+  onSelectCalendar,
+}: Props) {
   const snap = useEngine(engine);
   const bar = snap?.hover ?? snap?.last;
   return (
@@ -160,10 +176,40 @@ export function WidgetDock({ engine, active, onActive, quotes, onPick, alerts, n
             </ul>
           ) : null}
           {active === "calendar" ? (
-            <ul className="objects">
-              <li>CPI — tomorrow 12:30 UTC</li>
-              <li>FOMC minutes — Wed</li>
-              <li>NFP — Friday</li>
+            <ul className="cal-list">
+              {calendar.length ? (
+                calendar.map((item) => (
+                  <li
+                    key={item.id}
+                    className={`${selectedCalendarId === item.id ? "on" : ""} impact-${item.impact}`}
+                    onClick={() => onSelectCalendar(item)}
+                  >
+                    <span className={`cal-dot ${item.impact}`} title={item.impact} />
+                    <div>
+                      <strong>
+                        {item.currency ? `${item.currency} ` : ""}
+                        {item.title}
+                      </strong>
+                      <span>
+                        {formatCalTime(item.timeUnix)} · {item.category}
+                        {item.forecast ? ` · F ${item.forecast}` : ""}
+                        {item.previous ? ` · P ${item.previous}` : ""}
+                        {item.actual ? ` · A ${item.actual}` : ""}
+                        {item.url ? (
+                          <>
+                            {" · "}
+                            <a href={item.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
+                              FF
+                            </a>
+                          </>
+                        ) : null}
+                      </span>
+                    </div>
+                  </li>
+                ))
+              ) : (
+                <li className="muted">Waiting for Forex Factory calendar…</li>
+              )}
             </ul>
           ) : null}
         </div>
@@ -182,6 +228,10 @@ export function WidgetDock({ engine, active, onActive, quotes, onPick, alerts, n
       </nav>
     </div>
   );
+}
+
+function formatCalTime(unix: number): string {
+  return new Date(unix * 1000).toISOString().replace("T", " ").slice(0, 16) + " UTC";
 }
 
 function formatNewsTime(unix: number): string {

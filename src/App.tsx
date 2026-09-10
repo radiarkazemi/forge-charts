@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { findSymbol } from "./data/feed";
 import { fetchHistory, fetchQuotes, subscribeLive } from "./data/market";
-import { subscribeSymbolNews } from "./data/news";
+import { subscribeCalendar, subscribeSymbolNews } from "./data/news";
 import { ChartEngine } from "./engine/ChartEngine";
-import type { ChartNewsItem, ChartStyle, IndicatorKind, Interval, SymbolInfo } from "./engine/types";
+import type { ChartCalendarEvent, ChartNewsItem, ChartStyle, IndicatorKind, Interval, SymbolInfo } from "./engine/types";
 import { CHART_STYLE_KEY } from "./chartStyle";
 import { loadJson, saveJson } from "./persist";
 import { BottomDock } from "./ui/BottomDock";
@@ -41,6 +41,8 @@ export default function App() {
   const [alerts, setAlerts] = useState<string[]>([]);
   const [news, setNews] = useState<ChartNewsItem[]>([]);
   const [selectedNewsId, setSelectedNewsId] = useState<string | null>(null);
+  const [calendar, setCalendar] = useState<ChartCalendarEvent[]>([]);
+  const [selectedCalendarId, setSelectedCalendarId] = useState<string | null>(null);
   const [quotes, setQuotes] = useState<Record<string, { price: number; change: number }>>({});
   const [recentSymbols, setRecentSymbols] = useState<SymbolInfo[]>(loadRecentSymbols);
   const [indicatorFavorites, setIndicatorFavorites] = useState<string[]>(() => loadJson(IND_FAV_KEY, []));
@@ -135,7 +137,14 @@ export default function App() {
       setSelectedNewsId(item.id);
       setWidget("news");
     });
-    return () => eng.onNewsPick(null);
+    eng.onCalendarPick((item) => {
+      setSelectedCalendarId(item.id);
+      setWidget("calendar");
+    });
+    return () => {
+      eng.onNewsPick(null);
+      eng.onCalendarPick(null);
+    };
   }, [engine]);
 
   useEffect(() => {
@@ -148,6 +157,22 @@ export default function App() {
     const unsub = subscribeSymbolNews(ticker, (items) => {
       setNews(items);
       eng.setNews(items);
+    });
+    return () => {
+      unsub();
+    };
+  }, [snap?.symbol.ticker]);
+
+  useEffect(() => {
+    const ticker = snap?.symbol.ticker;
+    const eng = engineRef.current;
+    if (!ticker || !eng) return;
+    setCalendar([]);
+    setSelectedCalendarId(null);
+    eng.setCalendar([]);
+    const unsub = subscribeCalendar(ticker, (items) => {
+      setCalendar(items);
+      eng.setCalendar(items);
     });
     return () => {
       unsub();
@@ -256,6 +281,11 @@ export default function App() {
           onSelectNews={(item) => {
             setSelectedNewsId(item.id);
             engineRef.current?.selectNews(item.id);
+          }}
+          calendar={calendar}
+          selectedCalendarId={selectedCalendarId}
+          onSelectCalendar={(item) => {
+            setSelectedCalendarId(item.id);
           }}
         />
       </div>

@@ -60,6 +60,21 @@ curl 'http://127.0.0.1:8787/ingest?symbol=XAUUSD'   # force a TradingView pull
 
 `published` is Unix seconds. Put a lightning mark on a chart at that timestamp. Open `storyUrl` for the article; this API only stores headlines + a short preview.
 
+## Forex Factory calendar (separate collection)
+
+Economic releases (NFP, CPI, PPI, GDP, rate decisions, claims, …) live in the `calendar` table, not `news`. Source is the JSON/CSV Forex Factory publishes from [the calendar page](https://www.forexfactory.com/calendar).
+
+```bash
+curl 'http://127.0.0.1:8787/calendar?symbol=XAUUSD'
+curl 'http://127.0.0.1:8787/calendar?impact=high'
+curl 'http://127.0.0.1:8787/calendar?family=cpi'
+curl 'http://127.0.0.1:8787/calendar/ingest'
+```
+
+Each row is classified: `impact` (high/medium/low/holiday), `category` (labor, inflation, growth, central_bank, …), `eventFamily` (`nfp`, `cpi`, `core_cpi`, `interest_rate`, …), plus `datetime`, `forecast`, `previous`, `actual` (when FF publishes it), `status` (upcoming/live/released), and `relatedTickers`.
+
+Realtime: `GET /calendar/stream?symbol=XAUUSD` (SSE events `hello`, `calendar`, `ping`). Polled about every 2 minutes (`CALENDAR_POLL_MS`).
+
 ## Realtime (SSE)
 
 ```js

@@ -151,6 +151,21 @@ export type ChartNewsItem = {
   relatedSymbols: string[];
 };
 
+export type ChartCalendarEvent = {
+  id: string;
+  title: string;
+  timeUnix: number;
+  currency: string | null;
+  impact: "high" | "medium" | "low" | "holiday";
+  category: string;
+  eventFamily: string;
+  forecast: string | null;
+  previous: string | null;
+  actual: string | null;
+  status: string;
+  url: string | null;
+};
+
 export type SymbolInfo = {
   ticker: string;
   name: string;
@@ -249,4 +264,7 @@ export type EngineSnapshot = {
   hoverNews: ChartNewsItem[] | null;
   selectedNewsId: string | null;
   newsCount: number;
+  showCalendar: boolean;
+  hoverCalendar: ChartCalendarEvent[] | null;
+  calendarCount: number;
 };

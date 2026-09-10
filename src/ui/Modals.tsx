@@ -525,6 +525,15 @@ export function SettingsModal({
             />
           </label>
           <p className="hint">Purple lightning bolts on the time scale come from TradingView News Flow for this symbol.</p>
+          <label className="row">
+            Economic calendar
+            <input
+              type="checkbox"
+              checked={snap?.showCalendar ?? true}
+              onChange={(e) => engine?.setShowCalendar(e.target.checked)}
+            />
+          </label>
+          <p className="hint">Red/orange squares are Forex Factory high/medium-impact releases (CPI, NFP, rate decisions).</p>
         </div>
         <button className="primary" onClick={onClose}>
           Done

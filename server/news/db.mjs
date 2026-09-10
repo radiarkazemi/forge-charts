@@ -38,6 +38,42 @@ export function openNewsDb(filePath) {
       last_count INTEGER NOT NULL DEFAULT 0,
       last_error TEXT
     );
+    CREATE TABLE IF NOT EXISTS calendar (
+      id TEXT PRIMARY KEY,
+      source TEXT NOT NULL DEFAULT 'forexfactory',
+      title TEXT NOT NULL,
+      title_normalized TEXT,
+      currency TEXT,
+      country_code TEXT,
+      country_name TEXT,
+      datetime TEXT NOT NULL,
+      time_unix INTEGER NOT NULL,
+      time_label TEXT,
+      date_label TEXT,
+      timezone TEXT,
+      impact TEXT NOT NULL,
+      impact_rank INTEGER NOT NULL DEFAULT 1,
+      category TEXT NOT NULL,
+      event_family TEXT NOT NULL,
+      actual TEXT,
+      forecast TEXT,
+      previous TEXT,
+      actual_num REAL,
+      forecast_num REAL,
+      previous_num REAL,
+      unit TEXT,
+      surprise TEXT,
+      surprise_direction TEXT,
+      surprise_value REAL,
+      url TEXT,
+      related_tickers TEXT NOT NULL DEFAULT '[]',
+      all_day INTEGER NOT NULL DEFAULT 0,
+      status TEXT,
+      ingested_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS calendar_time_idx ON calendar (time_unix);
+    CREATE INDEX IF NOT EXISTS calendar_impact_idx ON calendar (impact_rank DESC, time_unix);
+    CREATE INDEX IF NOT EXISTS calendar_family_idx ON calendar (event_family, time_unix);
   `);
 
   const upsertNews = db.prepare(`
@@ -104,6 +140,66 @@ export function openNewsDb(filePath) {
   const countTickerStmt = db.prepare(`SELECT COUNT(*) AS n FROM news_tickers WHERE ticker = $ticker`);
   const lastPollStmt = db.prepare(`SELECT last_poll FROM ingest_state WHERE tv_symbol = $tvSymbol`);
 
+  const upsertCalendar = db.prepare(`
+    INSERT INTO calendar (
+      id, source, title, title_normalized, currency, country_code, country_name,
+      datetime, time_unix, time_label, date_label, timezone, impact, impact_rank,
+      category, event_family, actual, forecast, previous, actual_num, forecast_num,
+      previous_num, unit, surprise, surprise_direction, surprise_value, url,
+      related_tickers, all_day, status, ingested_at
+    ) VALUES (
+      $id, $source, $title, $titleNormalized, $currency, $countryCode, $countryName,
+      $datetime, $timeUnix, $timeLabel, $dateLabel, $timezone, $impact, $impactRank,
+      $category, $eventFamily, $actual, $forecast, $previous, $actualNum, $forecastNum,
+      $previousNum, $unit, $surprise, $surpriseDirection, $surpriseValue, $url,
+      $relatedTickers, $allDay, $status, $ingestedAt
+    )
+    ON CONFLICT(id) DO UPDATE SET
+      title = excluded.title,
+      title_normalized = excluded.title_normalized,
+      currency = excluded.currency,
+      country_code = excluded.country_code,
+      country_name = excluded.country_name,
+      datetime = excluded.datetime,
+      time_unix = excluded.time_unix,
+      time_label = excluded.time_label,
+      date_label = excluded.date_label,
+      timezone = excluded.timezone,
+      impact = excluded.impact,
+      impact_rank = excluded.impact_rank,
+      category = excluded.category,
+      event_family = excluded.event_family,
+      actual = COALESCE(excluded.actual, calendar.actual),
+      forecast = excluded.forecast,
+      previous = excluded.previous,
+      actual_num = COALESCE(excluded.actual_num, calendar.actual_num),
+      forecast_num = excluded.forecast_num,
+      previous_num = excluded.previous_num,
+      unit = COALESCE(excluded.unit, calendar.unit),
+      surprise = excluded.surprise,
+      surprise_direction = excluded.surprise_direction,
+      surprise_value = excluded.surprise_value,
+      url = COALESCE(excluded.url, calendar.url),
+      related_tickers = excluded.related_tickers,
+      all_day = excluded.all_day,
+      status = excluded.status,
+      ingested_at = excluded.ingested_at
+  `);
+
+  const calendarExists = db.prepare(`SELECT 1 AS ok FROM calendar WHERE id = $id`);
+  const calendarById = db.prepare(`SELECT * FROM calendar WHERE id = $id`);
+  const calendarCount = db.prepare(`SELECT COUNT(*) AS n FROM calendar`);
+  const calendarList = db.prepare(`
+    SELECT * FROM calendar
+    WHERE time_unix >= $fromUnix AND time_unix <= $toUnix
+      AND impact_rank >= $minImpact
+      AND ($ticker = '' OR related_tickers LIKE $tickerLike)
+      AND ($family = '' OR event_family = $family)
+      AND ($category = '' OR category = $category)
+    ORDER BY time_unix ASC, impact_rank DESC
+    LIMIT $limit
+  `);
+
   function rowToItem(row) {
     if (!row) return null;
     return {
@@ -163,7 +259,7 @@ export function openNewsDb(filePath) {
       return Boolean(existsStmt.get({ $id: id }));
     },
     stats() {
-      return { news: countStmt.get().n };
+      return { news: countStmt.get().n, calendar: calendarCount.get().n };
     },
     tickerCount(ticker) {
       return countTickerStmt.get({ $ticker: ticker.toUpperCase() }).n;
@@ -179,9 +275,108 @@ export function openNewsDb(filePath) {
         $lastError: error ?? null,
       });
     },
+    upsertCalendar(item) {
+      const existed = Boolean(calendarExists.get({ $id: item.id }));
+      upsertCalendar.run({
+        $id: item.id,
+        $source: item.source || "forexfactory",
+        $title: item.title,
+        $titleNormalized: item.titleNormalized ?? item.title,
+        $currency: item.currency ?? null,
+        $countryCode: item.countryCode ?? null,
+        $countryName: item.countryName ?? null,
+        $datetime: item.datetime,
+        $timeUnix: item.timeUnix,
+        $timeLabel: item.timeLabel ?? null,
+        $dateLabel: item.dateLabel ?? null,
+        $timezone: item.timezone ?? null,
+        $impact: item.impact,
+        $impactRank: item.impactRank,
+        $category: item.category,
+        $eventFamily: item.eventFamily,
+        $actual: item.actual ?? null,
+        $forecast: item.forecast ?? null,
+        $previous: item.previous ?? null,
+        $actualNum: item.actualNum ?? null,
+        $forecastNum: item.forecastNum ?? null,
+        $previousNum: item.previousNum ?? null,
+        $unit: item.unit ?? null,
+        $surprise: item.surprise ?? null,
+        $surpriseDirection: item.surpriseDirection ?? null,
+        $surpriseValue: item.surpriseValue ?? null,
+        $url: item.url ?? null,
+        $relatedTickers: JSON.stringify(item.relatedTickers || []),
+        $allDay: item.allDay ? 1 : 0,
+        $status: item.status ?? null,
+        $ingestedAt: Math.floor(Date.now() / 1000),
+      });
+      return !existed;
+    },
+    getCalendar(id) {
+      return calendarRow(calendarById.get({ $id: id }));
+    },
+    listCalendar(opts = {}) {
+      const now = Math.floor(Date.now() / 1000);
+      const fromUnix = opts.fromUnix ?? now - 3 * 86400;
+      const toUnix = opts.toUnix ?? now + 14 * 86400;
+      const minImpact = opts.minImpact ?? 0;
+      const ticker = (opts.ticker || "").toUpperCase();
+      const family = opts.family || "";
+      const category = opts.category || "";
+      const limit = opts.limit ?? 500;
+      return calendarList
+        .all({
+          $fromUnix: fromUnix,
+          $toUnix: toUnix,
+          $minImpact: minImpact,
+          $ticker: ticker,
+          $tickerLike: ticker ? `%${ticker}%` : "%",
+          $family: family,
+          $category: category,
+          $limit: limit,
+        })
+        .map(calendarRow);
+    },
     close() {
       db.close();
     },
+  };
+}
+
+function calendarRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    source: row.source,
+    title: row.title,
+    titleNormalized: row.title_normalized,
+    currency: row.currency,
+    countryCode: row.country_code,
+    countryName: row.country_name,
+    datetime: row.datetime,
+    timeUnix: row.time_unix,
+    timeLabel: row.time_label,
+    dateLabel: row.date_label,
+    timezone: row.timezone,
+    impact: row.impact,
+    impactRank: row.impact_rank,
+    category: row.category,
+    eventFamily: row.event_family,
+    actual: row.actual,
+    forecast: row.forecast,
+    previous: row.previous,
+    actualNum: row.actual_num,
+    forecastNum: row.forecast_num,
+    previousNum: row.previous_num,
+    unit: row.unit,
+    surprise: row.surprise,
+    surpriseDirection: row.surprise_direction,
+    surpriseValue: row.surprise_value,
+    url: row.url,
+    relatedTickers: safeJson(row.related_tickers),
+    allDay: Boolean(row.all_day),
+    status: row.status,
+    ingestedAt: row.ingested_at,
   };
 }
 

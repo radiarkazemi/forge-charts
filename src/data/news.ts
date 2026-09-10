@@ -1,6 +1,6 @@
-import type { ChartNewsItem } from "../engine/types";
+import type { ChartCalendarEvent, ChartNewsItem } from "../engine/types";
 
-export type { ChartNewsItem };
+export type { ChartCalendarEvent, ChartNewsItem };
 
 const BASE = "/news-api";
 
@@ -58,6 +58,75 @@ export function subscribeSymbolNews(
     window.clearInterval(poll);
     es.close();
   };
+}
+
+export async function fetchCalendar(opts: { symbol?: string; impact?: string; limit?: number } = {}): Promise<ChartCalendarEvent[]> {
+  const qs = new URLSearchParams();
+  if (opts.symbol) qs.set("symbol", opts.symbol);
+  if (opts.impact) qs.set("impact", opts.impact);
+  qs.set("limit", String(opts.limit ?? 500));
+  const data = await newsFetch<{ items?: CalendarApiItem[] }>(`/calendar?${qs}`);
+  return (data.items ?? []).map(toChartCalendar);
+}
+
+export function subscribeCalendar(
+  ticker: string,
+  onItems: (items: ChartCalendarEvent[]) => void,
+): () => void {
+  let stopped = false;
+  const pull = async () => {
+    try {
+      const items = await fetchCalendar({ symbol: ticker });
+      if (!stopped) onItems(items);
+    } catch {
+      /* collector may still be ingesting */
+    }
+  };
+  void pull();
+  const poll = window.setInterval(() => void pull(), 60_000);
+  const qs = ticker ? `?symbol=${encodeURIComponent(ticker)}` : "";
+  const es = new EventSource(`${BASE}/calendar/stream${qs}`);
+  es.addEventListener("hello", (ev) => {
+    const data = parseCal(ev);
+    if (!stopped) onItems((data.items ?? []).map(toChartCalendar));
+  });
+  es.addEventListener("calendar", (ev) => {
+    const data = parseCal(ev);
+    if (!stopped) onItems((data.items ?? []).map(toChartCalendar));
+  });
+  return () => {
+    stopped = true;
+    window.clearInterval(poll);
+    es.close();
+  };
+}
+
+type CalendarApiItem = ChartCalendarEvent & { timeUnix?: number };
+
+function toChartCalendar(item: CalendarApiItem): ChartCalendarEvent {
+  return {
+    id: item.id,
+    title: item.title,
+    timeUnix: item.timeUnix,
+    currency: item.currency,
+    impact: item.impact,
+    category: item.category,
+    eventFamily: item.eventFamily,
+    forecast: item.forecast,
+    previous: item.previous,
+    actual: item.actual,
+    status: item.status,
+    url: item.url,
+  };
+}
+
+function parseCal(ev: Event): { items?: CalendarApiItem[] } {
+  const raw = (ev as MessageEvent).data;
+  try {
+    return JSON.parse(String(raw || "{}")) as { items?: CalendarApiItem[] };
+  } catch {
+    return {};
+  }
 }
 
 function parse(ev: Event): { items?: ChartNewsItem[]; added?: ChartNewsItem[] } {
