@@ -14,7 +14,7 @@ Five setups on TradingView **and** a full MT5 Expert Advisor with smart autotrad
 
 Clean score A/B/C/D · Forge UI · auto-expire.
 
-**S1 tight MM:** last opposing candle before displacement → ENTRY=proximal · SL=distal of that pocket (e.g. 4396.69 / 4398.46). Min zone height default 1.0.
+**S1 tight MM:** last opposing candle before displacement → ENTRY=proximal · SL=distal of that pocket (e.g. 4396.69 / 4398.46). Min zone height default 1.0 · keep-score default 55 so tight boxes still draw.
 
 **Teaching setups on the theme TF:** S1 MM rail · **S2/S3 LQ→MSS→Fresh Supply/Demand retest** (shared across 1m/5m/15m).
 

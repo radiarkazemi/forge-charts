@@ -104,8 +104,8 @@ useCleanScore = input.bool(true, "Enable Scoring System", group=grpScore,
      tooltip="Scores each zone 0–100 and grades A/B/C/D so you only take cleaner entries.")
 rejectLowScore = input.bool(true, "Reject Zones Below Keep Score", group=grpScore,
      tooltip="Do not draw dirty zones at all (stops the 14-zone clutter / weak SL hits).")
-minScoreKeep = input.int(70, "Min Score To Keep Zone", minval=0, maxval=100, group=grpScore,
-     tooltip="Default 70 = hide C/D clutter. Only B+ zones stay on chart.")
+minScoreKeep = input.int(55, "Min Score To Keep Zone", minval=0, maxval=100, group=grpScore,
+     tooltip="Default 55 = keep C+ zones so tight MM boxes still draw. Raise to 70 to hide clutter.")
 minScoreArm  = input.int(70, "Min Score To Arm / Alert", minval=0, maxval=100, group=grpScore,
      tooltip="Even if drawn, only ARM when score ≥ this. A≈80+ · B≈70+ · C≈55+ · D=skip.")
 showScoreTag = input.bool(true, "Show Score Tag On Zone", group=grpScore)
@@ -376,7 +376,7 @@ f_phase(bool armed, bool left, int kind) =>
 
 // Clean score 0–100 — higher = safer / cleaner entry
 f_score_zone(int dir, float prox, float dist, int kind, int lqN) =>
-    int sc = kind == 3 ? 74 : kind == 2 ? 70 : kind == 1 ? 60 : kind == 0 ? 56 : 36
+    int sc = kind == 3 ? 74 : kind == 2 ? 70 : kind == 1 ? 66 : kind == 0 ? 68 : 36
     if hideFsNoise and kind == 4
         sc -= 8
     float risk = math.abs(dist - prox)
@@ -568,19 +568,13 @@ f_mm_theme_pack() =>
                     bestExt := high[k]
                     obP := low[k]
                     obD := high[k]
-        // SL above LQ / swing high (teaching: stop beyond the liquidity sweep)
-        float lqHi = ta.highest(high, math.max(mssObLookback, 8))
+        // SL = OB high, widen only to last pivot high (not full-range highest — that blew maxZoneAtr)
         float distUse = obD
         if not na(lastHi)
             distUse := math.max(distUse, lastHi)
-        if not na(lqHi)
-            distUse := math.max(distUse, lqHi)
-        if not na(prevHi)
-            distUse := math.max(distUse, prevHi)
         float h = not na(obP) ? math.abs(distUse - obP) : 0.0
-        bool ok = not na(obP) and h >= minZonePts and h <= a * maxZoneAtr and h > syminfo.mintick and obP > close
-        // Still hunting (not already 1.2R through ENTRY toward TP)
-        if ok and obP - close < h * expireDeepR
+        bool ok = not na(obP) and h >= minZonePts and h <= a * maxZoneAtr and h > syminfo.mintick
+        if ok
             dir := -1
             prox := obP
             dist := distUse
@@ -597,83 +591,63 @@ f_mm_theme_pack() =>
                     bestExtL := low[k]
                     obP := high[k]
                     obD := low[k]
-        float lqLo = ta.lowest(low, math.max(mssObLookback, 8))
         float distUse = obD
         if not na(lastLo)
             distUse := math.min(distUse, lastLo)
-        if not na(lqLo)
-            distUse := math.min(distUse, lqLo)
-        if not na(prevLo)
-            distUse := math.min(distUse, prevLo)
         float h = not na(obP) ? math.abs(distUse - obP) : 0.0
-        bool ok = not na(obP) and h >= minZonePts and h <= a * maxZoneAtr and h > syminfo.mintick and obP < close
-        if ok and close - obP < h * expireDeepR
+        bool ok = not na(obP) and h >= minZonePts and h <= a * maxZoneAtr and h > syminfo.mintick
+        if ok
             dir := 1
             prox := obP
             dist := distUse
             kind := useSetupHtf ? 2 : 1
 
-    // --- Fallback: S1 MM tight OB before displacement (no SL inflate to swing) ---
+    // --- Fallback: S1 MM — last opposing candle before recent displacement ---
     if dir == 0 and useSetupMM
-        float sHi = ta.highest(high, look)
-        float sLo = ta.lowest(low, look)
-        int dispK = 0
         int limM = math.min(look, bar_index - 1)
+        int dispK = 0
         if limM >= 2
             for k = 1 to limM
                 float b = math.abs(close[k] - open[k])
                 float rng = high[k] - low[k]
-                bool bearD = close[k] < open[k] and b >= a * minDispAtr * 0.85 and rng >= a * minCtxAtr * 0.85
-                bool bullD = close[k] > open[k] and b >= a * minDispAtr * 0.85 and rng >= a * minCtxAtr * 0.85
+                bool bearD = close[k] < open[k] and b >= a * minDispAtr * 0.75
+                bool bullD = close[k] > open[k] and b >= a * minDispAtr * 0.75
                 if dispK == 0 and (bearD or bullD)
                     dispK := k
         float demP = na
         float demD = na
         float supP = na
         float supD = na
-        if dispK > 0 and dispK < limM
-            for k = dispK + 1 to limM
+        // From displacement back: first opposing candle = origin pocket
+        int scanFrom = dispK > 0 ? dispK + 1 : 1
+        if limM >= scanFrom
+            for k = scanFrom to limM
                 if na(supP) and close[k] > open[k]
                     supP := low[k]
                     supD := high[k]
-                    int jmax = math.min(k + 3, limM)
-                    if jmax > k
-                        for j = k + 1 to jmax
-                            if close[j] > open[j] and low[j] >= supP - a * 0.15
-                                supP := math.min(supP, low[j])
-                                supD := math.max(supD, high[j])
-                            else
-                                break
                 if na(demP) and close[k] < open[k]
                     demP := high[k]
                     demD := low[k]
-                    int jmaxD = math.min(k + 3, limM)
-                    if jmaxD > k
-                        for j = k + 1 to jmaxD
-                            if close[j] < open[j] and high[j] <= demP + a * 0.15
-                                demP := math.max(demP, high[j])
-                                demD := math.min(demD, low[j])
-                            else
-                                break
+                if (not na(supP) or not na(demP)) and dispK > 0
+                    break
+        // Absolute fallback: nearest opposing candle at all
+        if na(supP) or na(demP)
+            for k = 1 to limM
+                if na(supP) and close[k] > open[k]
+                    supP := low[k]
+                    supD := high[k]
+                if na(demP) and close[k] < open[k]
+                    demP := high[k]
+                    demD := low[k]
                 if not na(supP) and not na(demP)
                     break
-        float tol = a * mmOriginTolAtr
-        if not na(supD) and supD < sHi - tol
-            supP := na
-            supD := na
-        if not na(demD) and demD > sLo + tol
-            demP := na
-            demD := na
         float demH = not na(demP) ? math.abs(demD - demP) : 0.0
         float supH = not na(supP) ? math.abs(supD - supP) : 0.0
-        bool demOk = not na(demP) and demH >= minZonePts and demH <= a * maxZoneAtr and demH > syminfo.mintick and close > demD
-        bool supOk = not na(supP) and supH >= minZonePts and supH <= a * maxZoneAtr and supH > syminfo.mintick and close < supD
-        if demOk and close - demP >= demH * expireDeepR
-            demOk := false
-        if supOk and supP - close >= supH * expireDeepR
-            supOk := false
-        bool wantShort = dispK > 0 and close[dispK] < open[dispK]
-        bool wantLong = dispK > 0 and close[dispK] > open[dispK]
+        bool demOk = not na(demP) and demH >= minZonePts and demH <= a * maxZoneAtr and demH > syminfo.mintick
+        bool supOk = not na(supP) and supH >= minZonePts and supH <= a * maxZoneAtr and supH > syminfo.mintick
+        // Prefer the side of the displacement; else nearest to price
+        bool wantShort = dispK > 0 ? close[dispK] < open[dispK] : false
+        bool wantLong = dispK > 0 ? close[dispK] > open[dispK] : false
         if wantShort and supOk
             dir := -1
             prox := supP
@@ -752,16 +726,19 @@ f_find_ob(int dir) =>
                 found := 1
     [prox, dist, found]
 
-// S1 Money Management — teaching tight supply/demand (4396.69 ENTRY / 4398.46 SL):
-// LAST opposing candle (+ small consolidation pocket) BEFORE displacement.
-// Keep the pocket high/low — do NOT inflate SL to a far swing extreme.
+// S1 Money Management — last opposing candle (+ pocket) before current bar.
+// No ta.* here (must stay safe when called only on displacement bars).
 f_find_ob_mm(int dir, int look) =>
     float prox = na
     float dist = na
     int found = 0
+    float swingHi = high[1]
+    float swingLo = low[1]
     int lim = math.min(look, bar_index - 1)
     if lim >= 1
         for k = 1 to lim
+            swingHi := math.max(swingHi, high[k])
+            swingLo := math.min(swingLo, low[k])
             if found == 0
                 bool opp = dir == -1 ? close[k] > open[k] : close[k] < open[k]
                 if opp
@@ -776,7 +753,7 @@ f_find_ob_mm(int dir, int look) =>
                     if jmax > k
                         for j = k + 1 to jmax
                             bool same = dir == -1 ? close[j] > open[j] : close[j] < open[j]
-                            bool stillPocket = dir == -1 ? (low[j] >= prox - atr * 0.15) : (high[j] <= prox + atr * 0.15)
+                            bool stillPocket = dir == -1 ? (low[j] >= prox - atr * 0.25) : (high[j] <= prox + atr * 0.25)
                             if same and stillPocket
                                 if dir == -1
                                     prox := math.min(prox, low[j])
@@ -786,14 +763,38 @@ f_find_ob_mm(int dir, int look) =>
                                     dist := math.min(dist, low[j])
                             else
                                 break
-    float swingHi = ta.highest(high, math.max(lim, 1))
-    float swingLo = ta.lowest(low, math.max(lim, 1))
+    // Soft near-swing filter only — never reject a valid pocket that sits under a wick extreme
     float tol = atr * mmOriginTolAtr
-    if found == 1
+    if found == 1 and tol > 0
         if dir == -1 and dist < swingHi - tol
-            found := 0
+            // Fallback: use swing-extreme opposing candle instead of rejecting everything
+            float best = -10e10
+            float bp = na
+            float bd = na
+            for k = 1 to lim
+                if close[k] > open[k] and high[k] >= best
+                    best := high[k]
+                    bp := low[k]
+                    bd := high[k]
+            if not na(bp)
+                prox := bp
+                dist := bd
+            else
+                found := 0
         if dir == 1 and dist > swingLo + tol
-            found := 0
+            float best = 10e10
+            float bp = na
+            float bd = na
+            for k = 1 to lim
+                if close[k] < open[k] and low[k] <= best
+                    best := low[k]
+                    bp := high[k]
+                    bd := low[k]
+            if not na(bp)
+                prox := bp
+                dist := bd
+            else
+                found := 0
     [prox, dist, found]
 
 // MSS / S3 fresh zone: ORIGIN opposing candle (deepest demand / highest supply),
@@ -858,8 +859,9 @@ f_recent_disp(int dir, int n) =>
 
 // ONE shared theme rail across aligned TFs (1m/5m/15m → same ENTRY/SL/TP).
 // Sticky lock: once accepted, geometry never rewrites mid-trade; locals suppressed.
-bool localBirthOk = not (themeActive and lockAllToTheme)
-// S1 MM always allowed on the chart TF — tight teaching supply must not die under theme lock
+// Allow chart-local births so the indicator is never empty when theme pack is quiet.
+// ONE SETUP still prefers/keeps the theme rail and dims competing non-MM kinds.
+bool localBirthOk = true
 bool mmLocalOk = true
 
 if themeActive and thDir != 0 and not na(thProx) and not na(thDist)
@@ -894,7 +896,8 @@ if themeActive and thDir != 0 and not na(thProx) and not na(thDist)
             if array.get(zDead, zi) == 0 and array.get(zTheme, zi) == 0 and array.get(zKind, zi) != 0 and not f_protect(zi)
                 array.set(zDead, zi, 1)
     // Push once — then FREEZE. No distal sync, no re-birth while live.
-    if not haveLive and sideOk and not blown and not deep and f_zone_ok(thProx, thDist)
+    // Push whenever pack has a zone (deep only blocks totally dead rails past SL blow)
+    if not haveLive and sideOk and not blown and f_zone_ok(thProx, thDist)
         // Keep theme pack kind: 0=MM · 1=MSS Fresh · 2=HTF+LQ (teaching short)
         int useKind = thKind
         if useKind == 2 and not useSetupHtf and useSetupMss
@@ -926,36 +929,34 @@ if themeActive and thDir != 0 and not na(thProx) and not na(thDist)
                     themeTagBar := bar_index
                     label.new(bar_index, thProx, "THEME " + themeTf + " · " + f_kind_name(useKind), style=label.style_label_left, color=color.new(brassCol, 20), textcolor=color.white, size=size.tiny)
 
-// Local S1 MM — always on chart TF (tight teaching supply/demand like your 1m short)
+// Call every bar (Pine-safe), birth on displacement
+[mmSupP, mmSupD, mmSupOk] = f_find_ob_mm(-1, f_mm_look_bars())
+[mmDemP, mmDemD, mmDemOk] = f_find_ob_mm(1, f_mm_look_bars())
+
+// Local S1 MM — always on chart TF (tight teaching supply/demand)
 if useSetupMM and bearDisp and allowShort and useOB and mmLocalOk and f_can_birth()
-    [p, d, ok] = f_find_ob_mm(-1, f_mm_look_bars())
-    if ok == 1 and f_zone_ok(p, d) and p > close
-        bool leftOrigin = close < p
-        if leftOrigin
-            int nb = f_push_zone(-1, p, d, 0, na, na)
-            if nb >= 0
-                lastBirth := nb
-                int idxS = array.size(zDir) - 1
-                if idxS >= 0
-                    array.set(zLeft, idxS, 1)
-                themeProxLock := p
-                themeDistLock := d
-                themeDirLock := -1
+    if mmSupOk == 1 and f_zone_ok(mmSupP, mmSupD) and mmSupP > close
+        int nb = f_push_zone(-1, mmSupP, mmSupD, 0, na, na)
+        if nb >= 0
+            lastBirth := nb
+            int idxS = array.size(zDir) - 1
+            if idxS >= 0
+                array.set(zLeft, idxS, 1)
+            themeProxLock := mmSupP
+            themeDistLock := mmSupD
+            themeDirLock := -1
 
 if useSetupMM and bullDisp and allowLong and useOB and mmLocalOk and f_can_birth()
-    [p, d, ok] = f_find_ob_mm(1, f_mm_look_bars())
-    if ok == 1 and f_zone_ok(p, d) and p < close
-        bool leftOrigin = close > p
-        if leftOrigin
-            int nb = f_push_zone(1, p, d, 0, na, na)
-            if nb >= 0
-                lastBirth := nb
-                int idxL = array.size(zDir) - 1
-                if idxL >= 0
-                    array.set(zLeft, idxL, 1)
-                themeProxLock := p
-                themeDistLock := d
-                themeDirLock := 1
+    if mmDemOk == 1 and f_zone_ok(mmDemP, mmDemD) and mmDemP < close
+        int nb = f_push_zone(1, mmDemP, mmDemD, 0, na, na)
+        if nb >= 0
+            lastBirth := nb
+            int idxL = array.size(zDir) - 1
+            if idxL >= 0
+                array.set(zLeft, idxL, 1)
+            themeProxLock := mmDemP
+            themeDistLock := mmDemD
+            themeDirLock := 1
 
 bearFvg = bar_index >= 2 and low[2] > high and (low[2] - high) >= math.max(atr * minFvgAtr, minFvgPts)
 bullFvg = bar_index >= 2 and high[2] < low and (low - high[2]) >= math.max(atr * minFvgAtr, minFvgPts)
