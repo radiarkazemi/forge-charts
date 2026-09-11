@@ -122,6 +122,7 @@ export function ChartToolbar({
       <button className="symbol-chip" onClick={onOpenSymbol} title="Symbol Search">
         <span className={live ? "live-dot on" : "live-dot"} />
         <b>{snap?.symbol.ticker ?? "XAUUSD"}</b>
+        <small className="exch">{snap?.symbol.exchange ?? ""}</small>
       </button>
       <button className="tb-icon" title="Compare" onClick={onCompare}>
         +

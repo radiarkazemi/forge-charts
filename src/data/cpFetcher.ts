@@ -152,7 +152,7 @@ export async function cpHistory(
 
 export async function cpPriceList(opts: {
   timeframe?: CpTimeframe;
-  exchange?: "binance" | "forexcom";
+  exchange?: "binance" | "forexcom" | "fxpro";
   page?: number;
   pageSize?: number;
 }): Promise<{ results?: CpPriceRow[]; count?: number } | CpPriceRow[]> {

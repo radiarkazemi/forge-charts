@@ -11,7 +11,9 @@
     "trh:alert": "node indicators/trh-free-alert.mjs",
     "trh:server": "node indicators/trh-alert-server.mjs",
     "news:server": "node --experimental-sqlite server/news/index.mjs",
-    "news:test": "node --experimental-sqlite server/news/selftest.mjs"
+    "news:test": "node --experimental-sqlite server/news/selftest.mjs",
+    "market:server": "node server/market/index.mjs",
+    "market:test": "node server/market/selftest.mjs"
   },
   "dependencies": {
     "react": "^19.1.1",
