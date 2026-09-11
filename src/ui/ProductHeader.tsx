@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ForgeMark } from "../brand/ForgeMark";
 
 type NavItem = {
   id: string;
@@ -142,7 +143,7 @@ export function ProductHeader({
     <header className="product-header" ref={rootRef}>
       <button type="button" className="hdr-brand" title="Forge Supercharts" onClick={onOpenMarkets}>
         <span className="logo" aria-hidden>
-          F
+          <ForgeMark theme={theme} size={22} />
         </span>
         <span className="hdr-brand-text">
           <b>Forge</b>
@@ -219,7 +220,7 @@ export function ProductHeader({
           }}
         >
           <span className="hdr-avatar" aria-hidden>
-            U
+            <ForgeMark theme={theme} size={16} />
           </span>
         </button>
         {profileOpen ? (
