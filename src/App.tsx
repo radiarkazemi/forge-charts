@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ForgeMark } from "./brand/ForgeMark";
 import {
   createAlert,
   dispatchWebhook,
@@ -832,6 +833,9 @@ export default function App() {
     >
       {showHeader && compact ? (
         <header className="mobile-header">
+          <span className="mobile-brand" aria-hidden>
+            <ForgeMark theme={snap?.theme ?? "dark"} size={18} />
+          </span>
           <button type="button" className="mobile-header-sym" onClick={() => setSymbolOpen(true)}>
             <b>{snap?.symbol.ticker ?? "XAUUSD"}</b>
             <em>{snap?.symbol.exchange ?? ""}</em>
