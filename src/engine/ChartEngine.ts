@@ -1,6 +1,7 @@
 import { intervalSeconds } from "../data/interval";
+import { drawingToolDefaultPatch } from "../data/drawingTemplates";
 import { chartStyleMatchesTheme, defaultChartStyle } from "../chartStyle";
-import { hitHandle, hitTestDrawing, isDrawingTool, isOpenEnded, neededPoints, paintDrawing, defaultFibStyleForKind } from "./drawings";
+import { hitHandle, hitTestDrawing, isDrawingTool, isOpenEnded, neededPoints, paintDrawing, defaultFibStyleForKind, onDrawingImageLoad } from "./drawings";
 import { bollinger, ema, heikinAshi, macd, rsi, sma } from "./indicators";
 import { clamp, formatPrice, formatTime, formatVolume, niceTicks, uid, snapAngle45 } from "./math";
 import { defaultLevelsForKind, defaultPaneForKind, defaultParamsForKind } from "./indicatorMeta";
@@ -191,6 +192,7 @@ export class ChartEngine {
   ];
   private drawings: Drawing[] = [];
   private draft: Drawing | null = null;
+  private unsubImageLoad: (() => void) | null = null;
   private selectedId: string | null = null;
   private selectedIndicatorId: string | null = null;
   private drawingPropsId: string | null = null;
@@ -246,6 +248,7 @@ export class ChartEngine {
     if (!ctx) throw new Error("Canvas 2D is not available");
     this.ctx = ctx;
     this.bind();
+    this.unsubImageLoad = onDrawingImageLoad(() => this.draw());
     this.snapshot = this.buildSnapshot();
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(container);
@@ -434,6 +437,13 @@ export class ChartEngine {
     const prev = this.theme;
     if (chartStyleMatchesTheme(this.chartStyle, prev)) {
       this.chartStyle = defaultChartStyle(theme);
+    }
+    const prevPal = palettes[prev];
+    if (this.canvasSettings.gridColor && this.canvasSettings.gridColor === prevPal.grid) {
+      this.canvasSettings.gridColor = "";
+    }
+    if (this.canvasSettings.crosshairColor && this.canvasSettings.crosshairColor === prevPal.cross) {
+      this.canvasSettings.crosshairColor = "";
     }
     this.theme = theme;
     this.emit();
@@ -730,6 +740,8 @@ export class ChartEngine {
         | "scaleRatio"
         | "leftEnd"
         | "rightEnd"
+        | "imageUrl"
+        | "paneId"
       >
     >,
   ): void {
@@ -1244,6 +1256,8 @@ export class ChartEngine {
   destroy(): void {
     cancelAnimationFrame(this.raf);
     window.clearInterval(this.countdownTimer);
+    this.unsubImageLoad?.();
+    this.unsubImageLoad = null;
     this.ro.disconnect();
     this.canvas.remove();
     this.listeners.clear();
@@ -1780,21 +1794,53 @@ export class ChartEngine {
     return this.pointFromMouse(s.x, s.y) ?? target;
   }
 
-  private pointFromMouse(x: number, y: number): ChartPoint | null {
-    const { main } = this.layout();
+  private pointFromMouse(x: number, y: number, paneId?: string | null): ChartPoint | null {
+    const layout = this.layout();
     const visible = this.plotBars();
     const rangeSource = visible.length ? visible : this.bars.slice(-30);
     if (!this.bars.length || !rangeSource.length) return null;
-    const range = this.priceRange(rangeSource);
-    let price = this.priceAtY(y, range.min, range.max, main);
-    if (this.percentScale) price = this.baseClose(rangeSource) * (1 + price / 100);
-    const logical = this.viewStart() + (x - main.x) / this.slotWidth(main) - 0.5;
+
+    const PANE_TOOLS = new Set(["hline", "trend", "ray", "horzray", "arrow", "extended", "crossline"]);
+    let targetPaneId = paneId ?? null;
+    let rect = layout.main;
+    let range = this.priceRange(rangeSource);
+    let useScaled = true;
+
+    if (!targetPaneId) {
+      for (const extra of layout.extras) {
+        if (y >= extra.rect.y && y <= extra.rect.y + extra.rect.h) {
+          const tool = this.draft?.kind ?? this.tool;
+          if (
+            PANE_TOOLS.has(tool) ||
+            (this.draft?.paneId && this.draft.paneId === extra.ind.id) ||
+            (paneId == null && this.selectedId && this.drawings.find((d) => d.id === this.selectedId)?.paneId === extra.ind.id)
+          ) {
+            targetPaneId = extra.ind.id;
+            rect = extra.rect;
+            range = this.paneValueRange(extra.ind, rangeSource);
+            useScaled = false;
+          }
+          break;
+        }
+      }
+    } else if (targetPaneId !== "main") {
+      const extra = layout.extras.find((e) => e.ind.id === targetPaneId);
+      if (extra) {
+        rect = extra.rect;
+        range = this.paneValueRange(extra.ind, rangeSource);
+        useScaled = false;
+      }
+    }
+
+    let price = this.priceAtY(y, range.min, range.max, rect);
+    if (useScaled && this.percentScale) price = this.baseClose(rangeSource) * (1 + price / 100);
+    const logical = this.viewStart() + (x - rect.x) / this.slotWidth(rect) - 0.5;
     const i0 = Math.floor(logical);
     const t = logical - i0;
     let time = this.timeAtIndex(i0) + (this.timeAtIndex(i0 + 1) - this.timeAtIndex(i0)) * t;
     const idx = clamp(Math.round(logical), 0, Math.max(0, this.bars.length - 1));
     const bar = this.bars[idx];
-    if (this.magnet !== "off" && bar && logical >= -0.5 && logical <= this.bars.length - 0.5) {
+    if (useScaled && this.magnet !== "off" && bar && logical >= -0.5 && logical <= this.bars.length - 0.5) {
       const candidates = [bar.open, bar.high, bar.low, bar.close];
       if (this.snapIndicators) {
         for (const ind of this.indicators) {
@@ -1807,7 +1853,7 @@ export class ChartEngine {
         }
       }
       const nearest = candidates.reduce((best, v) => (Math.abs(v - price) < Math.abs(best - price) ? v : best));
-      const dyPx = Math.abs(this.yOf(nearest, range.min, range.max, main) - y);
+      const dyPx = Math.abs(this.yOf(nearest, range.min, range.max, rect) - y);
       const weakPx = 12;
       if (this.magnet === "strong" || dyPx <= weakPx) {
         price = nearest;
@@ -1889,7 +1935,7 @@ export class ChartEngine {
     const h = this.container.clientHeight;
     const ctx = this.ctx;
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = pal.bg;
+    ctx.fillStyle = this.canvasSettings.bgColor || pal.bg;
     ctx.fillRect(0, 0, w, h);
     const bars = this.plotBars();
     const layout = this.layout();
@@ -2736,6 +2782,43 @@ export class ChartEngine {
     ctx.fillStyle = pal.muted;
     ctx.font = CHART_FONT;
     ctx.fillText(`${ind.kind.toUpperCase()} ${ind.params.join(",")}`, rect.x + 8, rect.y + 14);
+    if (!this.hideDrawings) {
+      this.paintPaneDrawings(rect, ind.id, { min, max }, bars);
+    }
+  }
+
+  /** Pane indicator value range (mirrors paintPane min/max). */
+  private paneValueRange(ind: IndicatorInstance, bars: Bar[]): { min: number; max: number } {
+    const series = this.indicatorSeries(ind, bars);
+    const bounded = ind.kind === "rsi" || ind.kind === "stoch";
+    const vals = series.lines.flat().filter((v): v is number => v != null);
+    if (series.hist) {
+      const lo = -Math.max(...vals.map(Math.abs), 0.01);
+      return { min: lo, max: -lo };
+    }
+    const min = bounded ? 0 : Math.min(...vals, 0);
+    const max = bounded ? 100 : Math.max(...vals, 0.01);
+    return { min, max };
+  }
+
+  private paintPaneDrawings(
+    rect: Rect,
+    paneId: string,
+    range: { min: number; max: number },
+    bars: Bar[],
+  ): void {
+    const all = this.draft ? [...this.drawings, this.draft] : this.drawings;
+    for (const d of all) {
+      if (d.paneId !== paneId) continue;
+      if (d !== this.draft && !drawingShownOnInterval(d, this.interval)) continue;
+      const pts = d.points.map((p) => ({
+        x: this.xOfTime(p.time, bars, rect),
+        y: this.yOf(p.price, range.min, range.max, rect),
+      }));
+      paintDrawing(this.ctx, d, pts, rect, this.symbol.pricePrecision, d.id === this.selectedId, bars, (price) =>
+        this.yOf(price, range.min, range.max, rect),
+      );
+    }
   }
 
   private locate(point: ChartPoint, bars: Bar[], range: { min: number; max: number }, rect: Rect): { x: number; y: number } {
@@ -2818,6 +2901,7 @@ export class ChartEngine {
   private paintDrawings(rect: Rect, bars: Bar[], range: { min: number; max: number }): void {
     const all = this.draft ? [...this.drawings, this.draft] : this.drawings;
     for (const d of all) {
+      if (d.paneId && d.paneId !== "main") continue;
       if (d !== this.draft && !drawingShownOnInterval(d, this.interval)) continue;
       const pts = d.points.map((p) => this.locate(p, bars, range, rect));
       paintDrawing(this.ctx, d, pts, rect, this.symbol.pricePrecision, d.id === this.selectedId, bars, (price) =>
@@ -2980,6 +3064,16 @@ export class ChartEngine {
     const bars = this.plotBars();
     const rangeBars = bars.length ? bars : this.bars.slice(-40);
     if (!rangeBars.length) return [];
+    if (d.paneId && d.paneId !== "main") {
+      const extra = layout.extras.find((e) => e.ind.id === d.paneId);
+      if (extra) {
+        const paneRange = this.paneValueRange(extra.ind, rangeBars);
+        return d.points.map((p) => ({
+          x: this.xOfTime(p.time, rangeBars, extra.rect),
+          y: this.yOf(p.price, paneRange.min, paneRange.max, extra.rect),
+        }));
+      }
+    }
     const range = this.priceRange(rangeBars);
     return d.points.map((p) => this.locate(p, rangeBars, range, layout.main));
   }
@@ -2990,8 +3084,25 @@ export class ChartEngine {
     const rangeBars = bars.length ? bars : this.bars.slice(-40);
     if (!rangeBars.length) return null;
     const range = this.priceRange(rangeBars);
+    // Pane drawings first (top-most extras), then main
+    for (let ei = layout.extras.length - 1; ei >= 0; ei--) {
+      const extra = layout.extras[ei]!;
+      if (y < extra.rect.y || y > extra.rect.y + extra.rect.h) continue;
+      const paneRange = this.paneValueRange(extra.ind, rangeBars);
+      for (let i = this.drawings.length - 1; i >= 0; i--) {
+        const d = this.drawings[i]!;
+        if (d.paneId !== extra.ind.id) continue;
+        if (!drawingShownOnInterval(d, this.interval)) continue;
+        const pts = d.points.map((p) => ({
+          x: this.xOfTime(p.time, rangeBars, extra.rect),
+          y: this.yOf(p.price, paneRange.min, paneRange.max, extra.rect),
+        }));
+        if (hitHandle(pts, x, y) != null || hitTestDrawing(d, pts, x, y, extra.rect)) return d;
+      }
+    }
     for (let i = this.drawings.length - 1; i >= 0; i--) {
-      const d = this.drawings[i];
+      const d = this.drawings[i]!;
+      if (d.paneId && d.paneId !== "main") continue;
       if (!drawingShownOnInterval(d, this.interval)) continue;
       const pts = d.points.map((p) => this.locate(p, rangeBars, range, layout.main));
       if (hitHandle(pts, x, y) != null || hitTestDrawing(d, pts, x, y, layout.main)) return d;
@@ -3001,6 +3112,15 @@ export class ChartEngine {
 
   private finishDraft(): void {
     if (!this.draft) return;
+    const defaults = drawingToolDefaultPatch(this.draft.kind);
+    if (defaults) Object.assign(this.draft, defaults);
+    if (this.draft.kind === "image" && !this.draft.imageUrl) {
+      const url = window.prompt("Image URL", this.draft.text?.startsWith("http") ? this.draft.text : "") || "";
+      if (url.trim()) {
+        this.draft.imageUrl = url.trim();
+        this.draft.text = this.draft.text || "Image";
+      }
+    }
     this.pushUndo();
     this.drawings.push(this.draft);
     this.selectedId = this.draft.id;
@@ -3193,25 +3313,38 @@ export class ChartEngine {
         const fallback = kind === "note" || kind === "anchorednote" ? "Note" : kind === "table" ? "A1" : "Text";
         text = window.prompt("Text", fallback) || fallback;
       }
+      const PANE_TOOLS = new Set(["hline", "trend", "ray", "horzray", "arrow", "extended", "crossline"]);
+      let paneId: string | undefined;
+      if (PANE_TOOLS.has(kind)) {
+        for (const extra of this.layout().extras) {
+          if (y >= extra.rect.y && y <= extra.rect.y + extra.rect.h) {
+            paneId = extra.ind.id;
+            break;
+          }
+        }
+      }
+      const panePoint = paneId ? this.pointFromMouse(x, y, paneId) ?? point : point;
       this.draft = {
         id: uid("dr"),
         kind,
-        points: [point],
+        points: [panePoint],
         color: palettes[this.theme].overlay,
         text,
         lineWidth: 1,
         lineStyle: "solid",
         fib: defaultFibStyleForKind(kind),
         scaleRatio: kind === "gannsquarefixed" ? this.chartScaleRatio() : undefined,
+        paneId,
       };
       if (neededPoints(kind) === 1) this.finishDraft();
     } else {
-      this.draft.points[this.draft.points.length - 1] = point;
+      const next = this.pointFromMouse(x, y, this.draft.paneId) ?? point;
+      this.draft.points[this.draft.points.length - 1] = next;
       if (this.draft.kind === "gannsquarefixed" && this.draft.points.length >= 2) {
         this.constrainGannSquareFixed(this.draft, 1);
       }
       if (!isOpenEnded(this.draft.kind) && this.draft.points.length >= neededPoints(this.draft.kind)) this.finishDraft();
-      else this.draft.points = [...this.draft.points, point];
+      else this.draft.points = [...this.draft.points, next];
     }
     this.emit();
     this.draw();
@@ -3304,7 +3437,7 @@ export class ChartEngine {
     }
     if (this.dragging === "drawing" && this.selectedId) {
       const d = this.drawings.find((item) => item.id === this.selectedId);
-      let p = this.pointFromMouse(x, y);
+      let p = this.pointFromMouse(x, y, d?.paneId);
       if (d && p && !d.locked) {
         if (!this.dragDirty) {
           this.pushUndo();
@@ -3325,7 +3458,7 @@ export class ChartEngine {
         }
       }
     } else if (this.draft && this.dragging !== "brush") {
-      let p = this.pointFromMouse(x, y);
+      let p = this.pointFromMouse(x, y, this.draft.paneId);
       if (p) {
         if (e.shiftKey && this.draft.points.length >= 1) {
           p = this.shiftSnapPoint(this.draft.points[0], p);

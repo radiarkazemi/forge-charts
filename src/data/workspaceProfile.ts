@@ -28,6 +28,7 @@ export type WorkspaceProfile = {
   syncCrosshair: boolean;
   syncInterval: boolean;
   syncSymbol: boolean;
+  syncDrawings: boolean;
   panes: PaneProfile[];
 };
 

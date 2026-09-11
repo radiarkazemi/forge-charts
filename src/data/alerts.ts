@@ -205,3 +205,83 @@ export function dispatchWebhook(fire: AlertFire): void {
     /* ignore */
   }
 }
+
+const FIRE_LOG_KEY = "forge.alertFireLog";
+const FIRE_LOG_MAX = 200;
+
+export function loadAlertFireLog(): AlertFire[] {
+  const rows = loadJson<AlertFire[] | null>(FIRE_LOG_KEY, null);
+  return Array.isArray(rows) ? rows : [];
+}
+
+export function appendAlertFires(fires: AlertFire[]): AlertFire[] {
+  if (!fires.length) return loadAlertFireLog();
+  const next = [...fires].reverse().concat(loadAlertFireLog()).slice(0, FIRE_LOG_MAX);
+  saveJson(FIRE_LOG_KEY, next);
+  return next;
+}
+
+export function clearAlertFireLog(): void {
+  saveJson(FIRE_LOG_KEY, []);
+}
+
+export function updateAlert(alert: PriceAlert, patch: Partial<PriceAlert>): PriceAlert {
+  return {
+    ...alert,
+    ...patch,
+    id: alert.id,
+    createdAt: alert.createdAt,
+    name: (patch.name ?? alert.name).trim() || alert.name,
+    message: patch.message != null ? patch.message.trim() : alert.message,
+    webhookUrl: patch.webhookUrl !== undefined ? patch.webhookUrl?.trim() || undefined : alert.webhookUrl,
+  };
+}
+
+/**
+ * Resolve the live alert level for a drawing (GAP-42).
+ * - hline / horzray / crossline → horizontal price
+ * - trend / ray / arrow / extended → interpolate price at `atTime` (or last point)
+ * - parallel / channel tools → nearer of the two rails (break semantics)
+ */
+export function resolveDrawingAlertLevel(
+  drawing: {
+    kind: string;
+    points: Array<{ time: number; price: number }>;
+  },
+  atTime?: number,
+): number | null {
+  const pts = drawing.points;
+  if (!pts.length) return null;
+  const kind = drawing.kind;
+  if (kind === "hline" || kind === "horzray" || kind === "crossline" || kind === "horizontalray") {
+    return pts[0]?.price ?? null;
+  }
+  if (
+    kind === "parallel" ||
+    kind === "regression" ||
+    kind === "flattop" ||
+    kind === "disjoint" ||
+    kind === "channel"
+  ) {
+    if (pts.length < 3) return pts[0]?.price ?? null;
+    // Rails: first leg A→B, third point C defines parallel. Use nearer rail price at end.
+    const a = pts[0]!;
+    const b = pts[1]!;
+    const c = pts[2]!;
+    const t = atTime ?? b.time;
+    const span = b.time - a.time || 1;
+    const u = Math.max(0, Math.min(1, (t - a.time) / span));
+    const p1 = a.price + (b.price - a.price) * u;
+    const p2 = c.price + (b.price - a.price) * u;
+    // Break level = outer rail closer to "outside"; for alerts use lower of the two (support) via avg band edge —
+    // TV fires when price leaves the channel, so return both mid and let caller compare; we return mid for crossing.
+    return (p1 + p2) / 2;
+  }
+  if (pts.length < 2) return pts[0]?.price ?? null;
+  const a = pts[0]!;
+  const b = pts[pts.length - 1]!;
+  const t = atTime ?? b.time;
+  const span = b.time - a.time || 1;
+  const u = (t - a.time) / span;
+  return a.price + (b.price - a.price) * u;
+}

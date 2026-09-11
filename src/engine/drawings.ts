@@ -1742,7 +1742,7 @@ function paintParallel(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], rec
   ctx.lineWidth = style.trendWidth;
   extend(ctx, a, b, rect, !!style.extendLeft, !!style.extendRight);
   extend(ctx, a2, b2, rect, !!style.extendLeft, !!style.extendRight);
-  if (style.showLevels) {
+  if (style.showLevels || style.showMidpoint) {
     applyLineStyle(ctx, "dashed");
     ctx.lineWidth = Math.max(1, style.levelsWidth);
     extend(ctx, midA, midB, rect, !!style.extendLeft, !!style.extendRight);
@@ -2787,6 +2787,17 @@ function paintLabel(ctx: CanvasRenderingContext2D, d: Drawing, p: Pt, precision:
   ctx.fillText(d.kind === "pricenote" ? `${d.text || "Note"}  ${price}` : d.text || "Text", p.x + 4, p.y - 4);
 }
 
+const imageCache = new Map<string, HTMLImageElement>();
+let imageLoadListeners: Array<() => void> = [];
+
+/** ChartEngine can subscribe so image tools redraw when a URL finishes loading. */
+export function onDrawingImageLoad(cb: () => void): () => void {
+  imageLoadListeners.push(cb);
+  return () => {
+    imageLoadListeners = imageLoadListeners.filter((x) => x !== cb);
+  };
+}
+
 function paintImage(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[]): void {
   if (pts.length < 2) return;
   const style = resolveFibStyleForKind(d);
@@ -2798,19 +2809,44 @@ function paintImage(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[]): void 
     ctx.fillStyle = "rgba(30,34,45,0.55)";
     ctx.fillRect(x, y, w, h);
   }
+  const url = d.imageUrl?.trim();
+  if (url) {
+    let img = imageCache.get(url);
+    if (!img) {
+      img = new Image();
+      img.decoding = "async";
+      img.src = url;
+      imageCache.set(url, img);
+      img.onload = () => {
+        for (const cb of imageLoadListeners) cb();
+      };
+    }
+    if (img.complete && img.naturalWidth > 0) {
+      try {
+        ctx.drawImage(img, x, y, w, h);
+      } catch {
+        /* tainted / bad image — fall through to frame */
+      }
+    }
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + w, y + h);
+    ctx.moveTo(x + w, y);
+    ctx.lineTo(x, y + h);
+    ctx.strokeStyle = style.trendColor;
+    ctx.lineWidth = style.trendWidth;
+    ctx.stroke();
+  }
   ctx.strokeStyle = style.trendColor;
   ctx.lineWidth = style.trendWidth;
   ctx.strokeRect(x, y, w, h);
-  // Placeholder X
-  ctx.beginPath();
-  ctx.moveTo(x, y);
-  ctx.lineTo(x + w, y + h);
-  ctx.moveTo(x + w, y);
-  ctx.lineTo(x, y + h);
-  ctx.stroke();
-  ctx.font = CHART_FONT;
-  ctx.fillStyle = "#d1d4dc";
-  ctx.fillText(d.text || "Image", x + 8, y + 16);
+  const cached = url ? imageCache.get(url) : undefined;
+  if (!url || !(cached?.complete && (cached.naturalWidth ?? 0) > 0)) {
+    ctx.font = CHART_FONT;
+    ctx.fillStyle = "#d1d4dc";
+    ctx.fillText(d.text || "Image", x + 8, y + 16);
+  }
 }
 
 function paintCallout(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[]): void {

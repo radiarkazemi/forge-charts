@@ -246,6 +246,8 @@ export type FibRetraceStyle = {
   showLevels: boolean;
   /** Independent stats readout for trend / channel tools (DI-19). */
   showStats?: boolean;
+  /** Explicit midpoint / middle-line toggle for channels & trend tools (GAP-41). */
+  showMidpoint?: boolean;
   levelsWidth: number;
   levelsStyle: LineStyle;
 };
@@ -293,6 +295,13 @@ export type Drawing = {
    * Captured from the chart scale at creation; keeps |Δprice| = |Δbars| × scaleRatio.
    */
   scaleRatio?: number;
+  /** Image tool source (URL or data-URL). GAP-43. */
+  imageUrl?: string;
+  /**
+   * Pane binding for drawings (GAP-46).
+   * `"main"` / omitted = price pane; otherwise an indicator instance id.
+   */
+  paneId?: "main" | string;
 };
 
 export type DrawingContextMenu = {

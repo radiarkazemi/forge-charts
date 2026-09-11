@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { conditionLabel, type PriceAlert } from "../data/alerts";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { conditionLabel, loadAlertFireLog, type AlertFire, type PriceAlert } from "../data/alerts";
 import { UNIVERSE } from "../data/feed";
 import type { ChartEngine } from "../engine/ChartEngine";
 import { formatPrice, formatVolume } from "../engine/math";
@@ -25,6 +25,18 @@ const ICONS: { id: WidgetId; label: string; glyph: string }[] = [
   { id: "help", label: "Help Center", glyph: "?" },
 ];
 
+type WatchTab = "list" | "details" | "news";
+
+function stubNews(ticker: string): string[] {
+  return [
+    `${ticker}: traders watch key levels into the session`,
+    `Analyst note — ${ticker} liquidity and flow update`,
+    `Macro brief: rates and FX backdrop for ${ticker}`,
+    `${ticker} options skew steadies after overnight move`,
+    `Desk chatter: positioning around ${ticker} stays mixed`,
+  ].slice(0, 5);
+}
+
 type Props = {
   engine: ChartEngine | null;
   active: WidgetId | null;
@@ -35,6 +47,8 @@ type Props = {
   onCreateAlert?: () => void;
   onToggleAlert?: (id: string) => void;
   onDeleteAlert?: (id: string) => void;
+  onEditAlert?: (alert: PriceAlert) => void;
+  fireLogRevision?: number;
 };
 
 export function WidgetDock({
@@ -47,15 +61,28 @@ export function WidgetDock({
   onCreateAlert,
   onToggleAlert,
   onDeleteAlert,
+  onEditAlert,
+  fireLogRevision = 0,
 }: Props) {
   const snap = useEngine(engine);
   const objTreeRef = useRef<HTMLUListElement | null>(null);
+  const [watchTab, setWatchTab] = useState<WatchTab>("list");
+  const fireLog = useMemo(() => loadAlertFireLog(), [alerts, fireLogRevision]);
+
   useEffect(() => {
     if (active !== "object") return;
     const el = objTreeRef.current?.querySelector("li.on");
     el?.scrollIntoView({ block: "nearest" });
   }, [active, snap?.selectedId, snap?.selectedIndicatorId]);
+
   const bar = snap?.hover ?? snap?.last;
+  const current = snap?.symbol;
+  const currentQuote = current ? quotes[current.ticker] : undefined;
+  const detailSymbol =
+    current ??
+    UNIVERSE.find((s) => s.ticker === snap?.symbol.ticker) ??
+    UNIVERSE[0];
+
   return (
     <div className="widget-dock">
       {active ? (
@@ -65,26 +92,101 @@ export function WidgetDock({
             <button onClick={() => onActive(null)}>×</button>
           </header>
           {active === "watchlist" ? (
-            <ul className="watch">
-              {UNIVERSE.map((s) => {
-                const q = quotes[s.ticker];
-                return (
-                  <li key={s.ticker} className={snap?.symbol.ticker === s.ticker ? "on" : ""} onClick={() => onPick(s)}>
+            <div className="watch-panel">
+              <div className="watch-tabs" role="tablist">
+                {(
+                  [
+                    { id: "list" as const, label: "List" },
+                    { id: "details" as const, label: "Details" },
+                    { id: "news" as const, label: "News" },
+                  ] as const
+                ).map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    className={watchTab === tab.id ? "on" : ""}
+                    aria-selected={watchTab === tab.id}
+                    onClick={() => setWatchTab(tab.id)}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+              {watchTab === "list" ? (
+                <ul className="watch">
+                  {UNIVERSE.map((s) => {
+                    const q = quotes[s.ticker];
+                    return (
+                      <li key={s.ticker} className={snap?.symbol.ticker === s.ticker ? "on" : ""} onClick={() => onPick(s)}>
+                        <div>
+                          <strong>{s.ticker}</strong>
+                          <span>{s.exchange}</span>
+                        </div>
+                        <div className={(q?.change ?? 0) >= 0 ? "up" : "down"}>
+                          {q ? formatPrice(q.price, s.pricePrecision) : "—"}
+                          <small>
+                            {(q?.change ?? 0) >= 0 ? "+" : ""}
+                            {(q?.change ?? 0).toFixed(2)}%
+                          </small>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
+              {watchTab === "details" && detailSymbol ? (
+                <dl className="watch-details data-win">
+                  <div>
+                    <dt>Ticker</dt>
+                    <dd>{detailSymbol.ticker}</dd>
+                  </div>
+                  <div>
+                    <dt>Exchange</dt>
+                    <dd>{detailSymbol.exchange}</dd>
+                  </div>
+                  <div>
+                    <dt>Type</dt>
+                    <dd>{detailSymbol.type}</dd>
+                  </div>
+                  <div>
+                    <dt>Last</dt>
+                    <dd>
+                      {currentQuote
+                        ? formatPrice(currentQuote.price, detailSymbol.pricePrecision)
+                        : bar
+                          ? formatPrice(bar.close, detailSymbol.pricePrecision)
+                          : "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Change</dt>
+                    <dd className={(currentQuote?.change ?? 0) >= 0 ? "up" : "down"}>
+                      {currentQuote
+                        ? `${currentQuote.change >= 0 ? "+" : ""}${currentQuote.change.toFixed(2)}%`
+                        : "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Precision</dt>
+                    <dd>{detailSymbol.pricePrecision}</dd>
+                  </div>
+                  {detailSymbol.name ? (
                     <div>
-                      <strong>{s.ticker}</strong>
-                      <span>{s.exchange}</span>
+                      <dt>Name</dt>
+                      <dd>{detailSymbol.name}</dd>
                     </div>
-                    <div className={(q?.change ?? 0) >= 0 ? "up" : "down"}>
-                      {q ? formatPrice(q.price, s.pricePrecision) : "—"}
-                      <small>
-                        {(q?.change ?? 0) >= 0 ? "+" : ""}
-                        {(q?.change ?? 0).toFixed(2)}%
-                      </small>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+                  ) : null}
+                </dl>
+              ) : null}
+              {watchTab === "news" ? (
+                <ul className="objects watch-news">
+                  {stubNews(detailSymbol?.ticker ?? snap?.symbol.ticker ?? "SYM").map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
           ) : null}
           {active === "object" ? (
             <ul className="objects" ref={objTreeRef}>
@@ -207,6 +309,9 @@ export function WidgetDock({
                         </em>
                       </div>
                       <div className="alert-item-actions">
+                        <button type="button" title="Edit" onClick={() => onEditAlert?.(a)}>
+                          ✎
+                        </button>
                         <button type="button" title={a.enabled ? "Pause" : "Resume"} onClick={() => onToggleAlert?.(a.id)}>
                           {a.enabled ? "Ⅱ" : "▶"}
                         </button>
@@ -222,6 +327,24 @@ export function WidgetDock({
                   <li className="muted">No alerts yet. Use Alert on the toolbar or Alt+A.</li>
                 </ul>
               )}
+              <div className="alert-history">
+                <div className="fly-title">History</div>
+                {fireLog.length ? (
+                  <ul className="objects alert-fire-log">
+                    {fireLog.slice(0, 40).map((fire: AlertFire) => (
+                      <li key={`${fire.alertId}-${fire.at}`}>
+                        <strong>{fire.name}</strong>
+                        <span>
+                          {fire.symbol} @ {fire.price}
+                        </span>
+                        <em>{new Date(fire.at).toLocaleString()}</em>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="muted hint">No fired alerts yet.</p>
+                )}
+              </div>
             </div>
           ) : null}
           {active === "news" ? (

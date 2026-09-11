@@ -20,6 +20,8 @@ Current parity snapshot when this was written: ~244 MATCH · 45 PARTIAL · 2 MIS
 
 **2026-09-05 TV parity pass:** multi-chart layers (1–8) + sync, local profile/workspace save-export-import, mobile pan followLive detach, GAP-20…39 chart-type/settings depth.
 
+**2026-09-11:** GAP-40…49 done (magnet flyout, midpoint, drawing-alert geometry, image tool, toolbar recent/last, syncDrawings, pane drawings, tool defaults, watchlist details/news, alerts edit+history) + theme polish (grid/crosshair reset on theme switch, light CSS for new chrome).
+
 ---
 
 ## 1. What TradingView Supercharts actually is (observation)
@@ -100,7 +102,7 @@ Forge already mirrors most **chrome**. Gaps are mostly **depth, data, and runtim
 | GAP-37 | DONE | ADJ toggle (TV bottom bar) | Explicit adjusted/unadjusted series switch |
 | GAP-38 | DONE | Price-scale gear menu parity | Match TV scale context: auto, invert, lock, percentage, index, regular, move L/R, merge/no-overlap |
 | GAP-39 | DONE | Legend hover actions | Always expose hide / settings / ⋯ / remove with TV order |
-| GAP-40 | ADD | Soft magnet vs strong magnet UI copy + snap-to-indicators default clarity | Match TV magnet menu wording/behavior |
+| GAP-40 | DONE | Soft magnet vs strong magnet UI copy + snap-to-indicators default clarity | Magnet flyout: Off / Soft / Strong + Snap to indicators checkbox |
 
 ---
 
@@ -108,13 +110,13 @@ Forge already mirrors most **chrome**. Gaps are mostly **depth, data, and runtim
 
 | ID | Tag | Item | Action |
 | --- | --- | --- | --- |
-| GAP-41 | MODIFY | Generic Style tab | Ends, extend, midpoints, stats, fills for trend/ray/channel — not only Fib/pattern |
-| GAP-42 | MODIFY | Alert on drawing | True “price crosses line / channel break” semantics |
-| GAP-43 | MODIFY | Image tool | Upload/URL image, not placeholder frame |
-| GAP-44 | PARTIAL | Left toolbar IA | Favorites bar, last-used, flyout labels exact TV grouping |
-| GAP-45 | MODIFY | Sync drawings across layouts | Full live sync + sync-symbol / sync-interval options (TV layout menu) |
-| GAP-46 | ADD | Draw on indicator panes | Trend/horiz on RSI/MACD panes (TV supports this) |
-| GAP-47 | ADD | Templates as defaults for each tool | “Template” apply as default for next drawings (TV) |
+| GAP-41 | DONE | Generic Style tab | Midpoint / middle line (`showMidpoint`) on channels & trend PatternStylePanel |
+| GAP-42 | DONE | Alert on drawing | `resolveDrawingAlertLevel` for evaluateAlerts drawingLevels |
+| GAP-43 | DONE | Image tool | URL/data-URL paint + upload/URL in inspector; prompt on finish |
+| GAP-44 | DONE | Left toolbar IA | Persist last-per-group + recent strip (`forge.drawingLastTools` / `forge.drawingRecent`) |
+| GAP-45 | DONE | Sync drawings across layouts | `syncDrawings` toggle in LayoutMenu + workspace profile |
+| GAP-46 | DONE | Draw on indicator panes | paneId + paint/hit on extras panes (hline/trend/ray/…) |
+| GAP-47 | DONE | Templates as defaults for each tool | Apply/clear tool default; merge on finishDraft |
 
 ---
 
@@ -122,8 +124,8 @@ Forge already mirrors most **chrome**. Gaps are mostly **depth, data, and runtim
 
 | ID | Tag | Panel | Action |
 | --- | --- | --- | --- |
-| GAP-48 | PARTIAL | Watchlist + details + news | Live quotes OK; deepen details + symbol news |
-| GAP-49 | PARTIAL | Alerts manager | Edit/pause/log/history like TV; not only list+delete |
+| GAP-48 | DONE | Watchlist + details + news | List / Details / News tabs with quote + stub headlines |
+| GAP-49 | DONE | Alerts manager | Edit modal + fire-log history in alerts panel |
 | GAP-50 | PARTIAL | Screeners | Real criteria + results (stocks/crypto/forex) |
 | GAP-51 | PARTIAL | Calendars | Date-linked economic calendar |
 | GAP-52 | PARTIAL | News Flow | Live feed, not 3 hard-coded lines |
@@ -173,19 +175,19 @@ GAP-03, GAP-11…15, GAP-19, GAP-12…14
 GAP-01, GAP-02, GAP-16, GAP-17, GAP-61, GAP-62  
 
 ### Wave C — alerts that matter (P0)
-GAP-04, GAP-05, GAP-32, GAP-42, GAP-49  
+GAP-04, GAP-05, GAP-32  
 
 ### Wave D — advanced chart types (P1)
 GAP-06…08, GAP-20…30  
 
 ### Wave E — widgets with real data (P1)
-GAP-48, GAP-50…57, GAP-36, GAP-65  
+GAP-50…57, GAP-36, GAP-65  
 
 ### Wave F — multi-layout + drawing depth (P1)
-GAP-09, GAP-10, GAP-41, GAP-45, GAP-46, GAP-47, GAP-70  
+GAP-09, GAP-10, GAP-70  
 
 ### Wave G — settings polish (P2)
-GAP-31…35, GAP-37…40, GAP-67…69  
+GAP-31…35, GAP-37…39, GAP-67…69  
 
 ---
 

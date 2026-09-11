@@ -106,3 +106,35 @@ export function drawingTemplateSummary(tpl: DrawingTemplate): string {
   if (tpl.style.lineStyle && tpl.style.lineStyle !== "solid") bits.push(tpl.style.lineStyle);
   return bits.join(" · ");
 }
+
+/** Per-tool default style applied to the next drawing of that kind (GAP-47). */
+const DEFAULTS_KEY = "forge.drawingToolDefaults";
+
+export type DrawingToolDefaults = Partial<Record<DrawingKind, DrawingTemplateStyle>>;
+
+export function loadDrawingToolDefaults(): DrawingToolDefaults {
+  return loadJson<DrawingToolDefaults>(DEFAULTS_KEY, {});
+}
+
+export function saveDrawingToolDefaults(defaults: DrawingToolDefaults): void {
+  saveJson(DEFAULTS_KEY, defaults);
+}
+
+export function setDrawingToolDefault(kind: DrawingKind, style: DrawingTemplateStyle): void {
+  const next = loadDrawingToolDefaults();
+  next[kind] = style;
+  saveDrawingToolDefaults(next);
+}
+
+export function clearDrawingToolDefault(kind: DrawingKind): void {
+  const next = loadDrawingToolDefaults();
+  delete next[kind];
+  saveDrawingToolDefaults(next);
+}
+
+export function drawingToolDefaultPatch(
+  kind: DrawingKind,
+): Partial<Pick<Drawing, "color" | "lineWidth" | "lineStyle" | "leftEnd" | "rightEnd" | "fib">> | null {
+  const style = loadDrawingToolDefaults()[kind];
+  return style ? templatePatch(style) : null;
+}

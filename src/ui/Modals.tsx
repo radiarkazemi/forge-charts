@@ -581,6 +581,7 @@ export function SettingsModal({
                 <option value="light">Light</option>
               </select>
             </label>
+            <p className="hint">Resets canvas grid/crosshair when they still match the previous theme</p>
             <h3>{currentType?.label ?? "Chart"} style</h3>
             <label className="row">
               Source
