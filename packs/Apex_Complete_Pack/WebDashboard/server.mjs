@@ -21,7 +21,8 @@ import { dirname, join } from "path";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.MT5_WATCH_PORT || 8787);
-const HOST = process.env.MT5_WATCH_HOST || "127.0.0.1";
+// Bind all interfaces so cloud tunnels / remote MT5 WebRequest can reach us
+const HOST = process.env.MT5_WATCH_HOST || "0.0.0.0";
 const STATE_FILE = join(__dir, ".watch-state.json");
 const LOG_FILE = join(__dir, "events.jsonl");
 const PUBLIC = join(__dir, "public");
@@ -138,28 +139,26 @@ function applyEvent(ev) {
   if (ev.equity != null && !Number.isNaN(ev.equity)) m.equity = ev.equity;
   if (ev.balance != null && !Number.isNaN(ev.balance)) m.balance = ev.balance;
 
-  if (ev.kind === "setup" || (ev.model === "APEX" && ["armed", "confirm"].includes(String(ev.status || "").toLowerCase()))) {
-    if (ev.kind === "setup") {
-      m.setupsSeen = (m.setupsSeen || 0) + 1;
-      m.lastSetupAt = ev.recvAt;
-      m.lastSetup = {
-        side: ev.side,
-        entry: ev.entry,
-        sl: ev.sl,
-        tp: ev.tp,
-        mode: ev.mode,
-        barTime: ev.barTime,
-        at: ev.recvAt,
-        message: ev.message,
-      };
-      m.status = "SETUP";
-    }
+  if (ev.kind === "setup") {
+    m.setupsSeen = (m.setupsSeen || 0) + 1;
+    m.lastSetupAt = ev.recvAt;
+    m.lastSetup = {
+      side: ev.side,
+      entry: ev.entry,
+      sl: ev.sl,
+      tp: ev.tp,
+      mode: ev.mode,
+      barTime: ev.barTime,
+      at: ev.recvAt,
+      message: ev.message,
+    };
+    m.status = ev.status || "SETUP";
   }
   if (ev.kind === "entry") m.status = "LIVE";
   if (ev.kind === "exit") m.status = "FLAT";
   state.models[ev.model] = m;
 
-  const keepInFeed = ["setup", "entry", "exit", "error", "info", "status"].includes(ev.kind);
+  const keepInFeed = ["setup", "entry", "exit", "error", "info"].includes(ev.kind);
   if (keepInFeed) {
     state.events.push(ev);
     if (state.events.length > MAX_EVENTS) state.events = state.events.slice(-MAX_EVENTS);

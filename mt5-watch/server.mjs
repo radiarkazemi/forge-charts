@@ -21,7 +21,8 @@ import { dirname, join } from "path";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.MT5_WATCH_PORT || 8787);
-const HOST = process.env.MT5_WATCH_HOST || "127.0.0.1";
+// Bind all interfaces so cloud tunnels / remote MT5 WebRequest can reach us
+const HOST = process.env.MT5_WATCH_HOST || "0.0.0.0";
 const STATE_FILE = join(__dir, ".watch-state.json");
 const LOG_FILE = join(__dir, "events.jsonl");
 const PUBLIC = join(__dir, "public");
