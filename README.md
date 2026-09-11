@@ -16,3 +16,14 @@ npm run dev
 ```
 
 Open http://127.0.0.1:5173
+
+## Deploy to the VPS (`/charts/`)
+
+Production build is served at `http://185.222.163.116/charts/` with JS/CSS under `/assets/forge/`. FXPro and news run as local Node services; nginx proxies `/market-api` and `/news-api`.
+
+```bash
+# SSH key already loaded, or:
+SSHPASS='your-vps-password' VPS_USER=root ./scripts/deploy-vps.sh
+```
+
+That uploads the SPA, installs `forge-market` + `forge-news` systemd units, and writes `/etc/nginx/snippets/forge-api.conf`. If nginx does not already include that snippet, add `include /etc/nginx/snippets/forge-api.conf;` to the site server block (before the SPA fallback) and reload nginx.

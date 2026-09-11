@@ -74,8 +74,31 @@ export default defineConfig(({ mode }) => {
   const marketTarget = env.MARKET_ORIGIN || "http://127.0.0.1:8788";
   const chartTarget = env.VITE_CHART_FAST_TARGET || "http://185.222.163.116";
 
+  const production = mode === "production";
+
   return {
     plugins: [react(), forgeNewsPlugin(), forgeMarketPlugin()],
+    // VPS serves the SPA at /charts/; hashed bundles under /assets/forge/.
+    base: production ? "/charts/" : "/",
+    build: {
+      assetsDir: "assets",
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes("node_modules/react-dom")) return "react-dom";
+            if (id.includes("node_modules/react")) return "react";
+          },
+        },
+      },
+    },
+    experimental: {
+      renderBuiltUrl(filename) {
+        if (production && filename.startsWith("assets/")) {
+          return `/assets/forge/${filename.slice("assets/".length)}`;
+        }
+        return { relative: true as const };
+      },
+    },
     server: {
       port: 5173,
       host: "127.0.0.1",
