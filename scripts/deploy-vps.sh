@@ -29,8 +29,15 @@ echo "Uploading /assets/forge hashed bundles"
 tar -C dist/assets -cf - . | "${SSH[@]}" "${USER}@${HOST}" \
   "rm -rf '${REMOTE_ANIL_ASSETS}' && mkdir -p '${REMOTE_ANIL_ASSETS}' && tar -C '${REMOTE_ANIL_ASSETS}' -xf - && chown -R www-data:www-data '${REMOTE_ANIL_ASSETS}'"
 
-echo "Uploading /charts/index.html (+ static checklist if present)"
+echo "Uploading /charts/index.html (+ brand icons / manifest + static docs if present)"
 "${SCP[@]}" dist/index.html "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/index.html"
+if [[ -d dist/brand ]]; then
+  tar -C dist -cf - brand | "${SSH[@]}" "${USER}@${HOST}" \
+    "rm -rf '${REMOTE_ANIL_CHARTS}/brand' && tar -C '${REMOTE_ANIL_CHARTS}' -xf -"
+fi
+if [[ -f dist/site.webmanifest ]]; then
+  "${SCP[@]}" dist/site.webmanifest "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/site.webmanifest"
+fi
 if [[ -f dist/sample-ohlc.json ]]; then
   "${SCP[@]}" dist/sample-ohlc.json "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/sample-ohlc.json" || true
 fi
