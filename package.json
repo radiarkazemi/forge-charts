@@ -5,11 +5,15 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "vite",
+    "dev": "NODE_OPTIONS=--experimental-sqlite vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "trh:alert": "node indicators/trh-free-alert.mjs",
-    "trh:server": "node indicators/trh-alert-server.mjs"
+    "trh:server": "node indicators/trh-alert-server.mjs",
+    "news:server": "node --experimental-sqlite server/news/index.mjs",
+    "news:test": "node --experimental-sqlite server/news/selftest.mjs",
+    "market:server": "node server/market/index.mjs",
+    "market:test": "node server/market/selftest.mjs"
   },
   "dependencies": {
     "react": "^19.1.1",

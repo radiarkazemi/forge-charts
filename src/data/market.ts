@@ -1,3 +1,5 @@
+import { fetchChartApiHistory, fetchChartApiQuotes, isForexcomSymbol, subscribeChartApi } from "./chartApi";
+import { fetchFxproHistory, fetchFxproQuote, FXPRO_WATCH, subscribeFxpro, usesFxpro } from "./fxpro";
 import type { Bar, Interval, SymbolInfo } from "../engine/types";
 import { parseInterval } from "./interval";
 import { generateBars, UNIVERSE } from "./feed";
@@ -136,18 +138,41 @@ async function fetchYahoo(ticker: string, interval: Interval): Promise<Bar[]> {
   return bars;
 }
 
-export async function fetchHistory(symbol: SymbolInfo, interval: Interval): Promise<{ bars: Bar[]; live: boolean }> {
-  try {
-    if (BINANCE[symbol.ticker]) {
-      return { bars: await fetchBinance(symbol.ticker, interval), live: true };
+export async function fetchHistory(
+  symbol: SymbolInfo,
+  interval: Interval,
+): Promise<{ bars: Bar[]; live: boolean; source: "fxpro" | "binance" | "forexcom" | "yahoo" | "demo" }> {
+  if (usesFxpro(symbol)) {
+    try {
+      const bars = await fetchFxproHistory(symbol.ticker, interval);
+      if (bars.length) return { bars, live: true, source: "fxpro" };
+    } catch (err) {
+      console.warn("fxpro history failed", err);
     }
-    if (YAHOO[symbol.ticker]) {
-      return { bars: await fetchYahoo(symbol.ticker, interval), live: true };
-    }
-  } catch (err) {
-    console.warn("live history failed, using demo", err);
   }
-  return { bars: generateBars(symbol, interval), live: false };
+  if (BINANCE[symbol.ticker]) {
+    try {
+      return { bars: await fetchBinance(symbol.ticker, interval), live: true, source: "binance" };
+    } catch (err) {
+      console.warn("binance history failed", err);
+    }
+  }
+  if (isForexcomSymbol(symbol)) {
+    try {
+      const bars = await fetchChartApiHistory(symbol, interval);
+      if (bars.length) return { bars, live: true, source: "forexcom" };
+    } catch (err) {
+      console.warn("forexcom history failed", err);
+    }
+  }
+  if (YAHOO[symbol.ticker]) {
+    try {
+      return { bars: await fetchYahoo(symbol.ticker, interval), live: true, source: "yahoo" };
+    } catch (err) {
+      console.warn("yahoo history failed", err);
+    }
+  }
+  return { bars: generateBars(symbol, interval), live: false, source: "demo" };
 }
 
 export function subscribeLive(
@@ -155,6 +180,9 @@ export function subscribeLive(
   interval: Interval,
   onBar: (bar: Bar) => void,
 ): () => void {
+  if (usesFxpro(symbol)) {
+    return subscribeFxpro(symbol.ticker, interval, onBar);
+  }
   if (BINANCE[symbol.ticker]) {
     const pair = BINANCE[symbol.ticker].toLowerCase();
     const iv = binanceInterval(interval);
@@ -172,6 +200,10 @@ export function subscribeLive(
       });
     };
     return () => ws.close();
+  }
+
+  if (isForexcomSymbol(symbol)) {
+    return subscribeChartApi(symbol, interval, onBar);
   }
 
   if (YAHOO[symbol.ticker]) {
@@ -210,7 +242,27 @@ export async function fetchQuotes(): Promise<Record<string, { price: number; cha
     /* ignore */
   }
 
-  // Parallel Yahoo chart quotes for metals/FX/stocks (fast, no cp_fetcher).
+  await Promise.all(
+    FXPRO_WATCH.map(async (ticker) => {
+      try {
+        const q = await fetchFxproQuote(ticker);
+        if (q) out[ticker] = q;
+      } catch {
+        /* ignore */
+      }
+    }),
+  );
+
+  try {
+    const fxcom = await fetchChartApiQuotes();
+    for (const [ticker, q] of Object.entries(fxcom)) {
+      if (!out[ticker]) out[ticker] = q;
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // Yahoo leftovers (stocks / indices not on FXPro or Forex.com).
   await Promise.all(
     Object.keys(YAHOO).map(async (ticker) => {
       if (out[ticker]) return;

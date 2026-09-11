@@ -137,6 +137,36 @@ export type Bar = {
   volume: number;
 };
 
+export type ChartNewsItem = {
+  id: string;
+  title: string;
+  published: number;
+  urgency: number;
+  providerId: string;
+  providerName: string;
+  storyPath: string | null;
+  storyUrl: string | null;
+  link: string | null;
+  shortDescription: string | null;
+  relatedSymbols: string[];
+};
+
+export type ChartCalendarEvent = {
+  id: string;
+  title: string;
+  timeUnix: number;
+  currency: string | null;
+  countryName?: string | null;
+  impact: "high" | "medium" | "low" | "holiday";
+  category: string;
+  eventFamily: string;
+  forecast: string | null;
+  previous: string | null;
+  actual: string | null;
+  status: string;
+  url: string | null;
+};
+
 export type SymbolInfo = {
   ticker: string;
   name: string;
@@ -231,4 +261,11 @@ export type EngineSnapshot = {
   rangePreset: RangePreset;
   autoScale: boolean;
   chartStyle: ChartStyle;
+  showNews: boolean;
+  hoverNews: ChartNewsItem[] | null;
+  selectedNewsId: string | null;
+  newsCount: number;
+  showCalendar: boolean;
+  hoverCalendar: ChartCalendarEvent[] | null;
+  calendarCount: number;
 };

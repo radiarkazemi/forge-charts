@@ -272,7 +272,7 @@ Next drawing-parameter pass is **per tool** after DI-* is MATCH. Fib retracement
 | V-14 | Pane maximize / collapse / close | MISSING |
 | V-15 | Volume as overlay on main pane | PARTIAL |
 | V-16 | Session breaks | MISSING |
-| V-17 | Events on time scale (earnings, dividends, splits, ideas, news) | MISSING |
+| V-17 | Events on time scale (earnings, dividends, splits, ideas, news) | PARTIAL | Latest news lightning bolts from TradingView News Flow |
 | V-18 | Price scale: Regular | MATCH |
 | V-19 | Price scale: Percent | MATCH |
 | V-20 | Price scale: Indexed to 100 | MISSING |
@@ -379,7 +379,7 @@ SMA, EMA, WMA, SMMA, VWMA, DEMA, TEMA, HMA, ALMA, LSMA, KAMA, McGinley Dynamic, 
 | R-05 | Screeners | MISSING |
 | R-06 | Pine Editor (right dock) | PARTIAL |
 | R-07 | Calendars | PARTIAL |
-| R-08 | News Flow | PARTIAL |
+| R-08 | News Flow | PARTIAL | Live TV headlines in the News widget + SQLite collector |
 | R-09 | Portfolio | OUT |
 | R-10 | Fundamental Graphs | MISSING |
 | R-11 | Yield Curves | MISSING |
@@ -424,7 +424,7 @@ SMA, EMA, WMA, SMMA, VWMA, DEMA, TEMA, HMA, ALMA, LSMA, KAMA, McGinley Dynamic, 
 | S-14 | Margins (top / bottom / right) | MISSING |
 | S-15 | Trading appearance | OUT |
 | S-16 | Alerts appearance | MISSING |
-| S-17 | Events (ideas, dividends, splits, earnings, news) | MISSING |
+| S-17 | Events (ideas, dividends, splits, earnings, news) | PARTIAL | Latest news toggle + time-scale lightning |
 | S-18 | Settings templates | MISSING |
 
 ---
