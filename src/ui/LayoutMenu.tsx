@@ -12,6 +12,7 @@ export type ChartLayout = {
   syncCrosshair?: boolean;
   syncInterval?: boolean;
   syncSymbol?: boolean;
+  syncDrawings?: boolean;
 };
 
 const LAYOUTS_KEY = "forge.chartLayouts";
@@ -53,8 +54,14 @@ type Props = {
   syncCrosshair?: boolean;
   syncInterval?: boolean;
   syncSymbol?: boolean;
+  syncDrawings?: boolean;
   onArrangement: (next: LayoutArrangement) => void;
-  onSyncChange?: (next: { syncCrosshair?: boolean; syncInterval?: boolean; syncSymbol?: boolean }) => void;
+  onSyncChange?: (next: {
+    syncCrosshair?: boolean;
+    syncInterval?: boolean;
+    syncSymbol?: boolean;
+    syncDrawings?: boolean;
+  }) => void;
   onOpenLayout: (layout: ChartLayout) => void;
   onSaveCurrent: (name: string) => ChartLayout;
 };
@@ -65,6 +72,7 @@ export function LayoutMenu({
   syncCrosshair = true,
   syncInterval = false,
   syncSymbol = false,
+  syncDrawings = true,
   onArrangement,
   onSyncChange,
   onOpenLayout,
@@ -158,6 +166,14 @@ export function LayoutMenu({
                 onChange={(e) => onSyncChange?.({ syncSymbol: e.target.checked })}
               />
               Symbol
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={syncDrawings}
+                onChange={(e) => onSyncChange?.({ syncDrawings: e.target.checked })}
+              />
+              Drawings
             </label>
           </div>
           <div className="iv-head">Saved layouts</div>
@@ -259,7 +275,7 @@ export function createLayout(
   name: string,
   arrangement: LayoutArrangement,
   symbols: string[],
-  sync?: { syncCrosshair?: boolean; syncInterval?: boolean; syncSymbol?: boolean },
+  sync?: { syncCrosshair?: boolean; syncInterval?: boolean; syncSymbol?: boolean; syncDrawings?: boolean },
 ): ChartLayout {
   const meta = ARRANGEMENTS.find((a) => a.id === arrangement) ?? ARRANGEMENTS[0];
   const padded = [...symbols];
@@ -273,6 +289,7 @@ export function createLayout(
     syncCrosshair: sync?.syncCrosshair ?? true,
     syncInterval: sync?.syncInterval ?? false,
     syncSymbol: sync?.syncSymbol ?? false,
+    syncDrawings: sync?.syncDrawings ?? true,
   };
 }
 

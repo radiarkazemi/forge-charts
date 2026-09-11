@@ -5,6 +5,9 @@ import { useEngine } from "./useEngine";
 import { ToolGlyph } from "./toolIcons";
 
 const FAV_KEY = "forge.drawingFavorites";
+const LAST_TOOLS_KEY = "forge.drawingLastTools";
+const RECENT_KEY = "forge.drawingRecent";
+const RECENT_MAX = 6;
 
 function I(props: SVGProps<SVGSVGElement> & { children: ReactNode }) {
   const { children, ...rest } = props;
@@ -34,6 +37,28 @@ function loadFavorites(): string[] {
   }
 }
 
+function loadLastTools(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(LAST_TOOLS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function loadRecent(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string").slice(0, RECENT_MAX) : [];
+  } catch {
+    return [];
+  }
+}
+
 export function DrawingToolbar({ engine }: { engine: ChartEngine | null }) {
   const snap = useEngine(engine);
   const railRef = useRef<HTMLDivElement | null>(null);
@@ -42,13 +67,22 @@ export function DrawingToolbar({ engine }: { engine: ChartEngine | null }) {
   const closeTimer = useRef(0);
   const [open, setOpen] = useState<string | null>(null);
   const [pinned, setPinned] = useState(false);
-  const [saved, setSaved] = useState<Record<string, string>>({});
+  const [saved, setSaved] = useState<Record<string, string>>(loadLastTools);
   const [favorites, setFavorites] = useState<string[]>(loadFavorites);
+  const [recent, setRecent] = useState<string[]>(loadRecent);
   const [flyStyle, setFlyStyle] = useState<CSSProperties>({});
 
   useEffect(() => {
     localStorage.setItem(FAV_KEY, JSON.stringify(favorites));
   }, [favorites]);
+
+  useEffect(() => {
+    localStorage.setItem(LAST_TOOLS_KEY, JSON.stringify(saved));
+  }, [saved]);
+
+  useEffect(() => {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
+  }, [recent]);
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
@@ -125,9 +159,14 @@ export function DrawingToolbar({ engine }: { engine: ChartEngine | null }) {
     setPinned(true);
   };
 
+  const rememberRecent = (toolId: string) => {
+    setRecent((prev) => [toolId, ...prev.filter((id) => id !== toolId)].slice(0, RECENT_MAX));
+  };
+
   const pick = (item: ToolItem, groupId: string) => {
     engine?.setTool(item.draw, item.glyph ? { text: item.glyph } : undefined);
     setSaved((s) => ({ ...s, [groupId]: item.id }));
+    rememberRecent(item.id);
     setOpen(null);
     setPinned(false);
   };
@@ -135,6 +174,7 @@ export function DrawingToolbar({ engine }: { engine: ChartEngine | null }) {
   const activateGroup = (groupId: string, tools: ToolItem[]) => {
     const item = lastFor(groupId, saved, tools);
     engine?.setTool(item.draw, item.glyph ? { text: item.glyph } : undefined);
+    rememberRecent(item.id);
   };
 
   const toggleFavorite = (toolId: string) => {
@@ -142,6 +182,10 @@ export function DrawingToolbar({ engine }: { engine: ChartEngine | null }) {
   };
 
   const favItems = favorites
+    .map((id) => allToolItems().find((t) => t.id === id))
+    .filter((t): t is ToolItem => !!t);
+
+  const recentItems = recent
     .map((id) => allToolItems().find((t) => t.id === id))
     .filter((t): t is ToolItem => !!t);
 
@@ -245,16 +289,80 @@ export function DrawingToolbar({ engine }: { engine: ChartEngine | null }) {
             <path d="M16 16 L20 20M8 11h6M11 8v6" />
           </I>
         </button>
-        <button
-          className={snap.magnet !== "off" ? "tool on" : "tool"}
-          title={`Magnet (${snap.magnet})`}
-          onClick={() => engine?.cycleMagnet()}
+        <div
+          className={open === "magnet" ? "draw-group open" : "draw-group"}
+          ref={(node) => {
+            groupRefs.current.magnet = node;
+          }}
+          onPointerEnter={() => hoverGroup("magnet")}
+          onPointerLeave={scheduleClose}
         >
-          <I>
-            <path d="M7 4v8a5 5 0 0 0 10 0V4" />
-            <path d="M7 4h3v8M14 4h3v8" />
-          </I>
-        </button>
+          <button
+            className={snap.magnet !== "off" ? "tool on" : "tool"}
+            title={`Magnet (${snap.magnet === "weak" ? "soft" : snap.magnet})`}
+            onClick={() => pinGroup("magnet")}
+          >
+            <I>
+              <path d="M7 4v8a5 5 0 0 0 10 0V4" />
+              <path d="M7 4h3v8M14 4h3v8" />
+            </I>
+          </button>
+          <button
+            className="chev"
+            title="Magnet options"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              pinGroup("magnet");
+            }}
+          >
+            ▸
+          </button>
+          {open === "magnet" ? (
+            <div
+              className="flyout magnet-menu"
+              style={flyStyle}
+              onPointerEnter={cancelTimers}
+              onPointerLeave={scheduleClose}
+            >
+              <div className="flyout-list">
+                <div className="fly-section">
+                  <div className="fly-title">Magnet</div>
+                  {(
+                    [
+                      { id: "off" as const, label: "Off" },
+                      { id: "weak" as const, label: "Soft magnet" },
+                      { id: "strong" as const, label: "Strong magnet" },
+                    ] as const
+                  ).map((mode) => (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      className={snap.magnet === mode.id ? "on" : ""}
+                      onPointerDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        engine?.setMagnet(mode.id);
+                        setOpen(null);
+                        setPinned(false);
+                      }}
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
+                  <label className="magnet-snap-row">
+                    <input
+                      type="checkbox"
+                      checked={snap.snapIndicators}
+                      onChange={() => engine?.toggle("snapIndicators")}
+                    />
+                    Snap to indicators
+                  </label>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
         <button className={snap.stayMode ? "tool on" : "tool"} title="Stay in drawing mode" onClick={() => engine?.toggle("stayMode")}>
           <I>
             <rect x="7" y="11" width="10" height="8" rx="1" />
@@ -293,16 +401,6 @@ export function DrawingToolbar({ engine }: { engine: ChartEngine | null }) {
             <path d="M4 4l16 16" />
           </I>
         </button>
-        <button
-          className={snap.snapIndicators ? "tool on" : "tool"}
-          title="Snap to indicators"
-          onClick={() => engine?.toggle("snapIndicators")}
-        >
-          <I>
-            <path d="M4 12h16M12 4v16" />
-            <circle cx="12" cy="12" r="3" />
-          </I>
-        </button>
         <button className="tool" title="Remove drawings" onClick={() => engine?.clearDrawings()}>
           <I>
             <path d="M5 7h14M9 7V5h6v2M8 7l1 12h6l1-12" />
@@ -322,6 +420,25 @@ export function DrawingToolbar({ engine }: { engine: ChartEngine | null }) {
         </button>
       </aside>
 
+      {recentItems.length ? (
+        <div className="draw-recent-bar" title="Recent drawing tools">
+          {recentItems.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className={snap.tool === t.draw ? "on" : ""}
+              title={t.label}
+              onClick={() => {
+                engine?.setTool(t.draw, t.glyph ? { text: t.glyph } : undefined);
+                rememberRecent(t.id);
+              }}
+            >
+              {t.glyph ? <span className="tool-emoji">{t.glyph}</span> : <ToolGlyph id={t.id} />}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       {favItems.length ? (
         <div className="draw-fav-bar" title="Favorite drawing tools">
           {favItems.map((t) => (
@@ -330,7 +447,10 @@ export function DrawingToolbar({ engine }: { engine: ChartEngine | null }) {
               type="button"
               className={snap.tool === t.draw ? "on" : ""}
               title={t.label}
-              onClick={() => engine?.setTool(t.draw, t.glyph ? { text: t.glyph } : undefined)}
+              onClick={() => {
+                engine?.setTool(t.draw, t.glyph ? { text: t.glyph } : undefined);
+                rememberRecent(t.id);
+              }}
             >
               {t.glyph ? <span className="tool-emoji">{t.glyph}</span> : <ToolGlyph id={t.id} />}
             </button>

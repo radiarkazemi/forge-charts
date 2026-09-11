@@ -1,6 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { conditionLabel, type AlertCondition, type AlertTrigger, type PriceAlert } from "../data/alerts";
 
+type AlertInput = {
+  symbol: string;
+  exchange?: string;
+  interval?: string;
+  name: string;
+  condition: AlertCondition;
+  price: number;
+  trigger: AlertTrigger;
+  message: string;
+  webhookUrl?: string;
+};
+
 type Props = {
   open: boolean;
   onClose: () => void;
@@ -10,17 +22,10 @@ type Props = {
   precision: number;
   defaultPrice: number;
   defaultName?: string;
-  onCreate: (input: {
-    symbol: string;
-    exchange?: string;
-    interval?: string;
-    name: string;
-    condition: AlertCondition;
-    price: number;
-    trigger: AlertTrigger;
-    message: string;
-    webhookUrl?: string;
-  }) => void;
+  /** When set, modal edits this alert (GAP-49). */
+  initial?: PriceAlert | null;
+  onCreate: (input: AlertInput) => void;
+  onSave?: (alert: PriceAlert, input: AlertInput) => void;
 };
 
 export function AlertModal({
@@ -32,8 +37,11 @@ export function AlertModal({
   precision,
   defaultPrice,
   defaultName,
+  initial,
   onCreate,
+  onSave,
 }: Props) {
+  const editing = !!initial;
   const [condition, setCondition] = useState<AlertCondition>("crossing");
   const [price, setPrice] = useState("");
   const [name, setName] = useState("");
@@ -44,63 +52,78 @@ export function AlertModal({
 
   useEffect(() => {
     if (!open) return;
-    const p = Number.isFinite(defaultPrice) ? defaultPrice.toFixed(Math.max(0, precision)) : "";
-    setCondition("crossing");
-    setPrice(p);
-    setName(defaultName?.trim() || `${symbol} crossing ${p}`);
-    setTrigger("once");
-    setMessage("");
-    setWebhookUrl("");
+    if (initial) {
+      setCondition(initial.condition);
+      setPrice(Number.isFinite(initial.price) ? initial.price.toFixed(Math.max(0, precision)) : "");
+      setName(initial.name);
+      setTrigger(initial.trigger);
+      setMessage(initial.message ?? "");
+      setWebhookUrl(initial.webhookUrl ?? "");
+    } else {
+      const p = Number.isFinite(defaultPrice) ? defaultPrice.toFixed(Math.max(0, precision)) : "";
+      setCondition("crossing");
+      setPrice(p);
+      setName(defaultName?.trim() || `${symbol} crossing ${p}`);
+      setTrigger("once");
+      setMessage("");
+      setWebhookUrl("");
+    }
     requestAnimationFrame(() => {
       priceRef.current?.focus();
       priceRef.current?.select();
     });
-  }, [defaultName, defaultPrice, open, precision, symbol]);
+  }, [defaultName, defaultPrice, initial, open, precision, symbol]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || editing) return;
     const p = price.trim() || "…";
     setName((prev) => {
-      // Keep custom names the user typed, but refresh the default-style name.
       if (!prev || prev.startsWith(`${symbol} `)) {
         return `${symbol} ${conditionLabel(condition).toLowerCase()} ${p}`;
       }
       return prev;
     });
-  }, [condition, open, price, symbol]);
+  }, [condition, editing, open, price, symbol]);
 
   if (!open) return null;
 
   const submit = () => {
     const value = Number(price);
     if (!Number.isFinite(value)) return;
-    onCreate({
-      symbol,
-      exchange,
-      interval,
+    const input: AlertInput = {
+      symbol: initial?.symbol ?? symbol,
+      exchange: initial?.exchange ?? exchange,
+      interval: initial?.interval ?? interval,
       name: name.trim() || `${symbol} ${condition} ${value}`,
       condition,
       price: value,
       trigger,
       message: message.trim(),
       webhookUrl: webhookUrl.trim() || undefined,
-    });
+    };
+    if (initial && onSave) onSave(initial, input);
+    else onCreate(input);
     onClose();
   };
 
   return (
     <div className="modal-bg" onClick={onClose}>
-      <div className="modal alert-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Create alert">
+      <div
+        className="modal alert-modal"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-label={editing ? "Edit alert" : "Create alert"}
+      >
         <div className="alert-modal-head">
-          <h2>Create alert</h2>
+          <h2>{editing ? "Edit alert" : "Create alert"}</h2>
           <button type="button" className="ind-close" onClick={onClose} title="Close">
             ✕
           </button>
         </div>
         <p className="hint">
-          {symbol}
-          {exchange ? ` · ${exchange}` : ""}
-          {interval ? ` · ${interval}` : ""}
+          {initial?.symbol ?? symbol}
+          {(initial?.exchange ?? exchange) ? ` · ${initial?.exchange ?? exchange}` : ""}
+          {(initial?.interval ?? interval) ? ` · ${initial?.interval ?? interval}` : ""}
         </p>
 
         <label className="row">
@@ -158,7 +181,7 @@ export function AlertModal({
 
         <div className="alert-modal-actions">
           <button type="button" className="primary" onClick={submit} disabled={!Number.isFinite(Number(price))}>
-            Create
+            {editing ? "Save" : "Create"}
           </button>
           <button type="button" onClick={onClose}>
             Cancel

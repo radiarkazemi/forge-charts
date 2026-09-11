@@ -20,10 +20,13 @@ import type { LineEnd } from "../engine/types";
 import { DEFAULT_DRAWING_VISIBILITY,
   DEFAULT_INDICATOR_VISIBILITY } from "../engine/types";
 import {
+  clearDrawingToolDefault,
   createDrawingTemplate,
   drawingTemplateSummary,
   loadDrawingTemplates,
   saveDrawingTemplates,
+  setDrawingToolDefault,
+  snapshotDrawingStyle,
   templatePatch,
   type DrawingTemplate,
 } from "../data/drawingTemplates";
@@ -62,7 +65,8 @@ function hasTextField(kind: Drawing["kind"]): boolean {
     kind === "pricenote" ||
     kind === "pricelabel" ||
     kind === "sticker" ||
-    kind === "flagmark"
+    kind === "flagmark" ||
+    kind === "image"
   );
 }
 
@@ -427,6 +431,24 @@ function DrawingEditor({
         {tplOpen ? (
           <div className="tpl-mini-menu" onPointerDown={(e) => e.stopPropagation()}>
             <button type="button" onClick={saveTpl}>Save template…</button>
+            <button
+              type="button"
+              onClick={() => {
+                setDrawingToolDefault(drawing.kind, snapshotDrawingStyle(drawing));
+                setTplOpen(false);
+              }}
+            >
+              Apply as default for this tool
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                clearDrawingToolDefault(drawing.kind);
+                setTplOpen(false);
+              }}
+            >
+              Clear tool default
+            </button>
             {templates.map((tpl) => (
               <button key={tpl.id} type="button" title={drawingTemplateSummary(tpl)} onClick={() => applyTpl(tpl)}>
                 {tpl.name}
@@ -506,6 +528,38 @@ function DrawingPropertiesDialog({ engine, drawing }: { engine: ChartEngine | nu
             <PatternStylePanel engine={engine} drawing={drawing} />
           ) : (
             <>
+              {drawing.kind === "image" ? (
+                <>
+                  <label className="row stack-row">
+                    Image URL
+                    <input
+                      type="url"
+                      value={drawing.imageUrl ?? ""}
+                      placeholder="https://… or data URL"
+                      onChange={(e) =>
+                        engine?.updateDrawing(drawing.id, { imageUrl: e.target.value, text: drawing.text || "Image" })
+                      }
+                    />
+                  </label>
+                  <label className="row stack-row">
+                    Upload
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                          const imageUrl = typeof reader.result === "string" ? reader.result : "";
+                          if (imageUrl) engine?.updateDrawing(drawing.id, { imageUrl, text: file.name || "Image" });
+                        };
+                        reader.readAsDataURL(file);
+                      }}
+                    />
+                  </label>
+                </>
+              ) : null}
               <label className="row">
                 Color
                 <span className="swatch-row">
@@ -562,6 +616,38 @@ function DrawingPropertiesDialog({ engine, drawing }: { engine: ChartEngine | nu
       ) : null}
       {tab === "Text" && textOk ? (
         <div className="ind-tab-panel">
+          {drawing.kind === "image" ? (
+            <>
+              <label className="row stack-row">
+                Image URL
+                <input
+                  type="url"
+                  value={drawing.imageUrl ?? ""}
+                  placeholder="https://… or data URL"
+                  onChange={(e) =>
+                    engine?.updateDrawing(drawing.id, { imageUrl: e.target.value, text: drawing.text || "Image" })
+                  }
+                />
+              </label>
+              <label className="row stack-row">
+                Upload
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      const imageUrl = typeof reader.result === "string" ? reader.result : "";
+                      if (imageUrl) engine?.updateDrawing(drawing.id, { imageUrl, text: file.name || "Image" });
+                    };
+                    reader.readAsDataURL(file);
+                  }}
+                />
+              </label>
+            </>
+          ) : null}
           <label className="row stack-row">
             Text
             <textarea
@@ -849,6 +935,19 @@ function PatternStylePanel({ engine, drawing }: { engine: ChartEngine | null; dr
                 onChange={() => patchFib({ showStats: !(fib.showStats ?? fib.showPrices) })}
               />
               Stats on line
+            </label>
+          )}
+          {(isChannel || isTrendLine) && (
+            <label className="row check-row">
+              <input
+                type="checkbox"
+                checked={fib.showMidpoint ?? fib.showLevels}
+                onChange={() => {
+                  const next = !(fib.showMidpoint ?? fib.showLevels);
+                  patchFib({ showMidpoint: next, showLevels: next });
+                }}
+              />
+              Midpoint / middle line
             </label>
           )}
           {isTrendLine && (
@@ -1159,6 +1258,24 @@ function DrawingContextMenu({
       </button>
       <button type="button" onClick={saveTpl}>
         Save as template…
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setDrawingToolDefault(drawing.kind, snapshotDrawingStyle(drawing));
+          engine?.closeDrawingMenu();
+        }}
+      >
+        Apply as default for this tool
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          clearDrawingToolDefault(drawing.kind);
+          engine?.closeDrawingMenu();
+        }}
+      >
+        Clear tool default
       </button>
       <div className="ctx-sep" />
       <button type="button" onClick={() => { engine?.reorderDrawing(drawing.id, "front"); engine?.closeDrawingMenu(); }}>

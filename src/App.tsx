@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ForgeMark } from "./brand/ForgeMark";
 import {
+  appendAlertFires,
   createAlert,
   dispatchWebhook,
   evaluateAlerts,
   loadAlerts,
+  resolveDrawingAlertLevel,
   saveAlerts,
+  updateAlert,
   type AlertFire,
   type PriceAlert,
 } from "./data/alerts";
@@ -104,6 +107,8 @@ export default function App() {
   const [indOpen, setIndOpen] = useState(false);
   const [alertOpen, setAlertOpen] = useState(false);
   const [alertDraft, setAlertDraft] = useState<{ price: number; name: string; drawingId?: string; drawingKind?: string } | null>(null);
+  const [editingAlert, setEditingAlert] = useState<PriceAlert | null>(null);
+  const [fireLogRevision, setFireLogRevision] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [symbolQuery, setSymbolQuery] = useState("");
@@ -130,6 +135,7 @@ export default function App() {
   const [syncCrosshair, setSyncCrosshair] = useState(true);
   const [syncInterval, setSyncInterval] = useState(false);
   const [syncSymbol, setSyncSymbol] = useState(false);
+  const [syncDrawings, setSyncDrawings] = useState(true);
   const [workspaceName, setWorkspaceName] = useState("Untitled layout");
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspaceReady, setWorkspaceReady] = useState(false);
@@ -178,8 +184,9 @@ export default function App() {
     const drawingLevels: Record<string, number> = {};
     const indicatorValues: Record<string, number> = {};
     if (eng) {
+      const lastBarTime = eng.getBars().at(-1)?.time;
       for (const d of eng.getDrawings()) {
-        const px = d.points[0]?.price;
+        const px = resolveDrawingAlertLevel(d, lastBarTime);
         if (px != null && Number.isFinite(px)) drawingLevels[d.id] = px;
       }
       const idx = eng.getBars().length - 1;
@@ -199,6 +206,8 @@ export default function App() {
     });
     if (fires.length) {
       setAlerts(next);
+      appendAlertFires(fires);
+      setFireLogRevision((n) => n + 1);
       for (const fire of fires) dispatchWebhook(fire);
       setToast(fires[0]!);
       if (showWidgets) setWidget("alerts");
@@ -474,6 +483,7 @@ export default function App() {
   }, [toast]);
 
   const openCreateAlert = (price?: number) => {
+    setEditingAlert(null);
     if (price != null && Number.isFinite(price)) {
       setAlertDraft({
         price,
@@ -486,14 +496,16 @@ export default function App() {
   };
   
   const syncDrawingsAcrossPanes = useCallback((source: ChartEngine) => {
+    if (!syncDrawings) return;
     const rows = source.getDrawings();
     Object.values(paneEnginesRef.current).forEach((eng) => {
       if (!eng || eng === source) return;
       eng.setDrawings(rows);
     });
-  }, []);
+  }, [syncDrawings]);
 
   const openDrawingAlert = (drawing: import("./engine/types").Drawing) => {
+    setEditingAlert(null);
     const price = drawing.points[0]?.price ?? snap?.last?.close ?? 0;
     setAlertDraft({
       price,
@@ -646,10 +658,11 @@ export default function App() {
         syncCrosshair,
         syncInterval,
         syncSymbol,
+        syncDrawings,
         panes,
       };
     },
-    [activePane, arrangement, paneSymbols, snap?.interval, syncCrosshair, syncInterval, syncSymbol, workspaceName],
+    [activePane, arrangement, paneSymbols, snap?.interval, syncCrosshair, syncInterval, syncSymbol, syncDrawings, workspaceName],
   );
 
   const applyWorkspace = useCallback((profile: WorkspaceProfile) => {
@@ -660,6 +673,7 @@ export default function App() {
     setSyncCrosshair(profile.syncCrosshair);
     setSyncInterval(profile.syncInterval);
     setSyncSymbol(profile.syncSymbol);
+    setSyncDrawings(profile.syncDrawings ?? true);
     setPaneSymbols(profile.panes.map((p) => p.symbol));
     const primary = profile.panes[0];
     const eng = engineRef.current;
@@ -749,6 +763,7 @@ export default function App() {
     syncCrosshair,
     syncInterval,
     syncSymbol,
+    syncDrawings,
     snap?.chartType,
     snap?.theme,
     snap?.interval,
@@ -815,9 +830,9 @@ export default function App() {
       const next = fingerprint();
       if (next === last) return;
       last = next;
-      syncDrawingsAcrossPanes(engine);
+      if (syncDrawings) syncDrawingsAcrossPanes(engine);
     });
-  }, [engine, syncDrawingsAcrossPanes]);
+  }, [engine, syncDrawings, syncDrawingsAcrossPanes]);
 
   return (
     <div
@@ -900,10 +915,12 @@ export default function App() {
                 syncCrosshair={syncCrosshair}
                 syncInterval={syncInterval}
                 syncSymbol={syncSymbol}
+                syncDrawings={syncDrawings}
                 onSyncChange={(next) => {
                   if (next.syncCrosshair != null) setSyncCrosshair(next.syncCrosshair);
                   if (next.syncInterval != null) setSyncInterval(next.syncInterval);
                   if (next.syncSymbol != null) setSyncSymbol(next.syncSymbol);
+                  if (next.syncDrawings != null) setSyncDrawings(next.syncDrawings);
                 }}
                 onArrangement={setArrangement}
                 onOpenLayout={(layout) => {
@@ -913,11 +930,17 @@ export default function App() {
                   if (layout.syncCrosshair != null) setSyncCrosshair(layout.syncCrosshair);
                   if (layout.syncInterval != null) setSyncInterval(layout.syncInterval);
                   if (layout.syncSymbol != null) setSyncSymbol(layout.syncSymbol);
+                  if (layout.syncDrawings != null) setSyncDrawings(layout.syncDrawings);
                   const sym = findSymbol(layout.symbols[0] || "XAUUSD");
                   void attachFeed(sym, engineRef.current?.getSnapshot().interval ?? "15", "symbol");
                 }}
                 onSaveCurrent={(name) =>
-                  createLayout(name, arrangement, paneSymbols, { syncCrosshair, syncInterval, syncSymbol })
+                  createLayout(name, arrangement, paneSymbols, {
+                    syncCrosshair,
+                    syncInterval,
+                    syncSymbol,
+                    syncDrawings,
+                  })
                 }
               />
             )
@@ -990,6 +1013,12 @@ export default function App() {
                 setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, enabled: !a.enabled } : a)))
               }
               onDeleteAlert={(id) => setAlerts((prev) => prev.filter((a) => a.id !== id))}
+              onEditAlert={(alert) => {
+                setEditingAlert(alert);
+                setAlertDraft(null);
+                setAlertOpen(true);
+              }}
+              fireLogRevision={fireLogRevision}
             />
           </div>
         ) : null}
@@ -1115,13 +1144,18 @@ export default function App() {
       />
       <AlertModal
         open={alertOpen}
-        onClose={() => { setAlertOpen(false); setAlertDraft(null); }}
+        onClose={() => {
+          setAlertOpen(false);
+          setAlertDraft(null);
+          setEditingAlert(null);
+        }}
         symbol={toolbarSnap?.symbol.ticker ?? snap?.symbol.ticker ?? "SYMBOL"}
         exchange={toolbarSnap?.symbol.exchange ?? snap?.symbol.exchange}
         interval={toolbarSnap?.interval ?? snap?.interval}
         precision={toolbarSnap?.symbol.pricePrecision ?? snap?.symbol.pricePrecision ?? 2}
         defaultPrice={alertDraft?.price ?? toolbarSnap?.last?.close ?? snap?.last?.close ?? 0}
         defaultName={alertDraft?.name}
+        initial={editingAlert}
         onCreate={(input) => {
           const alert = createAlert({
             ...input,
@@ -1131,11 +1165,33 @@ export default function App() {
             webhookUrl: input.webhookUrl,
           });
           setAlertDraft(null);
+          setEditingAlert(null);
           setAlerts((prev) => [alert, ...prev]);
           if (showWidgets) {
             setWidget("alerts");
             if (compact) setMobileWidgetOpen(true);
           }
+        }}
+        onSave={(alert, input) => {
+          setAlerts((prev) =>
+            prev.map((a) =>
+              a.id === alert.id
+                ? updateAlert(a, {
+                    name: input.name,
+                    condition: input.condition,
+                    price: input.price,
+                    trigger: input.trigger,
+                    message: input.message,
+                    webhookUrl: input.webhookUrl,
+                    symbol: input.symbol,
+                    exchange: input.exchange,
+                    interval: input.interval as Interval | undefined,
+                  })
+                : a,
+            ),
+          );
+          setEditingAlert(null);
+          setAlertDraft(null);
         }}
       />
       <input
