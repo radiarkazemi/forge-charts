@@ -28,7 +28,7 @@ import {
   willr,
   wma,
 } from "./studies";
-import { CHART_FONT, CHART_FONT_BOLD, palettes } from "./theme";
+import { CHART_FONT, palettes } from "./theme";
 import type {
   Bar,
   ChartPoint,
@@ -185,11 +185,7 @@ export class ChartEngine {
   private showGrid = true;
   private hover: Bar | null = null;
   private mouse: { x: number; y: number } | null = null;
-  private indicators: IndicatorInstance[] = [
-    { id: uid("ind"), kind: "vol", pane: "volume", params: [], visible: true, color: "#787b86" },
-    { id: uid("ind"), kind: "sma", pane: "main", params: [20], visible: true, color: "#2962ff" },
-    { id: uid("ind"), kind: "ema", pane: "main", params: [50], visible: true, color: "#ff6d00" },
-  ];
+  private indicators: IndicatorInstance[] = [];
   private drawings: Drawing[] = [];
   private draft: Drawing | null = null;
   private unsubImageLoad: (() => void) | null = null;
@@ -351,8 +347,11 @@ export class ChartEngine {
   }
 
   setSymbol(symbol: SymbolInfo, bars: Bar[]): void {
+    const same = this.symbol?.ticker === symbol.ticker;
     this.symbol = symbol;
-    this.drawings = [];
+    if (!same) {
+      this.drawings = [];
+    }
     this.draft = null;
     this.selectedId = null;
     this.selectedIndicatorId = null;
@@ -893,7 +892,8 @@ export class ChartEngine {
   }
 
   zoom(dir: 1 | -1): void {
-    this.setViewCount(this.viewCount * (dir > 0 ? 0.82 : 1.22), this.viewStart() + this.viewCount * 0.5);
+    const factor = 0.85;
+    this.setViewCount(this.viewCount * (dir > 0 ? factor : 1 / factor), this.viewStart() + this.viewCount * 0.5);
     this.fitMode = false;
     this.emit();
     this.draw();
@@ -2919,7 +2919,7 @@ export class ChartEngine {
     const ctx = this.ctx;
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
-    ctx.fillStyle = pal.muted;
+    ctx.fillStyle = this.axisTextColor(pal.muted);
     ctx.font = this.axisFont();
     ctx.textAlign = "left";
     for (const tick of niceTicks(range.min, range.max, 8)) {
@@ -3041,22 +3041,8 @@ export class ChartEngine {
     }
   }
 
-  private paintLegend(rect: Rect, pal: (typeof palettes)["dark"]): void {
-    const ctx = this.ctx;
-    const lines = this.legendLines();
-    const sym = lines.find((l) => l.id === "sym" || l.id === "symbol") ?? lines[0];
-    if (!sym) return;
-    ctx.font = CHART_FONT_BOLD;
-    ctx.fillStyle = sym.color || pal.text;
-    const parts = sym.text.split("  ").filter(Boolean);
-    let y = rect.y + 18;
-    ctx.fillText(parts[0] ?? sym.text, rect.x + 10, y);
-    if (parts.length > 1) {
-      y += 16;
-      ctx.font = this.axisFont();
-      ctx.fillStyle = (this.axisTextColor(pal.text) as string);
-      ctx.fillText(parts.slice(1).join("  "), rect.x + 10, y);
-    }
+  private paintLegend(_rect: Rect, _pal: (typeof palettes)["dark"]): void {
+    // Symbol / OHLC legend is rendered by React ChartInspectors — avoid duplicate canvas paint.
   }
 
   private locPts(d: Drawing): { x: number; y: number }[] {
@@ -3130,11 +3116,14 @@ export class ChartEngine {
   }
 
   private hitZone(x: number, y: number): "price" | "time" | "chart" {
-    const { chart } = this.layout();
+    const layout = this.layout();
+    const { chart, main, rightAxis } = layout;
     // Widen price/time hit targets on phones so scale gestures are usable.
     const pricePad = this.container.clientWidth < 520 ? 12 : 0;
     const timePad = this.container.clientWidth < 520 ? 10 : 0;
-    if (x >= chart.w - pricePad) return "price";
+    // Price axis sits to the right of the main plot (not chart.w alone when left scale is on).
+    const priceLeft = main.x + main.w - pricePad;
+    if (rightAxis > 0 && x >= priceLeft) return "price";
     if (y >= chart.h - timePad) return "time";
     return "chart";
   }
@@ -3571,17 +3560,19 @@ export class ChartEngine {
     const x = e.clientX - r.left;
     const y = e.clientY - r.top;
     const zone = this.hitZone(x, y);
+    const wheelFactor = 1.1;
     if (zone === "price" || e.shiftKey) {
       this.ensurePriceSpan();
       if (this.priceSpan != null) {
-        this.priceSpan = clamp(this.priceSpan * (e.deltaY > 0 ? 1.12 : 0.88), 1e-8, 1e12);
+        this.priceSpan = clamp(this.priceSpan * (e.deltaY > 0 ? wheelFactor : 1 / wheelFactor), 1e-8, 1e12);
         this.fitMode = false;
       }
     } else {
+      // Main/time wheel: zoom time only — do not lock price via ensurePriceSpan.
       const main = this.layout().main;
       const frac = clamp((x - main.x) / Math.max(1, main.w), 0, 1);
       const anchor = this.viewStart() + frac * this.viewCount;
-      this.setViewCount(this.viewCount * (e.deltaY > 0 ? 1.12 : 0.9), anchor);
+      this.setViewCount(this.viewCount * (e.deltaY > 0 ? wheelFactor : 1 / wheelFactor), anchor);
       this.fitMode = false;
     }
     this.emit();

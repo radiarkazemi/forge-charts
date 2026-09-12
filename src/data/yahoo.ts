@@ -1,8 +1,12 @@
 import type { Bar, Interval, SymbolInfo } from "../engine/types";
 import { FOREXCOM_YAHOO } from "./forexcom";
+import { parseInterval } from "./interval";
 
-export const YAHOO_IV: Record<Interval, { interval: string; range: string }> = {
+export const YAHOO_IV: Record<string, { interval: string; range: string }> = {
   "1": { interval: "1m", range: "1d" },
+  "2": { interval: "1m", range: "1d" },
+  "3": { interval: "1m", range: "1d" },
+  "4": { interval: "1m", range: "1d" },
   "5": { interval: "5m", range: "5d" },
   "15": { interval: "15m", range: "5d" },
   "30": { interval: "30m", range: "1mo" },
@@ -14,6 +18,24 @@ export const YAHOO_IV: Record<Interval, { interval: string; range: string }> = {
   "1M": { interval: "1mo", range: "max" },
 };
 
+function resolveYahooIv(interval: Interval): { interval: string; range: string } {
+  const known = YAHOO_IV[interval];
+  if (known) return known;
+  const p = parseInterval(interval);
+  if (p.kind === "minutes") {
+    if (p.n <= 4) return { interval: "1m", range: "1d" };
+    if (p.n <= 5) return { interval: "5m", range: "5d" };
+    if (p.n <= 15) return { interval: "15m", range: "5d" };
+    if (p.n <= 30) return { interval: "30m", range: "1mo" };
+    return { interval: "60m", range: "1mo" };
+  }
+  if (p.kind === "hours") return { interval: "60m", range: "3mo" };
+  if (p.kind === "days") return { interval: "1d", range: "1y" };
+  if (p.kind === "weeks") return { interval: "1wk", range: "5y" };
+  if (p.kind === "months") return { interval: "1mo", range: "max" };
+  return { interval: "15m", range: "5d" };
+}
+
 export function yahooSymbol(ticker: string): string | undefined {
   return FOREXCOM_YAHOO[ticker];
 }
@@ -21,7 +43,7 @@ export function yahooSymbol(ticker: string): string | undefined {
 export async function fetchYahooHistory(ticker: string, interval: Interval): Promise<Bar[]> {
   const y = yahooSymbol(ticker);
   if (!y) throw new Error(`no yahoo map for ${ticker}`);
-  const { interval: iv, range } = YAHOO_IV[interval];
+  const { interval: iv, range } = resolveYahooIv(interval);
   const url = `/yahoo/v8/finance/chart/${encodeURIComponent(y)}?interval=${iv}&range=${range}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`yahoo ${res.status}`);
@@ -89,7 +111,7 @@ export function subscribeYahooBar(
       // Short range for live updates — full history is only needed once at attach.
       const y = yahooSymbol(symbol.ticker);
       if (!y) return;
-      const { interval: iv } = YAHOO_IV[interval];
+      const { interval: iv } = resolveYahooIv(interval);
       const res = await fetch(
         `/yahoo/v8/finance/chart/${encodeURIComponent(y)}?interval=${iv}&range=5d`,
       );

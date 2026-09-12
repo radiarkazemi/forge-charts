@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { ChartEngine } from "../engine/ChartEngine";
 import { runPineSubset, runStrategy, type StrategyReport } from "../engine/pineRuntime";
 import { loadJson, saveJson } from "../persist";
+import { RangeStrip } from "./RangeStrip";
 
 type PineScriptTab = { id: string; title: string; code: string };
 type StrategyId = "ma_cross" | "rsi_revert" | "macd_trend" | "donchian_break";
@@ -23,10 +24,12 @@ export function BottomDock({
   engine,
   open,
   onToggle,
+  rangeSlot,
 }: {
   engine: ChartEngine | null;
   open: boolean;
   onToggle: () => void;
+  rangeSlot?: ReactNode;
 }) {
   const [tab, setTab] = useState<"pine" | "tester" | "replay" | "logs">("pine");
   const [scripts, setScripts] = useState<PineScriptTab[]>(loadScripts);
@@ -88,51 +91,54 @@ export function BottomDock({
 
   return (
     <div className={open ? "bottom-dock open" : "bottom-dock"}>
-      <div className="dock-tabs">
-        <button
-          type="button"
-          className={tab === "pine" && open ? "on" : ""}
-          onClick={() => {
-            setTab("pine");
-            if (!open) onToggle();
-          }}
-        >
-          Pine Editor
-        </button>
-        <button
-          type="button"
-          className={tab === "tester" && open ? "on" : ""}
-          onClick={() => {
-            setTab("tester");
-            if (!open) onToggle();
-          }}
-        >
-          Strategy Tester
-        </button>
-        <button
-          type="button"
-          className={tab === "replay" && open ? "on" : ""}
-          onClick={() => {
-            setTab("replay");
-            if (!open) onToggle();
-          }}
-        >
-          Replay Trading
-        </button>
-        <button
-          type="button"
-          className={tab === "logs" && open ? "on" : ""}
-          onClick={() => {
-            setTab("logs");
-            if (!open) onToggle();
-          }}
-        >
-          Pine Logs
-        </button>
-        <span className="spacer" />
-        <button className="tb-btn" onClick={onToggle}>
-          {open ? "▾" : "▴"}
-        </button>
+      <div className="dock-chrome">
+        {rangeSlot ?? <RangeStrip engine={engine} />}
+        <div className="dock-tabs">
+          <button
+            type="button"
+            className={tab === "pine" && open ? "on" : ""}
+            onClick={() => {
+              setTab("pine");
+              if (!open) onToggle();
+            }}
+          >
+            Pine Editor
+          </button>
+          <button
+            type="button"
+            className={tab === "tester" && open ? "on" : ""}
+            onClick={() => {
+              setTab("tester");
+              if (!open) onToggle();
+            }}
+          >
+            Strategy Tester
+          </button>
+          <button
+            type="button"
+            className={tab === "replay" && open ? "on" : ""}
+            onClick={() => {
+              setTab("replay");
+              if (!open) onToggle();
+            }}
+          >
+            Replay Trading
+          </button>
+          <button
+            type="button"
+            className={tab === "logs" && open ? "on" : ""}
+            onClick={() => {
+              setTab("logs");
+              if (!open) onToggle();
+            }}
+          >
+            Pine Logs
+          </button>
+          <span className="spacer" />
+          <button className="tb-btn" onClick={onToggle}>
+            {open ? "▾" : "▴"}
+          </button>
+        </div>
       </div>
       {open ? (
         tab === "pine" ? (

@@ -1,10 +1,14 @@
 import type { Bar, Interval, SymbolInfo } from "../engine/types";
+import { parseInterval } from "./interval";
 
 export const BINANCE_REST = "/binance";
 export const BINANCE_WS = "wss://data-stream.binance.vision/ws";
 
-export const BINANCE_IV: Record<Interval, string> = {
+export const BINANCE_IV: Record<string, string> = {
   "1": "1m",
+  "2": "1m",
+  "3": "1m",
+  "4": "1m",
   "5": "5m",
   "15": "15m",
   "30": "30m",
@@ -15,6 +19,45 @@ export const BINANCE_IV: Record<Interval, string> = {
   "1W": "1w",
   "1M": "1M",
 };
+
+/** Native Binance interval + optional client-side grouping (for 2m/3m/4m). */
+function resolveBinanceIv(interval: Interval): { iv: string; group: number; stepSec: number } {
+  const known = BINANCE_IV[interval];
+  const p = parseInterval(interval);
+  if (p.kind === "minutes" && (p.n === 2 || p.n === 3 || p.n === 4)) {
+    return { iv: "1m", group: p.n, stepSec: 60 };
+  }
+  if (known) return { iv: known, group: 1, stepSec: 60 };
+  if (p.kind === "minutes" && p.n < 60) {
+    const native = BINANCE_IV[String(p.n)];
+    if (native) return { iv: native, group: 1, stepSec: 60 };
+    return { iv: "1m", group: Math.max(1, p.n), stepSec: 60 };
+  }
+  return { iv: known ?? "15m", group: 1, stepSec: 60 };
+}
+
+function aggregateBars(bars: Bar[], group: number, stepSec: number): Bar[] {
+  if (group <= 1 || bars.length === 0) return bars;
+  const bucket = stepSec * group;
+  const out: Bar[] = [];
+  let cur: Bar | null = null;
+  let bucketStart = 0;
+  for (const b of bars) {
+    const start = Math.floor(b.time / bucket) * bucket;
+    if (!cur || start !== bucketStart) {
+      if (cur) out.push(cur);
+      bucketStart = start;
+      cur = { ...b, time: start };
+    } else {
+      cur.high = Math.max(cur.high, b.high);
+      cur.low = Math.min(cur.low, b.low);
+      cur.close = b.close;
+      cur.volume += b.volume;
+    }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
 
 /** Curated list — never download the full exchange catalog on startup. */
 export const BINANCE_WATCH = [
@@ -131,14 +174,17 @@ export async function fetchBinanceSymbols(): Promise<SymbolInfo[]> {
 }
 
 export async function fetchBinanceHistory(symbol: string, interval: Interval, limit = 500): Promise<Bar[]> {
+  const { iv, group, stepSec } = resolveBinanceIv(interval);
+  const fetchLimit = group > 1 ? Math.min(1000, Math.max(50, limit * group)) : Math.min(1000, Math.max(50, limit));
   const qs = new URLSearchParams({
     symbol,
-    interval: BINANCE_IV[interval],
-    limit: String(Math.min(1000, Math.max(50, limit))),
+    interval: iv,
+    limit: String(fetchLimit),
   });
   const res = await fetch(`${BINANCE_REST}/api/v3/klines?${qs}`);
   if (!res.ok) throw new Error(`binance klines ${res.status}`);
-  return toBars((await res.json()) as Kline[]);
+  const bars = toBars((await res.json()) as Kline[]);
+  return aggregateBars(bars, group, stepSec);
 }
 
 export async function fetchBinanceQuotes(tickers: string[] = BINANCE_WATCH): Promise<Record<string, { price: number; change: number }>> {
@@ -155,7 +201,8 @@ export async function fetchBinanceQuotes(tickers: string[] = BINANCE_WATCH): Pro
 }
 
 export function subscribeBinanceKline(symbol: string, interval: Interval, onBar: (bar: Bar) => void): () => void {
-  const stream = `${symbol.toLowerCase()}@kline_${BINANCE_IV[interval]}`;
+  const { iv } = resolveBinanceIv(interval);
+  const stream = `${symbol.toLowerCase()}@kline_${iv}`;
   let ws: WebSocket | null = null;
   let closed = false;
   let retry = 0;
