@@ -426,9 +426,19 @@ function SnapshotMenu({ engine }: { engine: ChartEngine | null }) {
     window.open(url, "_blank");
     setOpen(false);
   };
-  const tweet = () => {
+  const tweet = async () => {
     const ticker = engine?.getSnapshot().symbol.ticker ?? "chart";
     const text = encodeURIComponent(`${ticker} chart — Forge Superchart`);
+    // X/Twitter intent cannot attach binary images; copy PNG then open composer so paste works (GAP-69).
+    if (engine) {
+      try {
+        const url = engine.toDataUrl("image/png");
+        const blob = await (await fetch(url)).blob();
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      } catch {
+        engine.screenshot();
+      }
+    }
     window.open(`https://twitter.com/intent/tweet?text=${text}`, "_blank");
     setOpen(false);
   };
@@ -447,7 +457,7 @@ function SnapshotMenu({ engine }: { engine: ChartEngine | null }) {
           <button type="button" onClick={download}>Download image</button>
           <button type="button" onClick={copyToClipboard}>Copy to clipboard</button>
           <button type="button" onClick={openInTab}>Open in new tab</button>
-          <button type="button" onClick={tweet}>Tweet chart</button>
+          <button type="button" onClick={tweet}>Tweet chart (image copied)</button>
         </div>
       ) : null}
     </div>

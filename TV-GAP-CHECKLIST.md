@@ -20,6 +20,8 @@ Current parity snapshot when this was written: ~244 MATCH · 45 PARTIAL · 2 MIS
 
 **2026-09-05 TV parity pass:** multi-chart layers (1–8) + sync, local profile/workspace save-export-import, mobile pan followLive detach, GAP-20…39 chart-type/settings depth.
 
+**2026-09-12:** GAP-61…70 + TV Trading Panel deepen (screener bottom tab, equity curve, denser replay, header menus, layout share, tweet image copy, sync time/crosshair).
+
 **2026-09-11:** GAP-40…49 done (magnet flyout, midpoint, drawing-alert geometry, image tool, toolbar recent/last, syncDrawings, pane drawings, tool defaults, watchlist details/news, alerts edit+history) + theme polish (grid/crosshair reset on theme switch, light CSS for new chrome).
 
 ---
@@ -144,12 +146,12 @@ Forge already mirrors most **chrome**. Gaps are mostly **depth, data, and runtim
 
 | ID | Tag | Item | Action |
 | --- | --- | --- | --- |
-| GAP-61 | PARTIAL | Pine Editor | Multi-tab scripts + localStorage save + add-to-chart via subset runtime |
-| GAP-62 | PARTIAL | Strategy Tester tabs | Distinct Overview / Performance / Trades / Ratios / Properties metrics |
+| GAP-61 | DONE | Pine Editor | Multi-tab scripts + localStorage save + add-to-chart via subset runtime |
+| GAP-62 | DONE | Strategy Tester tabs | Distinct Overview / Performance / Trades / Ratios / Properties metrics |
 | GAP-63 | DONE | Replay Trading dock | Replay controls + jump into Trading ticket for paper fills |
-| GAP-64 | PARTIAL | Bar Replay chrome | Select bar / Random / Jump to realtime present; denser TV chrome still open |
-| GAP-65 | ADD | Bottom Stock Screener tab | TV has Screener as bottom tab too |
-| GAP-66 | DONE | Broker Trading Panel | Paper demo + postMessage broker bridge (`brokerOrderRequest` / `brokerOrderUpdate`) |
+| GAP-64 | DONE | Bar Replay chrome | Select bar / Random / Jump to realtime present; denser TV chrome still open |
+| GAP-65 | DONE | Bottom Stock Screener tab | TV has Screener as bottom tab too |
+| GAP-66 | DONE | Broker Trading Panel | TV-style Trade/Positions/Orders/History/Account + stop/stop-limit/TP/SL/flatten/reverse + paper/broker bridge |
 
 ---
 
@@ -157,10 +159,10 @@ Forge already mirrors most **chrome**. Gaps are mostly **depth, data, and runtim
 
 | ID | Tag | Item | Action |
 | --- | --- | --- | --- |
-| GAP-67 | MODIFY | Header Products/Community/Brokers menus | Today many “Coming soon” — either wire local tools or hide |
-| GAP-68 | MODIFY | Layout save | Cloud sync optional OUT; improve local share/export (JSON) |
-| GAP-69 | MODIFY | Snapshot → Tweet | Attach chart image, not text-only intent |
-| GAP-70 | PARTIAL | Multi-chart grid | Sync symbol / interval / crosshair / time (TV layout sync matrix) |
+| GAP-67 | DONE | Header Products/Community/Brokers menus | Today many “Coming soon” — either wire local tools or hide |
+| GAP-68 | DONE | Layout save | Cloud sync optional OUT; improve local share/export (JSON) |
+| GAP-69 | DONE | Snapshot → Tweet | Attach chart image, not text-only intent |
+| GAP-70 | DONE | Multi-chart grid | Sync symbol / interval / crosshair / time (TV layout sync matrix) |
 | GAP-71 | OUT | Publish idea, Trade/Paper Trading, social drawings | Stay OUT |
 | GAP-72 | OUT | Bid/ask trading lines, hide positions/orders | Stay OUT without broker |
 

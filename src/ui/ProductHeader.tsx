@@ -18,6 +18,9 @@ type Props = {
   onOpenSettings: () => void;
   onToggleTheme: () => void;
   onOpenMarkets: () => void;
+  onOpenScreener?: () => void;
+  onOpenPine?: () => void;
+  onOpenTrading?: () => void;
   onSaveWorkspace?: () => void;
   onManageWorkspaces?: () => void;
   onExportWorkspace?: () => void;
@@ -59,6 +62,9 @@ export function ProductHeader({
   onOpenSettings,
   onToggleTheme,
   onOpenMarkets,
+  onOpenScreener,
+  onOpenPine,
+  onOpenTrading,
   onSaveWorkspace,
   onManageWorkspaces,
   onExportWorkspace,
@@ -104,16 +110,17 @@ export function ProductHeader({
       label: "Products",
       items: [
         { label: "Supercharts", hint: "This workspace", action: () => undefined },
-        { label: "Screeners", hint: "Coming soon", disabled: true },
+        { label: "Screeners", hint: "Bottom screener", action: onOpenScreener },
         { label: "Calendar", hint: "Open widget", action: onOpenMarkets },
+        { label: "Pine Editor", hint: "Bottom pane", action: onOpenPine },
       ],
     },
     {
       id: "community",
       label: "Community",
       items: [
-        { label: "Ideas", hint: "Local only", disabled: true },
-        { label: "Scripts", hint: "Pine pane", disabled: true },
+        { label: "Ideas", hint: "Local layouts", action: onManageWorkspaces },
+        { label: "Scripts", hint: "Pine pane", action: onOpenPine },
       ],
     },
     {
@@ -122,12 +129,16 @@ export function ProductHeader({
       items: [
         { label: "Symbol search", hint: "Browse all markets", action: onOpenSearch },
         { label: "Watchlist", hint: "Right dock", action: onOpenMarkets },
+        { label: "Screener", hint: "Bottom tab", action: onOpenScreener },
       ],
     },
     {
       id: "brokers",
       label: "Brokers",
-      items: [{ label: "Paper trading", hint: "Out of scope", disabled: true }],
+      items: [
+        { label: "Paper trading", hint: "Trading panel", action: onOpenTrading },
+        { label: "Broker bridge", hint: "postMessage parent", action: onOpenTrading },
+      ],
     },
     {
       id: "more",
