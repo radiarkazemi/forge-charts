@@ -100,7 +100,32 @@ Best when data lives in your app / WebView (no CORS):
 | `setSymbol` / `setInterval` / `setTheme` | Control chrome |
 | `ping` | Health check → `pong` |
 
-**Chart → parent:** `ready`, `requestData`, `dataApplied`, `interval`, `pong`.
+**Chart → parent:** `ready`, `requestData`, `dataApplied`, `interval`, `pong`, `brokerOrderRequest`.
+
+**Parent → chart (broker bridge):**
+
+| `type` | Purpose |
+| --- | --- |
+| `brokerOrderUpdate` | Fill / reject / cancel a demo-trade request from the Trading panel |
+
+Example (own broker / MT5 bridge in the parent app):
+
+```js
+window.addEventListener("message", (ev) => {
+  const msg = ev.data;
+  if (msg?.source !== "forge-charts" || msg.type !== "brokerOrderRequest") return;
+  // Forward msg to your broker API, then reply:
+  ev.source.postMessage({
+    source: "forge-charts",
+    type: "brokerOrderUpdate",
+    requestId: msg.requestId,
+    status: "filled", // or rejected / cancelled / working
+    fillPrice: 2345.6,
+  }, "*");
+});
+```
+
+Paper mode needs no parent — use bottom dock **Trading → Paper demo**.
 
 ## iframe snippet (mobile app size)
 

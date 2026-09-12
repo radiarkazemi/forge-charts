@@ -2229,3 +2229,70 @@ button { cursor: pointer; }
 
 .layout-sync-row { display: flex; flex-wrap: wrap; gap: 10px 14px; padding: 6px 8px 10px; font-size: 12px; }
 .layout-sync-row label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+
+/* GAP-50…59 market widgets + demo trading */
+.mkt-panel { display: grid; gap: 8px; }
+.mkt-filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.mkt-filters.wrap { gap: 4px; }
+.mkt-filters button, .mkt-filters select, .mkt-filters input {
+  background: var(--panel-2, var(--panel));
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 4px;
+  height: 26px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+.mkt-filters button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.mkt-filters label { display: inline-flex; gap: 4px; align-items: center; font-size: 11px; color: var(--muted); }
+.mkt-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.mkt-table th, .mkt-table td { padding: 5px 4px; border-bottom: 1px solid var(--border); text-align: right; }
+.mkt-table th:first-child, .mkt-table td:first-child { text-align: left; }
+.mkt-table tr { cursor: pointer; }
+.mkt-table tr:hover { background: rgba(255,255,255,0.03); }
+.mkt-table small { display: block; color: var(--muted); font-size: 10px; }
+.mkt-table.heat td { text-align: center; font-variant-numeric: tabular-nums; }
+.mkt-table.opts td { font-variant-numeric: tabular-nums; }
+.cal-list li, .news-flow li { display: grid; gap: 2px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.cal-list li strong, .news-flow li strong { font-size: 12px; }
+.cal-list li em, .news-flow li span { color: var(--muted); font-size: 11px; font-style: normal; }
+.cal-list li.impact-high strong { color: #f23645; }
+.cal-list li.impact-medium strong { color: #ff9800; }
+.fund-card { border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+.fund-card header { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 12px; }
+.yield-svg { background: rgba(255,255,255,0.02); border-radius: 6px; }
+.hot-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; cursor: pointer; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.hot-row em { grid-column: 1 / -1; color: var(--muted); font-style: normal; font-size: 11px; }
+.dom-bar { display: inline-block; height: 8px; vertical-align: middle; margin-right: 4px; border-radius: 2px; max-width: 70%; }
+.dom-bar.bid { background: rgba(8,153,129,0.55); }
+.dom-bar.ask { background: rgba(242,54,69,0.55); }
+.help-panel a { color: var(--accent); }
+.mkt-panel .hint { margin: 4px 0 0; }
+
+.trading-panel { display: grid; gap: 10px; padding: 8px 10px 12px; max-width: 720px; }
+.trading-mode, .trading-tabs, .trading-side { display: flex; gap: 6px; flex-wrap: wrap; }
+.trading-mode button, .trading-tabs button, .trading-side button {
+  border: 1px solid var(--border); background: var(--panel); color: var(--text);
+  border-radius: 4px; height: 28px; padding: 0 10px; font-size: 12px; cursor: pointer;
+}
+.trading-mode button.on, .trading-tabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.trading-mode button.ghost { color: var(--muted); }
+.trading-side button.buy.on { background: #089981; border-color: #089981; color: #fff; }
+.trading-side button.sell.on { background: #f23645; border-color: #f23645; color: #fff; }
+.trading-equity { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--muted); }
+.trading-equity b { color: var(--text); }
+.trading-ticket { display: grid; gap: 8px; max-width: 360px; }
+.trading-ticket label { display: grid; gap: 4px; font-size: 11px; color: var(--muted); }
+.trading-ticket input, .trading-ticket select {
+  height: 30px; border-radius: 4px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); padding: 0 8px;
+}
+.trading-ticket .primary { height: 34px; border: 0; border-radius: 4px; color: #fff; font-weight: 600; cursor: pointer; }
+.buy-submit { background: #089981; }
+.sell-submit { background: #f23645; }
+.trading-last { font-size: 12px; color: var(--muted); }
+.trading-list li { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; }
+.trading-list li span, .trading-list li em { color: var(--muted); font-style: normal; font-size: 11px; }
+.trading-msg { font-size: 12px; color: var(--accent); }
+.up { color: #089981; }
+.down { color: #f23645; }
