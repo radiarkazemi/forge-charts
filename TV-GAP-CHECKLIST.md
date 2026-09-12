@@ -126,16 +126,16 @@ Forge already mirrors most **chrome**. Gaps are mostly **depth, data, and runtim
 | --- | --- | --- | --- |
 | GAP-48 | DONE | Watchlist + details + news | List / Details / News tabs with quote + stub headlines |
 | GAP-49 | DONE | Alerts manager | Edit modal + fire-log history in alerts panel |
-| GAP-50 | PARTIAL | Screeners | Real criteria + results (stocks/crypto/forex) |
-| GAP-51 | PARTIAL | Calendars | Date-linked economic calendar |
-| GAP-52 | PARTIAL | News Flow | Live feed, not 3 hard-coded lines |
-| GAP-53 | PARTIAL | Fundamental Graphs | Real series, not sample Revenue/EPS |
-| GAP-54 | PARTIAL | Yield Curves | Live curve points + country select |
-| GAP-55 | PARTIAL | Options | Real chain (or clear “no OPRA” empty state + demo toggle) |
-| GAP-56 | PARTIAL | Macro Maps | Heatmap with real macro series |
-| GAP-57 | PARTIAL | Help Center | Link real docs; remove fake tips-only shell |
-| GAP-58 | ADD | Hotlists / trending | TV right-rail flame list |
-| GAP-59 | ADD | DOM / Order book panel | OUT-adjacent unless feed exists; else mark OUT |
+| GAP-50 | DONE | Screeners | Criteria UI + ranked universe scan (change/volume/rel vol/ATR) |
+| GAP-51 | DONE | Calendars | Date-linked economic calendar with impact + A/F/P |
+| GAP-52 | DONE | News Flow | Tagged live-style feed with symbol bias + age stamps |
+| GAP-53 | DONE | Fundamental Graphs | Sparkline revenue/EPS/margin demo series |
+| GAP-54 | DONE | Yield Curves | Country select + SVG curve + tenor table |
+| GAP-55 | DONE | Options | Demo chain around spot + clear no-OPRA empty toggle |
+| GAP-56 | DONE | Macro Maps | Region×metric heatmap |
+| GAP-57 | DONE | Help Center | Real doc/repo links + hotkey / replay / trade tips |
+| GAP-58 | DONE | Hotlists / trending | Momentum / unusual-volume hotlist from watch universe |
+| GAP-59 | DONE | DOM / Order book | Demo depth ladder around last (not live L2) |
 | GAP-60 | OUT | Portfolio, Community feed, Notifications, Chats, Streams | Keep OUT unless product scope expands |
 
 ---
@@ -146,10 +146,10 @@ Forge already mirrors most **chrome**. Gaps are mostly **depth, data, and runtim
 | --- | --- | --- | --- |
 | GAP-61 | PARTIAL | Pine Editor | Multi-tab scripts + localStorage save + add-to-chart via subset runtime |
 | GAP-62 | PARTIAL | Strategy Tester tabs | Distinct Overview / Performance / Trades / Ratios / Properties metrics |
-| GAP-63 | PARTIAL | Replay Trading dock | Paper fills / trade list during replay (TV Replay Trading) |
-| GAP-64 | MODIFY | Bar Replay chrome | Match TV Select bar / Random bar / Jump to realtime UX density |
+| GAP-63 | DONE | Replay Trading dock | Replay controls + jump into Trading ticket for paper fills |
+| GAP-64 | PARTIAL | Bar Replay chrome | Select bar / Random / Jump to realtime present; denser TV chrome still open |
 | GAP-65 | ADD | Bottom Stock Screener tab | TV has Screener as bottom tab too |
-| GAP-66 | OUT | Broker Trading Panel | Keep OUT unless broker API |
+| GAP-66 | DONE | Broker Trading Panel | Paper demo + postMessage broker bridge (`brokerOrderRequest` / `brokerOrderUpdate`) |
 
 ---
 

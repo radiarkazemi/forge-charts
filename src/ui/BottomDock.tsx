@@ -3,6 +3,8 @@ import type { ChartEngine } from "../engine/ChartEngine";
 import { runPineSubset, runStrategy, type StrategyReport } from "../engine/pineRuntime";
 import { loadJson, saveJson } from "../persist";
 import { RangeStrip } from "./RangeStrip";
+import { TradingPanel } from "./TradingPanel";
+import { useEngine } from "./useEngine";
 
 type PineScriptTab = { id: string; title: string; code: string };
 type StrategyId = "ma_cross" | "rsi_revert" | "macd_trend" | "donchian_break";
@@ -31,13 +33,15 @@ export function BottomDock({
   onToggle: () => void;
   rangeSlot?: ReactNode;
 }) {
-  const [tab, setTab] = useState<"pine" | "tester" | "replay" | "logs">("pine");
+  const [tab, setTab] = useState<"pine" | "tester" | "replay" | "trading" | "logs">("pine");
   const [scripts, setScripts] = useState<PineScriptTab[]>(loadScripts);
   const [activeScript, setActiveScript] = useState(0);
   const [logs, setLogs] = useState<string[]>([]);
   const [strategyId, setStrategyId] = useState<StrategyId>("ma_cross");
   const [testerTab, setTesterTab] = useState<"overview" | "performance" | "trades" | "ratios" | "properties">("overview");
   const [compileMsg, setCompileMsg] = useState<string | null>(null);
+  const snap = useEngine(engine);
+  const lastPrice = snap?.last?.close ?? snap?.hover?.close ?? 0;
 
   useEffect(() => {
     saveJson(PINE_KEY, scripts);
@@ -123,6 +127,16 @@ export function BottomDock({
             }}
           >
             Replay Trading
+          </button>
+          <button
+            type="button"
+            className={tab === "trading" && open ? "on" : ""}
+            onClick={() => {
+              setTab("trading");
+              if (!open) onToggle();
+            }}
+          >
+            Trading
           </button>
           <button
             type="button"
@@ -251,7 +265,7 @@ export function BottomDock({
           </div>
         ) : tab === "replay" ? (
           <div className="tester">
-            <p>Replay Trading dock — use the on-chart Replay bar, or start selection here.</p>
+            <p>Replay Trading dock — practice fills on historical bars. Start replay, then use the Trading tab for paper orders at the replay price.</p>
             <div className="pine-actions">
               <button className="primary" type="button" onClick={() => engine?.setReplay(true)}>
                 Start replay
@@ -262,8 +276,17 @@ export function BottomDock({
               <button type="button" onClick={() => engine?.beginReplaySelect?.()}>
                 Select bar
               </button>
+              <button type="button" onClick={() => setTab("trading")}>
+                Open trading ticket
+              </button>
             </div>
           </div>
+        ) : tab === "trading" ? (
+          <TradingPanel
+            symbol={snap?.symbol.ticker ?? "SYM"}
+            lastPrice={lastPrice || 0}
+            precision={snap?.symbol.pricePrecision ?? 2}
+          />
         ) : (
           <div className="tester">
             <p>Pine logs / profiler — compile and runtime events</p>
