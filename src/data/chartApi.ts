@@ -1,12 +1,15 @@
 import type { Bar, Interval, SymbolInfo } from "../engine/types";
 import { chartApiBase, chartApiWsUrl, chartFastBase } from "./config";
-import { intervalSeconds } from "./interval";
+import { intervalSeconds, parseInterval } from "./interval";
 
 export type Quote = { price: number; change: number };
 
 /** Chart interval -> cp_fetcher Mongo timeframe + aggregation group. */
-const HISTORY_TF: Record<Interval, { tf: "1m" | "1h" | "1d"; group: number }> = {
+const HISTORY_TF: Record<string, { tf: "1m" | "1h" | "1d"; group: number }> = {
   "1": { tf: "1m", group: 1 },
+  "2": { tf: "1m", group: 2 },
+  "3": { tf: "1m", group: 3 },
+  "4": { tf: "1m", group: 4 },
   "5": { tf: "1m", group: 5 },
   "15": { tf: "1m", group: 15 },
   "30": { tf: "1m", group: 30 },
@@ -18,8 +21,11 @@ const HISTORY_TF: Record<Interval, { tf: "1m" | "1h" | "1d"; group: number }> = 
   "1M": { tf: "1d", group: 30 },
 };
 
-const LIVE_TF: Record<Interval, "1m" | "1h" | "1d"> = {
+const LIVE_TF: Record<string, "1m" | "1h" | "1d"> = {
   "1": "1m",
+  "2": "1m",
+  "3": "1m",
+  "4": "1m",
   "5": "1m",
   "15": "1m",
   "30": "1m",
@@ -30,6 +36,27 @@ const LIVE_TF: Record<Interval, "1m" | "1h" | "1d"> = {
   "1W": "1d",
   "1M": "1d",
 };
+
+function resolveHistoryTf(interval: Interval): { tf: "1m" | "1h" | "1d"; group: number } {
+  const known = HISTORY_TF[interval];
+  if (known) return known;
+  const p = parseInterval(interval);
+  if (p.kind === "minutes") {
+    if (p.n < 60) return { tf: "1m", group: Math.max(1, p.n) };
+    return { tf: "1h", group: Math.max(1, Math.round(p.n / 60)) };
+  }
+  if (p.kind === "hours") return { tf: "1h", group: Math.max(1, p.n) };
+  if (p.kind === "days") return { tf: "1d", group: Math.max(1, p.n) };
+  if (p.kind === "weeks") return { tf: "1d", group: Math.max(1, p.n * 7) };
+  if (p.kind === "months") return { tf: "1d", group: Math.max(1, p.n * 30) };
+  return { tf: "1m", group: 15 };
+}
+
+function resolveLiveTf(interval: Interval): "1m" | "1h" | "1d" {
+  const known = LIVE_TF[interval];
+  if (known) return known;
+  return resolveHistoryTf(interval).tf;
+}
 
 /** Target candles on screen — server aggregates, so payload stays tiny. */
 const DISPLAY_BARS = 350;
@@ -193,7 +220,7 @@ export async function fetchChartApiSymbols(exchanges: string[]): Promise<SymbolI
 }
 
 async function fetchCompactHistory(symbol: SymbolInfo, interval: Interval): Promise<Bar[] | null> {
-  const { tf, group } = HISTORY_TF[interval];
+  const { tf, group } = resolveHistoryTf(interval);
   const limit = DISPLAY_BARS;
   const url =
     `${chartFastBase()}/history?symbol=${encodeURIComponent(symbol.ticker.toLowerCase())}` +
@@ -204,7 +231,7 @@ async function fetchCompactHistory(symbol: SymbolInfo, interval: Interval): Prom
 }
 
 async function fetchVerboseHistory(symbol: SymbolInfo, interval: Interval): Promise<Bar[]> {
-  const { tf, group } = HISTORY_TF[interval];
+  const { tf, group } = resolveHistoryTf(interval);
   // Keep verbose fallback small — never pull 2000 raw bars over the wire.
   const limit = Math.min(500, DISPLAY_BARS * Math.min(group, 4));
   const json = (await getApiJson(
@@ -293,7 +320,7 @@ export function subscribeChartApi(
   interval: Interval,
   onBar: (bar: Bar) => void,
 ): () => void {
-  const tf = LIVE_TF[interval];
+  const tf = resolveLiveTf(interval);
   let ws: WebSocket | null = null;
   let closed = false;
   let retry = 0;

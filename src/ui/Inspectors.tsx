@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { indicatorInputs, indicatorTitle, toolLabelForDraw } from "../catalog";
+import { intervalShort } from "../data/interval";
 import type { ChartEngine } from "../engine/ChartEngine";
 import {
   defaultFibStyleForKind,
@@ -7,6 +8,7 @@ import {
   formatFibRatio,
   resolveFibStyleForKind,
 } from "../engine/drawings";
+import { formatPrice } from "../engine/math";
 import type {
   ChartSource,
   Drawing,
@@ -98,18 +100,35 @@ export function ChartInspectors({
   const propsDrawing = snap?.drawings.find((d) => d.id === snap.drawingPropsId) ?? null;
   const menuDrawing = snap?.drawings.find((d) => d.id === snap.drawingMenu?.id) ?? null;
   const editingInd = snap?.indicators.find((i) => i.id === (indOpen ?? snap.selectedIndicatorId)) ?? null;
-  const symLine = snap?.legend.find((l) => l.id === "sym" || l.id === "symbol");
+  const bar = snap?.hover ?? snap?.last ?? null;
+  const chg = bar && bar.open ? ((bar.close - bar.open) / bar.open) * 100 : null;
+  const showOhlc = snap?.canvas.showOhlc !== false;
 
   if (!snap) return null;
   return (
     <>
       <div className="legend">
-        {symLine ? (
-          <div className="legend-row legend-symbol">
-            <span className="legend-swatch" style={{ background: symLine.color }} />
-            <span>{symLine.text}</span>
+        <div className="legend-row legend-symbol">
+          <span
+            className="legend-swatch"
+            style={{ background: chg != null && chg >= 0 ? "#089981" : chg != null ? "#f23645" : "var(--accent)" }}
+          />
+          <div className="legend-symbol-text">
+            <div className="legend-ticker">
+              <strong>{snap.symbol.ticker}</strong>
+              <span className="legend-iv">{intervalShort(snap.interval)}</span>
+            </div>
+            {bar && showOhlc ? (
+              <div className="legend-ohlc">
+                O {formatPrice(bar.open, snap.symbol.pricePrecision)}
+                {"  "}H {formatPrice(bar.high, snap.symbol.pricePrecision)}
+                {"  "}L {formatPrice(bar.low, snap.symbol.pricePrecision)}
+                {"  "}C {formatPrice(bar.close, snap.symbol.pricePrecision)}
+                {chg != null ? `  ${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%` : ""}
+              </div>
+            ) : null}
           </div>
-        ) : null}
+        </div>
         {snap.legend
           .filter((l) => l.id !== "sym" && l.id !== "symbol" && l.id !== "cmp")
           .map((line) => {

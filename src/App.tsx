@@ -41,6 +41,7 @@ import { WorkspaceManager } from "./ui/WorkspaceManager";
 import { AlertModal } from "./ui/AlertModal";
 import { BottomDock } from "./ui/BottomDock";
 import { ChartOverlays } from "./ui/ChartOverlays";
+import { RangeStrip } from "./ui/RangeStrip";
 import { ChartPane } from "./ui/ChartPane";
 import { ChartToolbar, type DataMode } from "./ui/ChartToolbar";
 import { DrawingToolbar } from "./ui/DrawingToolbar";
@@ -697,6 +698,8 @@ export default function App() {
           viewCount: primary.viewCount,
           viewEnd: primary.viewEnd,
           followLive: primary.followLive,
+          drawings: primary.drawings,
+          indicators: primary.indicators,
         });
         restoringRef.current = false;
         setWorkspaceReady(true);
@@ -723,6 +726,16 @@ export default function App() {
           percentScale: pane.percentScale,
           theme: pane.theme,
         });
+        // Re-apply after secondary feed may have loaded/cleared state.
+        window.setTimeout(() => {
+          secondary.applyChartState({
+            drawings: pane.drawings,
+            indicators: pane.indicators,
+            viewCount: pane.viewCount,
+            viewEnd: pane.viewEnd,
+            followLive: pane.followLive,
+          });
+        }, 200);
       });
     }, 700);
   }, []);
@@ -826,13 +839,27 @@ export default function App() {
         })),
       );
     let last = fingerprint();
-    return engine.subscribe(() => {
+    let saveTimer = 0;
+    const unsub = engine.subscribe(() => {
       const next = fingerprint();
       if (next === last) return;
       last = next;
       if (syncDrawings) syncDrawingsAcrossPanes(engine);
+      if (restoringRef.current || !workspaceReady) return;
+      window.clearTimeout(saveTimer);
+      saveTimer = window.setTimeout(() => {
+        try {
+          saveWorkspaceProfile(collectWorkspace());
+        } catch {
+          /* ignore quota */
+        }
+      }, 400);
     });
-  }, [engine, syncDrawings, syncDrawingsAcrossPanes]);
+    return () => {
+      unsub();
+      window.clearTimeout(saveTimer);
+    };
+  }, [engine, syncDrawings, syncDrawingsAcrossPanes, collectWorkspace, workspaceReady]);
 
   return (
     <div
@@ -1043,19 +1070,29 @@ export default function App() {
           </button>
         </div>
       ) : null}
-      {showBottom && !compact ? <BottomDock engine={toolbarEngine} open={bottomOpen} onToggle={() => setBottomOpen((v) => !v)} /> : null}
-      {compact ? (
-        <MobileBottomBar
+      {showBottom && !compact ? (
+        <BottomDock
           engine={toolbarEngine}
-          live={live}
-          onOpenSymbol={() => setSymbolOpen(true)}
-          onOpenIndicators={() => setIndOpen(true)}
-          onOpenSettings={() => setSettingsOpen(true)}
-          onOpenDrawing={() => setMobileDrawSheetOpen(true)}
-          onOpenMore={() => setMobileMoreOpen(true)}
-          onInterval={loadInterval}
-          onAlert={openCreateAlert}
+          open={bottomOpen}
+          onToggle={() => setBottomOpen((v) => !v)}
+          rangeSlot={<RangeStrip engine={toolbarEngine} />}
         />
+      ) : null}
+      {compact ? (
+        <>
+          <RangeStrip engine={toolbarEngine} compact />
+          <MobileBottomBar
+            engine={toolbarEngine}
+            live={live}
+            onOpenSymbol={() => setSymbolOpen(true)}
+            onOpenIndicators={() => setIndOpen(true)}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenDrawing={() => setMobileDrawSheetOpen(true)}
+            onOpenMore={() => setMobileMoreOpen(true)}
+            onInterval={loadInterval}
+            onAlert={openCreateAlert}
+          />
+        </>
       ) : null}
       <MobileMoreSheet
         open={mobileMoreOpen}

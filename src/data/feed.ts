@@ -8,8 +8,11 @@ export type ExchangeId = (typeof EXCHANGES)[number];
 
 export let UNIVERSE: SymbolInfo[] = [...BINANCE_UNIVERSE, ...FOREXCOM_UNIVERSE];
 
-export const INTERVAL_SEC: Record<Interval, number> = {
+export const INTERVAL_SEC: Record<string, number> = {
   "1": 60,
+  "2": 120,
+  "3": 180,
+  "4": 240,
   "5": 300,
   "15": 900,
   "30": 1800,
@@ -37,7 +40,11 @@ const BASE: Record<string, number> = {
 };
 
 export function intervalSeconds(interval: Interval): number {
-  return INTERVAL_SEC[interval];
+  return INTERVAL_SEC[interval] ?? (() => {
+    const n = Number(interval);
+    if (Number.isFinite(n) && n > 0) return n * 60;
+    return 900;
+  })();
 }
 
 export function setUniverse(next: SymbolInfo[]): void {
@@ -67,7 +74,7 @@ export function watchlistSymbols(universe: SymbolInfo[] = UNIVERSE): SymbolInfo[
 }
 
 export function generateBars(symbol: SymbolInfo, interval: Interval, count = 400): Bar[] {
-  const step = INTERVAL_SEC[interval];
+  const step = intervalSeconds(interval);
   const now = Math.floor(Date.now() / 1000);
   const aligned = now - (now % Math.min(step, 86400));
   const rand = mulberry32(hashString(`${symbol.exchange}:${symbol.ticker}:${interval}`));

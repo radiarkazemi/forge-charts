@@ -27,6 +27,7 @@ export const INTERVAL_GROUPS: { id: string; title: string; items: IntervalItem[]
       { id: "1", label: "1 minute", short: "1m", group: "minutes" },
       { id: "2", label: "2 minutes", short: "2m", group: "minutes" },
       { id: "3", label: "3 minutes", short: "3m", group: "minutes" },
+      { id: "4", label: "4 minutes", short: "4m", group: "minutes" },
       { id: "5", label: "5 minutes", short: "5m", group: "minutes" },
       { id: "10", label: "10 minutes", short: "10m", group: "minutes" },
       { id: "15", label: "15 minutes", short: "15m", group: "minutes" },

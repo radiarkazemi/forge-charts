@@ -113,7 +113,7 @@ export function defaultFibRetraceStyle(): FibRetraceStyle {
     trendWidth: 1,
     trendStyle: "dashed",
     extendLeft: false,
-    extendRight: true,
+    extendRight: false,
     reverse: false,
     showBackground: true,
     showPrices: true,
@@ -326,7 +326,7 @@ function fibStyleBase(levels: FibLevelStyle[]): FibRetraceStyle {
     trendWidth: 1,
     trendStyle: "dashed",
     extendLeft: false,
-    extendRight: true,
+    extendRight: false,
     reverse: false,
     showBackground: true,
     showPrices: true,
@@ -716,8 +716,8 @@ export function hitTestDrawing(d: Drawing, pts: Pt[], x: number, y: number, rect
   }
   if (kind === "fib" && pts.length >= 2) {
     const style = resolveFibStyle(d);
-    const a = style.reverse ? pts[1] : pts[0];
-    const b = style.reverse ? pts[0] : pts[1];
+    const a = style.reverse ? pts[0] : pts[1];
+    const b = style.reverse ? pts[1] : pts[0];
     const xL = Math.min(pts[0].x, pts[1].x);
     const xBox = Math.max(pts[0].x, pts[1].x);
     const x0 = style.extendLeft ? rect.x : xL;
@@ -880,10 +880,11 @@ function paintFibRetrace(
 ): void {
   if (pts.length < 2) return;
   const style = resolveFibStyle(d);
-  const aPt = style.reverse ? pts[1] : pts[0];
-  const bPt = style.reverse ? pts[0] : pts[1];
-  const p0 = style.reverse ? d.points[1].price : d.points[0].price;
-  const p1 = style.reverse ? d.points[0].price : d.points[1].price;
+  // TV default (reverse=false): first click = 100% (pts[0]), second click = 0% (pts[1]).
+  const aPt = style.reverse ? pts[0] : pts[1]; // 0% end
+  const bPt = style.reverse ? pts[1] : pts[0]; // 100% end
+  const p0 = style.reverse ? d.points[0].price : d.points[1].price;
+  const p1 = style.reverse ? d.points[1].price : d.points[0].price;
   const xL = Math.min(pts[0].x, pts[1].x);
   const xBox = Math.max(pts[0].x, pts[1].x);
   const x0 = style.extendLeft ? rect.x : xL;
@@ -2075,6 +2076,45 @@ function paintFree(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], kind: D
   ctx.globalAlpha = 1;
 }
 
+function paintPillLabel(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  bg: string,
+  align: "left" | "center" | "right" = "left",
+): void {
+  ctx.font = CHART_FONT;
+  const padX = 8;
+  const metrics = ctx.measureText(text);
+  const tw = metrics.width;
+  const h = 18;
+  const w = tw + padX * 2;
+  let left = x;
+  if (align === "center") left = x - w / 2;
+  else if (align === "right") left = x - w;
+  const top = y - h / 2;
+  const r = 5;
+  ctx.beginPath();
+  if (typeof ctx.roundRect === "function") {
+    ctx.roundRect(left, top, w, h, r);
+  } else {
+    ctx.moveTo(left + r, top);
+    ctx.arcTo(left + w, top, left + w, top + h, r);
+    ctx.arcTo(left + w, top + h, left, top + h, r);
+    ctx.arcTo(left, top + h, left, top, r);
+    ctx.arcTo(left, top, left + w, top, r);
+    ctx.closePath();
+  }
+  ctx.fillStyle = bg;
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, left + padX, top + h / 2 + 0.5);
+  ctx.textBaseline = "alphabetic";
+}
+
 function paintPosition(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], precision: number): void {
   if (!pts[0]) return;
   const style = resolveFibStyleForKind(d);
@@ -2083,23 +2123,27 @@ function paintPosition(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], pre
   const tp = pts[1] ?? { x: entry.x + 120, y: entry.y - (long ? 50 : -50) };
   const sl = pts[2] ?? { x: entry.x + 120, y: entry.y + (long ? 30 : -30) };
   const w = Math.max(110, Math.abs(tp.x - entry.x) + 90);
-  const profit = long ? "rgba(8,153,129,0.20)" : "rgba(242,54,69,0.20)";
-  const loss = long ? "rgba(242,54,69,0.20)" : "rgba(8,153,129,0.20)";
+  const profitFill = long ? "rgba(8,153,129,0.22)" : "rgba(242,54,69,0.22)";
+  const lossFill = long ? "rgba(242,54,69,0.22)" : "rgba(8,153,129,0.22)";
+
   if (style.showBackground) {
-    ctx.fillStyle = profit;
+    ctx.fillStyle = profitFill;
     ctx.fillRect(entry.x, Math.min(entry.y, tp.y), w, Math.abs(tp.y - entry.y) || 1);
-    ctx.fillStyle = loss;
+    ctx.fillStyle = lossFill;
     ctx.fillRect(entry.x, Math.min(entry.y, sl.y), w, Math.abs(sl.y - entry.y) || 1);
   }
-  applyLineStyle(ctx, style.levelsStyle);
-  ctx.strokeStyle = style.trendColor;
-  ctx.lineWidth = style.trendWidth;
-  ctx.strokeRect(entry.x, Math.min(entry.y, tp.y, sl.y), w, Math.max(Math.abs(tp.y - entry.y), Math.abs(sl.y - entry.y)) || 1);
+
+  // Thin entry line (no heavy outer strokeRect)
+  ctx.save();
+  applyLineStyle(ctx, "dashed");
+  ctx.strokeStyle = "#d1d4dc";
+  ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(entry.x, entry.y);
   ctx.lineTo(entry.x + w, entry.y);
-  ctx.strokeStyle = "#d1d4dc";
   ctx.stroke();
+  ctx.restore();
+
   const eP = d.points[0]?.price ?? 0;
   const tpP = d.points[1]?.price ?? eP;
   const slP = d.points[2]?.price ?? eP;
@@ -2108,20 +2152,22 @@ function paintPosition(ctx: CanvasRenderingContext2D, d: Drawing, pts: Pt[], pre
   const rr = reward / risk;
   const stopPct = (risk / (Math.abs(eP) || 1)) * 100;
   const tgtPct = (reward / (Math.abs(eP) || 1)) * 100;
-  ctx.font = CHART_FONT;
-  ctx.fillStyle = "#d1d4dc";
-  if (style.showLevels) {
-    ctx.fillText(long ? "Long" : "Short", entry.x + 8, Math.min(entry.y, tp.y, sl.y) + 14);
-    ctx.fillText(`Entry ${formatPrice(eP, precision)}`, entry.x + 8, entry.y - 6);
+  const qtyRaw = Number(String(d.text ?? "").trim());
+  const qty = Number.isFinite(qtyRaw) && qtyRaw > 0 ? qtyRaw : 100;
+  const openPnl = 0;
+  const cx = entry.x + w / 2;
+
+  if (style.showPrices || style.showLevels) {
+    const targetLabel = `Target: ${formatPrice(reward * qty, precision)} (${tgtPct.toFixed(2)}%)`;
+    const stopLabel = `Stop: ${formatPrice(risk * qty, precision)} (${stopPct.toFixed(2)}%)`;
+    paintPillLabel(ctx, targetLabel, cx, tp.y, long ? "#0b6b5a" : "#8b1e2d", "center");
+    paintPillLabel(ctx, stopLabel, cx, sl.y, long ? "#8b1e2d" : "#0b6b5a", "center");
   }
-  if (style.showPrices) {
-    ctx.fillStyle = long ? "#089981" : "#f23645";
-    ctx.fillText(`Target ${formatPrice(tpP, precision)}  (+${tgtPct.toFixed(2)}%)`, entry.x + 8, Math.min(entry.y, tp.y) + (style.showLevels ? 28 : 14));
-    ctx.fillStyle = long ? "#f23645" : "#089981";
-    ctx.fillText(`Stop ${formatPrice(slP, precision)}  (−${stopPct.toFixed(2)}%)`, entry.x + 8, Math.max(entry.y, sl.y) - 8);
-    ctx.fillStyle = "#d1d4dc";
-    ctx.fillText(`RR ${rr.toFixed(2)}`, entry.x + w - 64, entry.y - 6);
-  }
+
+  const midLabel1 = `Open PnL: ${formatPrice(openPnl, precision)}, Qty: ${qty}`;
+  const midLabel2 = `Risk/reward ratio: ${rr.toFixed(2)}`;
+  paintPillLabel(ctx, midLabel1, cx, entry.y - 11, "#1e222d", "center");
+  paintPillLabel(ctx, midLabel2, cx, entry.y + 11, "#1e222d", "center");
 }
 
 function priceDelta(a: { price: number } | undefined, b: { price: number } | undefined): number {
