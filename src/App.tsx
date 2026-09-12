@@ -137,6 +137,7 @@ export default function App() {
   const [syncInterval, setSyncInterval] = useState(false);
   const [syncSymbol, setSyncSymbol] = useState(false);
   const [syncDrawings, setSyncDrawings] = useState(true);
+  const [syncTime, setSyncTime] = useState(false);
   const [workspaceName, setWorkspaceName] = useState("Untitled layout");
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspaceReady, setWorkspaceReady] = useState(false);
@@ -660,10 +661,11 @@ export default function App() {
         syncInterval,
         syncSymbol,
         syncDrawings,
+        syncTime,
         panes,
       };
     },
-    [activePane, arrangement, paneSymbols, snap?.interval, syncCrosshair, syncInterval, syncSymbol, syncDrawings, workspaceName],
+    [activePane, arrangement, paneSymbols, snap?.interval, syncCrosshair, syncInterval, syncSymbol, syncDrawings, syncTime, workspaceName],
   );
 
   const applyWorkspace = useCallback((profile: WorkspaceProfile) => {
@@ -777,6 +779,7 @@ export default function App() {
     syncInterval,
     syncSymbol,
     syncDrawings,
+    syncTime,
     snap?.chartType,
     snap?.theme,
     snap?.interval,
@@ -808,6 +811,29 @@ export default function App() {
       return prev.map(() => ticker);
     });
   }, [syncSymbol, snap?.symbol.ticker]);
+
+  // Sync time / crosshair across panes (TV layout sync matrix).
+  useEffect(() => {
+    if (!engine || (!syncTime && !syncCrosshair)) return;
+    let syncing = false;
+    const unsub = engine.subscribe(() => {
+      if (syncing) return;
+      const src = engine.getSnapshot();
+      const hover = src.hover;
+      if (!hover) return;
+      syncing = true;
+      try {
+        Object.entries(paneEnginesRef.current).forEach(([key, eng]) => {
+          if (!eng || Number(key) === 0) return;
+          if (syncTime) eng.scrollToTime?.(hover.time, "center");
+          if (syncCrosshair) eng.showCrosshairAt?.(hover.time, hover.close);
+        });
+      } finally {
+        syncing = false;
+      }
+    });
+    return unsub;
+  }, [engine, syncTime, syncCrosshair]);
 
   const shellClass = [
     "shell",
@@ -925,6 +951,18 @@ export default function App() {
               if (compact) setMobileWidgetOpen(true);
             }
           }}
+          onOpenScreener={() => {
+            setBottomOpen(true);
+            window.dispatchEvent(new CustomEvent("forge:open-dock", { detail: { tab: "screener" } }));
+          }}
+          onOpenPine={() => {
+            setBottomOpen(true);
+            window.dispatchEvent(new CustomEvent("forge:open-dock", { detail: { tab: "pine" } }));
+          }}
+          onOpenTrading={() => {
+            setBottomOpen(true);
+            window.dispatchEvent(new CustomEvent("forge:open-dock", { detail: { tab: "trading" } }));
+          }}
         />
       ) : null}
       {showToolbar && !compact ? (
@@ -943,11 +981,13 @@ export default function App() {
                 syncInterval={syncInterval}
                 syncSymbol={syncSymbol}
                 syncDrawings={syncDrawings}
+                syncTime={syncTime}
                 onSyncChange={(next) => {
                   if (next.syncCrosshair != null) setSyncCrosshair(next.syncCrosshair);
                   if (next.syncInterval != null) setSyncInterval(next.syncInterval);
                   if (next.syncSymbol != null) setSyncSymbol(next.syncSymbol);
                   if (next.syncDrawings != null) setSyncDrawings(next.syncDrawings);
+                  if (next.syncTime != null) setSyncTime(next.syncTime);
                 }}
                 onArrangement={setArrangement}
                 onOpenLayout={(layout) => {
@@ -958,6 +998,7 @@ export default function App() {
                   if (layout.syncInterval != null) setSyncInterval(layout.syncInterval);
                   if (layout.syncSymbol != null) setSyncSymbol(layout.syncSymbol);
                   if (layout.syncDrawings != null) setSyncDrawings(layout.syncDrawings);
+                  if (layout.syncTime != null) setSyncTime(layout.syncTime);
                   const sym = findSymbol(layout.symbols[0] || "XAUUSD");
                   void attachFeed(sym, engineRef.current?.getSnapshot().interval ?? "15", "symbol");
                 }}
@@ -967,6 +1008,7 @@ export default function App() {
                     syncInterval,
                     syncSymbol,
                     syncDrawings,
+                    syncTime,
                   })
                 }
               />
@@ -1076,6 +1118,11 @@ export default function App() {
           open={bottomOpen}
           onToggle={() => setBottomOpen((v) => !v)}
           rangeSlot={<RangeStrip engine={toolbarEngine} />}
+          quotes={quotes}
+          onPickSymbol={(ticker) => {
+            const sym = findSymbol(ticker);
+            void attachFeed(sym, engineRef.current?.getSnapshot().interval ?? "15", "symbol");
+          }}
         />
       ) : null}
       {compact ? (

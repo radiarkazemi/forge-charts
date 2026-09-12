@@ -1,7 +1,7 @@
-/** Demo / paper trading + optional broker bridge (GAP-63 / GAP-66). */
+/** Paper trading + optional parent broker bridge (TV Trading Panel subset). */
 
 export type TradeSide = "buy" | "sell";
-export type OrderType = "market" | "limit";
+export type OrderType = "market" | "limit" | "stop" | "stop_limit";
 export type ExecMode = "paper" | "broker";
 export type OrderStatus = "working" | "filled" | "cancelled" | "rejected" | "sent";
 
@@ -12,6 +12,9 @@ export type PaperOrder = {
   type: OrderType;
   qty: number;
   limitPrice?: number;
+  stopPrice?: number;
+  takeProfit?: number;
+  stopLoss?: number;
   status: OrderStatus;
   filledPrice?: number;
   createdAt: number;
@@ -24,6 +27,8 @@ export type PaperPosition = {
   qty: number; // signed
   avgPrice: number;
   realizedPnl: number;
+  takeProfit?: number;
+  stopLoss?: number;
 };
 
 export type PaperFill = {
@@ -55,6 +60,9 @@ export type BrokerBridgeRequest = {
   orderType: OrderType;
   qty: number;
   limitPrice?: number;
+  stopPrice?: number;
+  takeProfit?: number;
+  stopLoss?: number;
 };
 
 export type BrokerBridgeUpdate = {
@@ -115,18 +123,30 @@ export function resetAccount(mode: ExecMode = "paper"): PaperAccount {
   return next;
 }
 
+export function buyingPower(account: PaperAccount): number {
+  return Math.max(0, account.cash);
+}
+
 function upsertPosition(
   positions: PaperPosition[],
   symbol: string,
   side: TradeSide,
   qty: number,
   price: number,
+  brackets?: { takeProfit?: number; stopLoss?: number },
 ): PaperPosition[] {
   const signed = side === "buy" ? qty : -qty;
   const next = positions.map((p) => ({ ...p }));
   const idx = next.findIndex((p) => p.symbol === symbol);
   if (idx < 0) {
-    next.push({ symbol, qty: signed, avgPrice: price, realizedPnl: 0 });
+    next.push({
+      symbol,
+      qty: signed,
+      avgPrice: price,
+      realizedPnl: 0,
+      takeProfit: brackets?.takeProfit,
+      stopLoss: brackets?.stopLoss,
+    });
     return next.filter((p) => Math.abs(p.qty) > 1e-9);
   }
   const cur = next[idx]!;
@@ -135,12 +155,21 @@ function upsertPosition(
     const total = Math.abs(cur.qty) * cur.avgPrice + qty * price;
     cur.avgPrice = total / Math.max(1e-9, Math.abs(cur.qty) + qty);
     cur.qty = newQty;
+    if (brackets?.takeProfit != null) cur.takeProfit = brackets.takeProfit;
+    if (brackets?.stopLoss != null) cur.stopLoss = brackets.stopLoss;
   } else {
     const closed = Math.min(Math.abs(cur.qty), qty);
     const dir = Math.sign(cur.qty);
     cur.realizedPnl += dir * closed * (price - cur.avgPrice);
     cur.qty = newQty;
-    if (Math.sign(cur.qty) !== dir && Math.abs(cur.qty) > 1e-9) cur.avgPrice = price;
+    if (Math.sign(cur.qty) !== dir && Math.abs(cur.qty) > 1e-9) {
+      cur.avgPrice = price;
+      cur.takeProfit = brackets?.takeProfit;
+      cur.stopLoss = brackets?.stopLoss;
+    } else if (Math.abs(cur.qty) <= 1e-9) {
+      cur.takeProfit = undefined;
+      cur.stopLoss = undefined;
+    }
   }
   next[idx] = cur;
   return next.filter((p) => Math.abs(p.qty) > 1e-9);
@@ -156,6 +185,35 @@ export function markEquity(account: PaperAccount, marks: Record<string, number>)
   return { ...account, equity: account.cash + unrealized };
 }
 
+function shouldFillNow(
+  type: OrderType,
+  side: TradeSide,
+  lastPrice: number,
+  limitPrice?: number,
+  stopPrice?: number,
+): boolean {
+  if (type === "market") return true;
+  if (type === "limit" && limitPrice != null) {
+    return (side === "buy" && lastPrice <= limitPrice) || (side === "sell" && lastPrice >= limitPrice);
+  }
+  if (type === "stop" && stopPrice != null) {
+    return (side === "buy" && lastPrice >= stopPrice) || (side === "sell" && lastPrice <= stopPrice);
+  }
+  if (type === "stop_limit" && stopPrice != null && limitPrice != null) {
+    const triggered =
+      (side === "buy" && lastPrice >= stopPrice) || (side === "sell" && lastPrice <= stopPrice);
+    if (!triggered) return false;
+    return (side === "buy" && lastPrice <= limitPrice) || (side === "sell" && lastPrice >= limitPrice);
+  }
+  return false;
+}
+
+function fillPriceFor(type: OrderType, lastPrice: number, limitPrice?: number, stopPrice?: number): number {
+  if (type === "market" || type === "stop") return lastPrice;
+  if (type === "limit" || type === "stop_limit") return limitPrice ?? lastPrice;
+  return stopPrice ?? lastPrice;
+}
+
 export function placePaperOrder(
   account: PaperAccount,
   input: {
@@ -164,6 +222,9 @@ export function placePaperOrder(
     type: OrderType;
     qty: number;
     limitPrice?: number;
+    stopPrice?: number;
+    takeProfit?: number;
+    stopLoss?: number;
     lastPrice: number;
   },
 ): { account: PaperAccount; order: PaperOrder } {
@@ -175,25 +236,22 @@ export function placePaperOrder(
     type: input.type,
     qty: input.qty,
     limitPrice: input.limitPrice,
+    stopPrice: input.stopPrice,
+    takeProfit: input.takeProfit,
+    stopLoss: input.stopLoss,
     status: "working",
     createdAt: now,
     updatedAt: now,
   };
 
-  const fillNow =
-    input.type === "market" ||
-    (input.type === "limit" &&
-      input.limitPrice != null &&
-      ((input.side === "buy" && input.lastPrice <= input.limitPrice) ||
-        (input.side === "sell" && input.lastPrice >= input.limitPrice)));
-
+  const fillNow = shouldFillNow(input.type, input.side, input.lastPrice, input.limitPrice, input.stopPrice);
   if (!fillNow) {
     const working = { ...account, orders: [order, ...account.orders].slice(0, 100) };
     saveAccount(working);
     return { account: working, order };
   }
 
-  const fillPrice = input.type === "market" ? input.lastPrice : (input.limitPrice as number);
+  const fillPrice = fillPriceFor(input.type, input.lastPrice, input.limitPrice, input.stopPrice);
   const notional = fillPrice * input.qty;
   const cashDelta = input.side === "buy" ? -notional : notional;
   if (input.side === "buy" && account.cash + cashDelta < -1e-6) {
@@ -208,7 +266,10 @@ export function placePaperOrder(
   order.status = "filled";
   order.filledPrice = fillPrice;
   order.updatedAt = now;
-  const positions = upsertPosition(account.positions, input.symbol, input.side, input.qty, fillPrice);
+  const positions = upsertPosition(account.positions, input.symbol, input.side, input.qty, fillPrice, {
+    takeProfit: input.takeProfit,
+    stopLoss: input.stopLoss,
+  });
   const fill: PaperFill = {
     id: uid("fill"),
     orderId: order.id,
@@ -243,24 +304,83 @@ export function cancelOrder(account: PaperAccount, orderId: string): PaperAccoun
   return next;
 }
 
-export function matchWorkingOrders(account: PaperAccount, symbol: string, lastPrice: number): PaperAccount {
+export function flattenPosition(
+  account: PaperAccount,
+  symbol: string,
+  lastPrice: number,
+): { account: PaperAccount; order: PaperOrder | null } {
+  const pos = account.positions.find((p) => p.symbol === symbol);
+  if (!pos || Math.abs(pos.qty) < 1e-9) return { account, order: null };
+  return placePaperOrder(account, {
+    symbol,
+    side: pos.qty > 0 ? "sell" : "buy",
+    type: "market",
+    qty: Math.abs(pos.qty),
+    lastPrice,
+  });
+}
+
+export function reversePosition(
+  account: PaperAccount,
+  symbol: string,
+  lastPrice: number,
+): { account: PaperAccount; order: PaperOrder | null } {
+  const pos = account.positions.find((p) => p.symbol === symbol);
+  if (!pos || Math.abs(pos.qty) < 1e-9) return { account, order: null };
+  const qty = Math.abs(pos.qty);
+  const side: TradeSide = pos.qty > 0 ? "sell" : "buy";
+  const flat = flattenPosition(account, symbol, lastPrice);
+  if (!flat.order) return flat;
+  return placePaperOrder(flat.account, {
+    symbol,
+    side,
+    type: "market",
+    qty,
+    lastPrice,
+  });
+}
+
+function matchBrackets(account: PaperAccount, symbol: string, lastPrice: number): PaperAccount {
   let next = account;
-  const working = account.orders.filter((o) => o.status === "working" && o.symbol === symbol && o.type === "limit");
+  for (const pos of [...next.positions]) {
+    if (pos.symbol !== symbol) continue;
+    if (pos.takeProfit != null) {
+      const hit =
+        (pos.qty > 0 && lastPrice >= pos.takeProfit) || (pos.qty < 0 && lastPrice <= pos.takeProfit);
+      if (hit) {
+        next = flattenPosition(next, symbol, lastPrice).account;
+        continue;
+      }
+    }
+    if (pos.stopLoss != null) {
+      const hit =
+        (pos.qty > 0 && lastPrice <= pos.stopLoss) || (pos.qty < 0 && lastPrice >= pos.stopLoss);
+      if (hit) next = flattenPosition(next, symbol, lastPrice).account;
+    }
+  }
+  return next;
+}
+
+export function matchWorkingOrders(account: PaperAccount, symbol: string, lastPrice: number): PaperAccount {
+  let next = matchBrackets(account, symbol, lastPrice);
+  const working = next.orders.filter(
+    (o) =>
+      o.status === "working" &&
+      o.symbol === symbol &&
+      (o.type === "limit" || o.type === "stop" || o.type === "stop_limit"),
+  );
   for (const order of working) {
-    const hit =
-      (order.side === "buy" && order.limitPrice != null && lastPrice <= order.limitPrice) ||
-      (order.side === "sell" && order.limitPrice != null && lastPrice >= order.limitPrice);
-    if (!hit) continue;
-    const stripped = {
-      ...next,
-      orders: next.orders.filter((o) => o.id !== order.id),
-    };
+    if (!shouldFillNow(order.type, order.side, lastPrice, order.limitPrice, order.stopPrice)) continue;
+    const stripped = { ...next, orders: next.orders.filter((o) => o.id !== order.id) };
     next = placePaperOrder(stripped, {
       symbol: order.symbol,
       side: order.side,
       type: "market",
       qty: order.qty,
-      lastPrice: order.limitPrice ?? lastPrice,
+      takeProfit: order.takeProfit,
+      stopLoss: order.stopLoss,
+      lastPrice:
+        order.type === "limit" || order.type === "stop_limit" ? (order.limitPrice ?? lastPrice) : lastPrice,
     }).account;
   }
   return next;
@@ -274,6 +394,9 @@ export function queueBrokerOrder(
     type: OrderType;
     qty: number;
     limitPrice?: number;
+    stopPrice?: number;
+    takeProfit?: number;
+    stopLoss?: number;
     targetOrigin?: string;
   },
 ): { account: PaperAccount; order: PaperOrder; requestId: string } {
@@ -286,6 +409,9 @@ export function queueBrokerOrder(
     type: input.type,
     qty: input.qty,
     limitPrice: input.limitPrice,
+    stopPrice: input.stopPrice,
+    takeProfit: input.takeProfit,
+    stopLoss: input.stopLoss,
     status: "sent",
     createdAt: now,
     updatedAt: now,
@@ -300,6 +426,9 @@ export function queueBrokerOrder(
     orderType: input.type,
     qty: input.qty,
     limitPrice: input.limitPrice,
+    stopPrice: input.stopPrice,
+    takeProfit: input.takeProfit,
+    stopLoss: input.stopLoss,
   };
   try {
     window.parent?.postMessage(msg, input.targetOrigin || "*");
@@ -311,7 +440,11 @@ export function queueBrokerOrder(
   return { account: next, order, requestId };
 }
 
-export function applyBrokerUpdate(account: PaperAccount, update: BrokerBridgeUpdate, lastPrice: number): PaperAccount {
+export function applyBrokerUpdate(
+  account: PaperAccount,
+  update: BrokerBridgeUpdate,
+  lastPrice: number,
+): PaperAccount {
   const order = account.orders.find((o) => o.id === update.requestId);
   if (!order) return account;
   if (update.status === "filled") {
@@ -321,6 +454,8 @@ export function applyBrokerUpdate(account: PaperAccount, update: BrokerBridgeUpd
       side: order.side,
       type: "market",
       qty: order.qty,
+      takeProfit: order.takeProfit,
+      stopLoss: order.stopLoss,
       lastPrice: update.fillPrice ?? lastPrice,
     }).account;
   }

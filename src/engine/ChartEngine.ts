@@ -968,6 +968,21 @@ export class ChartEngine {
   }
 
   /** Pan by N bars (V-32). */
+  /** Paint an external/synced crosshair at a bar time + price (layout sync). */
+  showCrosshairAt(time: number, price: number): void {
+    if (!this.bars.length) return;
+    const layout = this.layout();
+    const bars = this.plotBars();
+    const x = this.xOfTime(time, bars, layout.main);
+    const range = this.priceRange(bars.length ? bars : this.bars.slice(-40));
+    const y = this.yOf(this.scaled(price, bars), range.min, range.max, layout.main);
+    this.mouse = { x, y };
+    const idx = this.indexFromTime(time);
+    this.hover = this.bars[Math.max(0, Math.min(this.bars.length - 1, Math.round(idx)))] ?? this.hover;
+    this.draw();
+  }
+
+
   panByBars(bars: number): void {
     this.viewEnd += bars;
     this.fitMode = false;
@@ -1213,6 +1228,16 @@ export class ChartEngine {
       return;
     }
     this.bars = [...this.bars, next];
+    this.snapToLatest();
+    this.emit();
+    this.draw();
+  }
+
+  stepReplayBack(): void {
+    if (!this.replay || this.replaySelecting) return;
+    if (this.bars.length <= 2) return;
+    this.replayPlaying = false;
+    this.bars = this.bars.slice(0, -1);
     this.snapToLatest();
     this.emit();
     this.draw();

@@ -13,6 +13,7 @@ export type ChartLayout = {
   syncInterval?: boolean;
   syncSymbol?: boolean;
   syncDrawings?: boolean;
+  syncTime?: boolean;
 };
 
 const LAYOUTS_KEY = "forge.chartLayouts";
@@ -55,12 +56,14 @@ type Props = {
   syncInterval?: boolean;
   syncSymbol?: boolean;
   syncDrawings?: boolean;
+  syncTime?: boolean;
   onArrangement: (next: LayoutArrangement) => void;
   onSyncChange?: (next: {
     syncCrosshair?: boolean;
     syncInterval?: boolean;
     syncSymbol?: boolean;
     syncDrawings?: boolean;
+  syncTime?: boolean;
   }) => void;
   onOpenLayout: (layout: ChartLayout) => void;
   onSaveCurrent: (name: string) => ChartLayout;
@@ -73,6 +76,7 @@ export function LayoutMenu({
   syncInterval = false,
   syncSymbol = false,
   syncDrawings = true,
+  syncTime = false,
   onArrangement,
   onSyncChange,
   onOpenLayout,
@@ -175,6 +179,14 @@ export function LayoutMenu({
               />
               Drawings
             </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={syncTime}
+                onChange={(e) => onSyncChange?.({ syncTime: e.target.checked })}
+              />
+              Time
+            </label>
           </div>
           <div className="iv-head">Saved layouts</div>
           <div className="layout-actions">
@@ -186,6 +198,38 @@ export function LayoutMenu({
               }}
             >
               Save layout…
+            </button>
+            <button
+              type="button"
+              title="Download current layout as JSON"
+              onClick={() => {
+                const layout = onSaveCurrent(saveName.trim() || `${symbols[0] || "Chart"} layout`);
+                const blob = new Blob([JSON.stringify(layout, null, 2)], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `${layout.name.replace(/\s+/g, "-").toLowerCase()}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              Export JSON
+            </button>
+            <button
+              type="button"
+              title="Copy a local share payload to clipboard"
+              onClick={async () => {
+                const layout = onSaveCurrent(saveName.trim() || `${symbols[0] || "Chart"} layout`);
+                const payload = btoa(unescape(encodeURIComponent(JSON.stringify(layout))));
+                const share = `${location.origin}${location.pathname}?layout=${payload}`;
+                try {
+                  await navigator.clipboard.writeText(share);
+                } catch {
+                  window.prompt("Copy share link", share);
+                }
+              }}
+            >
+              Copy share link
             </button>
           </div>
           {saveOpen ? (
@@ -275,7 +319,7 @@ export function createLayout(
   name: string,
   arrangement: LayoutArrangement,
   symbols: string[],
-  sync?: { syncCrosshair?: boolean; syncInterval?: boolean; syncSymbol?: boolean; syncDrawings?: boolean },
+  sync?: { syncCrosshair?: boolean; syncInterval?: boolean; syncSymbol?: boolean; syncDrawings?: boolean; syncTime?: boolean },
 ): ChartLayout {
   const meta = ARRANGEMENTS.find((a) => a.id === arrangement) ?? ARRANGEMENTS[0];
   const padded = [...symbols];
@@ -290,6 +334,7 @@ export function createLayout(
     syncInterval: sync?.syncInterval ?? false,
     syncSymbol: sync?.syncSymbol ?? false,
     syncDrawings: sync?.syncDrawings ?? true,
+    syncTime: sync?.syncTime ?? false,
   };
 }
 
