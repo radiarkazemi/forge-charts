@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Forge Charts — Original Supercharts</title>
+    <meta
+      name="description"
+      content="Forge Charts is an original Super Chart–style trading terminal. Draw, analyze, replay, and embed — not affiliated with Danora or TradingView."
+    />
+    <meta name="application-name" content="Forge Charts" />
+    <meta name="theme-color" content="#060912" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./brand/favicon-32.png" />
+    <link rel="icon" type="image/svg+xml" href="./brand/forge-mark.svg" />
+    <link rel="apple-touch-icon" href="./brand/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Syne:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="atmosphere" aria-hidden="true">
+      <div class="grid-drift"></div>
+      <div class="glow glow-a"></div>
+      <div class="glow glow-b"></div>
+      <div class="scan"></div>
+      <svg class="hero-chart" viewBox="0 0 1200 640" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#2f7bff" stop-opacity="0.15" />
+            <stop offset="50%" stop-color="#5ce1ff" stop-opacity="0.95" />
+            <stop offset="100%" stop-color="#2f7bff" stop-opacity="0.25" />
+          </linearGradient>
+          <linearGradient id="fillGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#2f7bff" stop-opacity="0.32" />
+            <stop offset="100%" stop-color="#2f7bff" stop-opacity="0" />
+          </linearGradient>
+        </defs>
+        <path
+          class="chart-fill"
+          d="M0 420 C80 400 140 360 220 370 C320 385 360 300 460 280 C560 260 620 320 720 250 C820 180 900 210 980 160 C1060 110 1120 140 1200 90 L1200 640 L0 640 Z"
+        />
+        <path
+          class="chart-line"
+          d="M0 420 C80 400 140 360 220 370 C320 385 360 300 460 280 C560 260 620 320 720 250 C820 180 900 210 980 160 C1060 110 1120 140 1200 90"
+        />
+        <line class="crosshair-v" x1="720" y1="0" x2="720" y2="640" />
+        <line class="crosshair-h" x1="0" y1="250" x2="1200" y2="250" />
+      </svg>
+    </div>
+
+    <header class="top">
+      <a class="brand" href="/" aria-label="Forge Charts home">
+        <img src="./brand/forge-mark.svg" width="28" height="28" alt="" />
+        <span>Forge <em>Charts</em></span>
+      </a>
+      <nav class="top-nav" aria-label="Primary">
+        <a href="#product">Product</a>
+        <a href="#embed">Embed</a>
+        <a href="#domains">Domains</a>
+        <a class="nav-cta" href="/charts/">Open charts</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <p class="eyebrow">Original Super Chart engine · MIT</p>
+        <h1>
+          <span class="brand-word">Forge</span>
+          <span class="hero-rest">the charting terminal you ship.</span>
+        </h1>
+        <p class="lede">
+          Dense drawings, multi-pane layouts, Pine subset, strategy tester, bar replay, and paper trading —
+          built as an embeddable product, not a wrapper.
+        </p>
+        <div class="cta-row">
+          <a class="btn primary" href="/charts/">Launch Supercharts</a>
+          <a class="btn ghost" href="#embed">Embed docs</a>
+        </div>
+        <p class="hero-note">
+          This host is <strong>Forge Charts only</strong> — not Danora, not Anil Gold.
+        </p>
+      </section>
+
+      <section class="preview" aria-label="Product preview">
+        <div class="preview-frame">
+          <div class="preview-chrome">
+            <span></span><span></span><span></span>
+            <em>forge · XAUUSD · 15m · live</em>
+            <a class="preview-open" href="/charts/">Open full screen</a>
+          </div>
+          <iframe
+            class="preview-iframe"
+            title="Forge Charts live preview"
+            src="/charts/?embed=1&symbol=XAUUSD&interval=15&theme=dark"
+            loading="lazy"
+          ></iframe>
+        </div>
+      </section>
+
+      <section id="product" class="product">
+        <div class="product-intro">
+          <h2>One engine. Full desk.</h2>
+          <p>
+            Keyboard-first tools traders expect — then wrap it in your own brand via iframe or WebView.
+          </p>
+        </div>
+        <ul class="product-list">
+          <li>
+            <strong>Draw</strong>
+            <span>Trend, Fib, Gann, patterns, object tree — layout-synced.</span>
+          </li>
+          <li>
+            <strong>Study</strong>
+            <span>Indicators, Pine subset, equity curve, bar replay with fills.</span>
+          </li>
+          <li>
+            <strong>Trade (demo)</strong>
+            <span>Paper ticket, broker bridge hooks, Screener dock.</span>
+          </li>
+        </ul>
+      </section>
+
+      <section id="embed" class="embed">
+        <div class="embed-copy">
+          <h2>Drop the full terminal into your app</h2>
+          <p>
+            Point an iframe at <code>/charts/?embed=1</code>. Pass symbol, exchange, interval, theme —
+            or push bars with <code>postMessage</code>.
+          </p>
+          <a
+            class="btn primary"
+            href="/charts/?embed=1&symbol=BTCUSDT&exchange=BINANCE&interval=15&theme=dark"
+            >Open embed demo</a
+          >
+        </div>
+        <pre class="code" tabindex="0"><code>&lt;iframe
+  src="https://HOST/charts/?embed=1&amp;symbol=BTCUSDT&amp;interval=15&amp;theme=dark"
+  style="width:100%;height:720px;border:0"
+  title="Forge Chart"
+&gt;&lt;/iframe&gt;</code></pre>
+      </section>
+
+      <section id="domains" class="domains">
+        <h2>Where things live</h2>
+        <p class="lede tight">
+          Forge, Danora, and Anil no longer share a front door on this IP.
+        </p>
+        <div class="domain-grid">
+          <article class="domain-card on">
+            <h3>Forge Charts</h3>
+            <ul>
+              <li>
+                <a href="http://185.222.163.116:8088/">http://185.222.163.116:8088/</a> — this landing
+              </li>
+              <li>
+                <a href="http://185.222.163.116:8088/charts/">…:8088/charts/</a> — Supercharts
+              </li>
+              <li>
+                <a href="https://goldanil.ir/charts/">https://goldanil.ir/charts/</a> — production HTTPS
+              </li>
+            </ul>
+          </article>
+          <article class="domain-card">
+            <h3>Danora</h3>
+            <ul>
+              <li>Hostnames: <code>danoura.ir</code></li>
+              <li>
+                Staging: <a href="http://185.222.163.116:8092/">…:8092/</a> (not :8088)
+              </li>
+              <li>Never served as the Forge landing</li>
+            </ul>
+          </article>
+          <article class="domain-card">
+            <h3>Anil Gold</h3>
+            <ul>
+              <li><a href="https://goldanil.ir/">https://goldanil.ir/</a> — main product</li>
+              <li>Charts mount under <code>/charts/</code> only</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <div class="foot-brand">
+        <img src="./brand/forge-mark.svg" width="22" height="22" alt="" />
+        <span>Forge Charts</span>
+      </div>
+      <p>Independent charting engine. Not TradingView. Not Danora.</p>
+    </footer>
+
+    <script src="./main.js"></script>
+  </body>
+</html>
