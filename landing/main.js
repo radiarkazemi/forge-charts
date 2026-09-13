@@ -2,9 +2,8 @@
   const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (prefersReduced) return;
 
-  // Soft parallax on the chart silhouette
-  const chart = document.querySelector(".hero-chart");
-  if (!chart) return;
+  const terminal = document.querySelector(".hero-terminal");
+  if (!terminal) return;
 
   let ticking = false;
   window.addEventListener(
@@ -13,9 +12,10 @@
       if (ticking) return;
       ticking = true;
       requestAnimationFrame(() => {
-        const x = (event.clientX / window.innerWidth - 0.5) * 12;
-        const y = (event.clientY / window.innerHeight - 0.5) * 8;
-        chart.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+        const rect = terminal.getBoundingClientRect();
+        const x = ((event.clientX - rect.left) / rect.width - 0.5) * 10;
+        const y = ((event.clientY - rect.top) / rect.height - 0.5) * 8;
+        terminal.style.transform = `perspective(1200px) rotateY(${x * 0.35}deg) rotateX(${-y * 0.3}deg)`;
         ticking = false;
       });
     },
