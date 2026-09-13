@@ -45,9 +45,25 @@ Prefer HTTPS (full assets + live Mongo/`crypto-chart` data):
 
 - https://goldanil.ir/charts/
 
+**Forge landing (this product only):**
+
+- http://185.222.163.116:8088/ — Forge Charts marketing site
+- http://185.222.163.116:8088/charts/ — Supercharts app on the same host
+
 HTTP fallbacks (if TLS is blocked on your VPN):
 
 - http://185.222.163.116/charts/
 - http://185.222.163.116:8089/charts/
+
+**Do not confuse with other apps on this VPS:**
+
+| Port / host | App |
+| --- | --- |
+| `:8088` | **Forge Charts** landing + `/charts/` |
+| `:8089` | Forge charts fallback (Anil dist) |
+| `:8090` | Atrium |
+| `:8092` | Danora staging (not :8088) |
+| `danoura.ir` | Danora |
+| `goldanil.ir` | Anil Gold (+ `/charts/` embed) |
 
 Hard-refresh after updates: Ctrl+Shift+R (clears truncated JS caches).
