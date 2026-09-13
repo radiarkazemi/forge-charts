@@ -1,18 +1,23 @@
-# Session Daylight Pack
+# Session Daylight Box
 
-Non-trading session / day map for **TradingView + MT5**.
+Small **corner status box** only — no big session bands on the chart.
 
-## Files
+Shows:
+- current session
+- clock
+- day begin / day end
 
-```
-TradingView/Session_Daylight.pine
-MT5/Session_Daylight.mq5
-docs/README.md
-```
+Does not trade or draw over price.
+
+## Downloads
+
+- Pack: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/session-daylight-992e/packs/Session_Daylight_Pack.zip
+- Pine: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/session-daylight-992e/indicators/Session_Daylight.pine
+- MT5: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/session-daylight-992e/mt5/Session_Daylight/Session_Daylight.mq5
 
 ## Install
 
-1. TV — paste Pine → Add to chart  
-2. MT5 — compile `Session_Daylight.mq5` → attach  
+**TradingView:** paste Pine → Add to chart  
+**MT5:** compile `Session_Daylight.mq5` → attach  
 
-See `docs/README.md`.
+Default box sits **bottom-right**.
