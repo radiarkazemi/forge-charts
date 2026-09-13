@@ -3,209 +3,171 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Forge Charts — Original Supercharts</title>
+    <title>Forge — Smarter Trading for a Bigger Tomorrow</title>
     <meta
       name="description"
-      content="Forge Charts is an original Super Chart–style trading terminal. Draw, analyze, replay, and embed."
+      content="Forge Charts — global markets, advanced analytics, built for serious investors."
     />
-    <meta name="application-name" content="Forge Charts" />
-    <meta name="theme-color" content="#060912" />
-    <link rel="icon" type="image/png" sizes="32x32" href="./brand/favicon-32.png" />
+    <meta name="application-name" content="Forge" />
+    <meta name="theme-color" content="#0a0c10" />
     <link rel="icon" type="image/svg+xml" href="./brand/forge-mark.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./brand/favicon-32.png" />
     <link rel="apple-touch-icon" href="./brand/apple-touch-icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Syne:wght@600;700;800&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="atmosphere" aria-hidden="true">
-      <div class="grid-drift"></div>
-      <div class="glow glow-a"></div>
-      <div class="glow glow-b"></div>
+    <div class="world" aria-hidden="true">
+      <svg class="world-map" viewBox="0 0 1200 640" preserveAspectRatio="xMidYMid slice">
+        <defs>
+          <linearGradient id="mapFade" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#fff" stop-opacity="0.09" />
+            <stop offset="100%" stop-color="#fff" stop-opacity="0.02" />
+          </linearGradient>
+        </defs>
+        <!-- Simplified continents silhouette -->
+        <g fill="url(#mapFade)" stroke="none">
+          <path d="M180 180 C220 140 280 150 320 170 C360 140 420 130 470 160 C500 190 490 240 450 260 C400 290 330 280 290 250 C240 260 200 230 180 180 Z" />
+          <path d="M520 200 C560 170 620 175 660 200 C700 190 760 210 790 250 C810 290 780 330 730 340 C680 350 630 320 600 290 C560 300 530 260 520 200 Z" />
+          <path d="M820 220 C880 190 960 200 1020 240 C1060 270 1050 320 1000 340 C940 360 880 330 850 290 C820 280 800 250 820 220 Z" />
+          <path d="M700 380 C760 360 820 390 840 440 C850 480 820 510 770 500 C720 490 690 430 700 380 Z" />
+          <path d="M200 320 C260 300 310 340 300 390 C290 440 230 450 190 420 C160 390 170 340 200 320 Z" />
+          <path d="M980 360 C1040 340 1100 370 1110 420 C1120 470 1060 490 1010 470 C960 450 950 390 980 360 Z" />
+        </g>
+        <g stroke="rgba(255,255,255,0.04)" stroke-width="1" fill="none">
+          <ellipse cx="600" cy="320" rx="520" ry="220" />
+          <ellipse cx="600" cy="320" rx="380" ry="160" />
+          <ellipse cx="600" cy="320" rx="240" ry="100" />
+          <line x1="80" y1="320" x2="1120" y2="320" />
+          <line x1="600" y1="80" x2="600" y2="560" />
+        </g>
+      </svg>
     </div>
 
-    <header class="top">
-      <a class="brand" href="/" aria-label="Forge Charts home">
-        <img src="./brand/forge-mark.svg" width="28" height="28" alt="" />
-        <span>Forge <em>Charts</em></span>
+    <header class="nav">
+      <a class="logo" href="/" aria-label="Forge home">
+        <svg class="logo-mark" viewBox="0 0 80 72" aria-hidden="true">
+          <path fill="currentColor" d="M10 8 H70 L58 28 H22 V8 Z" />
+          <path fill="currentColor" d="M10 34 H52 L40 54 H22 V34 Z" />
+          <path fill="currentColor" d="M10 8 H22 V64 H10 Z" />
+        </svg>
+        <span class="logo-word">FORGE</span>
       </a>
-      <nav class="top-nav" aria-label="Primary">
-        <a href="#product">Product</a>
-        <a href="#embed">Embed</a>
-        <a href="#urls">URLs</a>
-        <a class="nav-cta" href="/charts/">Open Supercharts</a>
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#markets">Markets</a>
+        <a href="#analytics">Analytics</a>
+        <a href="#portfolio">Portfolio</a>
+        <a href="#more">More</a>
       </nav>
+      <div class="nav-actions">
+        <a class="icon-btn" href="/charts/" aria-label="Search markets" title="Open charts">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8">
+            <circle cx="11" cy="11" r="7" />
+            <path d="M20 20l-3.5-3.5" stroke-linecap="round" />
+          </svg>
+        </a>
+        <a class="icon-btn" href="/charts/" aria-label="Account" title="Open Supercharts">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8">
+            <circle cx="12" cy="8" r="3.5" />
+            <path d="M5 19c1.8-3.2 4.2-4.8 7-4.8s5.2 1.6 7 4.8" stroke-linecap="round" />
+          </svg>
+        </a>
+      </div>
     </header>
 
     <main>
-      <!-- Desktop: one composition — brand left, live terminal right -->
       <section class="hero">
         <div class="hero-copy">
-          <p class="eyebrow">Original Super Chart engine · MIT</p>
-          <h1>
-            <span class="brand-word">Forge</span>
-            <span class="hero-rest">Supercharts built to ship.</span>
-          </h1>
-          <p class="lede">
-            Dense drawings, multi-pane layouts, Pine subset, strategy tester, bar replay, and paper
-            trading — an embeddable terminal you own.
-          </p>
-          <div class="cta-row">
-            <a class="btn primary" href="/charts/">Launch Supercharts</a>
-            <a class="btn ghost" href="#embed">Embed in your app</a>
-          </div>
+          <h1>Smarter Trading<br />for a Bigger Tomorrow</h1>
+          <p class="sub">Global markets. Advanced analytics. Built for serious investors.</p>
+          <a class="cta" href="/charts/">Get Started <span aria-hidden="true">→</span></a>
         </div>
 
-        <a class="hero-terminal" href="/charts/?symbol=XAUUSD&interval=15" aria-label="Open Forge Supercharts">
-          <div class="terminal-chrome">
-            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-            <em>forge · XAUUSD · 15m</em>
-            <span class="terminal-go">Open →</span>
-          </div>
-          <div class="terminal-body" aria-hidden="true">
-            <aside class="terminal-tools">
-              <i></i><i></i><i></i><i></i><i></i><i></i>
-            </aside>
-            <div class="terminal-pane">
-              <div class="terminal-legend">
-                <strong>XAUUSD</strong>
-                <span class="up">+0.42%</span>
-                <span class="price">4348.90</span>
-              </div>
-              <svg class="terminal-chart" viewBox="0 0 720 360" preserveAspectRatio="none">
-                <defs>
-                  <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stop-color="#2f7bff" stop-opacity="0.35" />
-                    <stop offset="100%" stop-color="#2f7bff" stop-opacity="0" />
-                  </linearGradient>
-                </defs>
-                <g class="gridlines" stroke="rgba(148,176,220,0.1)">
-                  <line x1="0" y1="60" x2="720" y2="60" />
-                  <line x1="0" y1="120" x2="720" y2="120" />
-                  <line x1="0" y1="180" x2="720" y2="180" />
-                  <line x1="0" y1="240" x2="720" y2="240" />
-                  <line x1="0" y1="300" x2="720" y2="300" />
-                </g>
-                <path
-                  class="area"
-                  fill="url(#area)"
-                  d="M20 240 C80 220 120 200 180 210 C250 225 290 160 360 140 C430 120 470 160 540 110 C600 70 650 90 700 55 L700 340 L20 340 Z"
-                />
-                <path
-                  class="line"
-                  d="M20 240 C80 220 120 200 180 210 C250 225 290 160 360 140 C430 120 470 160 540 110 C600 70 650 90 700 55"
-                />
-                <g class="candles">
-                  <rect x="48" y="200" width="8" height="42" fill="#3dd68c" />
-                  <rect x="78" y="185" width="8" height="48" fill="#ff6b6b" />
-                  <rect x="108" y="175" width="8" height="40" fill="#3dd68c" />
-                  <rect x="138" y="150" width="8" height="55" fill="#3dd68c" />
-                  <rect x="168" y="165" width="8" height="38" fill="#ff6b6b" />
-                  <rect x="198" y="130" width="8" height="60" fill="#3dd68c" />
-                  <rect x="228" y="145" width="8" height="45" fill="#ff6b6b" />
-                  <rect x="258" y="115" width="8" height="58" fill="#3dd68c" />
-                  <rect x="288" y="100" width="8" height="50" fill="#3dd68c" />
-                  <rect x="318" y="88" width="8" height="62" fill="#ff6b6b" />
-                  <rect x="348" y="70" width="8" height="55" fill="#3dd68c" />
-                  <rect x="378" y="95" width="8" height="42" fill="#ff6b6b" />
-                  <rect x="408" y="60" width="8" height="58" fill="#3dd68c" />
-                  <rect x="438" y="48" width="8" height="50" fill="#3dd68c" />
-                  <rect x="468" y="72" width="8" height="40" fill="#ff6b6b" />
-                  <rect x="498" y="40" width="8" height="55" fill="#3dd68c" />
-                  <rect x="528" y="55" width="8" height="38" fill="#ff6b6b" />
-                  <rect x="558" y="32" width="8" height="52" fill="#3dd68c" />
-                  <rect x="588" y="45" width="8" height="40" fill="#3dd68c" />
-                  <rect x="618" y="28" width="8" height="48" fill="#ff6b6b" />
-                  <rect x="648" y="38" width="8" height="42" fill="#3dd68c" />
-                </g>
-                <line class="cross-v" x1="420" y1="0" x2="420" y2="360" />
-                <line class="cross-h" x1="0" y1="110" x2="720" y2="110" />
-              </svg>
-              <div class="terminal-axis">
-                <span>09:00</span><span>11:00</span><span>13:00</span><span>15:00</span><span>17:00</span>
-              </div>
+        <div class="hero-card" aria-hidden="true">
+          <div class="card-glass">
+            <div class="card-meta">
+              <span class="pair">BTC / USD</span>
+              <span class="chg">+2.41%</span>
             </div>
-            <aside class="terminal-watch">
-              <div><b>BTCUSDT</b><span class="up">+1.2%</span></div>
-              <div><b>ETHUSDT</b><span class="up">+0.8%</span></div>
-              <div><b>EURUSD</b><span class="dn">−0.1%</span></div>
-              <div><b>GBPUSD</b><span class="up">+0.1%</span></div>
-            </aside>
+            <svg class="card-chart" viewBox="0 0 360 160" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#22c55e" stop-opacity="0.35" />
+                  <stop offset="100%" stop-color="#22c55e" stop-opacity="0" />
+                </linearGradient>
+              </defs>
+              <path
+                class="spark-area"
+                fill="url(#sparkFill)"
+                d="M8 120 C40 112 60 100 90 95 C120 90 140 70 170 75 C200 80 220 50 250 42 C280 34 310 48 352 28 L352 160 L8 160 Z"
+              />
+              <path
+                class="spark-line"
+                d="M8 120 C40 112 60 100 90 95 C120 90 140 70 170 75 C200 80 220 50 250 42 C280 34 310 48 352 28"
+              />
+              <circle class="spark-dot" cx="250" cy="42" r="4.5" />
+            </svg>
           </div>
-        </a>
+        </div>
       </section>
 
-      <section id="product" class="product">
-        <div class="product-intro">
-          <h2>One engine. Full desk.</h2>
-          <p>Keyboard-first tools traders expect — ready to embed under your brand.</p>
+      <section class="stats" id="markets" aria-label="Highlights">
+        <div class="stat">
+          <strong>500+</strong>
+          <span>Global Markets</span>
         </div>
-        <ul class="product-list">
-          <li>
-            <strong>Draw</strong>
-            <span>Trend, Fib, Gann, patterns, object tree — layout-synced.</span>
-          </li>
-          <li>
-            <strong>Study</strong>
-            <span>Indicators, Pine subset, equity curve, bar replay with fills.</span>
-          </li>
-          <li>
-            <strong>Trade (demo)</strong>
-            <span>Paper ticket, broker bridge hooks, Screener dock.</span>
-          </li>
+        <div class="stat">
+          <strong>24/7</strong>
+          <span>Real-Time Data</span>
+        </div>
+        <div class="stat">
+          <strong>1M+</strong>
+          <span>Active Traders</span>
+        </div>
+      </section>
+
+      <section class="split" id="analytics">
+        <div>
+          <p class="kicker">TRADE · ANALYZE · INVEST</p>
+          <h2>Simple. Powerful. International.</h2>
+          <p>
+            Forge Supercharts give you dense drawings, multi-pane layouts, strategy tools, and embeddable
+            terminals — ready for desks that ship product, not slides.
+          </p>
+          <a class="cta ghost" href="/charts/">Open Supercharts <span aria-hidden="true">→</span></a>
+        </div>
+        <ul class="bullets" id="portfolio">
+          <li><strong>Markets</strong><span>FX, crypto, metals — live and replayable.</span></li>
+          <li><strong>Analytics</strong><span>Indicators, Pine subset, equity curves.</span></li>
+          <li><strong>Portfolio</strong><span>Paper ticket, broker hooks, screener dock.</span></li>
         </ul>
       </section>
 
-      <section id="embed" class="embed">
-        <div class="embed-copy">
-          <h2>Drop the full terminal into your app</h2>
-          <p>
-            Point an iframe at <code>/charts/?embed=1</code>. Pass symbol, exchange, interval, theme —
-            or push bars with <code>postMessage</code>.
-          </p>
-          <a
-            class="btn primary"
-            href="/charts/?embed=1&symbol=BTCUSDT&exchange=BINANCE&interval=15&theme=dark"
-            >Open embed demo</a
-          >
-        </div>
-        <pre class="code" tabindex="0"><code>&lt;iframe
-  src="https://HOST/charts/?embed=1&amp;symbol=BTCUSDT&amp;interval=15&amp;theme=dark"
-  style="width:100%;height:720px;border:0"
-  title="Forge Chart"
-&gt;&lt;/iframe&gt;</code></pre>
-      </section>
-
-      <section id="urls" class="urls">
-        <h2>Forge URLs on this host</h2>
-        <p class="lede tight">This port serves Forge Charts only.</p>
-        <ul class="url-list">
-          <li>
-            <span class="url-label">Landing</span>
-            <a href="http://185.222.163.116:8088/">http://185.222.163.116:8088/</a>
-          </li>
-          <li>
-            <span class="url-label">Supercharts</span>
-            <a href="http://185.222.163.116:8088/charts/">http://185.222.163.116:8088/charts/</a>
-          </li>
-          <li>
-            <span class="url-label">Production HTTPS</span>
-            <a href="https://goldanil.ir/charts/">https://goldanil.ir/charts/</a>
-          </li>
+      <section class="urls" id="more">
+        <h2>Forge on this host</h2>
+        <ul>
+          <li><span>Landing</span><a href="http://185.222.163.116:8088/">http://185.222.163.116:8088/</a></li>
+          <li><span>Supercharts</span><a href="http://185.222.163.116:8088/charts/">http://185.222.163.116:8088/charts/</a></li>
+          <li><span>Production HTTPS</span><a href="https://goldanil.ir/charts/">https://goldanil.ir/charts/</a></li>
         </ul>
       </section>
     </main>
 
     <footer class="foot">
-      <div class="foot-brand">
-        <img src="./brand/forge-mark.svg" width="22" height="22" alt="" />
-        <span>Forge Charts</span>
+      <div class="logo foot-logo">
+        <svg class="logo-mark" viewBox="0 0 80 72" aria-hidden="true">
+          <path fill="currentColor" d="M10 8 H70 L58 28 H22 V8 Z" />
+          <path fill="currentColor" d="M10 34 H52 L40 54 H22 V34 Z" />
+          <path fill="currentColor" d="M10 8 H22 V64 H10 Z" />
+        </svg>
+        <span class="logo-word">FORGE</span>
       </div>
-      <p>Independent charting engine.</p>
+      <p>TRADE · ANALYZE · INVEST</p>
     </footer>
 
     <script src="./main.js"></script>

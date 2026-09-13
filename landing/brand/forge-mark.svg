@@ -1,14 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <defs>
-    <linearGradient id="forgeGrad" x1="8" y1="58" x2="54" y2="6" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#1638ff"/>
-      <stop offset="45%" stop-color="#2f7bff"/>
-      <stop offset="100%" stop-color="#5ce1ff"/>
-    </linearGradient>
-  </defs>
-  <g transform="skewX(-12) translate(5 0)" fill="url(#forgeGrad)">
-    <path d="M12 10h14l-8 44H4z"/>
-    <path d="M26 10h30l-5 14H21z"/>
-    <path d="M23 32h24l-5 14H18z"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 72" fill="currentColor" role="img" aria-label="Forge">
+  <!-- Brand board: two forward bars, flush left edge, clipped right ends -->
+  <path d="M10 8 H70 L58 28 H22 V8 Z" />
+  <path d="M10 34 H52 L40 54 H22 V34 Z" />
+  <path d="M10 8 H22 V64 H10 Z" />
 </svg>
