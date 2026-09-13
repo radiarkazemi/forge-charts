@@ -1,69 +1,37 @@
 window.FORGE_I18N = {
   en: {
     dir: "ltr",
-    title: "Forge — Smarter Trading for a Bigger Tomorrow",
-    description: "Forge Charts — global markets, advanced analytics, built for serious investors.",
+    title: "Forge — Real Data. Real Opportunities.",
+    description: "Trade smarter with real-time data, advanced analytics and global markets.",
+    "nav.home": "Home",
     "nav.markets": "Markets",
-    "nav.analytics": "Analytics",
     "nav.portfolio": "Portfolio",
+    "nav.analytics": "Analytics",
     "nav.more": "More",
-    "nav.searchAria": "Open charts",
-    "nav.accountAria": "Open Supercharts",
-    "hero.title": "Smarter Trading<br />for a Bigger Tomorrow",
-    "hero.sub": "Global markets. Advanced analytics. Built for serious investors.",
+    "nav.searchAria": "Search",
+    "nav.historyAria": "History",
+    "splash.tag": "TRADE · ANALYZE · INVEST",
+    "hero.title": "Real Data.<br />Real Opportunities.",
+    "hero.sub": "Trade smarter with real-time data, advanced analytics and global markets.",
+    "hero.search": "Search assets...",
     "hero.cta": "Get Started",
-    "stats.markets": "Global Markets",
-    "stats.data": "Real-Time Data",
-    "stats.traders": "Active Traders",
-    "split.kicker": "TRADE · ANALYZE · INVEST",
-    "split.title": "Simple. Powerful. International.",
-    "split.body":
-      "Forge Supercharts give you dense drawings, multi-pane layouts, strategy tools, and embeddable terminals — ready for desks that ship product, not slides.",
-    "split.cta": "Open Supercharts",
-    "bullets.marketsTitle": "Markets",
-    "bullets.marketsBody": "FX, crypto, metals — live and replayable.",
-    "bullets.analyticsTitle": "Analytics",
-    "bullets.analyticsBody": "Indicators, Pine subset, equity curves.",
-    "bullets.portfolioTitle": "Portfolio",
-    "bullets.portfolioBody": "Paper ticket, broker hooks, screener dock.",
-    "more.title": "Built to ship inside your product",
-    "more.body":
-      "Embed the full terminal in your app, keep your brand on top, and give traders the desk tools they expect — without stitching together widgets.",
-    "more.cta": "Try embed mode",
-    "footer.tag": "TRADE · ANALYZE · INVEST",
   },
   fa: {
     dir: "rtl",
-    title: "فورج — معامله‌گری هوشمند برای فردایی بزرگ‌تر",
-    description: "فورج چارتس — بازارهای جهانی، تحلیل پیشرفته، ساخته‌شده برای سرمایه‌گذاران جدی.",
+    title: "فورج — دادهٔ واقعی. فرصت‌های واقعی.",
+    description: "هوشمندتر معامله کنید با داده‌های لحظه‌ای، تحلیل پیشرفته و بازارهای جهانی.",
+    "nav.home": "خانه",
     "nav.markets": "بازارها",
-    "nav.analytics": "تحلیل",
     "nav.portfolio": "سبد",
+    "nav.analytics": "تحلیل",
     "nav.more": "بیشتر",
-    "nav.searchAria": "باز کردن چارت‌ها",
-    "nav.accountAria": "باز کردن سوپرچارتس",
-    "hero.title": "معامله‌گری هوشمند<br />برای فردایی بزرگ‌تر",
-    "hero.sub": "بازارهای جهانی. تحلیل پیشرفته. ساخته‌شده برای سرمایه‌گذاران جدی.",
+    "nav.searchAria": "جستجو",
+    "nav.historyAria": "تاریخچه",
+    "splash.tag": "معامله · تحلیل · سرمایه‌گذاری",
+    "hero.title": "دادهٔ واقعی.<br />فرصت‌های واقعی.",
+    "hero.sub": "هوشمندتر معامله کنید با داده‌های لحظه‌ای، تحلیل پیشرفته و بازارهای جهانی.",
+    "hero.search": "جستجوی دارایی...",
     "hero.cta": "شروع کنید",
-    "stats.markets": "بازار جهانی",
-    "stats.data": "دادهٔ لحظه‌ای",
-    "stats.traders": "معامله‌گر فعال",
-    "split.kicker": "معامله · تحلیل · سرمایه‌گذاری",
-    "split.title": "ساده. قدرتمند. بین‌المللی.",
-    "split.body":
-      "سوپرچارتس فورج ابزارهای ترسیم متراکم، چیدمان چندپنلی، استراتژی و ترمینال قابل‌تعبیه را در اختیار شما می‌گذارد — آماده برای محصول واقعی، نه فقط اسلاید.",
-    "split.cta": "باز کردن سوپرچارتس",
-    "bullets.marketsTitle": "بازارها",
-    "bullets.marketsBody": "فارکس، کریپتو، فلزات — زنده و قابل بازپخش.",
-    "bullets.analyticsTitle": "تحلیل",
-    "bullets.analyticsBody": "اندیکاتورها، زیرمجموعهٔ پاین، منحنی سود.",
-    "bullets.portfolioTitle": "سبد",
-    "bullets.portfolioBody": "سفارش آزمایشی، اتصال کارگزار، اسکینر.",
-    "more.title": "برای جاسازی در محصول شما ساخته شده",
-    "more.body":
-      "ترمینال کامل را در اپ خود قرار دهید، برند خود را حفظ کنید و ابزارهایی که معامله‌گران انتظار دارند را بدون چسباندن ویجت‌های پراکنده ارائه دهید.",
-    "more.cta": "حالت تعبیه را ببینید",
-    "footer.tag": "معامله · تحلیل · سرمایه‌گذاری",
   },
 };
 
@@ -93,9 +61,9 @@ window.FORGE_I18N = {
       const key = el.getAttribute("data-i18n-aria");
       if (pack[key] != null) el.setAttribute("aria-label", pack[key]);
     });
-
-    document.querySelectorAll(".cta-arrow").forEach((el) => {
-      el.textContent = lang === "fa" ? "←" : "→";
+    document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+      const key = el.getAttribute("data-i18n-placeholder");
+      if (pack[key] != null) el.setAttribute("placeholder", pack[key]);
     });
 
     document.querySelectorAll(".lang-btn").forEach((btn) => {
@@ -160,7 +128,6 @@ window.FORGE_I18N = {
       /* ignore */
     }
 
-    // Cloudflare trace (often works when other geo APIs are blocked in IR)
     const trace = await fetchText("https://www.cloudflare.com/cdn-cgi/trace", 3000);
     if (trace) {
       const match = /(?:^|\n)loc=([A-Z]{2})/i.exec(trace);
