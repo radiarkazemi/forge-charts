@@ -9,3 +9,7 @@ dist/
 .env.*
 !.env.example
 indicators/.trh-alert-state.json
+
+# mt5-watch runtime
+mt5-watch/.watch-state.json
+mt5-watch/events.jsonl

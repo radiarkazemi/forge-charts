@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Apex Brain — Live Cockpit</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg0: #070a0f;
+      --bg1: #0c121c;
+      --panel: rgba(14, 20, 30, 0.88);
+      --line: #1e2a3a;
+      --text: #e8eef7;
+      --muted: #7d8fa3;
+      --apex: #5ee0c0;
+      --apex-dim: #2a8f78;
+      --long: #3dd68c;
+      --short: #ff6b6b;
+      --warn: #e6c07b;
+      --raid: #6ea8ff;
+      --shift: #c4a5ff;
+      --pocket: #5ee0c0;
+      --confirm: #e6c07b;
+      --armed: #3dd68c;
+      --live: #ff9f43;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      font-family: Manrope, system-ui, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(900px 500px at 8% -5%, rgba(94, 224, 192, 0.14), transparent 55%),
+        radial-gradient(800px 480px at 92% 0%, rgba(110, 168, 255, 0.10), transparent 50%),
+        linear-gradient(165deg, var(--bg1), var(--bg0) 45%, #05070b);
+      background-attachment: fixed;
+    }
+    a { color: var(--apex); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .shell { max-width: 1280px; margin: 0 auto; padding: 28px 24px 48px; }
+
+    .brand {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 28px;
+      animation: rise 0.7s ease both;
+    }
+    .brand .mark {
+      font-family: Syne, sans-serif;
+      font-weight: 800;
+      font-size: clamp(2.2rem, 5vw, 3.4rem);
+      letter-spacing: -0.03em;
+      line-height: 1;
+      background: linear-gradient(120deg, #fff 20%, var(--apex) 70%, var(--raid));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .brand p {
+      margin: 0;
+      max-width: 38rem;
+      color: var(--muted);
+      font-size: 1.02rem;
+      line-height: 1.45;
+    }
+    .brand .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 16px;
+      align-items: center;
+      margin-top: 8px;
+    }
+    .conn {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+    .conn.ok { color: var(--apex); }
+
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 22px;
+      animation: rise 0.8s 0.08s ease both;
+    }
+    @media (max-width: 860px) {
+      .pipeline { grid-template-columns: repeat(2, 1fr); }
+    }
+    .phase {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      backdrop-filter: blur(8px);
+      padding: 12px 10px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.25s, transform 0.25s;
+    }
+    .phase::after {
+      content: "";
+      position: absolute;
+      inset: auto 0 0;
+      height: 2px;
+      background: transparent;
+      transition: background 0.3s;
+    }
+    .phase.active {
+      border-color: color-mix(in srgb, var(--phase, var(--apex)) 55%, var(--line));
+      transform: translateY(-2px);
+    }
+    .phase.active::after { background: var(--phase, var(--apex)); }
+    .phase .n {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.68rem;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+    }
+    .phase .t {
+      font-family: Syne, sans-serif;
+      font-weight: 700;
+      font-size: 0.95rem;
+      margin-top: 4px;
+    }
+    .phase[data-p="RAID"] { --phase: var(--raid); }
+    .phase[data-p="SHIFT"] { --phase: var(--shift); }
+    .phase[data-p="POCKET"] { --phase: var(--pocket); }
+    .phase[data-p="CONFIRM"] { --phase: var(--confirm); }
+    .phase[data-p="ARMED"],
+    .phase[data-p="LIVE"] { --phase: var(--armed); }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+      animation: rise 0.85s 0.12s ease both;
+    }
+    @media (max-width: 900px) {
+      .hero { grid-template-columns: 1fr; }
+    }
+    .panel {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      backdrop-filter: blur(10px);
+      padding: 18px 20px;
+    }
+    .panel h2 {
+      margin: 0 0 4px;
+      font-family: Syne, sans-serif;
+      font-size: 1.15rem;
+      font-weight: 700;
+    }
+    .sub { color: var(--muted); font-size: 0.82rem; margin-bottom: 16px; }
+
+    .thesis-side {
+      font-family: Syne, sans-serif;
+      font-size: clamp(1.8rem, 4vw, 2.6rem);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      line-height: 1.05;
+    }
+    .thesis-side.long { color: var(--long); }
+    .thesis-side.short { color: var(--short); }
+    .thesis-side.flat { color: var(--muted); }
+
+    .levels {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 18px;
+    }
+    .lvl {
+      border: 1px solid var(--line);
+      padding: 12px 10px;
+      background: rgba(0,0,0,0.22);
+    }
+    .lvl b {
+      display: block;
+      font-size: 0.72rem;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .lvl span {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 1.15rem;
+      font-weight: 600;
+    }
+    .lvl.entry span { color: var(--apex); }
+    .lvl.sl span { color: var(--short); }
+    .lvl.tp span { color: var(--long); }
+
+    .score-wrap { margin-top: 18px; }
+    .score-bar {
+      height: 8px;
+      background: #152030;
+      border: 1px solid var(--line);
+      overflow: hidden;
+    }
+    .score-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--apex-dim), var(--apex));
+      transition: width 0.45s ease;
+    }
+    .score-meta {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 8px;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .grade {
+      font-family: Syne, sans-serif;
+      font-weight: 800;
+      font-size: 2rem;
+      color: var(--apex);
+      line-height: 1;
+    }
+
+    .kv {
+      display: grid;
+      grid-template-columns: 96px 1fr;
+      gap: 8px 12px;
+      font-size: 0.92rem;
+    }
+    .kv b { color: var(--muted); font-weight: 500; }
+    .mono { font-family: "IBM Plex Mono", monospace; }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+      animation: rise 0.9s 0.16s ease both;
+    }
+    @media (max-width: 720px) {
+      .stats { grid-template-columns: repeat(2, 1fr); }
+    }
+    .stat {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      padding: 14px 16px;
+    }
+    .stat b {
+      display: block;
+      font-size: 0.72rem;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+      margin-bottom: 6px;
+    }
+    .stat span {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 1.2rem;
+      font-weight: 600;
+    }
+
+    .feed {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      overflow: hidden;
+      animation: rise 0.95s 0.2s ease both;
+    }
+    .feed h3 {
+      margin: 0;
+      padding: 14px 18px;
+      font-family: Syne, sans-serif;
+      font-size: 1rem;
+      border-bottom: 1px solid var(--line);
+    }
+    .feed ul { list-style: none; margin: 0; padding: 0; max-height: 380px; overflow: auto; }
+    .feed li {
+      display: grid;
+      grid-template-columns: 78px 70px 72px 1fr;
+      gap: 10px;
+      padding: 11px 18px;
+      border-bottom: 1px solid #152030;
+      font-size: 0.86rem;
+      align-items: start;
+    }
+    .feed li:last-child { border-bottom: 0; }
+    .time, .tag { font-family: "IBM Plex Mono", monospace; font-size: 0.74rem; color: var(--muted); }
+    .tag.kind {
+      color: var(--apex);
+      border: 1px solid var(--line);
+      padding: 2px 6px;
+      width: fit-content;
+    }
+    .tag.entry { color: var(--live); border-color: #4a3220; }
+    .tag.setup { color: var(--armed); }
+    .msg { word-break: break-word; }
+
+    .pulse {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    .pulse.on {
+      background: var(--apex);
+      box-shadow: 0 0 0 0 rgba(94, 224, 192, 0.55);
+      animation: ping 1.6s ease infinite;
+    }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: none; }
+    }
+    @keyframes ping {
+      0% { box-shadow: 0 0 0 0 rgba(94, 224, 192, 0.45); }
+      70% { box-shadow: 0 0 0 10px rgba(94, 224, 192, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(94, 224, 192, 0); }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="brand">
+      <div class="mark">APEX</div>
+      <p>Realtime brain for MetaTrader — finds RAID liquidity, waits for SHIFT, maps the origin POCKET, confirms quality, then STRIKES with fixed 1:3 risk:reward.</p>
+      <div class="row">
+        <span class="conn" id="conn"><span class="pulse" id="pulse"></span>connecting…</span>
+        <a href="/">All models watch</a>
+      </div>
+    </header>
+
+    <section class="pipeline" id="pipeline">
+      <div class="phase" data-p="RAID"><div class="n">01</div><div class="t">RAID</div></div>
+      <div class="phase" data-p="SHIFT"><div class="n">02</div><div class="t">SHIFT</div></div>
+      <div class="phase" data-p="POCKET"><div class="n">03</div><div class="t">POCKET</div></div>
+      <div class="phase" data-p="CONFIRM"><div class="n">04</div><div class="t">CONFIRM</div></div>
+      <div class="phase" data-p="ARMED"><div class="n">05</div><div class="t">STRIKE</div></div>
+    </section>
+
+    <section class="hero">
+      <article class="panel">
+        <h2>Active thesis</h2>
+        <div class="sub" id="thesis-story">Waiting for first structure…</div>
+        <div class="thesis-side flat" id="thesis-side">FLAT</div>
+        <div class="levels">
+          <div class="lvl entry"><b>ENTRY</b><span id="v-entry">—</span></div>
+          <div class="lvl sl"><b>SL · 1R</b><span id="v-sl">—</span></div>
+          <div class="lvl tp"><b>TP · 3R</b><span id="v-tp">—</span></div>
+        </div>
+        <div class="score-wrap">
+          <div class="score-bar"><div class="score-fill" id="score-fill"></div></div>
+          <div class="score-meta">
+            <span id="score-txt">score —</span>
+            <span>confirm ≥ 70 arms strike</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <h2>Money &amp; state</h2>
+        <div class="sub">Risk percent sizing · daily loss lock · BE at +1R</div>
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; margin-bottom:18px;">
+          <div>
+            <div class="sub" style="margin:0">Grade</div>
+            <div class="grade" id="grade">—</div>
+          </div>
+          <div class="mono" id="rr-badge" style="color:var(--apex); font-size:1.1rem;">R:R 1:3</div>
+        </div>
+        <div class="kv">
+          <b>Status</b><span id="v-status">—</span>
+          <b>Symbol</b><span class="mono" id="v-symbol">—</span>
+          <b>TF</b><span class="mono" id="v-tf">—</span>
+          <b>Equity</b><span class="mono" id="v-equity">—</span>
+          <b>Balance</b><span class="mono" id="v-balance">—</span>
+          <b>Note</b><span id="v-note">—</span>
+        </div>
+      </article>
+    </section>
+
+    <section class="stats">
+      <div class="stat"><b>SETUPS SEEN</b><span id="s-setups">0</span></div>
+      <div class="stat"><b>LAST SEEN</b><span id="s-seen">—</span></div>
+      <div class="stat"><b>ONLINE</b><span id="s-online">no</span></div>
+      <div class="stat"><b>MODE</b><span id="s-mode">—</span></div>
+    </section>
+
+    <section class="feed">
+      <h3>Apex event stream</h3>
+      <ul id="feed"></ul>
+    </section>
+  </div>
+
+  <script>
+    const PHASES = ["RAID", "SHIFT", "POCKET", "CONFIRM", "ARMED", "LIVE", "SCOUT", "DEAD", "DONE"];
+    const feed = document.getElementById("feed");
+    const conn = document.getElementById("conn");
+    const pulse = document.getElementById("pulse");
+
+    function fmt(n, d = 2) {
+      if (n == null || Number.isNaN(n) || n === 0) return "—";
+      return Number(n).toFixed(d);
+    }
+    function ago(ms) {
+      if (!ms) return "never";
+      const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+      if (s < 60) return s + "s";
+      if (s < 3600) return Math.floor(s / 60) + "m";
+      return Math.floor(s / 3600) + "h";
+    }
+    function parseScore(msg = "") {
+      const m = String(msg).match(/score\s+(\d+)/i);
+      return m ? Number(m[1]) : null;
+    }
+    function parseGrade(mode = "", msg = "") {
+      const m = String(mode).match(/G([ABCD])/i) || String(msg).match(/grade\s+([ABCD])/i);
+      return m ? m[1].toUpperCase() : "—";
+    }
+    function parsePhase(status = "", msg = "") {
+      const blob = `${status} ${msg}`.toUpperCase();
+      for (const p of ["LIVE", "ARMED", "CONFIRM", "POCKET", "SHIFT", "RAID", "SCOUT", "LOCK", "DEAD", "DONE", "FLAT"]) {
+        if (blob.includes(p)) return p === "LOCK" ? "SCOUT" : p;
+      }
+      return "SCOUT";
+    }
+    function setPipeline(phase) {
+      const map = { LIVE: "ARMED", DONE: "ARMED", FLAT: "SCOUT", DEAD: "SCOUT" };
+      const active = map[phase] || phase;
+      const order = ["RAID", "SHIFT", "POCKET", "CONFIRM", "ARMED"];
+      const idx = order.indexOf(active);
+      document.querySelectorAll(".phase").forEach((el) => {
+        const p = el.getAttribute("data-p");
+        const pi = order.indexOf(p);
+        el.classList.toggle("active", idx >= 0 && pi >= 0 && pi <= idx);
+      });
+    }
+
+    function renderApex(m, lastEv) {
+      const online = !!m?.online;
+      pulse.className = "pulse " + (online ? "on" : "");
+      conn.className = "conn " + (online ? "ok" : "");
+      conn.innerHTML = `<span class="pulse ${online ? "on" : ""}" id="pulse"></span>${online ? "live bridge" : "offline"} · ${new Date().toLocaleTimeString()}`;
+
+      const status = m?.status || "—";
+      const msg = m?.message || lastEv?.message || "";
+      const phase = parsePhase(status, msg);
+      setPipeline(phase);
+
+      const side = m?.side || "";
+      const sideEl = document.getElementById("thesis-side");
+      sideEl.textContent = side || "FLAT";
+      sideEl.className = "thesis-side " + (side === "LONG" ? "long" : side === "SHORT" ? "short" : "flat");
+
+      document.getElementById("thesis-story").textContent = msg || "Waiting for first structure…";
+      document.getElementById("v-entry").textContent = fmt(m?.entry);
+      document.getElementById("v-sl").textContent = fmt(m?.sl);
+      document.getElementById("v-tp").textContent = fmt(m?.tp);
+      document.getElementById("v-status").textContent = status;
+      document.getElementById("v-symbol").textContent = m?.symbol || "—";
+      document.getElementById("v-tf").textContent = m?.tf || "—";
+      document.getElementById("v-note").textContent = msg || "—";
+      document.getElementById("v-equity").textContent = fmt(lastEv?.equity ?? m?.equity, 2);
+      document.getElementById("v-balance").textContent = fmt(lastEv?.balance ?? m?.balance, 2);
+      document.getElementById("s-setups").textContent = String(m?.setupsSeen || 0);
+      document.getElementById("s-seen").textContent = ago(m?.lastSeenAt);
+      document.getElementById("s-online").textContent = online ? "yes" : "no";
+      document.getElementById("s-mode").textContent = m?.mode || "—";
+      document.getElementById("rr-badge").textContent = (m?.mode || "").includes("RR") ? m.mode.split("|")[0] : "R:R 1:3";
+      document.getElementById("grade").textContent = parseGrade(m?.mode, msg);
+
+      const sc = parseScore(msg);
+      const fill = document.getElementById("score-fill");
+      fill.style.width = (sc != null ? sc : 0) + "%";
+      document.getElementById("score-txt").textContent = sc != null ? ("score " + sc) : "score —";
+    }
+
+    function pushFeed(ev) {
+      if (!ev || ev.model !== "APEX") return;
+      if (ev.kind === "heartbeat") return;
+      const li = document.createElement("li");
+      const t = new Date(ev.recvAt || ev.ts || Date.now());
+      li.innerHTML = `<span class="time">${t.toLocaleTimeString()}</span>
+        <span class="tag">${ev.side || "—"}</span>
+        <span class="tag kind ${ev.kind}">${ev.kind}</span>
+        <span class="msg">${ev.message || (ev.status + " E " + fmt(ev.entry))}</span>`;
+      feed.prepend(li);
+      while (feed.children.length > 100) feed.removeChild(feed.lastChild);
+    }
+
+    function applySnapshot(snap) {
+      const m = snap.models?.APEX || {};
+      const lastEv = (snap.events || []).filter((e) => e.model === "APEX").slice(-1)[0];
+      renderApex(m, lastEv);
+    }
+
+    async function boot() {
+      const r = await fetch("/api/snapshot");
+      const snap = await r.json();
+      applySnapshot(snap);
+      (snap.events || []).filter((e) => e.model === "APEX").slice(-40).forEach(pushFeed);
+    }
+
+    function connectSse() {
+      const es = new EventSource("/api/stream");
+      es.onmessage = (msg) => {
+        try {
+          const data = JSON.parse(msg.data);
+          if (data.type === "hello" || data.type === "tick") applySnapshot(data.snapshot || data);
+          if (data.type === "event") {
+            applySnapshot({ models: data.models, events: [data.event] });
+            pushFeed(data.event);
+          }
+        } catch {}
+      };
+      es.onerror = () => {
+        conn.textContent = "reconnecting…";
+        pulse.className = "pulse";
+      };
+    }
+
+    boot().then(connectSse).catch((e) => {
+      conn.textContent = "error: " + e.message;
+    });
+  </script>
+</body>
+</html>
