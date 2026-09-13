@@ -1,0 +1,73 @@
+//@version=6
+indicator("Session Daylight Map", shorttitle="Sessions", overlay=true, max_lines_count=500, max_labels_count=200)
+
+// Visual only — soft session bands + day begin. Does not trade or signal.
+
+tz          = input.string("America/New_York", "Timezone",
+     options=["America/New_York", "Europe/London", "Asia/Tokyo", "UTC", "Exchange"],
+     group="Clock")
+useExchange = tz == "Exchange"
+
+showAsia    = input.bool(true, "Asia", group="Sessions")
+showLondon  = input.bool(true, "London", group="Sessions")
+showNY      = input.bool(true, "New York", group="Sessions")
+showOverlap = input.bool(true, "London/NY overlap shade", group="Sessions")
+
+asiaSess    = input.session("1900-0000", "Asia window", group="Session hours")
+lonSess     = input.session("0300-1200", "London window", group="Session hours")
+nySess      = input.session("0800-1700", "New York window", group="Session hours")
+
+showDay     = input.bool(true, "Day begin line", group="Day")
+dayHour     = input.int(0, "Day begin hour", minval=0, maxval=23, group="Day")
+showLabels  = input.bool(false, "Tiny session labels", group="Look")
+showBands   = input.bool(true, "Soft background bands", group="Look")
+showTable   = input.bool(true, "Corner status", group="Look")
+
+colAsia     = input.color(color.new(#5B8DEF, 92), "Asia tint", group="Colors")
+colLon      = input.color(color.new(#E0B44E, 92), "London tint", group="Colors")
+colNY       = input.color(color.new(#46C39B, 92), "New York tint", group="Colors")
+colOvl      = input.color(color.new(#A78BFA, 90), "Overlap tint", group="Colors")
+colDay      = input.color(color.new(#8B97A8, 55), "Day line", group="Colors")
+
+f_tz() =>
+    useExchange ? syminfo.timezone : tz
+
+f_in(sess) =>
+    not na(time(timeframe.period, sess, f_tz()))
+
+inAsia   = showAsia and f_in(asiaSess)
+inLondon = showLondon and f_in(lonSess)
+inNY     = showNY and f_in(nySess)
+inOvl    = showOverlap and inLondon and inNY
+
+bgcolor(showBands and inAsia ? colAsia : na, title="Asia")
+bgcolor(showBands and inLondon ? colLon : na, title="London")
+bgcolor(showBands and inNY ? colNY : na, title="New York")
+bgcolor(showBands and inOvl ? colOvl : na, title="Overlap")
+
+hNow = hour(time, f_tz())
+mNow = minute(time, f_tz())
+hPrev = hour(time[1], f_tz())
+mPrev = minute(time[1], f_tz())
+
+isDayStart = showDay and hNow == dayHour and mNow == 0 and (na(time[1]) or hPrev != dayHour or mPrev != 0)
+
+if isDayStart
+    line.new(bar_index, low, bar_index, high, extend=extend.both, color=colDay, style=line.style_dotted, width=1)
+    if showLabels
+        label.new(bar_index, high, "DAY", style=label.style_label_down, color=color.new(colDay, 100), textcolor=color.new(colDay, 15), size=size.tiny)
+
+f_edge(cond) =>
+    cond and not cond[1]
+
+if showLabels and f_edge(inAsia)
+    label.new(bar_index, low, "AS", style=label.style_label_up, color=color.new(colAsia, 100), textcolor=color.new(#5B8DEF, 30), size=size.tiny)
+if showLabels and f_edge(inLondon)
+    label.new(bar_index, low, "LN", style=label.style_label_up, color=color.new(colLon, 100), textcolor=color.new(#E0B44E, 30), size=size.tiny)
+if showLabels and f_edge(inNY)
+    label.new(bar_index, low, "NY", style=label.style_label_up, color=color.new(colNY, 100), textcolor=color.new(#46C39B, 30), size=size.tiny)
+
+var table hud = table.new(position.bottom_right, 1, 1, bgcolor=color.new(#0E1116, 72), border_width=0)
+if showTable and barstate.islast
+    st = inOvl ? "LN/NY" : inNY ? "NEW YORK" : inLondon ? "LONDON" : inAsia ? "ASIA" : "OFF-SESSION"
+    table.cell(hud, 0, 0, st + " · " + str.format_time(time, "HH:mm", f_tz()), text_color=color.new(#E7ECF3, 30), text_size=size.tiny)
