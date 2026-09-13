@@ -86,19 +86,64 @@
       </section>
 
       <section class="preview" aria-label="Product preview">
-        <div class="preview-frame">
+        <a class="preview-frame" href="/charts/?symbol=XAUUSD&interval=15">
           <div class="preview-chrome">
             <span></span><span></span><span></span>
-            <em>forge · XAUUSD · 15m · live</em>
-            <a class="preview-open" href="/charts/">Open full screen</a>
+            <em>forge · XAUUSD · 15m</em>
+            <span class="preview-open">Open Supercharts →</span>
           </div>
-          <iframe
-            class="preview-iframe"
-            title="Forge Charts live preview"
-            src="/charts/?embed=1&symbol=XAUUSD&interval=15&theme=dark"
-            loading="lazy"
-          ></iframe>
-        </div>
+          <div class="preview-stage" aria-hidden="true">
+            <svg class="preview-svg" viewBox="0 0 960 420" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="paneFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#2f7bff" stop-opacity="0.18" />
+                  <stop offset="100%" stop-color="#2f7bff" stop-opacity="0" />
+                </linearGradient>
+              </defs>
+              <rect width="960" height="420" fill="#070b16" />
+              <g stroke="rgba(148,176,220,0.08)" stroke-width="1">
+                <line x1="0" y1="70" x2="960" y2="70" />
+                <line x1="0" y1="140" x2="960" y2="140" />
+                <line x1="0" y1="210" x2="960" y2="210" />
+                <line x1="0" y1="280" x2="960" y2="280" />
+                <line x1="0" y1="350" x2="960" y2="350" />
+              </g>
+              <path
+                fill="url(#paneFill)"
+                d="M40 260 L100 240 L160 250 L220 200 L280 210 L340 160 L400 180 L460 120 L520 140 L580 90 L640 110 L700 70 L760 95 L820 60 L900 80 L920 70 L920 380 L40 380 Z"
+              />
+              <g class="candles">
+                <rect x="70" y="220" width="10" height="50" fill="#3dd68c" />
+                <rect x="110" y="200" width="10" height="55" fill="#ff6b6b" />
+                <rect x="150" y="210" width="10" height="40" fill="#3dd68c" />
+                <rect x="190" y="170" width="10" height="60" fill="#3dd68c" />
+                <rect x="230" y="185" width="10" height="45" fill="#ff6b6b" />
+                <rect x="270" y="150" width="10" height="70" fill="#3dd68c" />
+                <rect x="310" y="140" width="10" height="55" fill="#ff6b6b" />
+                <rect x="350" y="120" width="10" height="65" fill="#3dd68c" />
+                <rect x="390" y="130" width="10" height="50" fill="#3dd68c" />
+                <rect x="430" y="95" width="10" height="70" fill="#3dd68c" />
+                <rect x="470" y="110" width="10" height="45" fill="#ff6b6b" />
+                <rect x="510" y="80" width="10" height="75" fill="#3dd68c" />
+                <rect x="550" y="70" width="10" height="55" fill="#ff6b6b" />
+                <rect x="590" y="55" width="10" height="70" fill="#3dd68c" />
+                <rect x="630" y="85" width="10" height="50" fill="#ff6b6b" />
+                <rect x="670" y="50" width="10" height="65" fill="#3dd68c" />
+                <rect x="710" y="65" width="10" height="45" fill="#ff6b6b" />
+                <rect x="750" y="40" width="10" height="70" fill="#3dd68c" />
+                <rect x="790" y="55" width="10" height="50" fill="#3dd68c" />
+                <rect x="830" y="35" width="10" height="60" fill="#ff6b6b" />
+                <rect x="870" y="48" width="10" height="55" fill="#3dd68c" />
+              </g>
+              <text x="48" y="36" fill="#8fa0bb" font-size="13" font-family="IBM Plex Sans, sans-serif">
+                XAUUSD · FOREXCOM · LIVE
+              </text>
+              <text x="780" y="36" fill="#5ce1ff" font-size="13" font-family="IBM Plex Sans, sans-serif">
+                4348.90
+              </text>
+            </svg>
+          </div>
+        </a>
       </section>
 
       <section id="product" class="product">

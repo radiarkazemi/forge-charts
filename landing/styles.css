@@ -300,6 +300,8 @@ main,
 }
 
 .preview-frame {
+  display: block;
+  color: inherit;
   border: 1px solid var(--line);
   border-radius: 14px;
   overflow: hidden;
@@ -319,7 +321,7 @@ main,
   background: rgba(255, 255, 255, 0.02);
 }
 
-.preview-chrome > span {
+.preview-chrome > span:not(.preview-open) {
   width: 9px;
   height: 9px;
   border-radius: 50%;
@@ -351,12 +353,61 @@ main,
   font-weight: 600;
 }
 
-.preview-iframe {
+.preview-frame:hover .preview-open {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.preview-stage {
+  background: #070b16;
+}
+
+.preview-svg {
   display: block;
   width: 100%;
-  height: min(64vh, 680px);
-  border: 0;
-  background: #070b16;
+  height: min(52vh, 480px);
+}
+
+.candles rect {
+  opacity: 0;
+  animation: candleIn 0.45s ease forwards;
+}
+
+.candles rect:nth-child(odd) {
+  animation-delay: calc(0.04s * var(--i, 1));
+}
+
+.candles rect:nth-child(1) { animation-delay: 0.05s; }
+.candles rect:nth-child(2) { animation-delay: 0.09s; }
+.candles rect:nth-child(3) { animation-delay: 0.13s; }
+.candles rect:nth-child(4) { animation-delay: 0.17s; }
+.candles rect:nth-child(5) { animation-delay: 0.21s; }
+.candles rect:nth-child(6) { animation-delay: 0.25s; }
+.candles rect:nth-child(7) { animation-delay: 0.29s; }
+.candles rect:nth-child(8) { animation-delay: 0.33s; }
+.candles rect:nth-child(9) { animation-delay: 0.37s; }
+.candles rect:nth-child(10) { animation-delay: 0.41s; }
+.candles rect:nth-child(11) { animation-delay: 0.45s; }
+.candles rect:nth-child(12) { animation-delay: 0.49s; }
+.candles rect:nth-child(13) { animation-delay: 0.53s; }
+.candles rect:nth-child(14) { animation-delay: 0.57s; }
+.candles rect:nth-child(15) { animation-delay: 0.61s; }
+.candles rect:nth-child(16) { animation-delay: 0.65s; }
+.candles rect:nth-child(17) { animation-delay: 0.69s; }
+.candles rect:nth-child(18) { animation-delay: 0.73s; }
+.candles rect:nth-child(19) { animation-delay: 0.77s; }
+.candles rect:nth-child(20) { animation-delay: 0.81s; }
+.candles rect:nth-child(21) { animation-delay: 0.85s; }
+
+@keyframes candleIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .product {
@@ -626,6 +677,7 @@ main,
   .chart-line,
   .chart-fill,
   .preview-frame,
+  .candles rect,
   .crosshair-v,
   .crosshair-h {
     animation: none !important;
@@ -637,7 +689,8 @@ main,
   }
 
   .chart-fill,
-  .preview-frame {
+  .preview-frame,
+  .candles rect {
     opacity: 1;
     transform: none;
   }
