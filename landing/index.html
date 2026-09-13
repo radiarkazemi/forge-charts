@@ -3,11 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Forge — Smarter Trading for a Bigger Tomorrow</title>
-    <meta
-      name="description"
-      content="Forge Charts — global markets, advanced analytics, built for serious investors."
-    />
+    <title>Forge</title>
+    <meta name="description" content="Forge Charts — global markets, advanced analytics." />
     <meta name="application-name" content="Forge" />
     <meta name="theme-color" content="#0a0c10" />
     <link rel="icon" type="image/svg+xml" href="./brand/forge-mark.svg" />
@@ -16,7 +13,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Vazirmatn:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./styles.css" />
@@ -30,7 +27,6 @@
             <stop offset="100%" stop-color="#fff" stop-opacity="0.05" />
           </linearGradient>
         </defs>
-        <!-- Simplified continents silhouette -->
         <g fill="url(#mapFade)" stroke="none">
           <path d="M180 180 C220 140 280 150 320 170 C360 140 420 130 470 160 C500 190 490 240 450 260 C400 290 330 280 290 250 C240 260 200 230 180 180 Z" />
           <path d="M520 200 C560 170 620 175 660 200 C700 190 760 210 790 250 C810 290 780 330 730 340 C680 350 630 320 600 290 C560 300 530 260 520 200 Z" />
@@ -50,24 +46,28 @@
     </div>
 
     <header class="nav">
-      <a class="logo" href="/" aria-label="Forge home">
+      <a class="logo" href="/" aria-label="Forge">
         <img class="logo-mark" src="./brand/forge-mark-white.png" width="28" height="28" alt="" />
         <span class="logo-word">FORGE</span>
       </a>
       <nav class="nav-links" aria-label="Primary">
-        <a href="#markets">Markets</a>
-        <a href="#analytics">Analytics</a>
-        <a href="#portfolio">Portfolio</a>
-        <a href="#more">More</a>
+        <a href="#markets" data-i18n="nav.markets">Markets</a>
+        <a href="#analytics" data-i18n="nav.analytics">Analytics</a>
+        <a href="#portfolio" data-i18n="nav.portfolio">Portfolio</a>
+        <a href="#more" data-i18n="nav.more">More</a>
       </nav>
       <div class="nav-actions">
-        <a class="icon-btn" href="/charts/" aria-label="Search markets" title="Open charts">
+        <div class="lang-switch" role="group" aria-label="Language">
+          <button type="button" class="lang-btn" data-lang="en" aria-pressed="true">EN</button>
+          <button type="button" class="lang-btn" data-lang="fa" aria-pressed="false">فا</button>
+        </div>
+        <a class="icon-btn" href="/charts/" data-i18n-aria="nav.searchAria" aria-label="Open charts">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8">
             <circle cx="11" cy="11" r="7" />
             <path d="M20 20l-3.5-3.5" stroke-linecap="round" />
           </svg>
         </a>
-        <a class="icon-btn" href="/charts/" aria-label="Account" title="Open Supercharts">
+        <a class="icon-btn" href="/charts/" data-i18n-aria="nav.accountAria" aria-label="Open Supercharts">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8">
             <circle cx="12" cy="8" r="3.5" />
             <path d="M5 19c1.8-3.2 4.2-4.8 7-4.8s5.2 1.6 7 4.8" stroke-linecap="round" />
@@ -79,9 +79,12 @@
     <main>
       <section class="hero">
         <div class="hero-copy">
-          <h1>Smarter Trading<br />for a Bigger Tomorrow</h1>
-          <p class="sub">Global markets. Advanced analytics. Built for serious investors.</p>
-          <a class="cta" href="/charts/">Get Started <span aria-hidden="true">→</span></a>
+          <h1 data-i18n-html="hero.title">Smarter Trading<br />for a Bigger Tomorrow</h1>
+          <p class="sub" data-i18n="hero.sub">Global markets. Advanced analytics. Built for serious investors.</p>
+          <a class="cta" href="/charts/">
+            <span data-i18n="hero.cta">Get Started</span>
+            <span class="cta-arrow" aria-hidden="true">→</span>
+          </a>
         </div>
 
         <div class="hero-card" aria-hidden="true">
@@ -115,42 +118,57 @@
       <section class="stats" id="markets" aria-label="Highlights">
         <div class="stat">
           <strong>500+</strong>
-          <span>Global Markets</span>
+          <span data-i18n="stats.markets">Global Markets</span>
         </div>
         <div class="stat">
           <strong>24/7</strong>
-          <span>Real-Time Data</span>
+          <span data-i18n="stats.data">Real-Time Data</span>
         </div>
         <div class="stat">
           <strong>1M+</strong>
-          <span>Active Traders</span>
+          <span data-i18n="stats.traders">Active Traders</span>
         </div>
       </section>
 
       <section class="split" id="analytics">
         <div>
-          <p class="kicker">TRADE · ANALYZE · INVEST</p>
-          <h2>Simple. Powerful. International.</h2>
-          <p>
+          <p class="kicker" data-i18n="split.kicker">TRADE · ANALYZE · INVEST</p>
+          <h2 data-i18n="split.title">Simple. Powerful. International.</h2>
+          <p data-i18n="split.body">
             Forge Supercharts give you dense drawings, multi-pane layouts, strategy tools, and embeddable
             terminals — ready for desks that ship product, not slides.
           </p>
-          <a class="cta ghost" href="/charts/">Open Supercharts <span aria-hidden="true">→</span></a>
+          <a class="cta ghost" href="/charts/">
+            <span data-i18n="split.cta">Open Supercharts</span>
+            <span class="cta-arrow" aria-hidden="true">→</span>
+          </a>
         </div>
         <ul class="bullets" id="portfolio">
-          <li><strong>Markets</strong><span>FX, crypto, metals — live and replayable.</span></li>
-          <li><strong>Analytics</strong><span>Indicators, Pine subset, equity curves.</span></li>
-          <li><strong>Portfolio</strong><span>Paper ticket, broker hooks, screener dock.</span></li>
+          <li>
+            <strong data-i18n="bullets.marketsTitle">Markets</strong>
+            <span data-i18n="bullets.marketsBody">FX, crypto, metals — live and replayable.</span>
+          </li>
+          <li>
+            <strong data-i18n="bullets.analyticsTitle">Analytics</strong>
+            <span data-i18n="bullets.analyticsBody">Indicators, Pine subset, equity curves.</span>
+          </li>
+          <li>
+            <strong data-i18n="bullets.portfolioTitle">Portfolio</strong>
+            <span data-i18n="bullets.portfolioBody">Paper ticket, broker hooks, screener dock.</span>
+          </li>
         </ul>
       </section>
 
-      <section class="urls" id="more">
-        <h2>Forge on this host</h2>
-        <ul>
-          <li><span>Landing</span><a href="http://185.222.163.116:8088/">http://185.222.163.116:8088/</a></li>
-          <li><span>Supercharts</span><a href="http://185.222.163.116:8088/charts/">http://185.222.163.116:8088/charts/</a></li>
-          <li><span>Production HTTPS</span><a href="https://goldanil.ir/charts/">https://goldanil.ir/charts/</a></li>
-        </ul>
+      <section class="more" id="more">
+        <h2 data-i18n="more.title">Built to ship inside your product</h2>
+        <p data-i18n="more.body">
+          Embed the full terminal in your app, keep your brand on top, and give traders the desk tools they
+          expect — without stitching together widgets.
+        </p>
+        <a class="cta" href="/charts/?embed=1">
+          <span data-i18n="more.cta">Try embed mode</span>
+          <span class="cta-arrow" aria-hidden="true">→</span>
+        </a>
       </section>
     </main>
 
@@ -159,9 +177,10 @@
         <img class="logo-mark" src="./brand/forge-mark-white.png" width="22" height="22" alt="" />
         <span class="logo-word">FORGE</span>
       </div>
-      <p>TRADE · ANALYZE · INVEST</p>
+      <p data-i18n="footer.tag">TRADE · ANALYZE · INVEST</p>
     </footer>
 
+    <script src="./i18n.js"></script>
     <script src="./main.js"></script>
   </body>
 </html>
