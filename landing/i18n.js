@@ -1,37 +1,61 @@
 window.FORGE_I18N = {
   en: {
     dir: "ltr",
-    title: "Forge — Real Data. Real Opportunities.",
-    description: "Trade smarter with real-time data, advanced analytics and global markets.",
-    "nav.home": "Home",
+    title: "Forge — The market, without the noise.",
+    description: "Professional charting. Real-time data. Intelligent analysis. All in one place.",
     "nav.markets": "Markets",
-    "nav.portfolio": "Portfolio",
-    "nav.analytics": "Analytics",
-    "nav.more": "More",
-    "nav.searchAria": "Search",
-    "nav.historyAria": "History",
-    "splash.tag": "TRADE · ANALYZE · INVEST",
-    "hero.title": "Real Data.<br />Real Opportunities.",
-    "hero.sub": "Trade smarter with real-time data, advanced analytics and global markets.",
-    "hero.search": "Search assets...",
-    "hero.cta": "Get Started",
+    "nav.charts": "Charts",
+    "nav.screener": "Screener",
+    "nav.news": "News",
+    "nav.learn": "Learn",
+    "nav.search": "Search markets, charts, or anything...",
+    "nav.login": "Log in",
+    "nav.getStarted": "Get started",
+    "hero.eyebrow": "TRADING. ANALYSIS. OPPORTUNITY.",
+    "hero.title": "The market,<br /><span class=\"accent\">without the noise.</span>",
+    "hero.lead": "Professional charting. Real-time data. Intelligent analysis. All in one place.",
+    "hero.search": "Search any market, asset, or indicator...",
+    "features.kicker": "ONE WORKSPACE. EVERY MARKET.",
+    "features.chartsTitle": "Advanced Charts",
+    "features.chartsBody": "100+ indicators, drawing tools, and multiple chart types. Built for precision.",
+    "features.screenerTitle": "Smart Screener",
+    "features.screenerBody": "Find the best opportunities with powerful, customizable scans.",
+    "features.aiTitle": "AI-Powered Analysis",
+    "features.aiBody": "Get instant insights, key levels, and market sentiment.",
+    "features.alertsTitle": "Real-Time Alerts",
+    "features.alertsBody": "Never miss a move. Set alerts for price, indicators, and more.",
+    "footer.live": "Live market data",
+    "footer.ok": "All systems operational",
+    "footer.explore": "Explore all markets →",
   },
   fa: {
     dir: "rtl",
-    title: "فورج — دادهٔ واقعی. فرصت‌های واقعی.",
-    description: "هوشمندتر معامله کنید با داده‌های لحظه‌ای، تحلیل پیشرفته و بازارهای جهانی.",
-    "nav.home": "خانه",
+    title: "فورج — بازار، بدون نویز.",
+    description: "چارت حرفه‌ای. دادهٔ لحظه‌ای. تحلیل هوشمند. همه در یک جا.",
     "nav.markets": "بازارها",
-    "nav.portfolio": "سبد",
-    "nav.analytics": "تحلیل",
-    "nav.more": "بیشتر",
-    "nav.searchAria": "جستجو",
-    "nav.historyAria": "تاریخچه",
-    "splash.tag": "معامله · تحلیل · سرمایه‌گذاری",
-    "hero.title": "دادهٔ واقعی.<br />فرصت‌های واقعی.",
-    "hero.sub": "هوشمندتر معامله کنید با داده‌های لحظه‌ای، تحلیل پیشرفته و بازارهای جهانی.",
-    "hero.search": "جستجوی دارایی...",
-    "hero.cta": "شروع کنید",
+    "nav.charts": "چارت‌ها",
+    "nav.screener": "اسکرینر",
+    "nav.news": "اخبار",
+    "nav.learn": "آموزش",
+    "nav.search": "جستجوی بازار، چارت یا هر چیز...",
+    "nav.login": "ورود",
+    "nav.getStarted": "شروع کنید",
+    "hero.eyebrow": "معامله. تحلیل. فرصت.",
+    "hero.title": "بازار،<br /><span class=\"accent\">بدون نویز.</span>",
+    "hero.lead": "چارت حرفه‌ای. دادهٔ لحظه‌ای. تحلیل هوشمند. همه در یک جا.",
+    "hero.search": "جستجوی هر بازار، دارایی یا اندیکاتور...",
+    "features.kicker": "یک فضای کار. همهٔ بازارها.",
+    "features.chartsTitle": "چارت‌های پیشرفته",
+    "features.chartsBody": "بیش از ۱۰۰ اندیکاتور، ابزار ترسیم و انواع چارت. ساخته‌شده برای دقت.",
+    "features.screenerTitle": "اسکرینر هوشمند",
+    "features.screenerBody": "بهترین فرصت‌ها را با اسکن‌های قدرتمند و قابل تنظیم پیدا کنید.",
+    "features.aiTitle": "تحلیل مبتنی بر هوش مصنوعی",
+    "features.aiBody": "بینش فوری، سطوح کلیدی و احساسات بازار را دریافت کنید.",
+    "features.alertsTitle": "هشدارهای لحظه‌ای",
+    "features.alertsBody": "هیچ حرکتی را از دست ندهید. برای قیمت، اندیکاتور و بیشتر هشدار بگذارید.",
+    "footer.live": "دادهٔ زندهٔ بازار",
+    "footer.ok": "همهٔ سامانه‌ها فعال",
+    "footer.explore": "مشاهدهٔ همهٔ بازارها ←",
   },
 };
 
@@ -57,10 +81,6 @@ window.FORGE_I18N = {
       const key = el.getAttribute("data-i18n-html");
       if (pack[key] != null) el.innerHTML = pack[key];
     });
-    document.querySelectorAll("[data-i18n-aria]").forEach((el) => {
-      const key = el.getAttribute("data-i18n-aria");
-      if (pack[key] != null) el.setAttribute("aria-label", pack[key]);
-    });
     document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
       const key = el.getAttribute("data-i18n-placeholder");
       if (pack[key] != null) el.setAttribute("placeholder", pack[key]);
@@ -69,7 +89,6 @@ window.FORGE_I18N = {
     document.querySelectorAll(".lang-btn").forEach((btn) => {
       const active = btn.getAttribute("data-lang") === lang;
       btn.setAttribute("aria-pressed", active ? "true" : "false");
-      btn.classList.toggle("is-active", active);
     });
   }
 
@@ -150,9 +169,7 @@ window.FORGE_I18N = {
   }
 
   document.querySelectorAll(".lang-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      setLang(btn.getAttribute("data-lang"), true);
-    });
+    btn.addEventListener("click", () => setLang(btn.getAttribute("data-lang"), true));
   });
 
   applyLang("en");

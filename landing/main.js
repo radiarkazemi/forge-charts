@@ -1,9 +1,28 @@
 (() => {
-  const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (prefersReduced) return;
+  // ⌘K / Ctrl+K focuses hero search
+  const heroInput = document.querySelector(".hero-search input");
+  const navInput = document.querySelector(".nav-search input");
 
-  const card = document.querySelector(".feature-card");
-  if (card) {
+  window.addEventListener("keydown", (event) => {
+    const meta = event.metaKey || event.ctrlKey;
+    if (!meta || String(event.key).toLowerCase() !== "k") return;
+    event.preventDefault();
+    (heroInput || navInput)?.focus();
+  });
+
+  if (navInput && heroInput) {
+    navInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      heroInput.value = navInput.value;
+      heroInput.form?.requestSubmit();
+    });
+  }
+
+  // Subtle parallax on product preview
+  const preview = document.querySelector(".preview-window");
+  const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (preview && !prefersReduced) {
     let ticking = false;
     window.addEventListener(
       "pointermove",
@@ -11,24 +30,13 @@
         if (ticking) return;
         ticking = true;
         requestAnimationFrame(() => {
-          const rect = card.getBoundingClientRect();
-          const x = ((event.clientX - rect.left) / rect.width - 0.5) * 8;
-          const y = ((event.clientY - rect.top) / rect.height - 0.5) * 6;
-          card.style.transform = `perspective(900px) rotateY(${x * 0.35}deg) rotateX(${-y * 0.3}deg)`;
+          const x = (event.clientX / window.innerWidth - 0.5) * 8;
+          const y = (event.clientY / window.innerHeight - 0.5) * 6;
+          preview.style.transform = `rotateY(${-12 + x}deg) rotateX(${4 - y}deg) rotateZ(1deg)`;
           ticking = false;
         });
       },
       { passive: true },
     );
-  }
-
-  const search = document.querySelector(".search input");
-  if (search) {
-    search.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter") return;
-      const q = String(search.value || "").trim();
-      const url = q ? `/charts/?symbol=${encodeURIComponent(q)}` : "/charts/";
-      window.location.href = url;
-    });
   }
 })();
