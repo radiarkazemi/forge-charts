@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Forge — Profile</title>
+    <meta name="description" content="Your Forge profile — local preferences and chart defaults." />
+    <meta name="theme-color" content="#050810" />
+    <link rel="icon" type="image/svg+xml" href="./brand/forge-mark.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./brand/favicon-32.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Vazirmatn:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="profile-page">
+    <div class="page-glow" aria-hidden="true"></div>
+
+    <header class="topnav">
+      <a class="brand" href="/" aria-label="Forge">
+        <img class="brand-mark" src="./brand/forge-mark-white.png" width="26" height="26" alt="" />
+        <span class="brand-word">FORGE</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary">
+        <a href="/#markets">Markets</a>
+        <a href="/charts/">Charts</a>
+        <a href="/#news">News</a>
+        <a href="/#learn">Learn</a>
+      </nav>
+      <div class="nav-right">
+        <div class="lang-switch" role="group" aria-label="Language">
+          <button type="button" class="lang-btn" data-lang="en" aria-pressed="true">EN</button>
+          <button type="button" class="lang-btn" data-lang="fa" aria-pressed="false">فا</button>
+        </div>
+        <a class="btn-primary" href="/charts/">Open charts</a>
+      </div>
+    </header>
+
+    <main class="profile-main">
+      <section class="profile-hero">
+        <div class="profile-avatar" id="profile-avatar">F</div>
+        <div>
+          <p class="eyebrow">ACCOUNT</p>
+          <h1 data-i18n="profile.title">Your Forge profile</h1>
+          <p class="lead" data-i18n="profile.lead">
+            Preferences are saved on this device. Open Supercharts anytime with your defaults.
+          </p>
+        </div>
+      </section>
+
+      <form class="profile-card" id="profile-form">
+        <label>
+          <span data-i18n="profile.name">Display name</span>
+          <input id="displayName" name="displayName" maxlength="40" placeholder="Trader" autocomplete="nickname" />
+        </label>
+        <label>
+          <span data-i18n="profile.email">Email (optional)</span>
+          <input id="email" name="email" type="email" placeholder="you@example.com" autocomplete="email" />
+        </label>
+        <label>
+          <span data-i18n="profile.symbol">Default symbol</span>
+          <select id="defaultSymbol" name="defaultSymbol">
+            <option value="BTCUSDT">BTCUSDT</option>
+            <option value="ETHUSDT">ETHUSDT</option>
+            <option value="SOLUSDT">SOLUSDT</option>
+            <option value="BNBUSDT">BNBUSDT</option>
+            <option value="XRPUSDT">XRPUSDT</option>
+            <option value="DOGEUSDT">DOGEUSDT</option>
+          </select>
+        </label>
+        <label>
+          <span data-i18n="profile.theme">Theme</span>
+          <select id="theme" name="theme">
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+          </select>
+        </label>
+        <label class="check">
+          <input id="syncWatchlist" name="syncWatchlist" type="checkbox" checked />
+          <span data-i18n="profile.sync">Keep watchlist synced on this browser</span>
+        </label>
+        <div class="profile-actions">
+          <button type="submit" class="btn-primary" data-i18n="profile.save">Save profile</button>
+          <a class="btn-ghost" id="open-charts" href="/charts/">Open charts</a>
+          <button type="button" class="btn-ghost danger" id="reset-profile" data-i18n="profile.reset">Reset</button>
+        </div>
+        <p class="profile-status" id="profile-status" hidden>Saved</p>
+      </form>
+
+      <section class="profile-meta">
+        <article>
+          <h3 data-i18n="profile.localTitle">Local-first</h3>
+          <p data-i18n="profile.localBody">
+            No account server yet — your profile stays in this browser’s local storage, same approach as chart layouts.
+          </p>
+        </article>
+        <article>
+          <h3 data-i18n="profile.nextTitle">Coming next</h3>
+          <p data-i18n="profile.nextBody">
+            Cloud sync for layouts, shared watchlists, and signed-in alerts across devices.
+          </p>
+        </article>
+      </section>
+    </main>
+
+    <script src="./i18n.js"></script>
+    <script src="./profile.js"></script>
+  </body>
+</html>

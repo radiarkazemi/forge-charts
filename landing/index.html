@@ -31,11 +31,11 @@
       </a>
 
       <nav class="nav-links" aria-label="Primary">
-        <a href="/charts/" data-i18n="nav.markets">Markets</a>
+        <a href="#markets" data-i18n="nav.markets">Markets</a>
         <a href="/charts/" data-i18n="nav.charts">Charts</a>
-        <a href="/charts/" data-i18n="nav.screener">Screener</a>
-        <a href="#features" data-i18n="nav.news">News</a>
-        <a href="#features" data-i18n="nav.learn">Learn</a>
+        <a href="#markets" data-i18n="nav.screener">Screener</a>
+        <a href="#news" data-i18n="nav.news">News</a>
+        <a href="#learn" data-i18n="nav.learn">Learn</a>
       </nav>
 
       <div class="nav-right">
@@ -51,13 +51,10 @@
           <button type="button" class="lang-btn" data-lang="en" aria-pressed="true">EN</button>
           <button type="button" class="lang-btn" data-lang="fa" aria-pressed="false">فا</button>
         </div>
-        <button type="button" class="icon-btn theme-btn" aria-label="Theme" title="Theme">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8">
-            <circle cx="12" cy="12" r="4" />
-            <path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.1 5.1l1.6 1.6M17.3 17.3l1.6 1.6M18.9 5.1l-1.6 1.6M6.7 17.3l-1.6 1.6" stroke-linecap="round" />
-          </svg>
-        </button>
-        <a class="link-login" href="/charts/" data-i18n="nav.login">Log in</a>
+        <a class="icon-btn profile-chip" href="./profile.html" data-i18n-aria="nav.profile" aria-label="Profile" title="Profile">
+          <span class="avatar-letter" id="nav-avatar">F</span>
+        </a>
+        <a class="link-login" href="./profile.html" data-i18n="nav.login">Log in</a>
         <a class="btn-primary" href="/charts/" data-i18n="nav.getStarted">Get started</a>
       </div>
     </header>
@@ -91,57 +88,49 @@
             </button>
           </form>
 
-          <div class="mini-tickers" aria-label="Markets">
-            <a class="mini-card" href="/charts/?symbol=BTCUSDT">
+          <div class="mini-tickers" aria-label="Markets" id="hero-tickers">
+            <a class="mini-card" data-symbol="BTCUSDT" href="/charts/?symbol=BTCUSDT">
               <div class="mini-top">
                 <span class="coin coin-btc">₿</span>
                 <strong>BTC</strong>
               </div>
-              <div class="mini-price">$67,432.12</div>
+              <div class="mini-price" data-price>—</div>
               <div class="mini-row">
-                <svg class="spark" viewBox="0 0 72 24" aria-hidden="true">
-                  <path d="M2 18 C12 16 18 8 28 10 C38 12 46 4 58 6 C64 7 68 5 70 4" />
-                </svg>
-                <span class="up">+2.84%</span>
+                <svg class="spark" viewBox="0 0 72 24" aria-hidden="true"><path data-spark d="M2 18 L70 6" /></svg>
+                <span class="chg" data-chg>—</span>
               </div>
             </a>
-            <a class="mini-card" href="/charts/?symbol=ETHUSDT">
+            <a class="mini-card" data-symbol="ETHUSDT" href="/charts/?symbol=ETHUSDT">
               <div class="mini-top">
                 <span class="coin coin-eth">Ξ</span>
                 <strong>ETH</strong>
               </div>
-              <div class="mini-price">$3,412.88</div>
+              <div class="mini-price" data-price>—</div>
               <div class="mini-row">
-                <svg class="spark" viewBox="0 0 72 24" aria-hidden="true">
-                  <path d="M2 14 C14 16 20 8 30 11 C42 15 50 6 62 8 C66 9 69 7 70 6" />
-                </svg>
-                <span class="up">+1.62%</span>
+                <svg class="spark" viewBox="0 0 72 24" aria-hidden="true"><path data-spark d="M2 14 L70 8" /></svg>
+                <span class="chg" data-chg>—</span>
               </div>
             </a>
-            <a class="mini-card" href="/charts/?symbol=SOLUSDT">
+            <a class="mini-card" data-symbol="SOLUSDT" href="/charts/?symbol=SOLUSDT">
               <div class="mini-top">
                 <span class="coin coin-sol">◎</span>
                 <strong>SOL</strong>
               </div>
-              <div class="mini-price">$148.26</div>
+              <div class="mini-price" data-price>—</div>
               <div class="mini-row">
-                <svg class="spark" viewBox="0 0 72 24" aria-hidden="true">
-                  <path d="M2 16 C12 14 18 18 28 10 C40 2 48 12 58 8 C64 6 68 5 70 3" />
-                </svg>
-                <span class="up">+4.11%</span>
+                <svg class="spark" viewBox="0 0 72 24" aria-hidden="true"><path data-spark d="M2 16 L70 4" /></svg>
+                <span class="chg" data-chg>—</span>
               </div>
             </a>
-            <a class="mini-card" href="/charts/?symbol=NVDA">
+            <a class="mini-card" data-symbol="BNBUSDT" href="/charts/?symbol=BNBUSDT">
               <div class="mini-top">
-                <span class="coin coin-nvda">N</span>
-                <strong>NVDA</strong>
+                <span class="coin coin-bnb">B</span>
+                <strong>BNB</strong>
               </div>
-              <div class="mini-price">$875.40</div>
+              <div class="mini-price" data-price>—</div>
               <div class="mini-row">
-                <svg class="spark" viewBox="0 0 72 24" aria-hidden="true">
-                  <path d="M2 12 C12 14 20 6 30 8 C42 10 50 4 60 6 C65 7 68 5 70 4" />
-                </svg>
-                <span class="up">+1.08%</span>
+                <svg class="spark" viewBox="0 0 72 24" aria-hidden="true"><path data-spark d="M2 12 L70 8" /></svg>
+                <span class="chg" data-chg>—</span>
               </div>
             </a>
           </div>
@@ -166,8 +155,8 @@
                 <div class="pv-pair">
                   <span class="coin coin-btc sm">₿</span>
                   <strong>BTC/USDT</strong>
-                  <span class="pv-price">$67,432.12</span>
-                  <span class="up">+2.84%</span>
+                  <span class="pv-price" data-preview-price>—</span>
+                  <span class="chg" data-preview-chg>—</span>
                 </div>
                 <div class="pv-tfs">
                   <span>1m</span><span>5m</span><span class="on">15m</span><span>1H</span><span>4H</span><span>1D</span>
@@ -185,26 +174,8 @@
                     <path d="M0 40 H520 M0 80 H520 M0 120 H520 M0 160 H520 M0 200 H520" />
                     <path d="M80 0 V220 M160 0 V220 M240 0 V220 M320 0 V220 M400 0 V220 M480 0 V220" />
                   </g>
-                  <!-- candlesticks -->
-                  <g class="candles">
-                    <line x1="40" y1="150" x2="40" y2="190" /><rect x="34" y="160" width="12" height="22" class="down" />
-                    <line x1="70" y1="140" x2="70" y2="185" /><rect x="64" y="148" width="12" height="28" class="up" />
-                    <line x1="100" y1="130" x2="100" y2="170" /><rect x="94" y="138" width="12" height="24" class="up" />
-                    <line x1="130" y1="120" x2="130" y2="165" /><rect x="124" y="132" width="12" height="26" class="down" />
-                    <line x1="160" y1="110" x2="160" y2="155" /><rect x="154" y="118" width="12" height="28" class="up" />
-                    <line x1="190" y1="95" x2="190" y2="145" /><rect x="184" y="105" width="12" height="30" class="up" />
-                    <line x1="220" y1="100" x2="220" y2="150" /><rect x="214" y="118" width="12" height="24" class="down" />
-                    <line x1="250" y1="85" x2="250" y2="135" /><rect x="244" y="95" width="12" height="28" class="up" />
-                    <line x1="280" y1="70" x2="280" y2="120" /><rect x="274" y="78" width="12" height="32" class="up" />
-                    <line x1="310" y1="75" x2="310" y2="125" /><rect x="304" y="90" width="12" height="26" class="down" />
-                    <line x1="340" y1="55" x2="340" y2="110" /><rect x="334" y="62" width="12" height="34" class="up" />
-                    <line x1="370" y1="45" x2="370" y2="95" /><rect x="364" y="52" width="12" height="30" class="up" />
-                    <line x1="400" y1="50" x2="400" y2="100" /><rect x="394" y="68" width="12" height="24" class="down" />
-                    <line x1="430" y1="35" x2="430" y2="85" /><rect x="424" y="42" width="12" height="32" class="up" />
-                    <line x1="460" y1="28" x2="460" y2="78" /><rect x="454" y="34" width="12" height="30" class="up" />
-                    <line x1="490" y1="22" x2="490" y2="70" /><rect x="484" y="28" width="12" height="28" class="up" />
-                  </g>
-                  <path class="pv-line" d="M20 175 C60 168 90 150 130 145 C170 140 200 120 250 110 C300 100 340 70 390 60 C430 52 470 35 500 28" />
+                  <path id="preview-area" fill="url(#pvFill)" d="" />
+                  <path id="preview-line" class="pv-line" d="" />
                 </svg>
               </div>
               <div class="pv-bottom">
@@ -213,31 +184,59 @@
                 </div>
                 <div class="pv-panels">
                   <div class="pv-gauge">
-                    <div class="gauge-ring"><strong>72</strong><small>Bullish</small></div>
-                    <span>Market Sentiment</span>
+                    <div class="gauge-ring"><strong id="sentiment-score">—</strong><small>Live</small></div>
+                    <span data-i18n="preview.sentiment">Market Sentiment</span>
                   </div>
                   <ul class="pv-insights">
-                    <li>Breakout above prior resistance</li>
-                    <li>Volume expanding on the move</li>
-                    <li>Momentum aligned with trend</li>
+                    <li data-i18n="preview.i1">Live feed connected to Forge market data</li>
+                    <li data-i18n="preview.i2">Open Supercharts for full depth & drawings</li>
+                    <li data-i18n="preview.i3">Multi-pane layouts with sync across charts</li>
                   </ul>
                 </div>
               </div>
             </div>
             <aside class="pv-side">
-              <div class="pv-side-title">Watchlist</div>
-              <div class="pv-row"><span>BTC</span><b>$67,432</b><i class="up">+2.84%</i></div>
-              <div class="pv-row"><span>ETH</span><b>$3,412</b><i class="up">+1.62%</i></div>
-              <div class="pv-row"><span>SOL</span><b>$148.26</b><i class="up">+4.11%</i></div>
-              <div class="pv-row"><span>NVDA</span><b>$875.40</b><i class="up">+1.08%</i></div>
-              <div class="pv-row"><span>SPY</span><b>$512.08</b><i class="down">−0.42%</i></div>
-              <div class="pv-row"><span>TSLA</span><b>$248.50</b><i class="up">+0.95%</i></div>
-              <div class="pv-movers-title">Market Movers</div>
-              <div class="mover"><span>SOL</span><div class="bar" style="--w:86%"></div><i class="up">+4.1%</i></div>
-              <div class="mover"><span>BTC</span><div class="bar" style="--w:68%"></div><i class="up">+2.8%</i></div>
-              <div class="mover"><span>ETH</span><div class="bar" style="--w:42%"></div><i class="up">+1.6%</i></div>
+              <div class="pv-side-title" data-i18n="preview.watchlist">Watchlist</div>
+              <div class="pv-row" data-symbol="BTCUSDT"><span>BTC</span><b data-price>—</b><i data-chg>—</i></div>
+              <div class="pv-row" data-symbol="ETHUSDT"><span>ETH</span><b data-price>—</b><i data-chg>—</i></div>
+              <div class="pv-row" data-symbol="SOLUSDT"><span>SOL</span><b data-price>—</b><i data-chg>—</i></div>
+              <div class="pv-row" data-symbol="BNBUSDT"><span>BNB</span><b data-price>—</b><i data-chg>—</i></div>
+              <div class="pv-row" data-symbol="XRPUSDT"><span>XRP</span><b data-price>—</b><i data-chg>—</i></div>
+              <div class="pv-row" data-symbol="DOGEUSDT"><span>DOGE</span><b data-price>—</b><i data-chg>—</i></div>
+              <div class="pv-movers-title" data-i18n="preview.movers">Market Movers</div>
+              <div class="mover" data-mover="SOLUSDT"><span>SOL</span><div class="bar" style="--w:40%"></div><i data-chg>—</i></div>
+              <div class="mover" data-mover="BTCUSDT"><span>BTC</span><div class="bar" style="--w:40%"></div><i data-chg>—</i></div>
+              <div class="mover" data-mover="ETHUSDT"><span>ETH</span><div class="bar" style="--w:40%"></div><i data-chg>—</i></div>
             </aside>
           </div>
+        </div>
+      </section>
+
+      <section class="markets" id="markets">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker" data-i18n="markets.kicker">LIVE MARKETS</p>
+            <h2 data-i18n="markets.title">Real prices. Real opportunities.</h2>
+          </div>
+          <a class="btn-ghost" href="/charts/" data-i18n="markets.cta">Open charts →</a>
+        </div>
+        <div class="markets-table-wrap">
+          <table class="markets-table" id="markets-table">
+            <thead>
+              <tr>
+                <th data-i18n="markets.col.symbol">Symbol</th>
+                <th data-i18n="markets.col.price">Price</th>
+                <th data-i18n="markets.col.change">24h</th>
+                <th data-i18n="markets.col.high">High</th>
+                <th data-i18n="markets.col.low">Low</th>
+                <th data-i18n="markets.col.volume">Volume</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="markets-body">
+              <tr><td colspan="7" class="muted" data-i18n="markets.loading">Loading live markets…</td></tr>
+            </tbody>
+          </table>
         </div>
       </section>
 
@@ -286,6 +285,59 @@
           </article>
         </div>
       </section>
+
+      <section class="news" id="news">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker" data-i18n="news.kicker">MARKET PULSE</p>
+            <h2 data-i18n="news.title">What traders are watching</h2>
+          </div>
+        </div>
+        <div class="news-grid" id="news-grid">
+          <article class="news-card">
+            <span class="news-tag" data-i18n="news.tag.crypto">Crypto</span>
+            <h3 data-i18n="news.a.title">BTC holding session highs</h3>
+            <p data-i18n="news.a.body">Watch volume confirmation on Supercharts. Key levels update from live Forge market data.</p>
+            <a href="/charts/?symbol=BTCUSDT" data-i18n="news.open">Open chart →</a>
+          </article>
+          <article class="news-card">
+            <span class="news-tag" data-i18n="news.tag.alt">Alts</span>
+            <h3 data-i18n="news.b.title">ETH & SOL relative strength</h3>
+            <p data-i18n="news.b.body">Compare pairs in multi-pane layouts. Sync crosshair and interval across the desk.</p>
+            <a href="/charts/?symbol=ETHUSDT" data-i18n="news.open">Open chart →</a>
+          </article>
+          <article class="news-card">
+            <span class="news-tag" data-i18n="news.tag.flow">Flow</span>
+            <h3 data-i18n="news.c.title">BNB liquidity in focus</h3>
+            <p data-i18n="news.c.body">Scan movers, set alerts, and keep your watchlist synced with the live feed.</p>
+            <a href="/charts/?symbol=BNBUSDT" data-i18n="news.open">Open chart →</a>
+          </article>
+        </div>
+      </section>
+
+      <section class="learn" id="learn">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker" data-i18n="learn.kicker">LEARN FORGE</p>
+            <h2 data-i18n="learn.title">Get productive in minutes</h2>
+          </div>
+          <a class="btn-ghost" href="./profile.html" data-i18n="learn.profile">Your profile →</a>
+        </div>
+        <div class="learn-grid">
+          <a class="learn-card" href="/charts/">
+            <strong data-i18n="learn.1.title">Launch Supercharts</strong>
+            <span data-i18n="learn.1.body">Full drawing tools, indicators, multi-pane layouts.</span>
+          </a>
+          <a class="learn-card" href="#markets">
+            <strong data-i18n="learn.2.title">Browse live markets</strong>
+            <span data-i18n="learn.2.body">Real prices from Forge market data — tap any row to chart.</span>
+          </a>
+          <a class="learn-card" href="./profile.html">
+            <strong data-i18n="learn.3.title">Set up your profile</strong>
+            <span data-i18n="learn.3.body">Display name, theme, default symbol — saved on this device.</span>
+          </a>
+        </div>
+      </section>
     </main>
 
     <footer class="tickerbar">
@@ -295,20 +347,7 @@
         <em data-i18n="footer.ok">All systems operational</em>
       </div>
       <div class="ticker-track" aria-hidden="true">
-        <div class="ticker-move">
-          <span><b>BTC</b> $67,432.12 <i class="up">+2.84%</i></span>
-          <span><b>ETH</b> $3,412.88 <i class="up">+1.62%</i></span>
-          <span><b>SOL</b> $148.26 <i class="up">+4.11%</i></span>
-          <span><b>NVDA</b> $875.40 <i class="up">+1.08%</i></span>
-          <span><b>SPY</b> $512.08 <i class="down">−0.42%</i></span>
-          <span><b>TSLA</b> $248.50 <i class="up">+0.95%</i></span>
-          <span><b>BTC</b> $67,432.12 <i class="up">+2.84%</i></span>
-          <span><b>ETH</b> $3,412.88 <i class="up">+1.62%</i></span>
-          <span><b>SOL</b> $148.26 <i class="up">+4.11%</i></span>
-          <span><b>NVDA</b> $875.40 <i class="up">+1.08%</i></span>
-          <span><b>SPY</b> $512.08 <i class="down">−0.42%</i></span>
-          <span><b>TSLA</b> $248.50 <i class="up">+0.95%</i></span>
-        </div>
+        <div class="ticker-move" id="footer-ticker"></div>
       </div>
       <a class="ticker-link" href="/charts/" data-i18n="footer.explore">Explore all markets →</a>
     </footer>
