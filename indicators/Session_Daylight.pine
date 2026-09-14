@@ -1,7 +1,7 @@
 //@version=6
 indicator("Session Daylight Box", shorttitle="Sessions", overlay=true)
 
-// Compact trader HUD — corner panel only (no chart bands).
+// Clear trader session card — corner only (no chart bands).
 
 tz = input.string("America/New_York", "Timezone",
      options=["America/New_York", "Europe/London", "Asia/Tokyo", "UTC", "Exchange"],
@@ -14,10 +14,9 @@ nySess   = input.session("0800-1700", "New York", group="Hours")
 dayOpen  = input.int(0, "Day open hour", minval=0, maxval=23, group="Hours")
 dayClose = input.int(23, "Day close hour", minval=0, maxval=23, group="Hours")
 
-boxPos = input.string("Bottom right", "Panel corner",
-     options=["Bottom right", "Bottom left", "Top right", "Top left"], group="Style")
+boxPos = input.string("Top right", "Panel corner",
+     options=["Top right", "Top left", "Bottom right", "Bottom left"], group="Style")
 showProg = input.bool(true, "Session progress", group="Style")
-compact  = input.bool(false, "Compact mode", group="Style")
 
 f_tz() =>
     useExchange ? syminfo.timezone : tz
@@ -28,7 +27,6 @@ f_in(sess) =>
 f_hhmm(v) =>
     (v < 10 ? "0" : "") + str.tostring(v)
 
-// "1900-0000" → "19:00–00:00"
 f_win(sess) =>
     str.substring(sess, 0, 2) + ":" + str.substring(sess, 2, 4) + "–" + str.substring(sess, 5, 7) + ":" + str.substring(sess, 7, 9)
 
@@ -39,16 +37,16 @@ inOvl    = inLondon and inNY
 isLive   = inAsia or inLondon or inNY
 
 sessName =
-     inOvl ? "LONDON × NEW YORK" :
+     inOvl ? "LN × NY" :
      inNY ? "NEW YORK" :
      inLondon ? "LONDON" :
-     inAsia ? "ASIA" : "OFF SESSION"
+     inAsia ? "ASIA" : "OFF"
 
 sessWin =
-     inOvl ? f_win(lonSess) + "  ∩  " + f_win(nySess) :
+     inOvl ? f_win(lonSess) + " | " + f_win(nySess) :
      inNY ? f_win(nySess) :
      inLondon ? f_win(lonSess) :
-     inAsia ? f_win(asiaSess) : "awaiting open"
+     inAsia ? f_win(asiaSess) : "—"
 
 accent =
      inOvl ? #C4B5FD :
@@ -87,72 +85,57 @@ prog =
      inAsia ? f_prog(asiaSess) : 0.0
 
 f_meter(p) =>
-    int n = int(math.round(p * 10))
+    int n = int(math.round(p * 8))
     string out = ""
-    for i = 1 to 10
+    for i = 1 to 8
         out += i <= n ? "█" : "·"
     out
 
 pos =
      boxPos == "Bottom left" ? position.bottom_left :
-     boxPos == "Top right" ? position.top_right :
+     boxPos == "Bottom right" ? position.bottom_right :
      boxPos == "Top left" ? position.top_left :
-     position.bottom_right
+     position.top_right
 
-rowsNeeded = compact ? (showProg ? 4 : 3) : (showProg ? 6 : 5)
+rowsNeeded = showProg ? 5 : 4
 
 var string lastKey = na
 var table hud = na
 
-cBg   = #0A0F16
-cHead = #121925
-cLine = #1E2A3A
-cMute = #7F8FA3
+cBg   = #080C12
+cHead = #101620
+cMute = #94A3B8
 cText = #F8FAFC
-cSoft = #CBD5E1
 
 if barstate.islast
     string key = boxPos + str.tostring(rowsNeeded)
     if na(hud) or lastKey != key
         if not na(hud)
             table.delete(hud)
-        hud := table.new(pos, 2, rowsNeeded, bgcolor=color.new(cBg, 4), border_width=1, border_color=color.new(accent, 45), frame_width=1, frame_color=color.new(cLine, 10))
+        hud := table.new(pos, 2, rowsNeeded, bgcolor=cBg, border_width=2, border_color=accent, frame_width=0)
         lastKey := key
     else
-        table.set_border_color(hud, color.new(accent, 45))
+        table.set_border_color(hud, accent)
 
     clock = f_hhmm(hour(time, f_tz())) + ":" + f_hhmm(minute(time, f_tz()))
-    live  = isLive ? "● LIVE" : "○ IDLE"
-    dayB  = f_hhmm(dayOpen) + ":00"
-    dayE  = f_hhmm(dayClose) + ":59"
-    pct   = str.tostring(math.round(prog * 100)) + "%"
+    live  = isLive ? "LIVE" : "IDLE"
+    dayLine = f_hhmm(dayOpen) + ":00 → " + f_hhmm(dayClose) + ":59"
+    pct = str.tostring(math.round(prog * 100)) + "%"
 
-    // Header
-    table.cell(hud, 0, 0, "  SESSIONS", text_color=cMute, text_size=size.tiny, text_halign=text.align_left, bgcolor=cHead)
-    table.cell(hud, 1, 0, live + "  ", text_color=liveCol, text_size=size.tiny, text_halign=text.align_right, bgcolor=cHead)
+    table.cell(hud, 0, 0, " SESSION", text_color=cMute, text_size=size.small, text_halign=text.align_left, bgcolor=cHead)
+    table.cell(hud, 1, 0, live + " ", text_color=liveCol, text_size=size.small, text_halign=text.align_right, bgcolor=cHead)
 
-    // Session + clock
-    table.cell(hud, 0, 1, "  " + sessName, text_color=accent, text_size=size.normal, text_halign=text.align_left)
-    table.cell(hud, 1, 1, clock + "  ", text_color=cText, text_size=size.normal, text_halign=text.align_right)
+    table.cell(hud, 0, 1, " " + sessName, text_color=accent, text_size=size.large, text_halign=text.align_left)
+    table.cell(hud, 1, 1, clock + " ", text_color=cText, text_size=size.large, text_halign=text.align_right)
 
-    if compact
-        // Window + optional progress on fewer rows
-        table.cell(hud, 0, 2, "  " + sessWin, text_color=cSoft, text_size=size.tiny, text_halign=text.align_left)
-        table.cell(hud, 1, 2, dayB + " → " + dayE + "  ", text_color=cMute, text_size=size.tiny, text_halign=text.align_right)
-        if showProg
-            table.cell(hud, 0, 3, "  " + (isLive ? f_meter(prog) : "··········"), text_color=isLive ? accent : cMute, text_size=size.tiny, text_halign=text.align_left)
-            table.cell(hud, 1, 3, (isLive ? pct : "—") + "  ", text_color=cMute, text_size=size.tiny, text_halign=text.align_right)
-    else
-        table.cell(hud, 0, 2, "  WINDOW", text_color=cMute, text_size=size.tiny, text_halign=text.align_left)
-        table.cell(hud, 1, 2, sessWin + "  ", text_color=cSoft, text_size=size.small, text_halign=text.align_right)
+    table.cell(hud, 0, 2, " " + sessWin, text_color=cText, text_size=size.normal, text_halign=text.align_left)
+    table.cell(hud, 1, 2, "", text_color=cText, text_size=size.normal)
 
-        int r = 3
-        if showProg
-            table.cell(hud, 0, r, "  " + (isLive ? f_meter(prog) : "··········"), text_color=isLive ? accent : cMute, text_size=size.tiny, text_halign=text.align_left)
-            table.cell(hud, 1, r, (isLive ? pct : "—") + "  ", text_color=cMute, text_size=size.tiny, text_halign=text.align_right)
-            r += 1
+    int r = 3
+    if showProg
+        table.cell(hud, 0, r, " " + (isLive ? f_meter(prog) : "········"), text_color=isLive ? accent : cMute, text_size=size.small, text_halign=text.align_left)
+        table.cell(hud, 1, r, (isLive ? pct : "—") + " ", text_color=cMute, text_size=size.small, text_halign=text.align_right)
+        r += 1
 
-        table.cell(hud, 0, r, "  DAY OPEN", text_color=cMute, text_size=size.tiny, text_halign=text.align_left)
-        table.cell(hud, 1, r, dayB + "  ", text_color=cText, text_size=size.small, text_halign=text.align_right)
-        table.cell(hud, 0, r + 1, "  DAY CLOSE", text_color=cMute, text_size=size.tiny, text_halign=text.align_left)
-        table.cell(hud, 1, r + 1, dayE + "  ", text_color=cText, text_size=size.small, text_halign=text.align_right)
+    table.cell(hud, 0, r, " DAY  " + dayLine, text_color=cMute, text_size=size.small, text_halign=text.align_left)
+    table.cell(hud, 1, r, "", text_color=cMute, text_size=size.small)

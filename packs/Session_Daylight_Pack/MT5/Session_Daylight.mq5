@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
 //| Session_Daylight.mq5                                             |
-//| Compact trader session HUD — corner panel only                   |
+//| Clear trader session card — corner only, no chart bands          |
 //+------------------------------------------------------------------+
 #property copyright "Forge Charts"
-#property version   "1.30"
+#property version   "1.40"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -19,20 +19,30 @@ input int    InpNyEnd        = 17;
 input int    InpDayBegin     = 0;
 input int    InpDayEnd       = 23;
 input bool   InpShowProgress = true;
-input bool   InpCompact      = false;
-input ENUM_BASE_CORNER InpCorner = CORNER_RIGHT_LOWER;
-input int    InpX            = 14;
-input int    InpY            = 20;
-input color  InpBg           = C'10,15,22';
-input color  InpHead         = C'18,25,37';
-input color  InpBorder       = C'30,42,58';
-input color  InpMuted        = C'127,143,163';
+input ENUM_BASE_CORNER InpCorner = CORNER_RIGHT_UPPER;
+input int    InpX            = 12;
+input int    InpY            = 18;
+input int    InpFontSize     = 9;
+input color  InpBg           = C'8,12,18';
+input color  InpHead         = C'16,22,32';
+input color  InpMuted        = C'148,163,184';
 input color  InpText         = C'248,250,252';
-input color  InpSoft         = C'203,213,225';
 input color  InpLive         = C'34,197,94';
 input color  InpIdle         = C'100,116,139';
 
 string g_pfx;
+bool   g_fromRight;
+bool   g_fromBottom;
+
+bool IsRightCorner(const ENUM_BASE_CORNER c)
+{
+   return (c == CORNER_RIGHT_UPPER || c == CORNER_RIGHT_LOWER);
+}
+
+bool IsBottomCorner(const ENUM_BASE_CORNER c)
+{
+   return (c == CORNER_LEFT_LOWER || c == CORNER_RIGHT_LOWER);
+}
 
 int HourAt(const datetime t)
 {
@@ -86,27 +96,27 @@ int KindAt(const datetime t)
 string SessName(const int kind)
 {
    if(kind == 4)
-      return "LONDON x NEW YORK";
+      return "LN x NY";
    if(kind == 3)
       return "NEW YORK";
    if(kind == 2)
       return "LONDON";
    if(kind == 1)
       return "ASIA";
-   return "OFF SESSION";
+   return "OFF";
 }
 
 string SessWin(const int kind)
 {
    if(kind == 4)
-      return WinTxt(InpLonStart, InpLonEnd) + " / " + WinTxt(InpNyStart, InpNyEnd);
+      return WinTxt(InpLonStart, InpLonEnd) + " | " + WinTxt(InpNyStart, InpNyEnd);
    if(kind == 3)
       return WinTxt(InpNyStart, InpNyEnd);
    if(kind == 2)
       return WinTxt(InpLonStart, InpLonEnd);
    if(kind == 1)
       return WinTxt(InpAsiaStart, InpAsiaEnd);
-   return "awaiting open";
+   return "--:--";
 }
 
 color SessColor(const int kind)
@@ -139,41 +149,51 @@ double Progress(const datetime t, const int a, const int b)
    return MathMax(0.0, MathMin(1.0, (double)cur / (double)MathMax(1, span)));
 }
 
-string Meter(const double p, const bool live)
+// Distance from chart corner → left content inside panel
+int DistLeft(const int panelW, const int insetFromLeft)
 {
-   if(!live)
-      return "..........";
-   const int n = (int)MathRound(p * 10.0);
-   string out = "";
-   for(int i = 1; i <= 10; i++)
-      out += (i <= n ? "#" : ".");
-   return out;
+   if(g_fromRight)
+      return InpX + panelW - insetFromLeft;
+   return InpX + insetFromLeft;
 }
 
-void PutLabel(const string name, const int x, const int y, const string text,
-              const color clr, const int size, const ENUM_ANCHOR_POINT anchor)
+// Distance from chart corner → top content inside panel
+int DistTop(const int panelH, const int insetFromTop)
 {
+   if(g_fromBottom)
+      return InpY + panelH - insetFromTop;
+   return InpY + insetFromTop;
+}
+
+void PutLabel(const string name, const int xDist, const int yDist, const string text,
+              const color clr, const int size, const bool alignRight)
+{
+   // Always grow text down into the panel from the top of each row
+   const ENUM_ANCHOR_POINT anchor = alignRight ? ANCHOR_RIGHT_UPPER : ANCHOR_LEFT_UPPER;
+
    if(ObjectFind(0, name) < 0)
       ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
    ObjectSetInteger(0, name, OBJPROP_CORNER, InpCorner);
    ObjectSetInteger(0, name, OBJPROP_ANCHOR, anchor);
-   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
-   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
-   ObjectSetString(0, name, OBJPROP_FONT, "Consolas");
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, xDist);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, yDist);
+   ObjectSetString(0, name, OBJPROP_FONT, "Arial Bold");
    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, size);
    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
    ObjectSetString(0, name, OBJPROP_TEXT, text);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
 }
 
-void PutRect(const string name, const int x, const int y, const int w, const int h, const color bg, const color border)
+void PutRect(const string name, const int xDist, const int yDist, const int w, const int h,
+             const color bg, const color border)
 {
    if(ObjectFind(0, name) < 0)
       ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
    ObjectSetInteger(0, name, OBJPROP_CORNER, InpCorner);
-   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
-   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, xDist);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, yDist);
    ObjectSetInteger(0, name, OBJPROP_XSIZE, w);
    ObjectSetInteger(0, name, OBJPROP_YSIZE, h);
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);
@@ -185,9 +205,24 @@ void PutRect(const string name, const int x, const int y, const int w, const int
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
 }
 
+// Place a horizontal bar inside the panel; fill grows from the LEFT of the track
+void PutBar(const string name, const int panelW, const int panelH,
+            const int insetL, const int insetTop, const int barW, const int barH,
+            const color clr)
+{
+   // Right corners: XDISTANCE = right edge of rect. Left corners: left edge.
+   const int xDist = g_fromRight ? (InpX + panelW - insetL - barW) : (InpX + insetL);
+   // Bottom corners: YDISTANCE = bottom edge of rect. Top corners: top edge.
+   const int yDist = g_fromBottom ? (InpY + panelH - insetTop - barH) : (InpY + insetTop);
+   PutRect(name, xDist, yDist, barW, barH, clr, clr);
+}
+
 void DrawBox()
 {
    ObjectsDeleteAll(0, g_pfx);
+
+   g_fromRight  = IsRightCorner(InpCorner);
+   g_fromBottom = IsBottomCorner(InpCorner);
 
    const datetime now = TimeCurrent();
    const int kind = KindAt(now);
@@ -197,7 +232,6 @@ void DrawBox()
    const color accent = SessColor(kind);
    const color liveCol = live ? InpLive : InpIdle;
    const string clock = Two(HourAt(now)) + ":" + Two(MinuteAt(now));
-   const string liveTxt = live ? "LIVE" : "IDLE";
 
    double prog = 0.0;
    if(kind == 4)
@@ -209,49 +243,57 @@ void DrawBox()
    else if(kind == 1)
       prog = Progress(now, InpAsiaStart, InpAsiaEnd);
 
-   const int w = InpCompact ? 210 : 236;
-   int h = InpCompact ? 78 : 108;
-   if(InpShowProgress)
-      h += 18;
+   const int pad = 12;
+   const int w = 176;
+   const int headH = 24;
+   const int barH = 7;
+   // layout: head, session row, window row, [bar], day row
+   const int bodyTop = headH + 8;
+   const int row1 = bodyTop;           // session + clock
+   const int row2 = row1 + 20;         // window
+   const int barTop = row2 + 18;
+   const int row3 = InpShowProgress ? (barTop + barH + 10) : (row2 + 18);
+   const int h = row3 + 18;
 
+   // Full opaque card
    PutRect(g_pfx + "BG", InpX, InpY, w, h, InpBg, accent);
+   PutRect(g_pfx + "HEAD", InpX, InpY, w, headH, InpHead, InpHead);
    PutRect(g_pfx + "STRIPE", InpX, InpY, 4, h, accent, accent);
-   PutRect(g_pfx + "HEAD", InpX + 4, InpY, w - 4, 22, InpHead, InpHead);
 
-   PutLabel(g_pfx + "H1", InpX + 14, InpY + 5, "SESSIONS", InpMuted, 8, ANCHOR_LEFT_UPPER);
-   PutLabel(g_pfx + "H2", InpX + w - 10, InpY + 5, liveTxt, liveCol, 8, ANCHOR_RIGHT_UPPER);
+   const int fs = MathMax(8, InpFontSize);
+   const int fsSm = MathMax(7, InpFontSize - 1);
+   const int fsLg = InpFontSize + 2;
 
-   PutLabel(g_pfx + "S1", InpX + 14, InpY + 28, sess, accent, 11, ANCHOR_LEFT_UPPER);
-   PutLabel(g_pfx + "S2", InpX + w - 10, InpY + 28, clock, InpText, 11, ANCHOR_RIGHT_UPPER);
+   const int xL = DistLeft(w, pad);
+   const int xR = g_fromRight ? (InpX + pad) : (InpX + w - pad);
 
-   int y = InpY + 50;
-   if(InpCompact)
-   {
-      PutLabel(g_pfx + "W1", InpX + 14, y, win, InpSoft, 8, ANCHOR_LEFT_UPPER);
-      PutLabel(g_pfx + "W2", InpX + w - 10, y,
-               Two(InpDayBegin) + ":00->" + Two(InpDayEnd) + ":59", InpMuted, 8, ANCHOR_RIGHT_UPPER);
-      y += 18;
-   }
-   else
-   {
-      PutLabel(g_pfx + "W1", InpX + 14, y, "WINDOW", InpMuted, 8, ANCHOR_LEFT_UPPER);
-      PutLabel(g_pfx + "W2", InpX + w - 10, y, win, InpSoft, 9, ANCHOR_RIGHT_UPPER);
-      y += 20;
-   }
+   // Header
+   PutLabel(g_pfx + "H1", xL, DistTop(h, 6), "SESSION", InpMuted, fsSm, false);
+   PutLabel(g_pfx + "H2", xR, DistTop(h, 6), live ? "LIVE" : "IDLE", liveCol, fsSm, true);
+
+   // Session + clock — biggest, highest contrast
+   PutLabel(g_pfx + "S1", xL, DistTop(h, row1), sess, accent, fsLg, false);
+   PutLabel(g_pfx + "S2", xR, DistTop(h, row1), clock, InpText, fsLg, true);
+
+   // Window hours (one line, bright)
+   PutLabel(g_pfx + "W1", xL, DistTop(h, row2), win, InpText, fs, false);
 
    if(InpShowProgress)
    {
-      PutLabel(g_pfx + "P1", InpX + 14, y, Meter(prog, live), live ? accent : InpMuted, 8, ANCHOR_LEFT_UPPER);
-      PutLabel(g_pfx + "P2", InpX + w - 10, y,
-               live ? IntegerToString((int)MathRound(prog * 100.0)) + "%" : "-", InpMuted, 8, ANCHOR_RIGHT_UPPER);
-      y += 18;
+      const int barW = w - pad * 2 - 36; // leave room for %
+      const int fillW = live ? (int)MathMax(2, MathRound(barW * prog)) : 0;
+      PutBar(g_pfx + "TRK", w, h, pad, barTop, barW, barH, C'30,41,59');
+      if(fillW > 0)
+         PutBar(g_pfx + "FIL", w, h, pad, barTop, fillW, barH, accent);
+      PutLabel(g_pfx + "P2", xR, DistTop(h, barTop - 1),
+               live ? IntegerToString((int)MathRound(prog * 100.0)) + "%" : "--",
+               InpMuted, fsSm, true);
    }
 
-   if(!InpCompact)
-   {
-      PutLabel(g_pfx + "D1", InpX + 14, y, "DAY OPEN " + Two(InpDayBegin) + ":00", InpMuted, 8, ANCHOR_LEFT_UPPER);
-      PutLabel(g_pfx + "D2", InpX + w - 10, y, "CLOSE " + Two(InpDayEnd) + ":59", InpMuted, 8, ANCHOR_RIGHT_UPPER);
-   }
+   // Day line
+   PutLabel(g_pfx + "D1", xL, DistTop(h, row3),
+            "DAY  " + Two(InpDayBegin) + ":00 > " + Two(InpDayEnd) + ":59",
+            InpMuted, fsSm, false);
 
    ChartRedraw(0);
 }
@@ -259,8 +301,8 @@ void DrawBox()
 int OnInit()
 {
    g_pfx = InpPrefix;
-   IndicatorSetString(INDICATOR_SHORTNAME, "Session Box");
-   EventSetTimer(10);
+   IndicatorSetString(INDICATOR_SHORTNAME, "Session");
+   EventSetTimer(5);
    DrawBox();
    return INIT_SUCCEEDED;
 }

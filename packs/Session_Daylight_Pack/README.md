@@ -1,20 +1,25 @@
 # Session Daylight Box
 
-Compact **trader-style corner HUD** — no big session bands on the chart.
+Clear **trader session card** in one corner — no chart bands.
 
-Shows LIVE/IDLE, active session, clock, window hours, progress meter, and day open/close.
+## Fixed in this version
+- Text was clipping off the right edge on MT5 (`SESSI` / `LOND`) — anchor math corrected
+- Opaque dark card so labels stay readable over candles
+- Bigger session name + clock
+- Solid progress bar (not tiny `#....` dots)
+- Default corner: **top right** (away from time axis / volume)
 
-Does not trade or draw over price.
+## Panel shows
+- LIVE / IDLE
+- Active session (color accent)
+- Clock
+- Session window hours
+- Progress %
+- Day open → close
 
 ## Downloads
-
 - Pack: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/session-daylight-992e/packs/Session_Daylight_Pack.zip
 - Pine: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/session-daylight-992e/indicators/Session_Daylight.pine
 - MT5: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/session-daylight-992e/mt5/Session_Daylight/Session_Daylight.mq5
 
-## Install
-
-**TradingView:** paste Pine → Add to chart  
-**MT5:** compile `Session_Daylight.mq5` → attach  
-
-Default panel sits **bottom-right**. Enable Compact mode for a thinner strip.
+**MT5:** delete the old indicator from the chart, recompile `Session_Daylight.mq5`, then attach again.
