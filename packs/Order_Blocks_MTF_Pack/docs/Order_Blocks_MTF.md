@@ -1,37 +1,34 @@
 # Order Blocks MTF
 
-TradingView Pine indicator that finds **bullish / bearish Order Blocks** on the chart TF and optional higher TFs.
+Bullish / bearish **Order Blocks** on chart TF + optional higher TFs.
 
-## How the box is drawn
-1. Detect an impulse (displacement and/or BOS).
-2. Take the previous **N candles** (`Candles in block`).
-3. Draw a rectangle from those candles’ **Highest High → Lowest Low**.
+Each block uses **N candles**; the rectangle is drawn from those candles’ **Highest High → Lowest Low**.
 
-## Block kinds
-| Kind | Meaning |
+## MT5 (recommended if TradingView is limited)
+
+1. Download `Order_Blocks_MTF.mq5`
+2. MetaEditor → open file → **Compile**
+3. Navigator → Indicators → `Order_Blocks_MTF` → attach to chart
+4. Defaults: BlockLen `2`, Chart TF on, TF1 `H1`
+
+### Important inputs
+| Input | Meaning |
 |------|---------|
-| **Bullish OB** | Last opposing (mostly bearish) candles before a bullish impulse / BOS |
-| **Bearish OB** | Last opposing (mostly bullish) candles before a bearish impulse / BOS |
-| **Breaker** | Mitigated OB kept on chart (optional) |
+| Candles in block | How many candles form the OB (HH→LL) |
+| Require opposing candles | ICT-style filter |
+| BOS / Displacement | Confirmation rules |
+| TF 1 / 2 / 3 | Extra timeframes (H1 / H4 / D1) |
+| Keep mitigated as breakers | Flip style instead of deleting |
 
-## Inputs (important)
-- **Candles in block** — how many candles form the zone (HH→LL)
-- **Require opposing candles** — ICT-style filter
-- **BOS / Displacement** — confirmation rules
-- **TF 1 / 2 / 3** — extra timeframes (e.g. 60 / 240 / D)
-- **Keep mitigated as breakers** — flip style instead of deleting
-
-## Install
-1. TradingView → Pine Editor → paste `Order_Blocks_MTF.pine`
-2. Add to chart
-3. Set `Candles in block` (try `1` or `2` first)
-4. Enable the TFs you want
+## TradingView Pine (optional)
+Same logic if you still want TV.
 
 ## Downloads
+- **MT5:** https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/order-blocks-mtf-992e/mt5/Order_Blocks_MTF/Order_Blocks_MTF.mq5
+- **Pack:** https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/order-blocks-mtf-992e/packs/Order_Blocks_MTF_Pack.zip
 - Pine: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/order-blocks-mtf-992e/indicators/Order_Blocks_MTF.pine
-- Pack: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/order-blocks-mtf-992e/packs/Order_Blocks_MTF_Pack.zip
 
 ## Notes
-- Does **not** auto-trade.
-- More TFs + lower `Candles in block` = more zones.
-- Tighten with higher displacement multiplier or longer structure lookback.
+- Does not trade.
+- Start with BlockLen `1` or `2`.
+- Enable more TFs only if you want more zones.
