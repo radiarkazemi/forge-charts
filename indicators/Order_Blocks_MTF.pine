@@ -1,0 +1,236 @@
+//@version=6
+indicator("Order Blocks MTF", shorttitle="OB MTF", overlay=true, max_boxes_count=500, max_labels_count=200)
+
+// Multi-timeframe Order Blocks.
+// A block is N candles; the rectangle is drawn from those candles' Highest High → Lowest Low.
+
+// ── Block ─────────────────────────────────────────────────────────
+blockLen   = input.int(2, "Candles in block", minval=1, maxval=10, group="Block",
+     tooltip="Number of candles that form the OB. Box = HH to LL of those candles.")
+requireOpp = input.bool(true, "Require opposing candles", group="Block",
+     tooltip="Bullish OB needs mostly bearish candles in the block (and reverse for bearish).")
+minOppPct  = input.float(50.0, "Min opposing %", minval=0.0, maxval=100.0, step=10.0, group="Block")
+
+// ── Detection ─────────────────────────────────────────────────────
+swingLen = input.int(5, "Structure lookback", minval=2, maxval=50, group="Detection")
+useBos   = input.bool(true, "Require BOS", group="Detection")
+useDisp  = input.bool(true, "Require displacement", group="Detection")
+atrLen   = input.int(14, "ATR length", minval=1, group="Detection")
+dispMult = input.float(1.2, "Displacement × ATR", minval=0.2, step=0.1, group="Detection")
+mitClose = input.bool(true, "Mitigate on close (off = wick)", group="Detection")
+
+// ── Timeframes ────────────────────────────────────────────────────
+useChart = input.bool(true, "Use chart TF", group="Timeframes")
+useTf1   = input.bool(true, "Use TF 1", group="Timeframes")
+tf1      = input.timeframe("60", "TF 1", group="Timeframes")
+useTf2   = input.bool(false, "Use TF 2", group="Timeframes")
+tf2      = input.timeframe("240", "TF 2", group="Timeframes")
+useTf3   = input.bool(false, "Use TF 3", group="Timeframes")
+tf3      = input.timeframe("D", "TF 3", group="Timeframes")
+
+// ── Display ───────────────────────────────────────────────────────
+maxObs    = input.int(12, "Max OBs per side", minval=1, maxval=50, group="Display")
+boxExtend = input.int(100, "Box extend (bars)", minval=5, maxval=500, group="Display")
+keepBrk   = input.bool(true, "Keep mitigated as breakers", group="Display")
+showLbl   = input.bool(true, "Show labels", group="Display")
+bullFill  = input.color(color.new(#22C55E, 78), "Bullish fill", group="Style")
+bearFill  = input.color(color.new(#EF4444, 78), "Bearish fill", group="Style")
+brkBullF  = input.color(color.new(#86EFAC, 88), "Bull breaker fill", group="Style")
+brkBearF  = input.color(color.new(#FCA5A5, 88), "Bear breaker fill", group="Style")
+bullBord  = input.color(#16A34A, "Bullish border", group="Style")
+bearBord  = input.color(#DC2626, "Bearish border", group="Style")
+
+// ── State ─────────────────────────────────────────────────────────
+var box[]    bx    = array.new_box()
+var label[]  lb    = array.new_label()
+var int[]    kind  = array.new_int()     // 1 bull, -1 bear
+var int[]    state = array.new_int()     // 0 active, 1 breaker
+var float[]  topA  = array.new_float()
+var float[]  botA  = array.new_float()
+var string[] srcA  = array.new_string()
+var int[]    leftA = array.new_int()
+
+f_block_hh(int len) =>
+    float hh = high[1]
+    if len >= 2
+        for i = 2 to len
+            hh := math.max(hh, high[i])
+    hh
+
+f_block_ll(int len) =>
+    float ll = low[1]
+    if len >= 2
+        for i = 2 to len
+            ll := math.min(ll, low[i])
+    ll
+
+f_opp_ok(bool isBull, int len) =>
+    bool ok = true
+    if requireOpp
+        int opp = 0
+        for i = 1 to len
+            if isBull and close[i] < open[i]
+                opp += 1
+            if not isBull and close[i] > open[i]
+                opp += 1
+        ok := (opp * 100.0 / len) >= minOppPct
+    ok
+
+f_detect() =>
+    float atr = ta.atr(atrLen)
+    float body = math.abs(close - open)
+    float swingHi = ta.highest(high[1], swingLen)
+    float swingLo = ta.lowest(low[1], swingLen)
+
+    bool bullBar = close > open
+    bool bearBar = close < open
+    bool bullDisp = useDisp ? (bullBar and body >= atr * dispMult) : bullBar
+    bool bearDisp = useDisp ? (bearBar and body >= atr * dispMult) : bearBar
+    bool bullBos = useBos ? (close > swingHi) : true
+    bool bearBos = useBos ? (close < swingLo) : true
+
+    bool needRule = useDisp or useBos
+    bool bullSig = needRule and bullDisp and bullBos and f_opp_ok(true, blockLen)
+    bool bearSig = needRule and bearDisp and bearBos and f_opp_ok(false, blockLen)
+
+    float hh = f_block_hh(blockLen)
+    float ll = f_block_ll(blockLen)
+    int leftT = time[blockLen]
+    [bullSig, bearSig, hh, ll, leftT]
+
+f_trim(int wantKind, string tag) =>
+    int n = 0
+    for i = array.size(kind) - 1 to 0
+        if array.get(kind, i) == wantKind and array.get(srcA, i) == tag
+            n += 1
+            if n > maxObs
+                box.delete(array.get(bx, i))
+                label.delete(array.get(lb, i))
+                array.remove(bx, i)
+                array.remove(lb, i)
+                array.remove(kind, i)
+                array.remove(state, i)
+                array.remove(topA, i)
+                array.remove(botA, i)
+                array.remove(srcA, i)
+                array.remove(leftA, i)
+
+f_bi_from_time(int tStamp) =>
+    int bi = bar_index
+    int lim = math.min(bar_index, 5000)
+    for i = 0 to lim
+        if time[i] <= tStamp
+            bi := bar_index - i
+            break
+    bi
+
+f_add(int k, float top, float bot, int leftBi, string tag) =>
+    bool dup = false
+    if array.size(srcA) > 0
+        for i = 0 to array.size(srcA) - 1
+            if array.get(srcA, i) == tag and array.get(kind, i) == k and array.get(leftA, i) == leftBi
+                dup := true
+                break
+    if not dup and not na(top) and not na(bot) and top > bot
+        color fillC = k > 0 ? bullFill : bearFill
+        color bordC = k > 0 ? bullBord : bearBord
+        int rightBi = math.max(leftBi + 1, bar_index + boxExtend)
+        box b = box.new(leftBi, top, rightBi, bot, xloc=xloc.bar_index, border_color=bordC, bgcolor=fillC, border_width=1)
+        array.push(bx, b)
+        array.push(kind, k)
+        array.push(state, 0)
+        array.push(topA, top)
+        array.push(botA, bot)
+        array.push(srcA, tag)
+        array.push(leftA, leftBi)
+        string txt = (k > 0 ? "BULL OB" : "BEAR OB") + " · " + tag + " · " + str.tostring(blockLen) + "c"
+        if showLbl
+            label lab = label.new(leftBi, k > 0 ? top : bot, txt, xloc=xloc.bar_index, yloc=yloc.price, style=k > 0 ? label.style_label_down : label.style_label_up, color=color.new(bordC, 75), textcolor=bordC, size=size.tiny)
+            array.push(lb, lab)
+        else
+            array.push(lb, label(na))
+        f_trim(k, tag)
+
+f_handle(string tag, bool bullSig, bool bearSig, float hh, float ll, int leftT) =>
+    if not na(leftT)
+        int leftBi = f_bi_from_time(leftT)
+        if bullSig
+            f_add(1, hh, ll, leftBi, tag)
+        if bearSig
+            f_add(-1, hh, ll, leftBi, tag)
+
+f_mitigate() =>
+    for i = array.size(bx) - 1 to 0
+        if array.get(state, i) != 0
+            continue
+        int k = array.get(kind, i)
+        float top = array.get(topA, i)
+        float bot = array.get(botA, i)
+        bool hit = k > 0 ? (mitClose ? close < bot : low < bot) : (mitClose ? close > top : high > top)
+        if hit
+            if keepBrk
+                array.set(state, i, 1)
+                box.set_bgcolor(array.get(bx, i), k > 0 ? brkBullF : brkBearF)
+                box.set_border_color(array.get(bx, i), color.new(k > 0 ? bullBord : bearBord, 45))
+                if showLbl
+                    label lab = array.get(lb, i)
+                    if not na(lab)
+                        label.set_text(lab, (k > 0 ? "BULL BRK" : "BEAR BRK") + " · " + array.get(srcA, i))
+            else
+                box.delete(array.get(bx, i))
+                label.delete(array.get(lb, i))
+                array.remove(bx, i)
+                array.remove(lb, i)
+                array.remove(kind, i)
+                array.remove(state, i)
+                array.remove(topA, i)
+                array.remove(botA, i)
+                array.remove(srcA, i)
+                array.remove(leftA, i)
+
+f_extend() =>
+    if array.size(bx) > 0
+        for i = 0 to array.size(bx) - 1
+            if array.get(state, i) == 0
+                box.set_right(array.get(bx, i), bar_index + 2)
+
+// ── Chart TF ──────────────────────────────────────────────────────
+[cBull, cBear, cHH, cLL, cLeftT] = f_detect()
+var int lastChartLeft = na
+if useChart and barstate.isconfirmed and (cBull or cBear)
+    if na(lastChartLeft) or cLeftT != lastChartLeft
+        f_handle("CHART", cBull, cBear, cHH, cLL, cLeftT)
+        lastChartLeft := cLeftT
+
+// ── Extra TFs ─────────────────────────────────────────────────────
+[t1Bull, t1Bear, t1HH, t1LL, t1LeftT] = request.security(syminfo.tickerid, tf1, f_detect(), barmerge.gaps_off, barmerge.lookahead_off)
+[t2Bull, t2Bear, t2HH, t2LL, t2LeftT] = request.security(syminfo.tickerid, tf2, f_detect(), barmerge.gaps_off, barmerge.lookahead_off)
+[t3Bull, t3Bear, t3HH, t3LL, t3LeftT] = request.security(syminfo.tickerid, tf3, f_detect(), barmerge.gaps_off, barmerge.lookahead_off)
+
+var int last1 = na
+var int last2 = na
+var int last3 = na
+
+if useTf1 and barstate.isconfirmed and not na(t1LeftT) and (t1Bull or t1Bear)
+    if na(last1) or t1LeftT != last1
+        f_handle(tf1, t1Bull, t1Bear, t1HH, t1LL, t1LeftT)
+        last1 := t1LeftT
+
+if useTf2 and barstate.isconfirmed and not na(t2LeftT) and (t2Bull or t2Bear)
+    if na(last2) or t2LeftT != last2
+        f_handle(tf2, t2Bull, t2Bear, t2HH, t2LL, t2LeftT)
+        last2 := t2LeftT
+
+if useTf3 and barstate.isconfirmed and not na(t3LeftT) and (t3Bull or t3Bear)
+    if na(last3) or t3LeftT != last3
+        f_handle(tf3, t3Bull, t3Bear, t3HH, t3LL, t3LeftT)
+        last3 := t3LeftT
+
+f_mitigate()
+f_extend()
+
+var table hud = table.new(position.bottom_right, 1, 1, bgcolor=color.new(#0B1220, 15), border_width=1, border_color=color.new(#334155, 50))
+if barstate.islast
+    string line = "OB " + str.tostring(blockLen) + "c  HH→LL"
+    string tfs = (useChart ? " · CHART" : "") + (useTf1 ? " · " + tf1 : "") + (useTf2 ? " · " + tf2 : "") + (useTf3 ? " · " + tf3 : "")
+    table.cell(hud, 0, 0, line + tfs, text_color=#94A3B8, text_size=size.tiny)
