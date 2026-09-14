@@ -1,7 +1,7 @@
 //@version=6
 indicator("Session Daylight Box", shorttitle="Sessions", overlay=true)
 
-// Clear trader session card — corner only (no chart bands).
+// Medium session card — default top-right (empty space away from left HUD).
 
 tz = input.string("America/New_York", "Timezone",
      options=["America/New_York", "Europe/London", "Asia/Tokyo", "UTC", "Exchange"],
@@ -102,28 +102,29 @@ rowsNeeded = showProg ? 5 : 4
 var string lastKey = na
 var table hud = na
 
-cBg   = #080C12
-cHead = #101620
+cBg   = #0A0E14
+cHead = #121820
 cMute = #94A3B8
-cText = #F8FAFC
+cText = #F1F5F9
+cEdge = #243044
 
 if barstate.islast
     string key = boxPos + str.tostring(rowsNeeded)
     if na(hud) or lastKey != key
         if not na(hud)
             table.delete(hud)
-        hud := table.new(pos, 2, rowsNeeded, bgcolor=cBg, border_width=2, border_color=accent, frame_width=0)
+        hud := table.new(pos, 2, rowsNeeded, bgcolor=cBg, border_width=1, border_color=cEdge, frame_width=0)
         lastKey := key
     else
-        table.set_border_color(hud, accent)
+        table.set_border_color(hud, cEdge)
 
     clock = f_hhmm(hour(time, f_tz())) + ":" + f_hhmm(minute(time, f_tz()))
     live  = isLive ? "LIVE" : "IDLE"
     dayLine = f_hhmm(dayOpen) + ":00 → " + f_hhmm(dayClose) + ":59"
     pct = str.tostring(math.round(prog * 100)) + "%"
 
-    table.cell(hud, 0, 0, " SESSION", text_color=cMute, text_size=size.small, text_halign=text.align_left, bgcolor=cHead)
-    table.cell(hud, 1, 0, live + " ", text_color=liveCol, text_size=size.small, text_halign=text.align_right, bgcolor=cHead)
+    table.cell(hud, 0, 0, " SESSION", text_color=cMute, text_size=size.normal, text_halign=text.align_left, bgcolor=cHead)
+    table.cell(hud, 1, 0, live + " ", text_color=liveCol, text_size=size.normal, text_halign=text.align_right, bgcolor=cHead)
 
     table.cell(hud, 0, 1, " " + sessName, text_color=accent, text_size=size.large, text_halign=text.align_left)
     table.cell(hud, 1, 1, clock + " ", text_color=cText, text_size=size.large, text_halign=text.align_right)
@@ -133,8 +134,8 @@ if barstate.islast
 
     int r = 3
     if showProg
-        table.cell(hud, 0, r, " " + (isLive ? f_meter(prog) : "········"), text_color=isLive ? accent : cMute, text_size=size.small, text_halign=text.align_left)
-        table.cell(hud, 1, r, (isLive ? pct : "—") + " ", text_color=cMute, text_size=size.small, text_halign=text.align_right)
+        table.cell(hud, 0, r, " " + (isLive ? f_meter(prog) : "········"), text_color=isLive ? accent : cMute, text_size=size.normal, text_halign=text.align_left)
+        table.cell(hud, 1, r, (isLive ? pct : "—") + " ", text_color=cMute, text_size=size.normal, text_halign=text.align_right)
         r += 1
 
     table.cell(hud, 0, r, " DAY  " + dayLine, text_color=cMute, text_size=size.small, text_halign=text.align_left)

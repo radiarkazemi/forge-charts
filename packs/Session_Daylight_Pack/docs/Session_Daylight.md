@@ -1,25 +1,23 @@
 # Session Daylight Box
 
-Clear **trader session card** in one corner — no chart bands.
+Medium **session card** for the **top-right empty space** — keeps left free for One-Click + TRH.
 
-## Fixed in this version
-- Text was clipping off the right edge on MT5 (`SESSI` / `LOND`) — anchor math corrected
-- Opaque dark card so labels stay readable over candles
-- Bigger session name + clock
-- Solid progress bar (not tiny `#....` dots)
-- Default corner: **top right** (away from time axis / volume)
+## Placement
+- Default: **top right**
+- Size: medium (~200px wide)
+- Soft TRH-style card (Consolas, accent stripe, no loud border)
 
-## Panel shows
+## Shows
 - LIVE / IDLE
-- Active session (color accent)
-- Clock
+- Active session + clock
 - Session window hours
-- Progress %
-- Day open → close
+- Progress bar + %
+- Day open / close
 
 ## Downloads
 - Pack: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/session-daylight-992e/packs/Session_Daylight_Pack.zip
 - Pine: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/session-daylight-992e/indicators/Session_Daylight.pine
 - MT5: https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/session-daylight-992e/mt5/Session_Daylight/Session_Daylight.mq5
 
-**MT5:** delete the old indicator from the chart, recompile `Session_Daylight.mq5`, then attach again.
+**MT5:** remove old indicator → recompile → attach again.  
+If you want it more left/right, change `InpX` (margin from right). Width: `InpWidth` (160–280).

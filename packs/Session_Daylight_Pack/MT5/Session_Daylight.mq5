@@ -1,15 +1,15 @@
 //+------------------------------------------------------------------+
 //| Session_Daylight.mq5                                             |
-//| Clear trader session card — corner only, no chart bands          |
+//| Medium session card — top-right empty space (away from TRH)      |
 //+------------------------------------------------------------------+
 #property copyright "Forge Charts"
-#property version   "1.40"
+#property version   "1.50"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
 
 input string InpPrefix       = "SDL_";
-input int    InpGmtOffset    = 0;              // Hours vs server time
+input int    InpGmtOffset    = 0;                 // Hours vs server time
 input int    InpAsiaStart    = 19;
 input int    InpAsiaEnd      = 0;
 input int    InpLonStart     = 3;
@@ -19,14 +19,16 @@ input int    InpNyEnd        = 17;
 input int    InpDayBegin     = 0;
 input int    InpDayEnd       = 23;
 input bool   InpShowProgress = true;
+// Top-right empty space (away from One-Click + TRH on the left)
 input ENUM_BASE_CORNER InpCorner = CORNER_RIGHT_UPPER;
-input int    InpX            = 12;
-input int    InpY            = 18;
-input int    InpFontSize     = 9;
-input color  InpBg           = C'8,12,18';
-input color  InpHead         = C'16,22,32';
+input int    InpX            = 28;                // Margin from right
+input int    InpY            = 24;                // Margin from top
+input int    InpWidth        = 200;               // Card width (medium)
+input int    InpFontSize     = 10;
+input color  InpBg           = C'10,14,20';
+input color  InpHead         = C'18,24,34';
 input color  InpMuted        = C'148,163,184';
-input color  InpText         = C'248,250,252';
+input color  InpText         = C'241,245,249';
 input color  InpLive         = C'34,197,94';
 input color  InpIdle         = C'100,116,139';
 
@@ -149,7 +151,6 @@ double Progress(const datetime t, const int a, const int b)
    return MathMax(0.0, MathMin(1.0, (double)cur / (double)MathMax(1, span)));
 }
 
-// Distance from chart corner → left content inside panel
 int DistLeft(const int panelW, const int insetFromLeft)
 {
    if(g_fromRight)
@@ -157,7 +158,6 @@ int DistLeft(const int panelW, const int insetFromLeft)
    return InpX + insetFromLeft;
 }
 
-// Distance from chart corner → top content inside panel
 int DistTop(const int panelH, const int insetFromTop)
 {
    if(g_fromBottom)
@@ -168,16 +168,14 @@ int DistTop(const int panelH, const int insetFromTop)
 void PutLabel(const string name, const int xDist, const int yDist, const string text,
               const color clr, const int size, const bool alignRight)
 {
-   // Always grow text down into the panel from the top of each row
    const ENUM_ANCHOR_POINT anchor = alignRight ? ANCHOR_RIGHT_UPPER : ANCHOR_LEFT_UPPER;
-
    if(ObjectFind(0, name) < 0)
       ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
    ObjectSetInteger(0, name, OBJPROP_CORNER, InpCorner);
    ObjectSetInteger(0, name, OBJPROP_ANCHOR, anchor);
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, xDist);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, yDist);
-   ObjectSetString(0, name, OBJPROP_FONT, "Arial Bold");
+   ObjectSetString(0, name, OBJPROP_FONT, "Consolas");
    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, size);
    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
    ObjectSetString(0, name, OBJPROP_TEXT, text);
@@ -205,14 +203,11 @@ void PutRect(const string name, const int xDist, const int yDist, const int w, c
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
 }
 
-// Place a horizontal bar inside the panel; fill grows from the LEFT of the track
 void PutBar(const string name, const int panelW, const int panelH,
             const int insetL, const int insetTop, const int barW, const int barH,
             const color clr)
 {
-   // Right corners: XDISTANCE = right edge of rect. Left corners: left edge.
    const int xDist = g_fromRight ? (InpX + panelW - insetL - barW) : (InpX + insetL);
-   // Bottom corners: YDISTANCE = bottom edge of rect. Top corners: top edge.
    const int yDist = g_fromBottom ? (InpY + panelH - insetTop - barH) : (InpY + insetTop);
    PutRect(name, xDist, yDist, barW, barH, clr, clr);
 }
@@ -243,54 +238,49 @@ void DrawBox()
    else if(kind == 1)
       prog = Progress(now, InpAsiaStart, InpAsiaEnd);
 
-   const int pad = 12;
-   const int w = 176;
-   const int headH = 24;
-   const int barH = 7;
-   // layout: head, session row, window row, [bar], day row
-   const int bodyTop = headH + 8;
-   const int row1 = bodyTop;           // session + clock
-   const int row2 = row1 + 20;         // window
-   const int barTop = row2 + 18;
-   const int row3 = InpShowProgress ? (barTop + barH + 10) : (row2 + 18);
-   const int h = row3 + 18;
+   const int pad = 14;
+   const int w = MathMax(160, MathMin(280, InpWidth));
+   const int headH = 26;
+   const int barH = 6;
+   const int bodyTop = headH + 10;
+   const int row1 = bodyTop;
+   const int row2 = row1 + 22;
+   const int barTop = row2 + 20;
+   const int row3 = InpShowProgress ? (barTop + barH + 12) : (row2 + 20);
+   const int h = row3 + 20;
 
-   // Full opaque card
-   PutRect(g_pfx + "BG", InpX, InpY, w, h, InpBg, accent);
+   const color edge = C'36,48,64';
+   PutRect(g_pfx + "BG", InpX, InpY, w, h, InpBg, edge);
    PutRect(g_pfx + "HEAD", InpX, InpY, w, headH, InpHead, InpHead);
-   PutRect(g_pfx + "STRIPE", InpX, InpY, 4, h, accent, accent);
+   PutRect(g_pfx + "STRIPE", InpX, InpY, 3, h, accent, accent);
 
-   const int fs = MathMax(8, InpFontSize);
-   const int fsSm = MathMax(7, InpFontSize - 1);
+   const int fs = MathMax(9, InpFontSize);
+   const int fsSm = MathMax(8, InpFontSize - 1);
    const int fsLg = InpFontSize + 2;
 
    const int xL = DistLeft(w, pad);
    const int xR = g_fromRight ? (InpX + pad) : (InpX + w - pad);
 
-   // Header
-   PutLabel(g_pfx + "H1", xL, DistTop(h, 6), "SESSION", InpMuted, fsSm, false);
-   PutLabel(g_pfx + "H2", xR, DistTop(h, 6), live ? "LIVE" : "IDLE", liveCol, fsSm, true);
+   PutLabel(g_pfx + "H1", xL, DistTop(h, 7), "SESSION", InpMuted, fsSm, false);
+   PutLabel(g_pfx + "H2", xR, DistTop(h, 7), live ? "LIVE" : "IDLE", liveCol, fsSm, true);
 
-   // Session + clock — biggest, highest contrast
    PutLabel(g_pfx + "S1", xL, DistTop(h, row1), sess, accent, fsLg, false);
    PutLabel(g_pfx + "S2", xR, DistTop(h, row1), clock, InpText, fsLg, true);
 
-   // Window hours (one line, bright)
    PutLabel(g_pfx + "W1", xL, DistTop(h, row2), win, InpText, fs, false);
 
    if(InpShowProgress)
    {
-      const int barW = w - pad * 2 - 36; // leave room for %
+      const int barW = w - pad * 2 - 40;
       const int fillW = live ? (int)MathMax(2, MathRound(barW * prog)) : 0;
       PutBar(g_pfx + "TRK", w, h, pad, barTop, barW, barH, C'30,41,59');
       if(fillW > 0)
          PutBar(g_pfx + "FIL", w, h, pad, barTop, fillW, barH, accent);
-      PutLabel(g_pfx + "P2", xR, DistTop(h, barTop - 1),
+      PutLabel(g_pfx + "P2", xR, DistTop(h, barTop - 2),
                live ? IntegerToString((int)MathRound(prog * 100.0)) + "%" : "--",
                InpMuted, fsSm, true);
    }
 
-   // Day line
    PutLabel(g_pfx + "D1", xL, DistTop(h, row3),
             "DAY  " + Two(InpDayBegin) + ":00 > " + Two(InpDayEnd) + ":59",
             InpMuted, fsSm, false);
