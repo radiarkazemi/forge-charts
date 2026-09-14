@@ -3,7 +3,7 @@
 //| Multi-timeframe Order Blocks — HH→LL rectangles (Pine parity)   |
 //+------------------------------------------------------------------+
 #property copyright "Forge Charts"
-#property version   "1.00"
+#property version   "1.10"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -26,10 +26,10 @@ input ENUM_TIMEFRAMES InpTf2 = PERIOD_H4;
 input bool   InpUseTf3      = false;      // Use TF 3
 input ENUM_TIMEFRAMES InpTf3 = PERIOD_D1;
 input int    InpMaxObs      = 12;         // Max OBs per side / TF
-input int    InpExtendBars  = 100;        // Box extend (chart bars)
 input bool   InpKeepBrk     = true;       // Keep mitigated as breakers
 input bool   InpShowLbl     = true;       // Show labels
 input int    InpScanBars    = 800;        // History scan depth
+// Boxes are tight squares over the N block candles only (no right extension).
 input color  InpBullFill    = C'34,197,94';
 input color  InpBearFill    = C'239,68,68';
 input color  InpBrkBull     = C'134,239,172';
@@ -134,13 +134,15 @@ double AtrAt(const string sym, const ENUM_TIMEFRAMES tf, const int shift)
 }
 
 bool DetectAt(const string sym, const ENUM_TIMEFRAMES tf, const MqlRates &rates[],
-              const int impShift, bool &bullSig, bool &bearSig, double &hh, double &ll, datetime &leftT)
+              const int impShift, bool &bullSig, bool &bearSig, double &hh, double &ll,
+              datetime &leftT, datetime &rightT)
 {
    bullSig = false;
    bearSig = false;
    hh = 0.0;
    ll = 0.0;
    leftT = 0;
+   rightT = 0;
 
    const int need = impShift + MathMax(InpBlockLen, InpSwingLen) + 2;
    if(ArraySize(rates) <= need || InpBlockLen < 1)
@@ -164,7 +166,8 @@ bool DetectAt(const string sym, const ENUM_TIMEFRAMES tf, const MqlRates &rates[
 
    hh = HighestHigh(rates, impShift + 1, InpBlockLen);
    ll = LowestLow(rates, impShift + 1, InpBlockLen);
-   leftT = rates[impShift + InpBlockLen].time;
+   leftT  = rates[impShift + InpBlockLen].time; // oldest candle in block
+   rightT = rates[impShift + 1].time;           // newest candle in block (tight square)
    return (bullSig || bearSig) && hh > ll;
 }
 
@@ -275,17 +278,12 @@ int FreeSlot()
 
 datetime RightTimeFromLeft(const datetime left)
 {
-   const int shift = iBarShift(_Symbol, PERIOD_CURRENT, left, false);
-   if(shift < 0)
-      return left + (datetime)PeriodSeconds(PERIOD_CURRENT) * InpExtendBars;
-   const int rightShift = MathMax(0, shift - InpExtendBars);
-   datetime t = iTime(_Symbol, PERIOD_CURRENT, rightShift);
-   if(t <= left)
-      t = left + (datetime)PeriodSeconds(PERIOD_CURRENT) * InpExtendBars;
-   return t;
+   // fallback only — preferred path passes exact right candle time
+   return left + (datetime)PeriodSeconds(PERIOD_CURRENT) * MathMax(1, InpBlockLen);
 }
 
-void AddOb(const int kind, const double top, const double bot, const datetime left, const string tag)
+void AddOb(const int kind, const double top, const double bot,
+           const datetime left, const datetime right, const string tag)
 {
    if(top <= bot || left <= 0)
       return;
@@ -299,51 +297,43 @@ void AddOb(const int kind, const double top, const double bot, const datetime le
    g_obs[idx].top   = top;
    g_obs[idx].bot   = bot;
    g_obs[idx].left  = left;
-   g_obs[idx].right = RightTimeFromLeft(left);
+   // Tight square over block candles only — never extend to chart edge
+   g_obs[idx].right = (right > left ? right : RightTimeFromLeft(left));
    g_obs[idx].tag   = tag;
    g_obs[idx].name  = g_pfx + tag + "_" + (kind > 0 ? "B" : "S") + "_" + IntegerToString((int)left);
    DrawOb(idx);
    TrimSide(kind, tag);
 }
 
-void MitigateAndExtend()
+void MitigateOnly()
 {
    const double c = iClose(_Symbol, PERIOD_CURRENT, 0);
    const double h = iHigh(_Symbol, PERIOD_CURRENT, 0);
    const double l = iLow(_Symbol, PERIOD_CURRENT, 0);
-   const datetime nowR = iTime(_Symbol, PERIOD_CURRENT, 0) + (datetime)PeriodSeconds(PERIOD_CURRENT);
 
    for(int i = 0; i < g_count; i++)
    {
-      if(!g_obs[i].used)
+      if(!g_obs[i].used || g_obs[i].state != 0)
          continue;
 
-      if(g_obs[i].state == 0)
-      {
-         bool hit = false;
-         if(g_obs[i].kind > 0)
-            hit = InpMitClose ? (c < g_obs[i].bot) : (l < g_obs[i].bot);
-         else
-            hit = InpMitClose ? (c > g_obs[i].top) : (h > g_obs[i].top);
+      bool hit = false;
+      if(g_obs[i].kind > 0)
+         hit = InpMitClose ? (c < g_obs[i].bot) : (l < g_obs[i].bot);
+      else
+         hit = InpMitClose ? (c > g_obs[i].top) : (h > g_obs[i].top);
 
-         if(hit)
-         {
-            if(InpKeepBrk)
-            {
-               g_obs[i].state = 1;
-               DrawOb(i);
-            }
-            else
-            {
-               DeleteObObjects(g_obs[i].name);
-               g_obs[i].used = false;
-            }
-         }
-         else
-         {
-            g_obs[i].right = nowR;
-            DrawOb(i);
-         }
+      if(!hit)
+         continue;
+
+      if(InpKeepBrk)
+      {
+         g_obs[i].state = 1;
+         DrawOb(i);
+      }
+      else
+      {
+         DeleteObObjects(g_obs[i].name);
+         g_obs[i].used = false;
       }
    }
 }
@@ -372,13 +362,13 @@ void ScanTf(const ENUM_TIMEFRAMES tf, const string tag, const bool fullScan, dat
    {
       bool bull = false, bear = false;
       double hh = 0.0, ll = 0.0;
-      datetime leftT = 0;
-      if(!DetectAt(_Symbol, tf, rates, s, bull, bear, hh, ll, leftT))
+      datetime leftT = 0, rightT = 0;
+      if(!DetectAt(_Symbol, tf, rates, s, bull, bear, hh, ll, leftT, rightT))
          continue;
       if(bull)
-         AddOb(1, hh, ll, leftT, tag);
+         AddOb(1, hh, ll, leftT, rightT, tag);
       if(bear)
-         AddOb(-1, hh, ll, leftT, tag);
+         AddOb(-1, hh, ll, leftT, rightT, tag);
    }
    lastBar = closed;
 }
@@ -419,7 +409,7 @@ void Rebuild(const bool fullScan)
    if(InpUseTf3)
       ScanTf(InpTf3, TfTag(InpTf3), fullScan, g_lastTf3Bar);
 
-   MitigateAndExtend();
+   MitigateOnly();
    ChartRedraw(0);
 }
 
@@ -470,13 +460,13 @@ int OnCalculate(const int rates_total,
       Rebuild(false);
    }
    else
-      MitigateAndExtend();
+      MitigateOnly();
    return rates_total;
 }
 
 void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
    if(id == CHARTEVENT_CHART_CHANGE)
-      MitigateAndExtend();
+      MitigateOnly();
 }
 //+------------------------------------------------------------------+

@@ -29,10 +29,10 @@ useTf3   = input.bool(false, "Use TF 3", group="Timeframes")
 tf3      = input.timeframe("D", "TF 3", group="Timeframes")
 
 // ── Display ───────────────────────────────────────────────────────
-maxObs    = input.int(12, "Max OBs per side", minval=1, maxval=50, group="Display")
-boxExtend = input.int(100, "Box extend (bars)", minval=5, maxval=500, group="Display")
-keepBrk   = input.bool(true, "Keep mitigated as breakers", group="Display")
-showLbl   = input.bool(true, "Show labels", group="Display")
+maxObs  = input.int(12, "Max OBs per side", minval=1, maxval=50, group="Display")
+keepBrk = input.bool(true, "Keep mitigated as breakers", group="Display")
+showLbl = input.bool(true, "Show labels", group="Display")
+// Boxes are tight squares over the N block candles only (no right extension).
 bullFill  = input.color(color.new(#22C55E, 78), "Bullish fill", group="Style")
 bearFill  = input.color(color.new(#EF4444, 78), "Bearish fill", group="Style")
 brkBullF  = input.color(color.new(#86EFAC, 88), "Bull breaker fill", group="Style")
@@ -95,8 +95,9 @@ f_detect() =>
 
     float hh = f_block_hh(blockLen)
     float ll = f_block_ll(blockLen)
-    int leftT = time[blockLen]
-    [bullSig, bearSig, hh, ll, leftT]
+    int leftT = time[blockLen]   // oldest candle in block
+    int rightT = time[1]         // newest candle in block (no extend)
+    [bullSig, bearSig, hh, ll, leftT, rightT]
 
 f_drop_at(int i) =>
     box.delete(array.get(bx, i))
@@ -129,7 +130,7 @@ f_bi_from_time(int tStamp) =>
             break
     bi
 
-f_add(int k, float top, float bot, int leftBi, string tag) =>
+f_add(int k, float top, float bot, int leftBi, int rightBi, string tag) =>
     bool dup = false
     if array.size(srcA) > 0
         for i = 0 to array.size(srcA) - 1
@@ -139,8 +140,9 @@ f_add(int k, float top, float bot, int leftBi, string tag) =>
     if not dup and not na(top) and not na(bot) and top > bot
         color fillC = k > 0 ? bullFill : bearFill
         color bordC = k > 0 ? bullBord : bearBord
-        int rightBi = math.max(leftBi + 1, bar_index + boxExtend)
-        box b = box.new(leftBi, top, rightBi, bot, xloc=xloc.bar_index, border_color=bordC, bgcolor=fillC, border_width=1)
+        // Tight square: only the N block candles (no extension to the right)
+        int rBi = math.max(leftBi + 1, rightBi)
+        box b = box.new(leftBi, top, rBi, bot, xloc=xloc.bar_index, border_color=bordC, bgcolor=fillC, border_width=1)
         array.push(bx, b)
         array.push(kind, k)
         array.push(state, 0)
@@ -156,13 +158,14 @@ f_add(int k, float top, float bot, int leftBi, string tag) =>
             array.push(lb, na)
         f_trim(k, tag)
 
-f_handle(string tag, bool bullSig, bool bearSig, float hh, float ll, int leftT) =>
+f_handle(string tag, bool bullSig, bool bearSig, float hh, float ll, int leftT, int rightT) =>
     if not na(leftT)
         int leftBi = f_bi_from_time(leftT)
+        int rightBi = not na(rightT) ? f_bi_from_time(rightT) : leftBi + blockLen - 1
         if bullSig
-            f_add(1, hh, ll, leftBi, tag)
+            f_add(1, hh, ll, leftBi, rightBi, tag)
         if bearSig
-            f_add(-1, hh, ll, leftBi, tag)
+            f_add(-1, hh, ll, leftBi, rightBi, tag)
 
 f_mitigate() =>
     for i = array.size(bx) - 1 to 0
@@ -180,24 +183,18 @@ f_mitigate() =>
             if hit and not keepBrk
                 f_drop_at(i)
 
-f_extend() =>
-    if array.size(bx) > 0
-        for i = 0 to array.size(bx) - 1
-            if array.get(state, i) == 0
-                box.set_right(array.get(bx, i), bar_index + 2)
-
 // ── Chart TF ──────────────────────────────────────────────────────
-[cBull, cBear, cHH, cLL, cLeftT] = f_detect()
+[cBull, cBear, cHH, cLL, cLeftT, cRightT] = f_detect()
 var int lastChartLeft = na
 if useChart and barstate.isconfirmed and (cBull or cBear)
     if na(lastChartLeft) or cLeftT != lastChartLeft
-        f_handle("CHART", cBull, cBear, cHH, cLL, cLeftT)
+        f_handle("CHART", cBull, cBear, cHH, cLL, cLeftT, cRightT)
         lastChartLeft := cLeftT
 
 // ── Extra TFs ─────────────────────────────────────────────────────
-[t1Bull, t1Bear, t1HH, t1LL, t1LeftT] = request.security(syminfo.tickerid, tf1, f_detect(), barmerge.gaps_off, barmerge.lookahead_off)
-[t2Bull, t2Bear, t2HH, t2LL, t2LeftT] = request.security(syminfo.tickerid, tf2, f_detect(), barmerge.gaps_off, barmerge.lookahead_off)
-[t3Bull, t3Bear, t3HH, t3LL, t3LeftT] = request.security(syminfo.tickerid, tf3, f_detect(), barmerge.gaps_off, barmerge.lookahead_off)
+[t1Bull, t1Bear, t1HH, t1LL, t1LeftT, t1RightT] = request.security(syminfo.tickerid, tf1, f_detect(), barmerge.gaps_off, barmerge.lookahead_off)
+[t2Bull, t2Bear, t2HH, t2LL, t2LeftT, t2RightT] = request.security(syminfo.tickerid, tf2, f_detect(), barmerge.gaps_off, barmerge.lookahead_off)
+[t3Bull, t3Bear, t3HH, t3LL, t3LeftT, t3RightT] = request.security(syminfo.tickerid, tf3, f_detect(), barmerge.gaps_off, barmerge.lookahead_off)
 
 var int last1 = na
 var int last2 = na
@@ -205,21 +202,20 @@ var int last3 = na
 
 if useTf1 and barstate.isconfirmed and not na(t1LeftT) and (t1Bull or t1Bear)
     if na(last1) or t1LeftT != last1
-        f_handle(tf1, t1Bull, t1Bear, t1HH, t1LL, t1LeftT)
+        f_handle(tf1, t1Bull, t1Bear, t1HH, t1LL, t1LeftT, t1RightT)
         last1 := t1LeftT
 
 if useTf2 and barstate.isconfirmed and not na(t2LeftT) and (t2Bull or t2Bear)
     if na(last2) or t2LeftT != last2
-        f_handle(tf2, t2Bull, t2Bear, t2HH, t2LL, t2LeftT)
+        f_handle(tf2, t2Bull, t2Bear, t2HH, t2LL, t2LeftT, t2RightT)
         last2 := t2LeftT
 
 if useTf3 and barstate.isconfirmed and not na(t3LeftT) and (t3Bull or t3Bear)
     if na(last3) or t3LeftT != last3
-        f_handle(tf3, t3Bull, t3Bear, t3HH, t3LL, t3LeftT)
+        f_handle(tf3, t3Bull, t3Bear, t3HH, t3LL, t3LeftT, t3RightT)
         last3 := t3LeftT
 
 f_mitigate()
-f_extend()
 
 var table hud = table.new(position.bottom_right, 1, 1, bgcolor=color.new(#0B1220, 15), border_width=1, border_color=color.new(#334155, 50))
 if barstate.islast
