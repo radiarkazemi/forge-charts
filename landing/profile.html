@@ -60,17 +60,18 @@
           <span data-i18n="profile.email">Email (optional)</span>
           <input id="email" name="email" type="email" placeholder="you@example.com" autocomplete="email" />
         </label>
-        <label>
-          <span data-i18n="profile.symbol">Default symbol</span>
-          <select id="defaultSymbol" name="defaultSymbol">
-            <option value="BTCUSDT">BTCUSDT</option>
-            <option value="ETHUSDT">ETHUSDT</option>
-            <option value="SOLUSDT">SOLUSDT</option>
-            <option value="BNBUSDT">BNBUSDT</option>
-            <option value="XRPUSDT">XRPUSDT</option>
-            <option value="DOGEUSDT">DOGEUSDT</option>
-          </select>
-        </label>
+        <fieldset class="symbol-fieldset">
+          <legend data-i18n="profile.symbol">Default symbol</legend>
+          <input type="hidden" id="defaultSymbol" name="defaultSymbol" value="BTCUSDT" />
+          <div class="symbol-chips" role="radiogroup" aria-label="Default symbol">
+            <button type="button" class="symbol-chip is-active" data-symbol="BTCUSDT" aria-pressed="true">BTC</button>
+            <button type="button" class="symbol-chip" data-symbol="ETHUSDT" aria-pressed="false">ETH</button>
+            <button type="button" class="symbol-chip" data-symbol="SOLUSDT" aria-pressed="false">SOL</button>
+            <button type="button" class="symbol-chip" data-symbol="BNBUSDT" aria-pressed="false">BNB</button>
+            <button type="button" class="symbol-chip" data-symbol="XRPUSDT" aria-pressed="false">XRP</button>
+            <button type="button" class="symbol-chip" data-symbol="DOGEUSDT" aria-pressed="false">DOGE</button>
+          </div>
+        </fieldset>
         <label>
           <span data-i18n="profile.theme">Theme</span>
           <select id="theme" name="theme">
