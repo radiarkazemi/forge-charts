@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Forge — The market, without the noise.</title>
+    <meta
+      name="description"
+      content="Professional charting. Real-time data. Intelligent analysis. All in one place."
+    />
+    <meta name="application-name" content="Forge" />
+    <meta name="theme-color" content="#050810" />
+    <link rel="icon" type="image/svg+xml" href="./brand/forge-mark.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./brand/favicon-32.png" />
+    <link rel="apple-touch-icon" href="./brand/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Vazirmatn:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-glow" aria-hidden="true"></div>
+
+    <header class="topnav">
+      <a class="brand" href="/" aria-label="Forge">
+        <img class="brand-mark" src="./brand/forge-mark-white.png" width="26" height="26" alt="" />
+        <span class="brand-word">FORGE</span>
+      </a>
+
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#markets" data-i18n="nav.markets">Markets</a>
+        <a href="/charts/" data-i18n="nav.charts">Charts</a>
+        <a href="#markets" data-i18n="nav.screener">Screener</a>
+        <a href="#news" data-i18n="nav.news">News</a>
+        <a href="#learn" data-i18n="nav.learn">Learn</a>
+      </nav>
+
+      <div class="nav-right">
+        <label class="nav-search">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" />
+            <path d="M20 20l-3.2-3.2" stroke-linecap="round" />
+          </svg>
+          <input type="search" data-i18n-placeholder="nav.search" placeholder="Search markets, charts, or anything..." />
+          <kbd>⌘ K</kbd>
+        </label>
+        <div class="lang-switch" role="group" aria-label="Language">
+          <button type="button" class="lang-btn" data-lang="en" aria-pressed="true">EN</button>
+          <button type="button" class="lang-btn" data-lang="fa" aria-pressed="false">فا</button>
+        </div>
+        <a class="icon-btn profile-chip" href="./profile.html" data-i18n-aria="nav.profile" aria-label="Profile" title="Profile">
+          <span class="avatar-letter" id="nav-avatar">F</span>
+        </a>
+        <a class="link-login" href="./profile.html" data-i18n="nav.login">Log in</a>
+        <a class="btn-primary" href="/charts/" data-i18n="nav.getStarted">Get started</a>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow" data-i18n="hero.eyebrow">TRADING. ANALYSIS. OPPORTUNITY.</p>
+          <h1 data-i18n-html="hero.title">
+            The market,<br /><span class="accent">without the noise.</span>
+          </h1>
+          <p class="lead" data-i18n="hero.lead">
+            Professional charting. Real-time data. Intelligent analysis. All in one place.
+          </p>
+
+          <form class="hero-search" action="/charts/" method="get" role="search">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="M20 20l-3.2-3.2" stroke-linecap="round" />
+            </svg>
+            <input
+              name="symbol"
+              type="search"
+              data-i18n-placeholder="hero.search"
+              placeholder="Search any market, asset, or indicator..."
+            />
+            <button type="submit" class="search-go" aria-label="Search">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M5 12h12M13 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </button>
+          </form>
+
+          <div class="mini-tickers" aria-label="Markets" id="hero-tickers">
+            <a class="mini-card" data-symbol="BTCUSDT" href="/charts/?symbol=BTCUSDT">
+              <div class="mini-top">
+                <span class="coin coin-btc">₿</span>
+                <strong>BTC</strong>
+              </div>
+              <div class="mini-price" data-price>—</div>
+              <div class="mini-row">
+                <svg class="spark" viewBox="0 0 72 24" aria-hidden="true"><path data-spark d="M2 18 L70 6" /></svg>
+                <span class="chg" data-chg>—</span>
+              </div>
+            </a>
+            <a class="mini-card" data-symbol="ETHUSDT" href="/charts/?symbol=ETHUSDT">
+              <div class="mini-top">
+                <span class="coin coin-eth">Ξ</span>
+                <strong>ETH</strong>
+              </div>
+              <div class="mini-price" data-price>—</div>
+              <div class="mini-row">
+                <svg class="spark" viewBox="0 0 72 24" aria-hidden="true"><path data-spark d="M2 14 L70 8" /></svg>
+                <span class="chg" data-chg>—</span>
+              </div>
+            </a>
+            <a class="mini-card" data-symbol="SOLUSDT" href="/charts/?symbol=SOLUSDT">
+              <div class="mini-top">
+                <span class="coin coin-sol">◎</span>
+                <strong>SOL</strong>
+              </div>
+              <div class="mini-price" data-price>—</div>
+              <div class="mini-row">
+                <svg class="spark" viewBox="0 0 72 24" aria-hidden="true"><path data-spark d="M2 16 L70 4" /></svg>
+                <span class="chg" data-chg>—</span>
+              </div>
+            </a>
+            <a class="mini-card" data-symbol="BNBUSDT" href="/charts/?symbol=BNBUSDT">
+              <div class="mini-top">
+                <span class="coin coin-bnb">B</span>
+                <strong>BNB</strong>
+              </div>
+              <div class="mini-price" data-price>—</div>
+              <div class="mini-row">
+                <svg class="spark" viewBox="0 0 72 24" aria-hidden="true"><path data-spark d="M2 12 L70 8" /></svg>
+                <span class="chg" data-chg>—</span>
+              </div>
+            </a>
+          </div>
+        </div>
+
+        <div class="hero-preview" aria-hidden="true">
+          <div class="preview-glow"></div>
+          <div class="preview-window">
+            <aside class="pv-rail">
+              <div class="pv-logo"></div>
+              <span class="pv-ico is-on"></span>
+              <span class="pv-ico"></span>
+              <span class="pv-ico"></span>
+              <span class="pv-ico"></span>
+              <span class="pv-ico"></span>
+              <span class="pv-ico"></span>
+              <span class="pv-ico"></span>
+              <span class="pv-ico"></span>
+            </aside>
+            <div class="pv-main">
+              <div class="pv-chart-head">
+                <div class="pv-pair">
+                  <span class="coin coin-btc sm">₿</span>
+                  <strong>BTC/USDT</strong>
+                  <span class="pv-price" data-preview-price>—</span>
+                  <span class="chg" data-preview-chg>—</span>
+                </div>
+                <div class="pv-tfs">
+                  <span>1m</span><span>5m</span><span class="on">15m</span><span>1H</span><span>4H</span><span>1D</span>
+                </div>
+              </div>
+              <div class="pv-chart">
+                <svg viewBox="0 0 520 220" preserveAspectRatio="none">
+                  <defs>
+                    <linearGradient id="pvFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stop-color="#2f7bff" stop-opacity="0.28" />
+                      <stop offset="100%" stop-color="#2f7bff" stop-opacity="0" />
+                    </linearGradient>
+                  </defs>
+                  <g class="pv-grid">
+                    <path d="M0 40 H520 M0 80 H520 M0 120 H520 M0 160 H520 M0 200 H520" />
+                    <path d="M80 0 V220 M160 0 V220 M240 0 V220 M320 0 V220 M400 0 V220 M480 0 V220" />
+                  </g>
+                  <path id="preview-area" fill="url(#pvFill)" d="" />
+                  <path id="preview-line" class="pv-line" d="" />
+                </svg>
+              </div>
+              <div class="pv-bottom">
+                <div class="pv-tabs">
+                  <span class="on">Analysis</span><span>News</span><span>Key Levels</span>
+                </div>
+                <div class="pv-panels">
+                  <div class="pv-gauge">
+                    <div class="gauge-ring"><strong id="sentiment-score">—</strong><small>Live</small></div>
+                    <span data-i18n="preview.sentiment">Market Sentiment</span>
+                  </div>
+                  <ul class="pv-insights">
+                    <li data-i18n="preview.i1">Live feed connected to Forge market data</li>
+                    <li data-i18n="preview.i2">Open Supercharts for full depth & drawings</li>
+                    <li data-i18n="preview.i3">Multi-pane layouts with sync across charts</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+            <aside class="pv-side">
+              <div class="pv-side-title" data-i18n="preview.watchlist">Watchlist</div>
+              <div class="pv-row" data-symbol="BTCUSDT"><span>BTC</span><b data-price>—</b><i data-chg>—</i></div>
+              <div class="pv-row" data-symbol="ETHUSDT"><span>ETH</span><b data-price>—</b><i data-chg>—</i></div>
+              <div class="pv-row" data-symbol="SOLUSDT"><span>SOL</span><b data-price>—</b><i data-chg>—</i></div>
+              <div class="pv-row" data-symbol="BNBUSDT"><span>BNB</span><b data-price>—</b><i data-chg>—</i></div>
+              <div class="pv-row" data-symbol="XRPUSDT"><span>XRP</span><b data-price>—</b><i data-chg>—</i></div>
+              <div class="pv-row" data-symbol="DOGEUSDT"><span>DOGE</span><b data-price>—</b><i data-chg>—</i></div>
+              <div class="pv-movers-title" data-i18n="preview.movers">Market Movers</div>
+              <div class="mover" data-mover="SOLUSDT"><span>SOL</span><div class="bar" style="--w:40%"></div><i data-chg>—</i></div>
+              <div class="mover" data-mover="BTCUSDT"><span>BTC</span><div class="bar" style="--w:40%"></div><i data-chg>—</i></div>
+              <div class="mover" data-mover="ETHUSDT"><span>ETH</span><div class="bar" style="--w:40%"></div><i data-chg>—</i></div>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <section class="markets" id="markets">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker" data-i18n="markets.kicker">LIVE MARKETS</p>
+            <h2 data-i18n="markets.title">Real prices. Real opportunities.</h2>
+          </div>
+          <a class="btn-ghost" href="/charts/" data-i18n="markets.cta">Open charts →</a>
+        </div>
+        <div class="markets-table-wrap">
+          <table class="markets-table" id="markets-table">
+            <thead>
+              <tr>
+                <th data-i18n="markets.col.symbol">Symbol</th>
+                <th data-i18n="markets.col.price">Price</th>
+                <th data-i18n="markets.col.change">24h</th>
+                <th data-i18n="markets.col.high">High</th>
+                <th data-i18n="markets.col.low">Low</th>
+                <th data-i18n="markets.col.volume">Volume</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="markets-body">
+              <tr><td colspan="7" class="muted" data-i18n="markets.loading">Loading live markets…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="features" id="features">
+        <p class="section-kicker" data-i18n="features.kicker">ONE WORKSPACE. EVERY MARKET.</p>
+        <div class="feature-grid">
+          <article class="feature">
+            <div class="feature-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7">
+                <path d="M4 16l4-4 3 3 6-7" stroke-linecap="round" stroke-linejoin="round" />
+                <path d="M4 20h16" stroke-linecap="round" />
+              </svg>
+            </div>
+            <h3 data-i18n="features.chartsTitle">Advanced Charts</h3>
+            <p data-i18n="features.chartsBody">100+ indicators, drawing tools and multiple chart types. Built for precision.</p>
+          </article>
+          <article class="feature">
+            <div class="feature-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7">
+                <circle cx="11" cy="11" r="7" />
+                <path d="M20 20l-3.2-3.2" stroke-linecap="round" />
+              </svg>
+            </div>
+            <h3 data-i18n="features.screenerTitle">Smart Screener</h3>
+            <p data-i18n="features.screenerBody">Find the best opportunities with powerful, customizable scans.</p>
+          </article>
+          <article class="feature">
+            <div class="feature-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7">
+                <path d="M12 3c2.8 2.2 4.5 5 4.5 8.2A4.5 4.5 0 0 1 12 15.7 4.5 4.5 0 0 1 7.5 11.2C7.5 8 9.2 5.2 12 3Z" />
+                <path d="M9.5 16.5h5M10.5 19h3" stroke-linecap="round" />
+              </svg>
+            </div>
+            <h3 data-i18n="features.aiTitle">AI-Powered Analysis</h3>
+            <p data-i18n="features.aiBody">Get instant insights, key levels and market sentiment.</p>
+          </article>
+          <article class="feature">
+            <div class="feature-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7">
+                <path d="M6 9a6 6 0 0 1 12 0c0 7 3 7 3 7H3s3 0 3-7" />
+                <path d="M10 19a2 2 0 0 0 4 0" stroke-linecap="round" />
+              </svg>
+            </div>
+            <h3 data-i18n="features.alertsTitle">Real-Time Alerts</h3>
+            <p data-i18n="features.alertsBody">Never miss a move. Set alerts for price, indicators, and more.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="news" id="news">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker" data-i18n="news.kicker">MARKET PULSE</p>
+            <h2 data-i18n="news.title">What traders are watching</h2>
+          </div>
+        </div>
+        <div class="news-grid" id="news-grid">
+          <article class="news-card">
+            <span class="news-tag" data-i18n="news.tag.crypto">Crypto</span>
+            <h3 data-i18n="news.a.title">BTC holding session highs</h3>
+            <p data-i18n="news.a.body">Watch volume confirmation on Supercharts. Key levels update from live Forge market data.</p>
+            <a href="/charts/?symbol=BTCUSDT" data-i18n="news.open">Open chart →</a>
+          </article>
+          <article class="news-card">
+            <span class="news-tag" data-i18n="news.tag.alt">Alts</span>
+            <h3 data-i18n="news.b.title">ETH & SOL relative strength</h3>
+            <p data-i18n="news.b.body">Compare pairs in multi-pane layouts. Sync crosshair and interval across the desk.</p>
+            <a href="/charts/?symbol=ETHUSDT" data-i18n="news.open">Open chart →</a>
+          </article>
+          <article class="news-card">
+            <span class="news-tag" data-i18n="news.tag.flow">Flow</span>
+            <h3 data-i18n="news.c.title">BNB liquidity in focus</h3>
+            <p data-i18n="news.c.body">Scan movers, set alerts, and keep your watchlist synced with the live feed.</p>
+            <a href="/charts/?symbol=BNBUSDT" data-i18n="news.open">Open chart →</a>
+          </article>
+        </div>
+      </section>
+
+      <section class="learn" id="learn">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker" data-i18n="learn.kicker">LEARN FORGE</p>
+            <h2 data-i18n="learn.title">Get productive in minutes</h2>
+          </div>
+          <a class="btn-ghost" href="./profile.html" data-i18n="learn.profile">Your profile →</a>
+        </div>
+        <div class="learn-grid">
+          <a class="learn-card" href="/charts/">
+            <strong data-i18n="learn.1.title">Launch Supercharts</strong>
+            <span data-i18n="learn.1.body">Full drawing tools, indicators, multi-pane layouts.</span>
+          </a>
+          <a class="learn-card" href="#markets">
+            <strong data-i18n="learn.2.title">Browse live markets</strong>
+            <span data-i18n="learn.2.body">Real prices from Forge market data — tap any row to chart.</span>
+          </a>
+          <a class="learn-card" href="./profile.html">
+            <strong data-i18n="learn.3.title">Set up your profile</strong>
+            <span data-i18n="learn.3.body">Display name, theme, default symbol — saved on this device.</span>
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="tickerbar">
+      <div class="ticker-status">
+        <span class="dot"></span>
+        <span data-i18n="footer.live">Live market data</span>
+        <em data-i18n="footer.ok">All systems operational</em>
+      </div>
+      <div class="ticker-track" aria-hidden="true">
+        <div class="ticker-move" id="footer-ticker"></div>
+      </div>
+      <a class="ticker-link" href="/charts/" data-i18n="footer.explore">Explore all markets →</a>
+    </footer>
+
+    <script src="./i18n.js"></script>
+    <script src="./main.js"></script>
+  </body>
+</html>

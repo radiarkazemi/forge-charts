@@ -11,10 +11,11 @@ type Props = {
   size?: number | string;
 };
 
-/** Slanted geometric F mark paths (spine + top + mid bars). */
-const SPINE = "M12 10h14l-8 44H4z";
-const TOP = "M26 10h30l-5 14H21z";
-const MID = "M23 32h24l-5 14H18z";
+/** Official Forge mark — two forward bars traced from brand asset. */
+const TOP =
+  "M13 84.5 L12.5 52 L46 14.5 L53 11.5 L144.5 12 L116 41.5 L112 43.5 L54 43.5 L49 45.5 Z";
+const BOTTOM =
+  "M13 143.5 L12.5 103 L16.5 97 L48 63.5 L52 61.5 L81 60.5 L125.5 61 L96 88.5 L68 89.5 L64 91.5 Z";
 
 /**
  * Forge brand mark (icon only — no wordmark).
@@ -46,7 +47,7 @@ export function ForgeMark({
       className={className}
       width={size}
       height={size}
-      viewBox="0 0 64 64"
+      viewBox="0 0 158 157"
       role="img"
       aria-label={title}
       xmlns="http://www.w3.org/2000/svg"
@@ -54,17 +55,16 @@ export function ForgeMark({
       <title>{title}</title>
       {resolved === "gradient" ? (
         <defs>
-          <linearGradient id={gradId} x1="8" y1="58" x2="54" y2="6" gradientUnits="userSpaceOnUse">
+          <linearGradient id={gradId} x1="12" y1="144" x2="144" y2="12" gradientUnits="userSpaceOnUse">
             <stop offset="0%" stopColor="#1638ff" />
             <stop offset="45%" stopColor="#2f7bff" />
             <stop offset="100%" stopColor="#5ce1ff" />
           </linearGradient>
         </defs>
       ) : null}
-      <g transform="skewX(-12) translate(5 0)" fill={fill}>
-        <path d={SPINE} />
+      <g fill={fill}>
         <path d={TOP} />
-        <path d={MID} />
+        <path d={BOTTOM} />
       </g>
     </svg>
   );
