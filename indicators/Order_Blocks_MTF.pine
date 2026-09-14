@@ -148,7 +148,7 @@ f_add(int k, float top, float bot, int leftBi, string tag) =>
             label lab = label.new(leftBi, k > 0 ? top : bot, txt, xloc=xloc.bar_index, yloc=yloc.price, style=k > 0 ? label.style_label_down : label.style_label_up, color=color.new(bordC, 75), textcolor=bordC, size=size.tiny)
             array.push(lb, lab)
         else
-            array.push(lb, label(na))
+            array.push(lb, na)
         f_trim(k, tag)
 
 f_handle(string tag, bool bullSig, bool bearSig, float hh, float ll, int leftT) =>
