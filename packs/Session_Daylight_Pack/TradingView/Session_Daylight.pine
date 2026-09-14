@@ -1,7 +1,7 @@
 //@version=6
 indicator("Session Daylight Box", shorttitle="Sessions", overlay=true)
 
-// Tiny corner box only — no chart bands.
+// Compact trader HUD — corner panel only (no chart bands).
 
 tz = input.string("America/New_York", "Timezone",
      options=["America/New_York", "Europe/London", "Asia/Tokyo", "UTC", "Exchange"],
@@ -11,11 +11,13 @@ useExchange = tz == "Exchange"
 asiaSess = input.session("1900-0000", "Asia", group="Hours")
 lonSess  = input.session("0300-1200", "London", group="Hours")
 nySess   = input.session("0800-1700", "New York", group="Hours")
-dayBegin = input.int(0, "Day begin hour", minval=0, maxval=23, group="Hours")
-dayEnd   = input.int(23, "Day end hour", minval=0, maxval=23, group="Hours")
+dayOpen  = input.int(0, "Day open hour", minval=0, maxval=23, group="Hours")
+dayClose = input.int(23, "Day close hour", minval=0, maxval=23, group="Hours")
 
-boxPos = input.string("Bottom right", "Box corner",
-     options=["Bottom right", "Bottom left", "Top right", "Top left"], group="Look")
+boxPos = input.string("Bottom right", "Panel corner",
+     options=["Bottom right", "Bottom left", "Top right", "Top left"], group="Style")
+showProg = input.bool(true, "Session progress", group="Style")
+compact  = input.bool(false, "Compact mode", group="Style")
 
 f_tz() =>
     useExchange ? syminfo.timezone : tz
@@ -23,22 +25,73 @@ f_tz() =>
 f_in(sess) =>
     not na(time(timeframe.period, sess, f_tz()))
 
+f_hhmm(v) =>
+    (v < 10 ? "0" : "") + str.tostring(v)
+
+// "1900-0000" → "19:00–00:00"
+f_win(sess) =>
+    str.substring(sess, 0, 2) + ":" + str.substring(sess, 2, 4) + "–" + str.substring(sess, 5, 7) + ":" + str.substring(sess, 7, 9)
+
 inAsia   = f_in(asiaSess)
 inLondon = f_in(lonSess)
 inNY     = f_in(nySess)
 inOvl    = inLondon and inNY
+isLive   = inAsia or inLondon or inNY
 
 sessName =
-     inOvl ? "LN/NY" :
+     inOvl ? "LONDON × NEW YORK" :
      inNY ? "NEW YORK" :
      inLondon ? "LONDON" :
-     inAsia ? "ASIA" : "OFF"
+     inAsia ? "ASIA" : "OFF SESSION"
+
+sessWin =
+     inOvl ? f_win(lonSess) + "  ∩  " + f_win(nySess) :
+     inNY ? f_win(nySess) :
+     inLondon ? f_win(lonSess) :
+     inAsia ? f_win(asiaSess) : "awaiting open"
 
 accent =
-     inOvl ? #A78BFA :
-     inNY ? #46C39B :
-     inLondon ? #E0B44E :
-     inAsia ? #5B8DEF : #9AA6B5
+     inOvl ? #C4B5FD :
+     inNY ? #34D399 :
+     inLondon ? #FBBF24 :
+     inAsia ? #38BDF8 : #64748B
+
+liveCol = isLive ? #22C55E : #64748B
+
+nowMin = hour(time, f_tz()) * 60 + minute(time, f_tz())
+
+f_start(sess) =>
+    int(str.tonumber(str.substring(sess, 0, 2))) * 60 + int(str.tonumber(str.substring(sess, 2, 4)))
+
+f_end(sess) =>
+    int(str.tonumber(str.substring(sess, 5, 7))) * 60 + int(str.tonumber(str.substring(sess, 7, 9)))
+
+f_prog(sess) =>
+    int a = f_start(sess)
+    int b = f_end(sess)
+    float p = 0.0
+    if a == b
+        p := 0.0
+    else if a < b
+        p := math.max(0.0, math.min(1.0, (nowMin - a) / float(math.max(1, b - a))))
+    else
+        int span = (1440 - a) + b
+        int cur = nowMin >= a ? (nowMin - a) : ((1440 - a) + nowMin)
+        p := math.max(0.0, math.min(1.0, cur / float(math.max(1, span))))
+    p
+
+prog =
+     inOvl ? math.max(f_prog(lonSess), f_prog(nySess)) :
+     inNY ? f_prog(nySess) :
+     inLondon ? f_prog(lonSess) :
+     inAsia ? f_prog(asiaSess) : 0.0
+
+f_meter(p) =>
+    int n = int(math.round(p * 10))
+    string out = ""
+    for i = 1 to 10
+        out += i <= n ? "█" : "·"
+    out
 
 pos =
      boxPos == "Bottom left" ? position.bottom_left :
@@ -46,27 +99,60 @@ pos =
      boxPos == "Top left" ? position.top_left :
      position.bottom_right
 
-var string lastPos = na
-var table box = na
+rowsNeeded = compact ? (showProg ? 4 : 3) : (showProg ? 6 : 5)
+
+var string lastKey = na
+var table hud = na
+
+cBg   = #0A0F16
+cHead = #121925
+cLine = #1E2A3A
+cMute = #7F8FA3
+cText = #F8FAFC
+cSoft = #CBD5E1
 
 if barstate.islast
-    if na(box) or lastPos != boxPos
-        if not na(box)
-            table.delete(box)
-        box := table.new(pos, 2, 4, bgcolor=color.new(#0B0E12, 12), border_width=1, border_color=color.new(#2A3340, 35), frame_width=0)
-        lastPos := boxPos
+    string key = boxPos + str.tostring(rowsNeeded)
+    if na(hud) or lastKey != key
+        if not na(hud)
+            table.delete(hud)
+        hud := table.new(pos, 2, rowsNeeded, bgcolor=color.new(cBg, 4), border_width=1, border_color=color.new(accent, 45), frame_width=1, frame_color=color.new(cLine, 10))
+        lastKey := key
+    else
+        table.set_border_color(hud, color.new(accent, 45))
 
-    clock = str.format_time(time, "HH:mm", f_tz())
-    dayB = (dayBegin < 10 ? "0" : "") + str.tostring(dayBegin) + ":00"
-    dayE = (dayEnd < 10 ? "0" : "") + str.tostring(dayEnd) + ":59"
-    muted = #9AA6B5
-    bright = #E8EEF5
+    clock = f_hhmm(hour(time, f_tz())) + ":" + f_hhmm(minute(time, f_tz()))
+    live  = isLive ? "● LIVE" : "○ IDLE"
+    dayB  = f_hhmm(dayOpen) + ":00"
+    dayE  = f_hhmm(dayClose) + ":59"
+    pct   = str.tostring(math.round(prog * 100)) + "%"
 
-    table.cell(box, 0, 0, "SESSION", text_color=muted, text_size=size.tiny, text_halign=text.align_left)
-    table.cell(box, 1, 0, sessName, text_color=accent, text_size=size.small, text_halign=text.align_right)
-    table.cell(box, 0, 1, "CLOCK", text_color=muted, text_size=size.tiny, text_halign=text.align_left)
-    table.cell(box, 1, 1, clock, text_color=bright, text_size=size.small, text_halign=text.align_right)
-    table.cell(box, 0, 2, "DAY IN", text_color=muted, text_size=size.tiny, text_halign=text.align_left)
-    table.cell(box, 1, 2, dayB, text_color=bright, text_size=size.small, text_halign=text.align_right)
-    table.cell(box, 0, 3, "DAY OUT", text_color=muted, text_size=size.tiny, text_halign=text.align_left)
-    table.cell(box, 1, 3, dayE, text_color=bright, text_size=size.small, text_halign=text.align_right)
+    // Header
+    table.cell(hud, 0, 0, "  SESSIONS", text_color=cMute, text_size=size.tiny, text_halign=text.align_left, bgcolor=cHead)
+    table.cell(hud, 1, 0, live + "  ", text_color=liveCol, text_size=size.tiny, text_halign=text.align_right, bgcolor=cHead)
+
+    // Session + clock
+    table.cell(hud, 0, 1, "  " + sessName, text_color=accent, text_size=size.normal, text_halign=text.align_left)
+    table.cell(hud, 1, 1, clock + "  ", text_color=cText, text_size=size.normal, text_halign=text.align_right)
+
+    if compact
+        // Window + optional progress on fewer rows
+        table.cell(hud, 0, 2, "  " + sessWin, text_color=cSoft, text_size=size.tiny, text_halign=text.align_left)
+        table.cell(hud, 1, 2, dayB + " → " + dayE + "  ", text_color=cMute, text_size=size.tiny, text_halign=text.align_right)
+        if showProg
+            table.cell(hud, 0, 3, "  " + (isLive ? f_meter(prog) : "··········"), text_color=isLive ? accent : cMute, text_size=size.tiny, text_halign=text.align_left)
+            table.cell(hud, 1, 3, (isLive ? pct : "—") + "  ", text_color=cMute, text_size=size.tiny, text_halign=text.align_right)
+    else
+        table.cell(hud, 0, 2, "  WINDOW", text_color=cMute, text_size=size.tiny, text_halign=text.align_left)
+        table.cell(hud, 1, 2, sessWin + "  ", text_color=cSoft, text_size=size.small, text_halign=text.align_right)
+
+        int r = 3
+        if showProg
+            table.cell(hud, 0, r, "  " + (isLive ? f_meter(prog) : "··········"), text_color=isLive ? accent : cMute, text_size=size.tiny, text_halign=text.align_left)
+            table.cell(hud, 1, r, (isLive ? pct : "—") + "  ", text_color=cMute, text_size=size.tiny, text_halign=text.align_right)
+            r += 1
+
+        table.cell(hud, 0, r, "  DAY OPEN", text_color=cMute, text_size=size.tiny, text_halign=text.align_left)
+        table.cell(hud, 1, r, dayB + "  ", text_color=cText, text_size=size.small, text_halign=text.align_right)
+        table.cell(hud, 0, r + 1, "  DAY CLOSE", text_color=cMute, text_size=size.tiny, text_halign=text.align_left)
+        table.cell(hud, 1, r + 1, dayE + "  ", text_color=cText, text_size=size.small, text_halign=text.align_right)

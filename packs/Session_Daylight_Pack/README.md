@@ -1,11 +1,8 @@
 # Session Daylight Box
 
-Small **corner status box** only — no big session bands on the chart.
+Compact **trader-style corner HUD** — no big session bands on the chart.
 
-Shows:
-- current session
-- clock
-- day begin / day end
+Shows LIVE/IDLE, active session, clock, window hours, progress meter, and day open/close.
 
 Does not trade or draw over price.
 
@@ -20,4 +17,4 @@ Does not trade or draw over price.
 **TradingView:** paste Pine → Add to chart  
 **MT5:** compile `Session_Daylight.mq5` → attach  
 
-Default box sits **bottom-right**.
+Default panel sits **bottom-right**. Enable Compact mode for a thinner strip.

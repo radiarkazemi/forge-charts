@@ -1,30 +1,36 @@
 //+------------------------------------------------------------------+
 //| Session_Daylight.mq5                                             |
-//| Tiny corner session/day box — no chart-wide bands                |
+//| Compact trader session HUD — corner panel only                   |
 //+------------------------------------------------------------------+
 #property copyright "Forge Charts"
-#property version   "1.10"
+#property version   "1.30"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
 
-input string InpPrefix     = "SDL_";
-input int    InpGmtOffset  = 0;     // Hours vs server time
-input int    InpAsiaStart  = 19;
-input int    InpAsiaEnd    = 0;
-input int    InpLonStart   = 3;
-input int    InpLonEnd     = 12;
-input int    InpNyStart    = 8;
-input int    InpNyEnd      = 17;
-input int    InpDayBegin   = 0;
-input int    InpDayEnd     = 23;
+input string InpPrefix       = "SDL_";
+input int    InpGmtOffset    = 0;              // Hours vs server time
+input int    InpAsiaStart    = 19;
+input int    InpAsiaEnd      = 0;
+input int    InpLonStart     = 3;
+input int    InpLonEnd       = 12;
+input int    InpNyStart      = 8;
+input int    InpNyEnd        = 17;
+input int    InpDayBegin     = 0;
+input int    InpDayEnd       = 23;
+input bool   InpShowProgress = true;
+input bool   InpCompact      = false;
 input ENUM_BASE_CORNER InpCorner = CORNER_RIGHT_LOWER;
-input int    InpX          = 12;    // Distance from corner
-input int    InpY          = 18;
-input color  InpBg         = C'11,14,18';
-input color  InpBorder     = C'42,51,64';
-input color  InpMuted      = C'154,166,181';
-input color  InpText       = C'232,238,245';
+input int    InpX            = 14;
+input int    InpY            = 20;
+input color  InpBg           = C'10,15,22';
+input color  InpHead         = C'18,25,37';
+input color  InpBorder       = C'30,42,58';
+input color  InpMuted        = C'127,143,163';
+input color  InpText         = C'248,250,252';
+input color  InpSoft         = C'203,213,225';
+input color  InpLive         = C'34,197,94';
+input color  InpIdle         = C'100,116,139';
 
 string g_pfx;
 
@@ -51,38 +57,132 @@ bool InWindow(const int h, const int a, const int b)
    return (h >= a || h < b);
 }
 
-string SessName(const datetime t)
+string Two(const int v)
+{
+   return (v < 10 ? "0" : "") + IntegerToString(v);
+}
+
+string WinTxt(const int a, const int b)
+{
+   return Two(a) + ":00-" + Two(b) + ":00";
+}
+
+int KindAt(const datetime t)
 {
    const int h = HourAt(t);
    const bool lon = InWindow(h, InpLonStart, InpLonEnd);
    const bool ny  = InWindow(h, InpNyStart, InpNyEnd);
    if(lon && ny)
-      return "LN/NY";
+      return 4;
    if(ny)
-      return "NEW YORK";
+      return 3;
    if(lon)
-      return "LONDON";
+      return 2;
    if(InWindow(h, InpAsiaStart, InpAsiaEnd))
+      return 1;
+   return 0;
+}
+
+string SessName(const int kind)
+{
+   if(kind == 4)
+      return "LONDON x NEW YORK";
+   if(kind == 3)
+      return "NEW YORK";
+   if(kind == 2)
+      return "LONDON";
+   if(kind == 1)
       return "ASIA";
-   return "OFF";
+   return "OFF SESSION";
 }
 
-color SessColor(const string s)
+string SessWin(const int kind)
 {
-   if(s == "LN/NY")
-      return C'167,139,250';
-   if(s == "NEW YORK")
-      return C'70,195,155';
-   if(s == "LONDON")
-      return C'224,180,78';
-   if(s == "ASIA")
-      return C'91,141,239';
-   return InpMuted;
+   if(kind == 4)
+      return WinTxt(InpLonStart, InpLonEnd) + " / " + WinTxt(InpNyStart, InpNyEnd);
+   if(kind == 3)
+      return WinTxt(InpNyStart, InpNyEnd);
+   if(kind == 2)
+      return WinTxt(InpLonStart, InpLonEnd);
+   if(kind == 1)
+      return WinTxt(InpAsiaStart, InpAsiaEnd);
+   return "awaiting open";
 }
 
-string Two(const int v)
+color SessColor(const int kind)
 {
-   return (v < 10 ? "0" : "") + IntegerToString(v);
+   if(kind == 4)
+      return C'196,181,253';
+   if(kind == 3)
+      return C'52,211,153';
+   if(kind == 2)
+      return C'251,191,36';
+   if(kind == 1)
+      return C'56,189,248';
+   return InpIdle;
+}
+
+double Progress(const datetime t, const int a, const int b)
+{
+   const int nowMin = HourAt(t) * 60 + MinuteAt(t);
+   const int sa = a * 60;
+   const int sb = b * 60;
+   if(sa == sb)
+      return 0.0;
+   if(sa < sb)
+   {
+      const double p = (double)(nowMin - sa) / (double)MathMax(1, sb - sa);
+      return MathMax(0.0, MathMin(1.0, p));
+   }
+   const int span = (1440 - sa) + sb;
+   const int cur = (nowMin >= sa) ? (nowMin - sa) : ((1440 - sa) + nowMin);
+   return MathMax(0.0, MathMin(1.0, (double)cur / (double)MathMax(1, span)));
+}
+
+string Meter(const double p, const bool live)
+{
+   if(!live)
+      return "..........";
+   const int n = (int)MathRound(p * 10.0);
+   string out = "";
+   for(int i = 1; i <= 10; i++)
+      out += (i <= n ? "#" : ".");
+   return out;
+}
+
+void PutLabel(const string name, const int x, const int y, const string text,
+              const color clr, const int size, const ENUM_ANCHOR_POINT anchor)
+{
+   if(ObjectFind(0, name) < 0)
+      ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, name, OBJPROP_CORNER, InpCorner);
+   ObjectSetInteger(0, name, OBJPROP_ANCHOR, anchor);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+   ObjectSetString(0, name, OBJPROP_FONT, "Consolas");
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, size);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+   ObjectSetString(0, name, OBJPROP_TEXT, text);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+}
+
+void PutRect(const string name, const int x, const int y, const int w, const int h, const color bg, const color border)
+{
+   if(ObjectFind(0, name) < 0)
+      ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, name, OBJPROP_CORNER, InpCorner);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, w);
+   ObjectSetInteger(0, name, OBJPROP_YSIZE, h);
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);
+   ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, border);
+   ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
 }
 
 void DrawBox()
@@ -90,67 +190,69 @@ void DrawBox()
    ObjectsDeleteAll(0, g_pfx);
 
    const datetime now = TimeCurrent();
-   const string sess = SessName(now);
+   const int kind = KindAt(now);
+   const bool live = (kind != 0);
+   const string sess = SessName(kind);
+   const string win = SessWin(kind);
+   const color accent = SessColor(kind);
+   const color liveCol = live ? InpLive : InpIdle;
    const string clock = Two(HourAt(now)) + ":" + Two(MinuteAt(now));
-   const string dayIn = Two(InpDayBegin) + ":00";
-   const string dayOut = Two(InpDayEnd) + ":59";
+   const string liveTxt = live ? "LIVE" : "IDLE";
 
-   const int w = 150;
-   const int h = 82;
-   const string bg = g_pfx + "BG";
+   double prog = 0.0;
+   if(kind == 4)
+      prog = MathMax(Progress(now, InpLonStart, InpLonEnd), Progress(now, InpNyStart, InpNyEnd));
+   else if(kind == 3)
+      prog = Progress(now, InpNyStart, InpNyEnd);
+   else if(kind == 2)
+      prog = Progress(now, InpLonStart, InpLonEnd);
+   else if(kind == 1)
+      prog = Progress(now, InpAsiaStart, InpAsiaEnd);
 
-   ObjectCreate(0, bg, OBJ_RECTANGLE_LABEL, 0, 0, 0);
-   ObjectSetInteger(0, bg, OBJPROP_CORNER, InpCorner);
-   ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, InpX);
-   ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, InpY);
-   ObjectSetInteger(0, bg, OBJPROP_XSIZE, w);
-   ObjectSetInteger(0, bg, OBJPROP_YSIZE, h);
-   ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, InpBg);
-   ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
-   ObjectSetInteger(0, bg, OBJPROP_COLOR, InpBorder);
-   ObjectSetInteger(0, bg, OBJPROP_WIDTH, 1);
-   ObjectSetInteger(0, bg, OBJPROP_BACK, false);
-   ObjectSetInteger(0, bg, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, bg, OBJPROP_HIDDEN, true);
+   const int w = InpCompact ? 210 : 236;
+   int h = InpCompact ? 78 : 108;
+   if(InpShowProgress)
+      h += 18;
 
-   string keys[4];
-   string vals[4];
-   color  cols[4];
-   keys[0] = "SESSION"; vals[0] = sess;   cols[0] = SessColor(sess);
-   keys[1] = "CLOCK";   vals[1] = clock;  cols[1] = InpText;
-   keys[2] = "DAY IN";  vals[2] = dayIn;  cols[2] = InpText;
-   keys[3] = "DAY OUT"; vals[3] = dayOut; cols[3] = InpText;
+   PutRect(g_pfx + "BG", InpX, InpY, w, h, InpBg, accent);
+   PutRect(g_pfx + "STRIPE", InpX, InpY, 4, h, accent, accent);
+   PutRect(g_pfx + "HEAD", InpX + 4, InpY, w - 4, 22, InpHead, InpHead);
 
-   for(int i = 0; i < 4; i++)
+   PutLabel(g_pfx + "H1", InpX + 14, InpY + 5, "SESSIONS", InpMuted, 8, ANCHOR_LEFT_UPPER);
+   PutLabel(g_pfx + "H2", InpX + w - 10, InpY + 5, liveTxt, liveCol, 8, ANCHOR_RIGHT_UPPER);
+
+   PutLabel(g_pfx + "S1", InpX + 14, InpY + 28, sess, accent, 11, ANCHOR_LEFT_UPPER);
+   PutLabel(g_pfx + "S2", InpX + w - 10, InpY + 28, clock, InpText, 11, ANCHOR_RIGHT_UPPER);
+
+   int y = InpY + 50;
+   if(InpCompact)
    {
-      const string kn = g_pfx + "K" + IntegerToString(i);
-      const string vn = g_pfx + "V" + IntegerToString(i);
-      const int yy = InpY + 10 + i * 17;
-
-      ObjectCreate(0, kn, OBJ_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, kn, OBJPROP_CORNER, InpCorner);
-      ObjectSetInteger(0, kn, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-      ObjectSetInteger(0, kn, OBJPROP_XDISTANCE, InpX + 10);
-      ObjectSetInteger(0, kn, OBJPROP_YDISTANCE, yy);
-      ObjectSetString(0, kn, OBJPROP_FONT, "Consolas");
-      ObjectSetInteger(0, kn, OBJPROP_FONTSIZE, 8);
-      ObjectSetInteger(0, kn, OBJPROP_COLOR, InpMuted);
-      ObjectSetString(0, kn, OBJPROP_TEXT, keys[i]);
-      ObjectSetInteger(0, kn, OBJPROP_SELECTABLE, false);
-      ObjectSetInteger(0, kn, OBJPROP_HIDDEN, true);
-
-      ObjectCreate(0, vn, OBJ_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, vn, OBJPROP_CORNER, InpCorner);
-      ObjectSetInteger(0, vn, OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
-      ObjectSetInteger(0, vn, OBJPROP_XDISTANCE, InpX + w - 10);
-      ObjectSetInteger(0, vn, OBJPROP_YDISTANCE, yy);
-      ObjectSetString(0, vn, OBJPROP_FONT, "Consolas");
-      ObjectSetInteger(0, vn, OBJPROP_FONTSIZE, 9);
-      ObjectSetInteger(0, vn, OBJPROP_COLOR, cols[i]);
-      ObjectSetString(0, vn, OBJPROP_TEXT, vals[i]);
-      ObjectSetInteger(0, vn, OBJPROP_SELECTABLE, false);
-      ObjectSetInteger(0, vn, OBJPROP_HIDDEN, true);
+      PutLabel(g_pfx + "W1", InpX + 14, y, win, InpSoft, 8, ANCHOR_LEFT_UPPER);
+      PutLabel(g_pfx + "W2", InpX + w - 10, y,
+               Two(InpDayBegin) + ":00->" + Two(InpDayEnd) + ":59", InpMuted, 8, ANCHOR_RIGHT_UPPER);
+      y += 18;
    }
+   else
+   {
+      PutLabel(g_pfx + "W1", InpX + 14, y, "WINDOW", InpMuted, 8, ANCHOR_LEFT_UPPER);
+      PutLabel(g_pfx + "W2", InpX + w - 10, y, win, InpSoft, 9, ANCHOR_RIGHT_UPPER);
+      y += 20;
+   }
+
+   if(InpShowProgress)
+   {
+      PutLabel(g_pfx + "P1", InpX + 14, y, Meter(prog, live), live ? accent : InpMuted, 8, ANCHOR_LEFT_UPPER);
+      PutLabel(g_pfx + "P2", InpX + w - 10, y,
+               live ? IntegerToString((int)MathRound(prog * 100.0)) + "%" : "-", InpMuted, 8, ANCHOR_RIGHT_UPPER);
+      y += 18;
+   }
+
+   if(!InpCompact)
+   {
+      PutLabel(g_pfx + "D1", InpX + 14, y, "DAY OPEN " + Two(InpDayBegin) + ":00", InpMuted, 8, ANCHOR_LEFT_UPPER);
+      PutLabel(g_pfx + "D2", InpX + w - 10, y, "CLOSE " + Two(InpDayEnd) + ":59", InpMuted, 8, ANCHOR_RIGHT_UPPER);
+   }
+
    ChartRedraw(0);
 }
 
@@ -158,7 +260,7 @@ int OnInit()
 {
    g_pfx = InpPrefix;
    IndicatorSetString(INDICATOR_SHORTNAME, "Session Box");
-   EventSetTimer(15);
+   EventSetTimer(10);
    DrawBox();
    return INIT_SUCCEEDED;
 }
