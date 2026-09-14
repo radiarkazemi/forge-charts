@@ -98,22 +98,27 @@ f_detect() =>
     int leftT = time[blockLen]
     [bullSig, bearSig, hh, ll, leftT]
 
+f_drop_at(int i) =>
+    box.delete(array.get(bx, i))
+    if not na(array.get(lb, i))
+        label.delete(array.get(lb, i))
+    box _b = array.remove(bx, i)
+    label _l = array.remove(lb, i)
+    int _k = array.remove(kind, i)
+    int _s = array.remove(state, i)
+    float _t = array.remove(topA, i)
+    float _o = array.remove(botA, i)
+    string _r = array.remove(srcA, i)
+    int _e = array.remove(leftA, i)
+    0
+
 f_trim(int wantKind, string tag) =>
     int n = 0
     for i = array.size(kind) - 1 to 0
         if array.get(kind, i) == wantKind and array.get(srcA, i) == tag
             n += 1
             if n > maxObs
-                box.delete(array.get(bx, i))
-                label.delete(array.get(lb, i))
-                array.remove(bx, i)
-                array.remove(lb, i)
-                array.remove(kind, i)
-                array.remove(state, i)
-                array.remove(topA, i)
-                array.remove(botA, i)
-                array.remove(srcA, i)
-                array.remove(leftA, i)
+                f_drop_at(i)
 
 f_bi_from_time(int tStamp) =>
     int bi = bar_index
@@ -161,32 +166,19 @@ f_handle(string tag, bool bullSig, bool bearSig, float hh, float ll, int leftT) 
 
 f_mitigate() =>
     for i = array.size(bx) - 1 to 0
-        if array.get(state, i) != 0
-            continue
-        int k = array.get(kind, i)
-        float top = array.get(topA, i)
-        float bot = array.get(botA, i)
-        bool hit = k > 0 ? (mitClose ? close < bot : low < bot) : (mitClose ? close > top : high > top)
-        if hit
-            if keepBrk
+        if array.get(state, i) == 0
+            int k = array.get(kind, i)
+            float top = array.get(topA, i)
+            float bot = array.get(botA, i)
+            bool hit = k > 0 ? (mitClose ? close < bot : low < bot) : (mitClose ? close > top : high > top)
+            if hit and keepBrk
                 array.set(state, i, 1)
                 box.set_bgcolor(array.get(bx, i), k > 0 ? brkBullF : brkBearF)
                 box.set_border_color(array.get(bx, i), color.new(k > 0 ? bullBord : bearBord, 45))
-                if showLbl
-                    label lab = array.get(lb, i)
-                    if not na(lab)
-                        label.set_text(lab, (k > 0 ? "BULL BRK" : "BEAR BRK") + " · " + array.get(srcA, i))
-            else
-                box.delete(array.get(bx, i))
-                label.delete(array.get(lb, i))
-                array.remove(bx, i)
-                array.remove(lb, i)
-                array.remove(kind, i)
-                array.remove(state, i)
-                array.remove(topA, i)
-                array.remove(botA, i)
-                array.remove(srcA, i)
-                array.remove(leftA, i)
+                if showLbl and not na(array.get(lb, i))
+                    label.set_text(array.get(lb, i), (k > 0 ? "BULL BRK" : "BEAR BRK") + " · " + array.get(srcA, i))
+            if hit and not keepBrk
+                f_drop_at(i)
 
 f_extend() =>
     if array.size(bx) > 0
