@@ -1,9 +1,9 @@
-(function () {
+(() => {
   "use strict";
 
-  var CHARTS = "/charts/";
-  var SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT"];
-  var NAMES = {
+  const CHARTS = "/charts/";
+  const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT"];
+  const NAMES = {
     BTCUSDT: "Bitcoin",
     ETHUSDT: "Ethereum",
     SOLUSDT: "Solana",
@@ -11,16 +11,13 @@
     XRPUSDT: "XRP",
     DOGEUSDT: "Dogecoin",
   };
+  const PROFILE_KEY = "forge.userProfile";
 
   function fmtPrice(n) {
     if (!Number.isFinite(n)) return "—";
-    var abs = Math.abs(n);
-    if (abs >= 1000) {
-      return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    }
-    if (abs >= 1) {
-      return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
-    }
+    const abs = Math.abs(n);
+    if (abs >= 1000) return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (abs >= 1) return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
     return n.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 });
   }
 
@@ -39,8 +36,7 @@
 
   function pctText(pct) {
     if (!Number.isFinite(pct)) return "—";
-    var sign = pct > 0 ? "+" : "";
-    return sign + pct.toFixed(2) + "%";
+    return (pct > 0 ? "+" : "") + pct.toFixed(2) + "%";
   }
 
   function chartUrl(symbol) {
@@ -49,48 +45,47 @@
 
   function sparkPath(closes, w, h) {
     if (!closes.length) return "";
-    var min = Math.min.apply(null, closes);
-    var max = Math.max.apply(null, closes);
-    var span = max - min || 1;
+    const min = Math.min(...closes);
+    const max = Math.max(...closes);
+    const span = max - min || 1;
     return closes
-      .map(function (c, i) {
-        var x = (i / Math.max(closes.length - 1, 1)) * (w - 4) + 2;
-        var y = h - ((c - min) / span) * (h - 6) - 3;
+      .map((c, i) => {
+        const x = (i / Math.max(closes.length - 1, 1)) * (w - 4) + 2;
+        const y = h - ((c - min) / span) * (h - 6) - 3;
         return (i === 0 ? "M" : "L") + x.toFixed(1) + " " + y.toFixed(1);
       })
       .join(" ");
   }
 
   async function fetchQuote(symbol) {
-    var res = await fetch("/crypto-api/prices/" + encodeURIComponent(symbol) + "/?timeframe=1d", {
+    const res = await fetch("/crypto-api/prices/" + encodeURIComponent(symbol) + "/?timeframe=1d", {
       headers: { Accept: "application/json" },
     });
     if (!res.ok) throw new Error("quote " + res.status);
-    var raw = await res.json();
-    var price = Number(raw.price);
-    var open = Number(raw.open);
-    var changePct = open ? ((price - open) / open) * 100 : 0;
+    const raw = await res.json();
+    const price = Number(raw.price);
+    const open = Number(raw.open);
     return {
-      symbol: symbol,
-      price: price,
-      open: open,
+      symbol,
+      price,
+      open,
       high: Number(raw.high),
       low: Number(raw.low),
       volume: Number(raw.volume),
-      changePct: changePct,
+      changePct: open ? ((price - open) / open) * 100 : 0,
     };
   }
 
-  async function fetchHistory(symbol, limit) {
-    var url =
+  async function fetchHistory(symbol, limit = 48) {
+    const url =
       "/crypto-chart/history?symbol=" +
       encodeURIComponent(symbol.toLowerCase()) +
       "&timeframe=1h&limit=" +
-      (limit || 48) +
+      limit +
       "&group=1";
-    var res = await fetch(url, { headers: { Accept: "application/json" } });
+    const res = await fetch(url, { headers: { Accept: "application/json" } });
     if (!res.ok) throw new Error("history " + res.status);
-    var raw = await res.json();
+    const raw = await res.json();
     if (Array.isArray(raw)) return raw;
     if (raw && Array.isArray(raw.bars)) return raw.bars;
     if (raw && Array.isArray(raw.data)) return raw.data;
@@ -101,36 +96,36 @@
     if (!el) return;
     el.textContent = pctText(pct);
     el.classList.remove("up", "down");
-    var cls = pctClass(pct);
+    const cls = pctClass(pct);
     if (cls) el.classList.add(cls);
   }
 
   function applyQuote(q) {
-    document.querySelectorAll('.mini-card[data-symbol="' + q.symbol + '"]').forEach(function (card) {
-      var price = card.querySelector(".mini-price, [data-price]");
-      var chg = card.querySelector("[data-chg], .chg");
+    document.querySelectorAll('.mini-card[data-symbol="' + q.symbol + '"]').forEach((card) => {
+      const price = card.querySelector(".mini-price, [data-price]");
+      const chg = card.querySelector("[data-chg], .chg");
       if (price) price.textContent = "$" + fmtPrice(q.price);
       if (chg) setChg(chg, q.changePct);
     });
 
-    document.querySelectorAll('.pv-row[data-symbol="' + q.symbol + '"]').forEach(function (row) {
-      var b = row.querySelector("b[data-price], b");
-      var i = row.querySelector("i[data-chg], i");
+    document.querySelectorAll('.pv-row[data-symbol="' + q.symbol + '"]').forEach((row) => {
+      const b = row.querySelector("b[data-price], b");
+      const i = row.querySelector("i[data-chg], i");
       if (b) b.textContent = fmtPrice(q.price);
       if (i) setChg(i, q.changePct);
     });
 
     if (q.symbol === "BTCUSDT") {
-      document.querySelectorAll("[data-preview-price]").forEach(function (el) {
+      document.querySelectorAll("[data-preview-price]").forEach((el) => {
         el.textContent = "$" + fmtPrice(q.price);
       });
-      document.querySelectorAll("[data-preview-chg]").forEach(function (el) {
+      document.querySelectorAll("[data-preview-chg]").forEach((el) => {
         setChg(el, q.changePct);
       });
     }
 
-    document.querySelectorAll('#markets-body tr[data-symbol="' + q.symbol + '"]').forEach(function (row) {
-      var cells = row.querySelectorAll("td");
+    document.querySelectorAll('#markets-body tr[data-symbol="' + q.symbol + '"]').forEach((row) => {
+      const cells = row.querySelectorAll("td");
       if (cells.length < 7) return;
       cells[1].textContent = "$" + fmtPrice(q.price);
       setChg(cells[2], q.changePct);
@@ -139,30 +134,30 @@
       cells[5].textContent = fmtVol(q.volume);
     });
 
-    document.querySelectorAll('.ft-item[data-symbol="' + q.symbol + '"]').forEach(function (item) {
-      var price = item.querySelector(".ft-price");
-      var chg = item.querySelector(".ft-chg");
+    document.querySelectorAll('.ft-item[data-symbol="' + q.symbol + '"]').forEach((item) => {
+      const price = item.querySelector(".ft-price");
+      const chg = item.querySelector(".ft-chg");
       if (price) price.textContent = "$" + fmtPrice(q.price);
       if (chg) setChg(chg, q.changePct);
     });
 
-    document.querySelectorAll('[data-mover="' + q.symbol + '"]').forEach(function (mover) {
-      var i = mover.querySelector("i[data-chg], i");
+    document.querySelectorAll('[data-mover="' + q.symbol + '"]').forEach((mover) => {
+      const i = mover.querySelector("i[data-chg], i");
       if (i) setChg(i, q.changePct);
-      var bar = mover.querySelector(".bar");
+      const bar = mover.querySelector(".bar");
       if (bar) {
-        var w = Math.min(100, Math.max(12, Math.abs(q.changePct) * 12));
+        const w = Math.min(100, Math.max(12, Math.abs(q.changePct) * 12));
         bar.style.setProperty("--w", w.toFixed(0) + "%");
       }
     });
   }
 
   function buildMarketsTable() {
-    var body = document.getElementById("markets-body");
+    const body = document.getElementById("markets-body");
     if (!body) return;
-    body.innerHTML = SYMBOLS.map(function (sym) {
-      var short = sym.replace("USDT", "");
-      var coin = short.toLowerCase();
+    body.innerHTML = SYMBOLS.map((sym) => {
+      const short = sym.replace("USDT", "");
+      const coin = short.toLowerCase();
       return (
         '<tr data-symbol="' +
         sym +
@@ -190,10 +185,10 @@
   }
 
   function buildFooterTicker() {
-    var el = document.getElementById("footer-ticker");
+    const el = document.getElementById("footer-ticker");
     if (!el) return;
-    var once = SYMBOLS.map(function (sym) {
-      var short = sym.replace("USDT", "");
+    const once = SYMBOLS.map((sym) => {
+      const short = sym.replace("USDT", "");
       return (
         '<a class="ft-item" href="' +
         chartUrl(sym) +
@@ -209,24 +204,17 @@
 
   async function renderSparks() {
     await Promise.all(
-      SYMBOLS.slice(0, 4).map(async function (sym) {
+      SYMBOLS.slice(0, 4).map(async (sym) => {
         try {
-          var bars = await fetchHistory(sym, 24);
-          var closes = bars
-            .map(function (b) {
-              return Number(b[4]);
-            })
-            .filter(Number.isFinite);
+          const bars = await fetchHistory(sym, 24);
+          const closes = bars.map((b) => Number(b[4])).filter(Number.isFinite);
           if (!closes.length) return;
-          var path = sparkPath(closes, 72, 24);
-          var card = document.querySelector('.mini-card[data-symbol="' + sym + '"]');
+          const card = document.querySelector('.mini-card[data-symbol="' + sym + '"]');
           if (!card) return;
-          var spark = card.querySelector("[data-spark]");
-          if (spark) {
-            spark.setAttribute("d", path);
-            var up = closes[closes.length - 1] >= closes[0];
-            spark.style.stroke = up ? "var(--green)" : "var(--red)";
-          }
+          const spark = card.querySelector("[data-spark]");
+          if (!spark) return;
+          spark.setAttribute("d", sparkPath(closes, 72, 24));
+          spark.style.stroke = closes[closes.length - 1] >= closes[0] ? "var(--green)" : "var(--red)";
         } catch (err) {
           console.warn("spark", sym, err);
         }
@@ -235,37 +223,33 @@
   }
 
   async function renderPreviewChart(symbol) {
-    var line = document.getElementById("preview-line");
-    var area = document.getElementById("preview-area");
+    const line = document.getElementById("preview-line");
+    const area = document.getElementById("preview-area");
     if (!line || !area) return;
     try {
-      var bars = await fetchHistory(symbol, 48);
-      var closes = bars
-        .map(function (b) {
-          return Number(b[4]);
-        })
-        .filter(Number.isFinite);
+      const bars = await fetchHistory(symbol, 48);
+      const closes = bars.map((b) => Number(b[4])).filter(Number.isFinite);
       if (!closes.length) return;
-      var d = sparkPath(closes, 520, 220);
+      const d = sparkPath(closes, 520, 220);
       line.setAttribute("d", d);
       area.setAttribute("d", d + " L520 220 L0 220 Z");
-      var last = closes[closes.length - 1];
-      var first = closes[0];
-      var pct = first ? ((last - first) / first) * 100 : 0;
-      document.querySelectorAll("[data-preview-price]").forEach(function (el) {
+      const last = closes[closes.length - 1];
+      const first = closes[0];
+      const pct = first ? ((last - first) / first) * 100 : 0;
+      document.querySelectorAll("[data-preview-price]").forEach((el) => {
         el.textContent = "$" + fmtPrice(last);
       });
-      document.querySelectorAll("[data-preview-chg]").forEach(function (el) {
+      document.querySelectorAll("[data-preview-chg]").forEach((el) => {
         setChg(el, pct);
       });
-      var score = document.getElementById("sentiment-score");
+      const score = document.getElementById("sentiment-score");
       if (score) {
-        var s = Math.max(0, Math.min(99, Math.round(50 + pct * 4)));
+        const s = Math.max(0, Math.min(99, Math.round(50 + pct * 4)));
         score.textContent = String(s);
-        var ring = score.closest(".gauge-ring");
+        const ring = score.closest(".gauge-ring");
         if (ring) {
           ring.style.background =
-            "conic-gradient(#2f7bff 0 " + s + "%, rgba(255,255,255,0.08) " + s + "% 100%)";
+            "conic-gradient(var(--blue, #2f7bff) 0 " + s + "%, rgba(255,255,255,0.08) " + s + "% 100%)";
         }
       }
     } catch (err) {
@@ -274,57 +258,57 @@
   }
 
   async function refreshQuotes() {
-    var results = await Promise.allSettled(
-      SYMBOLS.map(function (s) {
-        return fetchQuote(s);
-      })
-    );
-    results.forEach(function (r) {
+    const results = await Promise.allSettled(SYMBOLS.map((s) => fetchQuote(s)));
+    results.forEach((r) => {
       if (r.status === "fulfilled") applyQuote(r.value);
     });
   }
 
   function hydrateProfileChip() {
-    var chip = document.getElementById("nav-avatar");
+    const chip = document.getElementById("nav-avatar");
     if (!chip) return;
     try {
-      var profile = JSON.parse(localStorage.getItem("forge.userProfile") || "null");
+      const profile = JSON.parse(localStorage.getItem(PROFILE_KEY) || "null");
       if (!profile) return;
-      var name = profile.displayName || profile.name || "";
+      const name = profile.displayName || profile.name || "";
       if (!name) return;
-      var parts = String(name).trim().split(/\s+/);
-      chip.textContent = parts
-        .slice(0, 2)
-        .map(function (p) {
-          return p.charAt(0).toUpperCase();
-        })
-        .join("") || "F";
+      const parts = String(name).trim().split(/\s+/);
+      chip.textContent =
+        parts
+          .slice(0, 2)
+          .map((p) => p.charAt(0).toUpperCase())
+          .join("") || "F";
       chip.title = name;
     } catch (_) {}
   }
 
+  function normalizeSymbol(raw) {
+    let q = String(raw || "")
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "");
+    if (!q) return "";
+    if (!q.endsWith("USDT") && q.length <= 6) q += "USDT";
+    return q;
+  }
+
   function wireHeroSearch() {
-    var form = document.querySelector(".hero-search");
+    const form = document.querySelector(".hero-search");
     if (!form) return;
-    form.addEventListener("submit", function (e) {
+    form.addEventListener("submit", (e) => {
       e.preventDefault();
-      var input = form.querySelector('input[name="symbol"]');
-      var q = (input && input.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "")) || "";
-      if (!q) {
-        window.location.href = CHARTS;
-        return;
-      }
-      if (!q.endsWith("USDT") && q.length <= 6) q += "USDT";
-      window.location.href = chartUrl(q);
+      const input = form.querySelector('input[name="symbol"]');
+      const q = normalizeSymbol(input && input.value);
+      window.location.href = q ? chartUrl(q) : CHARTS;
     });
   }
 
   function wireGetStarted() {
-    var btn = document.querySelector('.btn-primary[href="/charts/"]');
+    const btn = document.querySelector('.btn-primary[href="/charts/"]');
     if (!btn) return;
-    btn.addEventListener("click", function (e) {
+    btn.addEventListener("click", (e) => {
       try {
-        var profile = JSON.parse(localStorage.getItem("forge.userProfile") || "null");
+        const profile = JSON.parse(localStorage.getItem(PROFILE_KEY) || "null");
         if (profile && profile.defaultSymbol) {
           e.preventDefault();
           window.location.href = chartUrl(profile.defaultSymbol);
@@ -334,23 +318,22 @@
   }
 
   function wireNavSearch() {
-    var input = document.querySelector(".nav-search input");
+    const input = document.querySelector(".nav-search input");
     if (!input) return;
-    input.addEventListener("keydown", function (e) {
+    input.addEventListener("keydown", (e) => {
       if (e.key !== "Enter") return;
-      var q = input.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+      const q = normalizeSymbol(input.value);
       if (!q) return;
-      if (!q.endsWith("USDT") && q.length <= 6) q += "USDT";
       window.location.href = chartUrl(q);
     });
   }
 
   function wireMarketsRows() {
-    var body = document.getElementById("markets-body");
+    const body = document.getElementById("markets-body");
     if (!body) return;
-    body.addEventListener("click", function (e) {
+    body.addEventListener("click", (e) => {
       if (e.target.closest("a")) return;
-      var row = e.target.closest("tr[data-symbol]");
+      const row = e.target.closest("tr[data-symbol]");
       if (!row) return;
       window.location.href = chartUrl(row.getAttribute("data-symbol"));
     });
@@ -364,14 +347,10 @@
     wireGetStarted();
     wireNavSearch();
     wireMarketsRows();
-
     await Promise.all([refreshQuotes(), renderSparks(), renderPreviewChart("BTCUSDT")]);
     setInterval(refreshQuotes, 30000);
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", boot);
-  } else {
-    boot();
-  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+  else boot();
 })();
