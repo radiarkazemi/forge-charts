@@ -86,9 +86,9 @@ systemctl reload nginx
 ss -tlnp | grep -E ':80 |:443 |:8088|:8089|:8092' || true
 echo "nginx reloaded"
 
-RESOLVED="$(dig +short forgechart.ir A 2>/dev/null | head -1 || true)"
-echo "forgechart.ir A currently resolves to: ${RESOLVED:-<none>}"
-if [[ -n "${RESOLVED}" && ! -f /etc/letsencrypt/live/forgechart.ir/fullchain.pem ]]; then
+RESOLVED="\$(dig +short forgechart.ir A 2>/dev/null | head -1 || true)"
+echo "forgechart.ir A currently resolves to: \${RESOLVED:-<none>}"
+if [[ -n "\${RESOLVED}" && ! -f /etc/letsencrypt/live/forgechart.ir/fullchain.pem ]]; then
   certbot certonly --webroot -w /var/www/forge-landing \
     -d forgechart.ir -d www.forgechart.ir \
     --non-interactive --agree-tos --register-unsafely-without-email \
