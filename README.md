@@ -47,16 +47,21 @@ Prefer HTTPS (full assets + live Mongo/`crypto-chart` data):
 
 **Forge Charts (isolated — not Danora):**
 
-- http://185.222.163.116:8088/ — Forge landing only
-- http://185.222.163.116:8088/charts/ — Forge Supercharts
+- https://forgechart.ir/ — Forge landing (public domain)
+- https://forgechart.ir/charts/ — Forge Supercharts
+- http://185.222.163.116:8088/ — Forge landing (direct IP/port)
+- http://185.222.163.116:8088/charts/ — Forge Supercharts (direct)
 - http://185.222.163.116:8089/charts/ — Forge charts HTTP fallback
-- https://goldanil.ir/charts/ — production HTTPS Supercharts
+- https://goldanil.ir/charts/ — Anil product site charts path
+
+**DNS (forgechart.ir):** set Cloudflare nameservers at IRNIC (`edna.ns.cloudflare.com` / `fattouche.ns.cloudflare.com`), then in Cloudflare DNS add `A` `@` and `www` → `185.222.163.116` (proxied or DNS-only). SSL mode: **Full**.
 
 **Other apps (separate ports / hostnames):**
 
 | Port / host | App |
 | --- | --- |
-| `:8088` / `:8089` | **Forge Charts** only |
+| `forgechart.ir` | **Forge Charts** public site |
+| `:8088` / `:8089` | **Forge Charts** direct IP |
 | `:8090` | Atrium |
 | `:8092` | Danora staging |
 | `danoura.ir` | Danora |
