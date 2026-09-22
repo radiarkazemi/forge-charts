@@ -51,7 +51,7 @@ After that it runs forever in the background and pops Chrome notifications when 
 ## VPS server (optional, runs on cloud agent)
 
 ```bash
-npm run trh:server
+pnpm trh:server
 ```
 
 Local health: http://127.0.0.1:3921/health
