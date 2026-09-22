@@ -65,6 +65,9 @@ export class ChartController {
 
     this.patch({ ready: true, error: null, symbol: stripExchange(chart.symbol()), interval: chart.resolution() });
 
+    // Force candle close countdown even if autosaved chart state turned it off.
+    widget.applyOverrides({ "mainSeriesProperties.showCountdown": true });
+
     if (this.desiredTheme && this.desiredTheme !== widget.getTheme()) void this.applyTheme(this.desiredTheme);
   }
 

@@ -75,6 +75,7 @@ export function chartOverrides(theme: ThemeMode): ChartingLibraryWidgetOptions["
     "paneProperties.crossHairProperties.color": t.crosshair,
     "scalesProperties.textColor": t.textMuted,
     "scalesProperties.lineColor": t.border,
+    "mainSeriesProperties.showCountdown": true,
     "mainSeriesProperties.candleStyle.upColor": t.up,
     "mainSeriesProperties.candleStyle.downColor": t.down,
     "mainSeriesProperties.candleStyle.borderUpColor": light ? "#131722" : t.up,
