@@ -35,10 +35,6 @@ const ENABLED_FEATURES: ChartingLibraryFeatureset[] = [
 const DISABLED_FEATURES: ChartingLibraryFeatureset[] = ["popup_hints", "symbol_info_price_source"];
 
 const FAVORITE_INTERVALS = [
-  "1S",
-  "5S",
-  "15S",
-  "30S",
   "1",
   "3",
   "5",
@@ -47,11 +43,13 @@ const FAVORITE_INTERVALS = [
   "60",
   "120",
   "240",
-  "360",
-  "720",
   "1D",
   "1W",
   "1M",
+  "1S",
+  "5S",
+  "15S",
+  "30S",
 ] as ResolutionString[];
 
 const TIME_FRAMES: TimeFrameItem[] = [

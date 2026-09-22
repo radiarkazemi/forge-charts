@@ -16,7 +16,6 @@ const TICK_POLL_MS = 150;
 const FOREX_POLL_MS = 2_500;
 const BAR_RECONCILE_MS = 15_000;
 const MAX_BARS = 1_000;
-const MAX_1S_FETCH = 3_600;
 
 /** Full TradingView-style resolution set we advertise and serve. */
 export const GERMANY_NATIVE_INTERVALS: readonly Interval[] = [
@@ -46,42 +45,29 @@ export const GERMANY_NATIVE_INTERVALS: readonly Interval[] = [
   "1M",
 ];
 
-/** Germany crypto history timeframes that exist natively. */
-const CRYPTO_HISTORY_TF: Readonly<Record<string, string>> = {
-  "1S": "1s",
-  "1": "1m",
-  "3": "3m",
-  "5": "5m",
-  "15": "15m",
-  "30": "30m",
-  "60": "1h",
-  "120": "2h",
-  "240": "4h",
-  "360": "6h",
-  "480": "8h",
-  "720": "12h",
-  "1D": "1d",
-  "1W": "1w",
-  "1M": "1M",
-};
 
-/** Germany `/ohlc/` interval param for metals (and crypto fallback). */
-const OHLC_INTERVAL: Readonly<Record<string, string>> = {
-  "1": "1",
-  "5": "5",
-  "15": "15",
-  "30": "15",
-  "60": "60",
-  "120": "60",
-  "180": "60",
-  "240": "240",
-  "360": "240",
-  "480": "240",
-  "720": "240",
-  "1D": "1D",
-  "1W": "1D",
-  "1M": "1D",
-};
+/** Map any TV interval → OHLC request interval + optional aggregate step. */
+function ohlcPlan(interval: Interval): { request: string; aggregateStep: number } {
+  const { unit, count, seconds } = parseInterval(interval);
+  if (unit === "seconds") return { request: "1", aggregateStep: 60 }; // parents for synth
+  if (unit === "minutes") {
+    if (count === 1) return { request: "1", aggregateStep: 0 };
+    if (count === 5) return { request: "5", aggregateStep: 0 };
+    if (count === 15) return { request: "15", aggregateStep: 0 };
+    if (count === 60) return { request: "60", aggregateStep: 0 };
+    if (count === 240) return { request: "240", aggregateStep: 0 };
+    if (count < 5) return { request: "1", aggregateStep: seconds };
+    if (count < 15) return { request: "5", aggregateStep: seconds };
+    if (count < 60) return { request: "15", aggregateStep: seconds };
+    if (count < 240) return { request: "60", aggregateStep: seconds };
+    return { request: "240", aggregateStep: seconds };
+  }
+  if (unit === "days" && count === 1) return { request: "1D", aggregateStep: 0 };
+  if (unit === "weeks" || unit === "months" || unit === "days") {
+    return { request: "1D", aggregateStep: seconds };
+  }
+  return { request: "15", aggregateStep: 0 };
+}
 
 type Route = {
   apiSymbol: string;
@@ -144,20 +130,6 @@ interface CryptoLatest {
   updated_at?: string;
 }
 
-interface CryptoHistoryResponse {
-  symbol?: string;
-  timeframe?: string;
-  count?: number;
-  results?: Array<{
-    time: number | string;
-    open: number;
-    high: number;
-    low: number;
-    close: number;
-    volume?: number;
-  }>;
-  detail?: string;
-}
 
 interface ForexXau {
   symbol?: string;
@@ -290,72 +262,63 @@ function aggregateBars(bars: readonly Bar[], stepSec: number): Bar[] {
   return out;
 }
 
-/**
- * Fill missing 1-second slots with flat candles (O=H=L=C=prev close).
- * Keeps TV second charts continuous when the upstream skips quiet seconds.
- * Extends forward to `toSec` (exclusive) so trailing gaps up to "now" are covered.
- */
-function fillSecondGaps(bars: readonly Bar[], fromSec: number, toSec: number): Bar[] {
-  if (!bars.length && toSec <= fromSec) return [];
-  const byTime = new Map(bars.map((b) => [b.time, b]));
-  const first = bars[0]?.time ?? fromSec;
-  const last = bars[bars.length - 1]?.time ?? fromSec;
-  const start = Math.min(fromSec, first);
-  const end = Math.max(toSec - 1, last);
-  if (end < start) return [...bars];
 
+/**
+ * Reconstruct second bars from a 1m OHLC parent using the standard path:
+ * bullish: O → L → H → C ; bearish: O → H → L → C
+ * (avoids the linear open→close staircase that looks fake on charts).
+ */
+function synthesizeSecondsFromMinute(parent: Bar): Bar[] {
+  const slots = 60;
+  const bullish = parent.close >= parent.open;
+  const p1 = parent.open;
+  const p2 = bullish ? parent.low : parent.high;
+  const p3 = bullish ? parent.high : parent.low;
+  const p4 = parent.close;
   const out: Bar[] = [];
-  let prevClose = bars[0]?.open ?? bars[0]?.close ?? 0;
-  for (let t = start; t <= end; t += 1) {
-    const hit = byTime.get(t);
-    if (hit) {
-      out.push(hit);
-      prevClose = hit.close;
-    } else if (Number.isFinite(prevClose) && prevClose > 0) {
-      out.push({ time: t, open: prevClose, high: prevClose, low: prevClose, close: prevClose, volume: 0 });
+  let hiIdx = 0;
+  let loIdx = 0;
+  for (let i = 0; i < slots; i += 1) {
+    const t = parent.time + i;
+    let frac: number;
+    let a: number;
+    let b: number;
+    if (i < 20) {
+      frac = i / 20;
+      a = p1;
+      b = p2;
+    } else if (i < 40) {
+      frac = (i - 20) / 20;
+      a = p2;
+      b = p3;
+    } else {
+      frac = (i - 40) / 20;
+      a = p3;
+      b = p4;
     }
+    const px = a + (b - a) * Math.min(1, Math.max(0, frac));
+    const prev = i === 0 ? parent.open : out[i - 1]!.close;
+    const bar: Bar = {
+      time: t,
+      open: prev,
+      high: Math.max(prev, px),
+      low: Math.min(prev, px),
+      close: i === slots - 1 ? parent.close : px,
+      volume: parent.volume / slots,
+    };
+    out.push(bar);
+    if (bar.high >= out[hiIdx]!.high) hiIdx = i;
+    if (bar.low <= out[loIdx]!.low) loIdx = i;
   }
+  out[hiIdx] = { ...out[hiIdx]!, high: parent.high };
+  out[loIdx] = { ...out[loIdx]!, low: parent.low };
   return out;
 }
 
-/**
- * Build synthetic lower-TF history from higher-TF bars when seconds/minutes are missing.
- * Distributes each parent candle across child slots with open→close path and high/low anchors.
- */
-function synthesizeFromHigher(parentBars: readonly Bar[], stepSec: number): Bar[] {
-  if (!parentBars.length) return [];
-  const out: Bar[] = [];
-  for (const parent of parentBars) {
-    const parentStep = Math.max(stepSec, 60);
-    // Infer parent duration from spacing is hard; assume 60s when synthesizing seconds from 1m.
-    const duration = parentStep;
-    const slots = Math.max(1, Math.floor(duration / stepSec));
-    for (let i = 0; i < slots; i += 1) {
-      const t = parent.time + i * stepSec;
-      const frac0 = i / slots;
-      const frac1 = (i + 1) / slots;
-      const c0 = parent.open + (parent.close - parent.open) * frac0;
-      const c1 = parent.open + (parent.close - parent.open) * frac1;
-      const isFirst = i === 0;
-      const isLast = i === slots - 1;
-      const mid = Math.floor(slots / 2);
-      let high = Math.max(c0, c1);
-      let low = Math.min(c0, c1);
-      if (i === mid || (slots === 1)) {
-        high = Math.max(high, parent.high);
-        low = Math.min(low, parent.low);
-      }
-      out.push({
-        time: t,
-        open: isFirst ? parent.open : c0,
-        high,
-        low,
-        close: isLast ? parent.close : c1,
-        volume: parent.volume / slots,
-      });
-    }
-  }
-  return out;
+function synthesizeFromMinuteBars(parents: readonly Bar[], stepSec: number): Bar[] {
+  const ones: Bar[] = [];
+  for (const parent of parents) ones.push(...synthesizeSecondsFromMinute(parent));
+  return stepSec <= 1 ? ones : aggregateBars(ones, stepSec);
 }
 
 /** Combined trade + bookTicker stream for near-broker tick latency. */
@@ -562,20 +525,6 @@ function openCpFetcherSocket(apiSymbol: string, interval: Interval, onBar: (bar:
   };
 }
 
-async function fetchCryptoHistory(apiSymbol: string, timeframe: string, limit: number): Promise<Bar[]> {
-  const json = await fetchJson<CryptoHistoryResponse>(
-    buildUrl(`${BASE}/crypto/prices/${encodeURIComponent(apiSymbol.toLowerCase())}/history/`, {
-      timeframe,
-      limit: Math.min(MAX_BARS, Math.max(1, limit)),
-    }),
-    { timeoutMs: REQUEST_TIMEOUT_MS },
-  );
-  if (json.detail) throw new Error(json.detail);
-  return (json.results ?? [])
-    .map((row) => parseBar(row))
-    .filter((b): b is Bar => b !== null)
-    .sort((a, b) => a.time - b.time);
-}
 
 async function fetchOhlc(apiSymbol: string, exchange: string, interval: string, limit: number): Promise<Bar[]> {
   const json = await fetchJson<OhlcResponse>(
@@ -636,29 +585,18 @@ export class GermanyMarketProvider implements MarketDataProvider {
     await this.assertHealthy();
     const route = routeFor(symbol);
     if (!route) throw new Error(`germany-market: unsupported ${symbol.ticker}`);
+    const { unit } = parseInterval(interval);
     const step = intervalSeconds(interval);
-    const { unit, count } = parseInterval(interval);
     const limit = Math.min(MAX_BARS, Math.max(50, range.countBack + 20));
 
-    let bars: Bar[] = [];
-
-    if (route.kind === "crypto") {
-      bars = await this.fetchCryptoBars(route.apiSymbol, interval, limit, range);
+    let bars: Bar[];
+    if (unit === "seconds") {
+      bars = await this.fetchSecondBars(route, step, limit, range);
     } else {
-      bars = await this.fetchMetalBars(route, interval, limit);
+      bars = await this.fetchOhlcBars(route, interval, limit);
     }
 
     bars = bars.filter((b) => b.time < range.to).sort((a, b) => a.time - b.time);
-
-    // Ensure bar times align to the requested step.
-    if (unit === "seconds" && count === 1) {
-      // already 1s
-    } else if (bars.length && step > 1) {
-      const aligned = bars.map((b) => ({ ...b, time: alignTime(b.time, step) }));
-      // Re-aggregate if alignment collapsed multiples
-      bars = aggregateBars(aligned, step);
-    }
-
     if (!bars.length) throw new Error(`germany-market: empty history for ${route.apiSymbol} @ ${interval}`);
     return bars.slice(-Math.max(range.countBack, 1));
   }
@@ -902,160 +840,32 @@ export class GermanyMarketProvider implements MarketDataProvider {
     return out;
   }
 
-  private async fetchCryptoBars(
-    apiSymbol: string,
-    interval: Interval,
-    limit: number,
-    range: BarRange,
-  ): Promise<Bar[]> {
-    const { unit, count } = parseInterval(interval);
-    const step = intervalSeconds(interval);
-    const directTf = CRYPTO_HISTORY_TF[interval];
-
-    // Seconds: Germany 1s history is short/sparse — fill gaps, then prepend from 1m synth.
-    if (unit === "seconds" || directTf === "1s") {
-      return this.fetchCryptoSecondBars(apiSymbol, step, limit, range);
-    }
-
-    if (directTf) {
-      return fetchCryptoHistory(apiSymbol, directTf, limit);
-    }
-
-    // Minutes without native TF (2, 10, 45, 180…): aggregate from next-finer native.
-    if (unit === "minutes") {
-      const baseTf =
-        count <= 3
-          ? "1m"
-          : count <= 10
-            ? "5m"
-            : count <= 45
-              ? "15m"
-              : count <= 180
-                ? "1h"
-                : count <= 360
-                  ? "4h"
-                  : "6h";
-      const baseStep =
-        baseTf === "1m"
-          ? 60
-          : baseTf === "5m"
-            ? 300
-            : baseTf === "15m"
-              ? 900
-              : baseTf === "1h"
-                ? 3600
-                : baseTf === "4h"
-                  ? 14_400
-                  : 21_600;
-      const need = Math.min(MAX_BARS, Math.ceil((limit * step) / baseStep) + 10);
-      const raw = await fetchCryptoHistory(apiSymbol, baseTf, need);
-      return aggregateBars(raw, step);
-    }
-
-    // Weeks/months without direct: aggregate daily.
-    if (unit === "weeks" || unit === "months") {
-      const raw = await fetchCryptoHistory(apiSymbol, "1d", Math.min(MAX_BARS, limit * (unit === "weeks" ? 8 : 32)));
-      return aggregateBars(raw, step);
-    }
-
-    return fetchCryptoHistory(apiSymbol, "1m", limit);
+  /** Fresh minute+ history from Germany `/ohlc/` (never the stale crypto /history/ archive). */
+  private async fetchOhlcBars(route: Route, interval: Interval, limit: number): Promise<Bar[]> {
+    const plan = ohlcPlan(interval);
+    const requestLimit =
+      plan.aggregateStep > 0 ? Math.min(MAX_BARS, Math.max(limit * 12, limit + 30)) : Math.min(MAX_BARS, limit);
+    const raw = await fetchOhlc(route.apiSymbol, route.exchange, plan.request, requestLimit);
+    if (plan.aggregateStep > 0) return aggregateBars(raw, plan.aggregateStep);
+    return raw;
   }
 
   /**
-   * Build second (and multi-second) history:
-   * 1) synthesize from fresh 1m OHLC (open→close path) so candles have visible bodies
-   * 2) overlay native 1s bars where Germany still has them
-   * 3) gap-fill only inside the native 1s window (never flat-extend a stale last price to "now")
+   * Seconds history: synthesize from fresh 1m `/ohlc/` only.
+   * Do not splice Germany `/history/?timeframe=1s` — that archive lags by many minutes
+   * and produced gaps + staircase garbage when mixed with live ticks.
    */
-  private async fetchCryptoSecondBars(
-    apiSymbol: string,
+  private async fetchSecondBars(
+    route: Route,
     step: number,
     limit: number,
     range: BarRange,
   ): Promise<Bar[]> {
-    const needSeconds = Math.min(MAX_1S_FETCH, Math.max(limit * step + 60, step * 120));
-    const parentNeed = Math.min(MAX_BARS, Math.ceil(needSeconds / 60) + 8);
-
-    let ones: Bar[] = [];
-    try {
-      const parents = await fetchCryptoHistory(apiSymbol, "1m", parentNeed);
-      ones = synthesizeFromHigher(parents, 1);
-    } catch {
-      ones = [];
-    }
-
-    try {
-      const raw = await fetchCryptoHistory(apiSymbol, "1s", Math.min(500, needSeconds));
-      if (raw.length) {
-        const rawFirst = raw[0]!.time;
-        const rawLast = raw[raw.length - 1]!.time;
-        // Only treat 1s as authoritative near "now"; otherwise keep 1m synthesis.
-        const freshEnough = range.to - rawLast <= 15;
-        if (freshEnough) {
-          const filledNative = fillSecondGaps(raw, rawFirst, rawLast + 1);
-          const byTime = new Map(ones.map((b) => [b.time, b]));
-          for (const bar of filledNative) byTime.set(bar.time, bar);
-          ones = [...byTime.values()].sort((a, b) => a.time - b.time);
-        } else {
-          // Stale 1s archive: splice it in for its window only, leave recent synth intact.
-          const byTime = new Map(ones.map((b) => [b.time, b]));
-          for (const bar of raw) {
-            if (!byTime.has(bar.time)) byTime.set(bar.time, bar);
-          }
-          ones = [...byTime.values()].sort((a, b) => a.time - b.time);
-        }
-      }
-    } catch {
-      /* synthesis-only */
-    }
-
-    if (!ones.length) throw new Error(`germany-market: no second bars for ${apiSymbol}`);
-
-    const bars = step <= 1 ? ones : aggregateBars(ones, step);
+    const parentNeed = Math.min(MAX_BARS, Math.ceil((limit * step) / 60) + 10);
+    const parents = await fetchOhlc(route.apiSymbol, route.exchange, "1", parentNeed);
+    if (!parents.length) throw new Error(`germany-market: no 1m parents for ${route.apiSymbol}`);
+    const bars = synthesizeFromMinuteBars(parents, step);
     return bars.filter((b) => b.time < range.to).slice(-Math.max(limit, 1));
-  }
-
-  private async fetchMetalBars(
-    route: Route,
-    interval: Interval,
-    limit: number,
-  ): Promise<Bar[]> {
-    const { unit, count } = parseInterval(interval);
-    const step = intervalSeconds(interval);
-
-    // Seconds: synthesize from FOREXCOM/FXPRO 1m OHLC (do not use PAXG — different price basis).
-    if (unit === "seconds") {
-      const parents = await fetchOhlc(
-        route.apiSymbol,
-        route.exchange,
-        "1",
-        Math.min(MAX_BARS, Math.ceil((limit * step) / 60) + 5),
-      );
-      const synth = aggregateBars(synthesizeFromHigher(parents, 1), step);
-      if (synth.length) return synth.slice(-limit);
-      throw new Error(`germany-market: no metal seconds for ${route.apiSymbol}`);
-    }
-
-    const ohlcIv = OHLC_INTERVAL[interval];
-    if (ohlcIv && (interval === "1" || interval === "5" || interval === "15" || interval === "60" || interval === "240" || interval === "1D")) {
-      return fetchOhlc(route.apiSymbol, route.exchange, ohlcIv, limit);
-    }
-
-    // Aggregate from finer metal OHLC.
-    if (unit === "minutes") {
-      const baseIv = count <= 5 ? "1" : count <= 30 ? "5" : count <= 60 ? "15" : "60";
-      const baseStep = baseIv === "1" ? 60 : baseIv === "5" ? 300 : baseIv === "15" ? 900 : 3600;
-      const need = Math.min(MAX_BARS, Math.ceil((limit * step) / baseStep) + 10);
-      const raw = await fetchOhlc(route.apiSymbol, route.exchange, baseIv, need);
-      return aggregateBars(raw, step);
-    }
-
-    if (unit === "weeks" || unit === "months") {
-      const raw = await fetchOhlc(route.apiSymbol, route.exchange, "1D", Math.min(MAX_BARS, limit * 32));
-      return aggregateBars(raw, step);
-    }
-
-    return fetchOhlc(route.apiSymbol, route.exchange, "15", limit);
   }
 
   private async isHealthy(): Promise<boolean> {
