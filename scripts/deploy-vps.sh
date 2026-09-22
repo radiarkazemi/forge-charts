@@ -59,4 +59,29 @@ echo "Mirroring full dist → ${REMOTE_APP}"
 tar -C dist -cf - . | "${SSH[@]}" "${USER}@${HOST}" \
   "tar -C '${REMOTE_APP}' -xf - && chown -R www-data:www-data '${REMOTE_APP}'"
 
-echo "Done. Open http://${HOST}/charts/"
+
+REMOTE_FORGE_WEB="${REMOTE_FORGE_WEB:-/var/www/forge-web}"
+echo "Syncing Forge web root → ${REMOTE_FORGE_WEB}"
+"${SSH[@]}" "${USER}@${HOST}" bash -s <<REMOTE
+set -euo pipefail
+ANIL_DIST='/var/www/anil/frontend/dist'
+REMOTE_FORGE_WEB='${REMOTE_FORGE_WEB}'
+mkdir -p "\${REMOTE_FORGE_WEB}/charts" "\${REMOTE_FORGE_WEB}/assets/forge"
+if [[ -d "\${ANIL_DIST}/charts" && -d "\${ANIL_DIST}/assets/forge" ]]; then
+  rsync -a --delete "\${ANIL_DIST}/charts/" "\${REMOTE_FORGE_WEB}/charts/"
+  rsync -a --delete "\${ANIL_DIST}/assets/forge/" "\${REMOTE_FORGE_WEB}/assets/forge/"
+  if [[ -d "\${ANIL_DIST}/charts/brand" ]]; then
+    rsync -a "\${ANIL_DIST}/charts/brand/" "\${REMOTE_FORGE_WEB}/charts/brand/"
+  fi
+  chown -R www-data:www-data "\${REMOTE_FORGE_WEB}"
+  echo "Synced forge-web from Anil dist"
+else
+  echo "WARN: Anil dist missing charts/assets" >&2
+fi
+REMOTE
+
+echo "Done."
+echo "  https://forgechart.ir/charts/"
+echo "  http://${HOST}:8088/charts/"
+echo "  http://${HOST}/charts/"
+
