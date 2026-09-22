@@ -945,9 +945,9 @@ export class GermanyMarketProvider implements MarketDataProvider {
 
   /**
    * Build second (and multi-second) history:
-   * 1) pull native 1s where available
-   * 2) fill quiet seconds with flat O=H=L=C=prevClose
-   * 3) if still short, synthesize older seconds from 1m OHLC (open→close path)
+   * 1) synthesize from fresh 1m OHLC (open→close path) so candles have visible bodies
+   * 2) overlay native 1s bars where Germany still has them
+   * 3) gap-fill only inside the native 1s window (never flat-extend a stale last price to "now")
    */
   private async fetchCryptoSecondBars(
     apiSymbol: string,
@@ -955,30 +955,43 @@ export class GermanyMarketProvider implements MarketDataProvider {
     limit: number,
     range: BarRange,
   ): Promise<Bar[]> {
-    const needSeconds = Math.min(MAX_1S_FETCH, Math.max(limit * step + 30, step * 60));
+    const needSeconds = Math.min(MAX_1S_FETCH, Math.max(limit * step + 60, step * 120));
+    const parentNeed = Math.min(MAX_BARS, Math.ceil(needSeconds / 60) + 8);
+
     let ones: Bar[] = [];
     try {
-      const raw = await fetchCryptoHistory(apiSymbol, "1s", Math.min(500, needSeconds));
-      ones = fillSecondGaps(raw, range.to - needSeconds - 5, range.to);
+      const parents = await fetchCryptoHistory(apiSymbol, "1m", parentNeed);
+      ones = synthesizeFromHigher(parents, 1);
     } catch {
       ones = [];
     }
 
-    if (ones.length < needSeconds) {
-      const parentNeed = Math.min(MAX_BARS, Math.ceil(needSeconds / 60) + 5);
-      try {
-        const parents = await fetchCryptoHistory(apiSymbol, "1m", parentNeed);
-        const synth = synthesizeFromHigher(parents, 1);
-        const byTime = new Map(ones.map((b) => [b.time, b]));
-        for (const bar of synth) {
-          if (!byTime.has(bar.time)) byTime.set(bar.time, bar);
+    try {
+      const raw = await fetchCryptoHistory(apiSymbol, "1s", Math.min(500, needSeconds));
+      if (raw.length) {
+        const rawFirst = raw[0]!.time;
+        const rawLast = raw[raw.length - 1]!.time;
+        // Only treat 1s as authoritative near "now"; otherwise keep 1m synthesis.
+        const freshEnough = range.to - rawLast <= 15;
+        if (freshEnough) {
+          const filledNative = fillSecondGaps(raw, rawFirst, rawLast + 1);
+          const byTime = new Map(ones.map((b) => [b.time, b]));
+          for (const bar of filledNative) byTime.set(bar.time, bar);
+          ones = [...byTime.values()].sort((a, b) => a.time - b.time);
+        } else {
+          // Stale 1s archive: splice it in for its window only, leave recent synth intact.
+          const byTime = new Map(ones.map((b) => [b.time, b]));
+          for (const bar of raw) {
+            if (!byTime.has(bar.time)) byTime.set(bar.time, bar);
+          }
+          ones = [...byTime.values()].sort((a, b) => a.time - b.time);
         }
-        ones = [...byTime.values()].sort((a, b) => a.time - b.time);
-        ones = fillSecondGaps(ones, range.to - needSeconds - 5, range.to);
-      } catch {
-        /* keep whatever 1s we have */
       }
+    } catch {
+      /* synthesis-only */
     }
+
+    if (!ones.length) throw new Error(`germany-market: no second bars for ${apiSymbol}`);
 
     const bars = step <= 1 ? ones : aggregateBars(ones, step);
     return bars.filter((b) => b.time < range.to).slice(-Math.max(limit, 1));
