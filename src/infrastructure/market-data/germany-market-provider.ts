@@ -12,7 +12,8 @@ const BASE = "/market-api";
 const REQUEST_TIMEOUT_MS = 8_000;
 const HEALTH_TTL_MS = 60_000;
 const TICK_POLL_MS = 150;
-const FOREX_POLL_MS = 120;
+/** Browser forex HTTP is fallback only — VPS /market-ticks owns the 1 req/s budget. */
+const FOREX_POLL_MS = 2_500;
 const BAR_RECONCILE_MS = 15_000;
 const MAX_BARS = 1_000;
 const MAX_1S_FETCH = 3_600;
@@ -601,6 +602,16 @@ export class GermanyMarketProvider implements MarketDataProvider {
   readonly isSynthetic = false;
 
   private health: { ok: boolean; checkedAt: number } | null = null;
+  /** Share the Germany forex 1 req/s budget across quotes + bar fallback. */
+  private forexCache: { at: number; data: ForexXau } | null = null;
+
+  private async fetchForexXau(force = false): Promise<ForexXau> {
+    const now = Date.now();
+    if (!force && this.forexCache && now - this.forexCache.at < 1_000) return this.forexCache.data;
+    const fx = await fetchJson<ForexXau>(`${BASE}/forex/xauusd/`, { timeoutMs: 1_500 });
+    this.forexCache = { at: now, data: fx };
+    return fx;
+  }
 
   supports(symbol: SymbolInfo, interval: Interval): boolean {
     if (routeFor(symbol) === null) return false;
@@ -757,12 +768,13 @@ export class GermanyMarketProvider implements MarketDataProvider {
         }, TICK_POLL_MS),
       );
     } else {
+      // Prefer /market-ticks; HTTP only if the WS has been quiet (avoids Germany 429).
       disposers.push(
         startPolling(async () => {
-          const fx = await fetchJson<ForexXau>(`${BASE}/forex/xauusd/`, { timeoutMs: 1_000 });
+          if (Date.now() - lastTickMs < 2_000) return;
+          const fx = await this.fetchForexXau();
           const price = +fx.price;
           if (!Number.isFinite(price)) return;
-          if (Date.now() - lastTickMs < 400) return;
           onTick(price, parseUpdatedAt(fx.updated_at), 0);
         }, FOREX_POLL_MS),
       );
@@ -864,7 +876,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
 
     if (xauTickers.length) {
       try {
-        const fx = await fetchJson<ForexXau>(`${BASE}/forex/xauusd/`, { timeoutMs: 1_500 });
+        const fx = await this.fetchForexXau();
         if (Number.isFinite(+fx.price)) {
           for (const ticker of xauTickers) {
             out.push({

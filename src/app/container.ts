@@ -64,7 +64,7 @@ export function createServices(config: AppConfig = readConfig()): Services {
   const providers = buildProviders(config);
 
   const marketData = new MarketDataService(providers);
-  const quotes = new QuoteService(providers, { refreshMs: 1_000 });
+  const quotes = new QuoteService(providers, { refreshMs: 2_000 });
   const alerts = new AlertService({ storage, symbols, notifier, generateId });
   const settings = new SettingsService(storage);
 

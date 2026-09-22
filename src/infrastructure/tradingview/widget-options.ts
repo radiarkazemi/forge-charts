@@ -68,6 +68,7 @@ const TIME_FRAMES: TimeFrameItem[] = [
 /** Chart-canvas overrides derived from the shared design tokens. */
 export function chartOverrides(theme: ThemeMode): ChartingLibraryWidgetOptions["overrides"] {
   const t = TOKENS[theme];
+  const light = theme === "light";
   return {
     "paneProperties.background": t.background,
     "paneProperties.backgroundType": "solid",
@@ -78,14 +79,21 @@ export function chartOverrides(theme: ThemeMode): ChartingLibraryWidgetOptions["
     "scalesProperties.lineColor": t.border,
     "mainSeriesProperties.candleStyle.upColor": t.up,
     "mainSeriesProperties.candleStyle.downColor": t.down,
-    "mainSeriesProperties.candleStyle.borderUpColor": t.up,
-    "mainSeriesProperties.candleStyle.borderDownColor": t.down,
-    "mainSeriesProperties.candleStyle.wickUpColor": t.up,
-    "mainSeriesProperties.candleStyle.wickDownColor": t.down,
+    "mainSeriesProperties.candleStyle.borderUpColor": light ? "#131722" : t.up,
+    "mainSeriesProperties.candleStyle.borderDownColor": light ? "#131722" : t.down,
+    "mainSeriesProperties.candleStyle.wickUpColor": light ? "#131722" : t.up,
+    "mainSeriesProperties.candleStyle.wickDownColor": light ? "#131722" : t.down,
+    "mainSeriesProperties.candleStyle.drawWick": true,
+    "mainSeriesProperties.candleStyle.drawBorder": true,
+    "mainSeriesProperties.candleStyle.drawBody": true,
     "mainSeriesProperties.hollowCandleStyle.upColor": t.up,
     "mainSeriesProperties.hollowCandleStyle.downColor": t.down,
-    "mainSeriesProperties.barStyle.upColor": t.up,
-    "mainSeriesProperties.barStyle.downColor": t.down,
+    "mainSeriesProperties.hollowCandleStyle.borderUpColor": light ? "#131722" : t.up,
+    "mainSeriesProperties.hollowCandleStyle.borderDownColor": light ? "#131722" : t.down,
+    "mainSeriesProperties.hollowCandleStyle.wickUpColor": light ? "#131722" : t.up,
+    "mainSeriesProperties.hollowCandleStyle.wickDownColor": light ? "#131722" : t.down,
+    "mainSeriesProperties.barStyle.upColor": light ? "#131722" : t.up,
+    "mainSeriesProperties.barStyle.downColor": light ? "#131722" : t.down,
     "mainSeriesProperties.lineStyle.color": t.accent,
     "mainSeriesProperties.areaStyle.linecolor": t.accent,
   };
