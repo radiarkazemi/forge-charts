@@ -29,11 +29,28 @@ const ENABLED_FEATURES: ChartingLibraryFeatureset[] = [
   "use_localstorage_for_settings",
   "pre_post_market_sessions",
   "chart_template_storage",
+  "seconds_resolution",
 ];
 
 const DISABLED_FEATURES: ChartingLibraryFeatureset[] = ["popup_hints", "symbol_info_price_source"];
 
-const FAVORITE_INTERVALS = ["1", "5", "15", "60", "240", "1D", "1W"] as ResolutionString[];
+const FAVORITE_INTERVALS = [
+  "1S",
+  "5S",
+  "15S",
+  "30S",
+  "1",
+  "3",
+  "5",
+  "15",
+  "30",
+  "60",
+  "120",
+  "240",
+  "1D",
+  "1W",
+  "1M",
+] as ResolutionString[];
 
 const TIME_FRAMES: TimeFrameItem[] = [
   { text: "1d", resolution: "5" as ResolutionString, description: "1 Day", title: "1D" },
