@@ -106,9 +106,9 @@ const ROUTES: Readonly<Record<string, Route>> = {
   APTUSDT: { apiSymbol: "APTUSDT", exchange: "BINANCE", kind: "crypto", tickSymbol: "APTUSDT" },
   ARBUSDT: { apiSymbol: "ARBUSDT", exchange: "BINANCE", kind: "crypto", tickSymbol: "ARBUSDT" },
   OPUSDT: { apiSymbol: "OPUSDT", exchange: "BINANCE", kind: "crypto", tickSymbol: "OPUSDT" },
-  XAUUSD: { apiSymbol: "XAUUSD", exchange: "FOREXCOM", kind: "metal", tickSymbol: "PAXGUSDT" },
+  XAUUSD: { apiSymbol: "XAUUSD", exchange: "FOREXCOM", kind: "metal" },
   PAXGUSDT: { apiSymbol: "PAXGUSDT", exchange: "BINANCE", kind: "crypto", tickSymbol: "PAXGUSDT" },
-  "GC1!": { apiSymbol: "XAUUSD", exchange: "FOREXCOM", kind: "metal", tickSymbol: "PAXGUSDT" },
+  "GC1!": { apiSymbol: "XAUUSD", exchange: "FOREXCOM", kind: "metal" },
 };
 
 interface OhlcResponse {
@@ -167,6 +167,7 @@ function routeFor(symbol: SymbolInfo): Route | null {
     if (ex === "FXPRO" && byTicker.kind === "metal") return { ...byTicker, exchange: "FXPRO" };
     if (ex === "FOREXCOM" && byTicker.kind === "metal") return { ...byTicker, exchange: "FOREXCOM" };
     if (ex === "BINANCE" && byTicker.kind === "metal") {
+      // Explicit Binance gold listing uses PAXG, not XAU CFD.
       return { ...byTicker, exchange: "BINANCE", apiSymbol: "PAXGUSDT", tickSymbol: "PAXGUSDT", kind: "crypto" };
     }
     return byTicker;
@@ -184,7 +185,6 @@ function routeFor(symbol: SymbolInfo): Route | null {
         apiSymbol: "XAUUSD",
         exchange: ex === "FXPRO" ? "FXPRO" : "FOREXCOM",
         kind: "metal",
-        tickSymbol: "PAXGUSDT",
       };
     }
   }
@@ -614,7 +614,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
     if (route.kind === "crypto") {
       bars = await this.fetchCryptoBars(route.apiSymbol, interval, limit, range);
     } else {
-      bars = await this.fetchMetalBars(route, interval, limit, range);
+      bars = await this.fetchMetalBars(route, interval, limit);
     }
 
     bars = bars.filter((b) => b.time < range.to).sort((a, b) => a.time - b.time);
@@ -904,24 +904,21 @@ export class GermanyMarketProvider implements MarketDataProvider {
     route: Route,
     interval: Interval,
     limit: number,
-    range: BarRange,
   ): Promise<Bar[]> {
     const { unit, count } = parseInterval(interval);
     const step = intervalSeconds(interval);
 
-    // Seconds: prefer PAXG 1s (Binance via Germany), then synthesize if needed.
+    // Seconds: synthesize from FOREXCOM/FXPRO 1m OHLC (do not use PAXG — different price basis).
     if (unit === "seconds") {
-      try {
-        const need = Math.min(MAX_1S_FETCH, limit * count + 30);
-        const raw = await fetchCryptoHistory("PAXGUSDT", "1s", need);
-        const filled = fillSecondGaps(raw, range.to - need - 5, range.to);
-        const bars = count === 1 ? filled : aggregateBars(filled, step);
-        if (bars.length) return bars;
-      } catch {
-        /* fall through to 1m synthesis */
-      }
-      const parents = await fetchOhlc(route.apiSymbol, route.exchange, "1", Math.min(MAX_BARS, Math.ceil(limit / 60) + 5));
-      return aggregateBars(synthesizeFromHigher(parents, 1), step).slice(-limit);
+      const parents = await fetchOhlc(
+        route.apiSymbol,
+        route.exchange,
+        "1",
+        Math.min(MAX_BARS, Math.ceil((limit * step) / 60) + 5),
+      );
+      const synth = aggregateBars(synthesizeFromHigher(parents, 1), step);
+      if (synth.length) return synth.slice(-limit);
+      throw new Error(`germany-market: no metal seconds for ${route.apiSymbol}`);
     }
 
     const ohlcIv = OHLC_INTERVAL[interval];
