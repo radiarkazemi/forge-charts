@@ -9,6 +9,3 @@ dist/
 .env.*
 !.env.example
 indicators/.trh-alert-state.json
-indicators/.trh-secrets.json
-
-public/charting_library/

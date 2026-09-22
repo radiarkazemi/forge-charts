@@ -1,0 +1,465 @@
+# Supercharts parity checklist
+
+Source of truth for making Forge Charts match **TradingView Supercharts** structure and behavior.
+
+Inventory taken from TradingView’s public Supercharts docs (Getting started, drawing tools, chart types, Supercharts settings, right toolbar, built-in indicators folder) plus the Charting Library **Drawings List**. A logged-in live Supercharts session is a JS app and cannot be fully pixel-scraped here; every named control below is from those official Supercharts surfaces, not from proprietary charting-library source.
+
+Status:
+
+- **MATCH** — present and close enough to Supercharts
+- **PARTIAL** — present, not Supercharts-accurate
+- **MISSING** — not in Forge
+- **OUT** — Supercharts product (broker / social / cloud). Listed so nothing is omitted; implement only if you ask
+
+Work **one ID at a time**, top to bottom. Do not skip PARTIAL items.
+
+---
+
+## 0. Chart chrome
+
+| ID | Supercharts item | Forge | Notes |
+| --- | --- | --- | --- |
+| C-01 | App header (product, search, alerts, profile) | MATCH | Brand + Products/Community/Markets/Brokers/More menus, search (⌘K), alerts badge, local profile menu. Cloud account/sync remains OUT |
+| C-02 | Top chart toolbar | MATCH | T-01–T-18 Supercharts toolbar controls |
+| C-03 | Left drawing toolbar | PARTIAL | Drawing toolbar present; full tool set expanding |
+| C-04 | Chart canvas + legend + overlays | MATCH | Canvas + legend + overlays (nav, menus, events, scales) |
+| C-05 | Right widget bar | PARTIAL | Right widget bar with new shells |
+| C-06 | Bottom panel (Pine / tester / replay / trade) | PARTIAL | Bottom Pine / tester / replay / logs docks |
+| C-07 | Time scale + range presets + timezone | MATCH | Time scale range presets + timezone + date format |
+| C-08 | Price scale + scale menu | MATCH | Price scale menu: log / % / indexed / invert / lock / L-R |
+| C-09 | Favorites drawing toolbar (floating) | MATCH | Star tools in flyout → floating favorites bar |
+| C-10 | Multi-chart layout grid | PARTIAL | Multi-chart layouts + drawing sync |
+
+---
+
+## 1. Top toolbar (left → right)
+
+| ID | Supercharts control | Forge |
+| --- | --- | --- |
+| T-01 | Symbol search (type-to-open, categories: Stocks / Funds / Futures / Forex / Crypto / Indices / Bonds / Economy / Options, exchange, description) | MATCH |
+| T-02 | Symbol button shows ticker + live flag | MATCH | Ticker + exchange + LIVE/DELAYED pill with pulse |
+| T-03 | Data switcher beside symbol: Technicals / Seasonals / News / Ideas | MATCH | Switches right-dock panels (data / calendar / news / ideas) |
+| T-04 | Compare / overlay symbol | MATCH | Compare control + removable overlay chip |
+| T-05 | Interval dropdown (seconds → months, Range, custom, favorites) | MATCH |
+| T-06 | Quick interval favorites on the bar | MATCH |
+| T-07 | Chart type menu (20+ types, favorites) | MATCH |
+| T-08 | Indicators, metrics, strategies dialog (Technicals / Financials / Community / Invite-only / Patterns, search, favorites, recently used) | MATCH | Full tabbed dialog with role filters, favorites, recents, on-chart badges, pattern→draw arming, Alt+I |
+| T-09 | Indicator templates (save, remember symbol + interval) | MATCH | ▦ menu: save/update/apply/delete; optional bind to symbol+interval with auto-apply |
+| T-10 | Create Alert | MATCH | Create-alert dialog (crossing/up/down, price, name, once/every); dock manager; live evaluate + toast; Alt+A |
+| T-11 | Bar Replay | MATCH | Select-start (blue scissors line), Play/Pause/Forward/Speed, Select bar / Random / Jump to real-time, Shift+Alt+R, Shift+↓/→ |
+| T-12 | Undo | MATCH | Drawings + indicators + chart type; Ctrl/Cmd+Z |
+| T-13 | Redo | MATCH | Same history stack; Ctrl/Cmd+Y and Ctrl/Cmd+Shift+Z |
+| T-14 | Layouts (count, arrangement, save, rename, copy, share, export, open) | MATCH | ⊞ menu: 1/2h/2v/3/4 grids, save/open/rename/duplicate/delete (local). Cloud share/export remain OUT |
+| T-15 | Quick search (Ctrl/Cmd+K: tools, drawings, settings) | MATCH | Command palette for actions, chart types, drawing tools; Symbol search separate |
+| T-16 | Chart settings (full dialog, section 10) | MATCH | 4-tab dialog (Symbol/Status/Scales/Canvas) per TradingView; S-02/06/11/13/14/16/17/18 remain open |
+| T-17 | Fullscreen | MATCH | Toggle with state tracking + icon swap; Esc exits; works in compact |
+| T-18 | Snapshot (download / copy / tweet) | MATCH | Dropdown: Download image / Copy to clipboard / Open in new tab / Tweet chart |
+| T-19 | Trade / Paper Trading | OUT |
+| T-20 | Publish idea | OUT |
+
+---
+
+## 2. Left drawing toolbar — every tool
+
+### 2.1 Cursors
+
+| ID | Tool | Forge |
+| --- | --- | --- |
+| D-CUR-01 | Cross | MATCH |
+| D-CUR-02 | Dot | MATCH |
+| D-CUR-03 | Arrow | MATCH |
+| D-CUR-04 | Demonstration | MATCH | Laser-pointer trail that fades; for presentations |
+| D-CUR-05 | Magic | MATCH | Auto-detect + highlight nearest drawing on hover; click to select |
+| D-CUR-06 | Eraser | MATCH |
+
+### 2.2 Trend tools
+
+| ID | Tool | Forge |
+| --- | --- | --- |
+| D-TR-01 | Trend Line | MATCH | Segment with extend L/R, % / angle labels; Style |
+| D-TR-02 | Arrow | MATCH | Trend + arrow head; Style extend / labels |
+| D-TR-03 | Ray | MATCH | One-way extend; Style |
+| D-TR-04 | Info Line | MATCH | Bars / Δprice / % / angle label box; Style |
+| D-TR-05 | Extended Line | MATCH | Infinite both ways; Style |
+| D-TR-06 | Trend Angle | MATCH | Arc + degree label; Style |
+| D-TR-07 | Horizontal Line | MATCH | Full-width + price label; Style |
+| D-TR-08 | Horizontal Ray | MATCH | Right ray + price label; Style extend |
+| D-TR-09 | Vertical Line | MATCH | Full-height + time label; Style |
+| D-TR-10 | Cross Line | MATCH | Crosshair at point; price + time labels |
+| D-TR-11 | Parallel Channel | MATCH | Dual rails + middle line + fill; Style |
+| D-TR-12 | Regression Trend | MATCH | OLS fit + ±σ bands; Style |
+| D-TR-13 | Flat Top/Bottom | MATCH | Diagonal + flat rail with fill; Style |
+| D-TR-14 | Disjoint Channel | MATCH | Two independent rails + fill; 4 pts; Style |
+| D-TR-15 | Anchored VWAP | MATCH | HLC3 AVWAP + σ bands + fill; Style |
+
+### 2.3 Gann and Fibonacci
+
+| ID | Tool | Forge |
+| --- | --- | --- |
+| D-FI-01 | Fib Retracement | MATCH | Supercharts defaults: 0 / 0.236 / 0.382 / 0.5 / 0.618 / 0.786 / 1 / 1.618 / 2.618 / 3.618 / 4.236, trend line, fills, labels `0.618 (price)`, extend L/R, reverse |
+| D-FI-02 | Trend-Based Fib Extension | MATCH | 3-point A–B–C geometry; defaults 0 / 0.618 / 1 / 1.272 / 1.618 / 2 / 2.618 / 3.618 / 4.236; fills; `1.618 (price)` labels; extend / reverse / Style tab |
+| D-FI-03 | Fib Channel | MATCH | 3-point A–B base + C width; defaults 0 / 0.236 / 0.382 / 0.5 / 0.618 / 0.786 / 1 / 1.618 / 2.618; parallel levels; fills; labels; extend / reverse / Style tab |
+| D-FI-04 | Fib Time Zone | MATCH | Fibonacci sequence zones 0–55; labels; reverse; Style tab |
+| D-FI-05 | Fib Speed Resistance Fan | MATCH | Fan rays at 0 / 0.236 / 0.382 / 0.5 / 0.618 / 0.786 / 1; extend; labels; Style tab |
+| D-FI-06 | Trend-Based Fib Time | MATCH | 3-point A–B–C time projections; defaults 0 / 0.382 / 0.5 / 0.618 / 1 / 1.272 / 1.618 / 2.618 |
+| D-FI-07 | Fib Circles | MATCH | Concentric circles at Fib radii; fills; labels; Style tab |
+| D-FI-08 | Fib Spiral | MATCH | Golden spiral from A–B radius; reverse; Style color/width |
+| D-FI-09 | Fib Speed Resistance Arcs | MATCH | Semicircle arcs at fan ratios; labels; Style tab |
+| D-FI-10 | Fib Wedge | MATCH | Rays from origin across A–B chord at Fib ratios; Style tab |
+| D-FI-11 | Pitchfan | MATCH | Pitchfork origin + fan rays at level ratios; Style tab |
+| D-FI-12 | Pitchfork | MATCH | Median + parallels at 0 / 0.25 / 0.5 / 0.75 / 1; extend; Style tab |
+| D-FI-13 | Schiff Pitchfork | MATCH | Schiff origin; same level set + Style tab |
+| D-FI-14 | Modified Schiff Pitchfork | MATCH | Modified Schiff origin; same level set + Style tab |
+| D-FI-15 | Inside Pitchfork | MATCH | Inside origin; same level set + Style tab |
+| D-FI-16 | Gann Box | MATCH | Grid at 0 / 0.25 / 0.333 / 0.5 / 0.667 / 0.75 / 1 + diagonals; Style tab |
+| D-FI-17 | Gann Square | MATCH | Square-constrained Gann grid + diagonals; Style tab |
+| D-FI-18 | Gann Fan | MATCH | Fan rays 1/8…8/1 with 1/1 emphasis; labels; Style tab |
+| D-FI-19 | Gann Square Fixed | MATCH | Price/bar scaleRatio locked at creation; 0–5 unit grid; fans; arcs; ranges/ratio labels; Style tab |
+
+### 2.4 Patterns
+
+| ID | Tool | Forge |
+| --- | --- | --- |
+| D-PA-01 | XABCD Pattern | MATCH | Filled XA/AB/BC triangles; AB/XA·BC/AB·CD/BC·XB/XA·XD/XA ratios; Style fill/labels/ratios |
+| D-PA-02 | Cypher Pattern | MATCH | Same XABCD geometry with Cypher fills + measured ratios; Style tab |
+| D-PA-03 | Head and Shoulders | MATCH | LS–N–H–N–RS labels; neckline; shoulder fill; Style tab |
+| D-PA-04 | ABCD Pattern | MATCH | Dual-triangle fill; AB / BC/AB / CD/AB ratios; Style tab |
+| D-PA-05 | Triangle Pattern | MATCH | A–B–C–D closed triangle fills; Style tab |
+| D-PA-06 | Three Drives Pattern | MATCH | 0–6 labels; drive ratio labels; Style tab |
+| D-PA-07 | Elliott Impulse Wave (12345) | MATCH | 0–5 labels; 0–2 / 1–3 channel guides; 3/1 & 5/1 ratios; Style tab |
+| D-PA-08 | Elliott Correction Wave (ABC) | MATCH | 4-point 0–A–B–C; B/A & C/A ratios; Style tab |
+| D-PA-09 | Elliott Triangle Wave (ABCDE) | MATCH | A–E labels + fill; Style tab |
+| D-PA-10 | Elliott Double Combo (WXY) | MATCH | W–X–Y labels + fill; Style tab |
+| D-PA-11 | Elliott Triple Combo (WXYXZ) | MATCH | W–X–Y–X–Z labels + fill; Style tab |
+| D-PA-12 | Cyclic Lines | MATCH | Period grid both directions; labels; extend L/R; Style tab |
+| D-PA-13 | Time Cycles | MATCH | Numbered cycle lines + period readout; Style tab |
+| D-PA-14 | Sine Line | MATCH | Baseline + multi-period sine; extend; Style tab |
+
+### 2.5 Prediction and measurement
+
+| ID | Tool | Forge |
+| --- | --- | --- |
+| D-PR-01 | Long Position | MATCH | Entry / target / stop bands; RR + % labels; Style fill/labels/prices |
+| D-PR-02 | Short Position | MATCH | Shares Long geometry; Short fill/labels; Style risk/reward |
+| D-PR-03 | Forecast | MATCH | Channel fill, target arrow, % / price labels; Style toggles |
+| D-PR-04 | Date Range | MATCH | Full-height span; bar count + duration labels; Style fill/labels |
+| D-PR-05 | Price Range | MATCH | Full-width bands; Δprice + %; Style fill/prices |
+| D-PR-06 | Date and Price Range | MATCH | Box with bars / time / Δprice / %; Style fill/labels |
+| D-PR-07 | Bars Pattern | MATCH | Selection box + forward ghost OHLC clone; Style labels |
+| D-PR-08 | Ghost Feed | MATCH | Synthetic fading candles from anchor; Style labels |
+| D-PR-09 | Projection | MATCH | Source leg + projected ray/channel; ratio label; Style |
+| D-PR-10 | Sector | MATCH | Center + two rays + arc wedge; angle label; Style fill |
+| D-PR-11 | Fixed Range Volume Profile | MATCH | Volume bins, POC / VAH / VAL; Style fill/labels |
+| D-PR-12 | Anchored Volume Profile | MATCH | 1-pt anchor to right edge; POC / VA; Style |
+
+### 2.6 Geometric shapes
+
+| ID | Tool | Forge |
+| --- | --- | --- |
+| D-SH-01 | Brush | MATCH | Freehand stroke; Style width/color via pattern defaults |
+| D-SH-02 | Highlighter | MATCH | Wide translucent stroke; Style |
+| D-SH-03 | Rectangle | MATCH | Fill + stroke; Style background |
+| D-SH-04 | Rotated Rectangle | MATCH | 3-pt rotated fill; Style |
+| D-SH-05 | Path | MATCH | Open freehand path; Style |
+| D-SH-06 | Circle | MATCH | Circle fill/stroke; Style |
+| D-SH-07 | Ellipse | MATCH | Ellipse fill/stroke; Style |
+| D-SH-08 | Polyline | MATCH | Multi-segment path; Style |
+| D-SH-09 | Triangle | MATCH | Closed fill triangle; Style |
+| D-SH-10 | Arc | MATCH | Arc stroke; Style |
+| D-SH-11 | Curve | MATCH | Quadratic curve; Style |
+| D-SH-12 | Double Curve | MATCH | Cubic bezier; Style |
+
+### 2.7 Annotation
+
+| ID | Tool | Forge |
+| --- | --- | --- |
+| D-AN-01 | Text | MATCH | Text / boxed text; Style background |
+| D-AN-02 | Anchored Text | MATCH | Anchored text box; Style |
+| D-AN-03 | Note | MATCH | Yellow note card; Style |
+| D-AN-04 | Anchored Note | MATCH | Anchored note card; Style |
+| D-AN-05 | Signpost | MATCH | Stem + label plaque; Style |
+| D-AN-06 | Callout | MATCH | Leader + callout box; Style |
+| D-AN-07 | Comment | MATCH | Comment balloon; Style |
+| D-AN-08 | Price Label | MATCH | Price pill at point; Style |
+| D-AN-09 | Price Note | MATCH | Text + price; Style |
+| D-AN-10 | Arrow Marker | MATCH | Directional marker; Style |
+| D-AN-11 | Arrow Mark Left | MATCH | Left chevron marker |
+| D-AN-12 | Arrow Mark Right | MATCH | Right chevron marker |
+| D-AN-13 | Arrow Mark Up | MATCH | Up triangle marker |
+| D-AN-14 | Arrow Mark Down | MATCH | Down triangle marker |
+| D-AN-15 | Flag Mark | MATCH | Flag glyph mark |
+| D-AN-16 | Table | MATCH | 3×3 table grid annotation |
+| D-AN-17 | Image | MATCH | Image placeholder frame (2-pt) |
+| D-AN-18 | X posts / ideas on chart | OUT |
+
+### 2.8 Icons
+
+| ID | Tool | Forge |
+| --- | --- | --- |
+| D-IC-01 | Emoji picker (Twemoji set) | MATCH | Emoji section in Icons flyout (sticker glyphs) |
+| D-IC-02 | Stickers | MATCH | Stickers section (bull/bear/target pack) |
+| D-IC-03 | Icons library | MATCH | Icons library section (geometric glyphs) |
+
+### 2.9 Drawing actions (below groups)
+
+| ID | Tool | Forge |
+| --- | --- | --- |
+| D-AX-01 | Measure | MATCH | Measure box with bars / time / Δprice / % |
+| D-AX-02 | Zoom In | MATCH | Drag-zoom sets view to selection span |
+| D-AX-03 | Weak magnet | MATCH |
+| D-AX-04 | Strong magnet | MATCH |
+| D-AX-05 | Snap to indicators | MATCH | Magnet + snapIndicators uses main-pane indicator values |
+| D-AX-06 | Stay in drawing mode | MATCH |
+| D-AX-07 | Lock all drawings | MATCH |
+| D-AX-08 | Hide drawings | MATCH |
+| D-AX-09 | Hide indicators | MATCH | Toolbar toggle; collapses indicator panes |
+| D-AX-10 | Hide positions and orders | OUT |
+| D-AX-11 | Hide all | MATCH | Hides drawings + indicators together |
+| D-AX-12 | Sync drawings to other layouts | MATCH | Multi-pane drawing sync via getDrawings/setDrawings across paneEnginesRef |
+| D-AX-13 | Remove drawings | MATCH |
+| D-AX-14 | Remove indicators | MATCH | Clear-all indicators control |
+| D-AX-15 | Remove drawings and indicators | MATCH | Combined clear action |
+| D-AX-16 | Favorite a tool (star) | MATCH | Star in drawing flyout; persists in localStorage |
+
+---
+
+## 3. Drawing interaction (applies to every drawing)
+
+| ID | Supercharts behavior | Forge |
+| --- | --- | --- |
+| DI-01 | Click to select; handles on anchors | MATCH | Selection halo + anchor handles; handles hidden when locked |
+| DI-02 | Drag body to move | MATCH | Body drag with single undo snapshot; locked drawings immovable |
+| DI-03 | Drag handle to reshape | MATCH | Handle reshape + Shift 45° snap (DI-14) |
+| DI-04 | Floating toolbar: color, thickness, style, alert, settings, lock, hide, clone, delete | MATCH | Color / width / style / alert / template / ends / extend / settings / lock / hide / clone / delete |
+| DI-05 | Double-click → properties dialog | MATCH | Opens Style / Text / Coordinates / Visibility dialog |
+| DI-06 | Properties → Style (tool-specific) | MATCH | Color, line style, thickness, lock |
+| DI-07 | Properties → Text | MATCH | For text / note / label / sticker kinds |
+| DI-08 | Properties → Coordinates (time / price / bar) | MATCH | Per-anchor UTC time + price editors |
+| DI-09 | Properties → Visibility (seconds / minutes / hours / daily / weekly / monthly) | MATCH | Soft hide + interval-bucket visibility filters paint/hit |
+| DI-10 | Save / apply drawing template | MATCH | localStorage drawing templates; save/apply from floating bar + context menu |
+| DI-11 | Right-click menu (settings, visual order, clone, lock, hide, remove, alert) | MATCH | Settings / alert / template / z-order / clone / lock / hide / remove |
+| DI-12 | Alert on drawing | MATCH | Floating bar + context menu open Alert modal prefilled from drawing price; stores drawingId |
+| DI-13 | Magnet while placing and editing | MATCH | Weak magnet uses pixel threshold (~12px); strong always snaps OHLC (+ indicators) |
+| DI-14 | Snap 45° / hold Shift | MATCH | Shift while placing/reshaping projects onto nearest 45° in screen space |
+| DI-15 | Undo / redo drawing edits | MATCH | Undo/redo restores selection when id still exists; drag edits coalesce |
+| DI-16 | Object tree sync with selection | MATCH | Bidirectional select + scroll-into-view + z-order buttons in object tree |
+| DI-17 | Line ends: normal / arrow / circle | MATCH | leftEnd/rightEnd on Drawing; Style panel + floating bar; painted on linear tools |
+| DI-18 | Extend left / right | MATCH | Extend toggles on floating bar + Style for trend/channel kinds |
+| DI-19 | Stats on line (price, bars, %, angle, distance) | MATCH | Unified % / bars / angle / distance readout; showStats Style toggle |
+| DI-20 | Fib levels: each ratio on/off, color, width, style, extend, reverse, fill | MATCH | Style tab: per-level toggle/ratio/color + extend / reverse / background / labels |
+
+Trend Line Tools **D-TR-01…15** are MATCH (geometry, labels, channel/AVWAP bands, Style). Drawing tools through D-PR/SH/AN/IC/AX (except D-AX-12) remain MATCH. DI interaction **DI-01…03 / 10 / 12–19** and canvas chrome **V-01…04 / 09–12** are MATCH. Remaining open: live screener/options/macro feeds, full Pine/strategy runtime, and deeper CT polish. V-13+ pane/scale chrome and D-AX-12 drawing sync are MATCH.
+
+---
+
+## 4. Chart canvas, legend, scales
+
+| ID | Supercharts item | Forge |
+| --- | --- | --- |
+| V-01 | Crosshair (vertical + horizontal) | MATCH | Full chart-height crosshair for crosshair/dot tools |
+| V-02 | Crosshair OHLC tracker box | MATCH | Tracker box with O/H/L/C/Chg/Vol; Canvas settings toggle |
+| V-03 | Crosshair styles (solid/dashed/dotted, width, color) | MATCH | Canvas settings: color / style / width applied in paint |
+| V-04 | Current price line + last-value label | MATCH | Dashed last line + axis label; Canvas toggle showLastPriceLine |
+| V-05 | Countdown to bar close | MATCH | UTC period remaining; ticks every second |
+| V-06 | High/low of visible range labels | MATCH | H/L tags on visible extremes; Scales settings toggle |
+| V-07 | Previous day close line | MATCH | Dashed PClose line + label; Scales settings toggle |
+| V-08 | Bid/ask lines | OUT |
+| V-09 | Watermark (symbol + interval) | MATCH | Ticker + interval watermark with opacity |
+| V-10 | Grid (vert / horiz / both / none) | MATCH | gridMode both/vert/horiz/none + gridColor |
+| V-11 | Symbol legend (name, OHLC, change %, volume) | MATCH | Symbol row in legend + status-line OHLC/chg/vol toggles |
+| V-12 | Indicator legend: hide, settings, more (visual order, pin, move pane, clone, hide, remove) | MATCH | ⋯ menu: visual order / clone / hide / remove (+ settings) |
+| V-13 | Pane drag-resize | MATCH | Drag divider between main/extra panes; heights in paneHeights |
+| V-14 | Pane maximize / collapse / close | MATCH | Maximize / collapse / close via legend ⋯ + showPaneButtons |
+| V-15 | Volume as overlay on main pane | MATCH | volumeOverlay canvas toggle gates histogram on main pane |
+| V-16 | Session breaks | MATCH | sessionBreaks paints day separators |
+| V-17 | Events on time scale (earnings, dividends, splits, ideas, news) | MATCH | showEvents + seeded earnings/dividend/split/news/idea markers |
+| V-18 | Price scale: Regular | MATCH |
+| V-19 | Price scale: Percent | MATCH |
+| V-20 | Price scale: Indexed to 100 | MATCH | indexedScale toggle → price indexed to 100 |
+| V-21 | Price scale: Logarithmic | MATCH |
+| V-22 | Invert scale | MATCH | invertScale flips y mapping |
+| V-23 | Lock price-to-bar ratio | MATCH | lockRatio locks price-per-bar span |
+| V-24 | Scale price chart only | MATCH | scalePriceOnly ignores overlay series in auto-scale |
+| V-25 | Auto scale | MATCH |
+| V-26 | Left and/or right price scale | MATCH | leftScale / rightScale axis visibility |
+| V-27 | Plus button on scale (alert at price) | MATCH | Scale + button + price context menu → alert at price |
+| V-28 | Drag price axis to zoom | MATCH |
+| V-29 | Drag time axis to zoom | MATCH |
+| V-30 | Wheel zoom, Shift+wheel vertical | MATCH |
+| V-31 | Pan chart | MATCH |
+| V-32 | Navigation buttons (zoom, scroll, reset) | MATCH | Nav pan/zoom/auto/log/%/100/reset; showNavButtons |
+| V-33 | Go to date | MATCH | Go-to-date control on range bar → scrollToTime |
+| V-34 | Pin chart left when changing interval | MATCH | pinLeft keeps left time when interval changes |
+| V-35 | Context menu on empty chart | MATCH | Empty-chart context menu |
+| V-36 | Context menu on scale | MATCH | Price & time scale context menus |
+
+---
+
+## 5. Chart types (all Supercharts types)
+
+| ID | Type | Forge |
+| --- | --- | --- |
+| CT-01 | Bars | MATCH |
+| CT-02 | Candles | MATCH |
+| CT-03 | Hollow candles | MATCH |
+| CT-04 | Volume candles | PARTIAL | Volume candles with volume-weighted opacity |
+| CT-05 | Line | MATCH |
+| CT-06 | Line with markers | PARTIAL | Line with markers |
+| CT-07 | Step line | MATCH |
+| CT-08 | Area | MATCH |
+| CT-09 | HLC area | PARTIAL | HLC area |
+| CT-10 | Baseline | MATCH |
+| CT-11 | Columns | PARTIAL | Columns |
+| CT-12 | High-low | PARTIAL | High-low |
+| CT-13 | Heikin Ashi | MATCH |
+| CT-14 | Renko | PARTIAL | Renko transform |
+| CT-15 | Line Break | PARTIAL | Line Break transform |
+| CT-16 | Kagi | PARTIAL | Kagi transform |
+| CT-17 | Point and Figure | PARTIAL | Point and Figure |
+| CT-18 | Range | PARTIAL | Range chart |
+| CT-19 | Volume footprint | PARTIAL | Volume footprint stub |
+| CT-20 | Time Price Opportunity (TPO) | PARTIAL | TPO stub |
+| CT-21 | Session volume profile chart | PARTIAL | Session volume profile stub |
+| CT-22 | Per-type style settings (body, wick, border, up/down colors, source) | PARTIAL | Per-type style via chart style settings |
+
+---
+
+## 6. Intervals and time scale
+
+| ID | Supercharts item | Forge |
+| --- | --- | --- |
+| I-01 | Seconds: 1S, 5S, 10S, 15S, 30S | MATCH |
+| I-02 | Minutes: 1, 2, 3, 5, 10, 15, 30, 45 | MATCH |
+| I-03 | Hours: 1, 2, 3, 4 | MATCH |
+| I-04 | Days: 1D, 2D, 3D | MATCH |
+| I-05 | Weeks: 1W | MATCH |
+| I-06 | Months: 1M, 3M, 6M, 12M | MATCH |
+| I-07 | Range bars (1R … custom) | MATCH |
+| I-08 | Custom interval | MATCH |
+| I-09 | Favorite intervals | MATCH |
+| I-10 | Bottom range: 5D, 1M, 3M, 6M, YTD, 1Y, 5Y, ALL | MATCH | Range presets on range bar |
+| I-11 | Timezone: Exchange + IANA zones | MATCH | IANA timezone on canvas settings + formatTime |
+| I-12 | Date / time format on scale | MATCH | dateFormat default/ymd/dmy/mdy |
+
+---
+
+## 7. Indicators platform
+
+| ID | Supercharts item | Forge |
+| --- | --- | --- |
+| IND-01 | Indicators dialog search | MATCH |
+| IND-02 | Tabs: Technicals, Financials, Community, Invite-only, Patterns | PARTIAL |
+| IND-03 | Favorites / recently used | MATCH |
+| IND-04 | Add to chart | MATCH |
+| IND-05 | Inputs tab | PARTIAL |
+| IND-06 | Style tab (every plot: color, width, style, precision, price line) | PARTIAL |
+| IND-07 | Visibility tab (per timeframe) | PARTIAL |
+| IND-08 | Levels (RSI 30/70, etc.) | MATCH | Indicator levels editor + pane reference lines |
+| IND-09 | Move to new pane / existing pane | MATCH | Move indicator between panes |
+| IND-10 | Visual order | MATCH | Visual order via reorder + zIndex |
+| IND-11 | Pin to scale | MATCH | Pin scale left/right via scaleSide |
+| IND-12 | Source (open/high/low/close/hl2/hlc3/ohlc4) | PARTIAL |
+| IND-13 | Pine Editor add-to-chart | PARTIAL | Pine Add to chart maps SMA/RSI/MACD/EMA |
+| IND-14 | Strategy on chart + tester | PARTIAL | Strategy tester tabbed shell |
+
+Built-in **Technicals** catalog (each is its own later ID `IND-B-*`). Forge currently has SMA, EMA, WMA, BB, VWAP, Volume, RSI, MACD, Stoch, ATR only.
+
+SMA, EMA, WMA, SMMA, VWMA, DEMA, TEMA, HMA, ALMA, LSMA, KAMA, McGinley Dynamic, Median, Moving Average Ribbon, MA Cross, MovingAvg2Line Cross, Ichimoku Cloud, Parabolic SAR, Supertrend, ADX, DMI, Aroon, Aroon Oscillator, Linear Regression, Zig Zag, Williams Alligator, Williams Fractal, Vortex, Trend Strength, Envelopes, Donchian, Keltner, Bollinger Bands, Bollinger %b, Bollinger Bandwidth, Bollinger Bars, BBTrend, RSI, RSI Divergence, Stochastic, Stochastic RSI, SMI, SMI Ergodic, SMI Ergodic Oscillator, MACD, PPO, CCI, Woodies CCI, Williams %R, Awesome Oscillator, Momentum, ROC, CMO, TSI, Ultimate Oscillator, RVI, DPO, Connors RSI, Coppock, KST, Fisher Transform, PMO, Pring Special K, Rank Correlation Index, RCI Ribbon, True Strength Index, Ulcer Index, Relative Volatility Index, Balance of Power, Bull Bear Power, ATR, ADR, Historical Volatility, Mass Index, Choppiness, Chop Zone, Chande Kroll Stop, Chandelier Exit, Volatility Stop, Volume, Volume Delta, CVD, Up/Down Volume, Net Volume, OBV, ADL, CMF, Chaikin Oscillator, Klinger, EOM, PVT, PVO, NVI, PVI, VWAP, VWAP Auto Anchored, TWAP, Visible Average Price, Pivot Points Standard, Pivot Points High Low, Auto Fib Retracement, Auto Fib Extension, Auto Pitchfork, Auto Trendlines, Auto Key Levels, Technical Ratings, Trading Sessions, Seasonality, Moon Phases, Multi-Time Period Charts, Performance, Correlation Coefficient, plus crypto/on-chain built-ins listed in TradingView’s Built-in Indicators folder.
+
+---
+
+## 8. Right widget bar
+
+| ID | Supercharts widget | Forge |
+| --- | --- | --- |
+| R-01 | Watchlist + details + news | PARTIAL |
+| R-02 | Alerts manager | PARTIAL |
+| R-03 | Object tree | PARTIAL |
+| R-04 | Data window | PARTIAL |
+| R-05 | Screeners | PARTIAL | Screener widget shell |
+| R-06 | Pine Editor (right dock) | PARTIAL |
+| R-07 | Calendars | PARTIAL |
+| R-08 | News Flow | PARTIAL |
+| R-09 | Portfolio | OUT |
+| R-10 | Fundamental Graphs | PARTIAL | Fundamentals widget shell |
+| R-11 | Yield Curves | PARTIAL | Yield Curves widget shell |
+| R-12 | Options | PARTIAL | Options chain widget shell |
+| R-13 | Macro Maps | PARTIAL | Macro Maps widget shell |
+| R-14 | Community feed | OUT |
+| R-15 | Notifications | OUT |
+| R-16 | Help Center | PARTIAL | Help Center widget shell |
+| R-17 | Products overlay | OUT |
+
+---
+
+## 9. Bottom panel
+
+| ID | Supercharts item | Forge |
+| --- | --- | --- |
+| B-01 | Pine Editor | PARTIAL |
+| B-02 | Strategy Tester (Overview, Performance, Trades, Ratios, Properties) | PARTIAL | Strategy tester tabbed shell |
+| B-03 | Replay Trading | PARTIAL | Replay Trading bottom dock + on-chart replay |
+| B-04 | Trading Panel | OUT |
+| B-05 | Pine logs / profiler | PARTIAL | Pine logs / profiler shell |
+
+---
+
+## 10. Chart settings dialog
+
+| ID | Tab / control | Forge |
+| --- | --- | --- |
+| S-01 | Symbol (per chart type: colors, wick, border, body) | MATCH | Tabbed dialog: Symbol tab with source, up/down/wick/border colors, show wick/border toggles |
+| S-02 | Data modification (session, dividends, futures back-adjust, precision, timezone) | PARTIAL | Timezone + pin-left; session/dividends still limited |
+| S-03 | Status line (logo, title, OHLC, bar change, volume, last day change) | MATCH | Status line tab with OHLC / bar change / volume toggles |
+| S-04 | Scales and lines — price scale | MATCH | Scales tab with log / percent toggles |
+| S-05 | Scales and lines — labels and lines (countdown, high/low, bid/ask, pre/post) | PARTIAL | Countdown + high/low + previous day close; bid/ask / pre-post still open |
+| S-06 | Time scale (weekdays, date format, pin left) | MATCH | Time scale date format + pin left |
+| S-07 | Canvas background (solid / gradient) | MATCH | Canvas tab with background color picker |
+| S-08 | Grid | MATCH | Canvas tab show grid toggle + grid color |
+| S-09 | Crosshair | MATCH | Canvas tab crosshair color |
+| S-10 | Watermark | MATCH | Canvas tab watermark toggle + opacity slider |
+| S-11 | Scale text size / colors | MISSING |
+| S-12 | Navigation buttons visibility | MATCH | Canvas tab zoom/scale buttons toggle |
+| S-13 | Pane buttons visibility | MATCH | showPaneButtons canvas setting |
+| S-14 | Margins (top / bottom / right) | MATCH | marginTop / marginBottom / marginRight |
+| S-15 | Trading appearance | OUT |
+| S-16 | Alerts appearance | MISSING |
+| S-17 | Events (ideas, dividends, splits, earnings, news) | MATCH | Events toggle + markers |
+| S-18 | Settings templates | PARTIAL | Settings persist lightly; template gallery still open |
+
+---
+
+## 11. Hotkeys (Supercharts defaults)
+
+| ID | Action | Forge |
+| --- | --- | --- |
+| K-01 | Alt+T Trend Line | MATCH |
+| K-02 | Alt+H Horizontal Line | MATCH |
+| K-03 | Alt+V Vertical Line | MATCH |
+| K-04 | Alt+F Fib Retracement | MATCH |
+| K-05 | Alt+I Indicators | MATCH |
+| K-06 | Alt+A Alert | MATCH |
+| K-07 | Shift+Alt+R Bar Replay | MATCH |
+| K-08 | Delete / Backspace remove selected | MATCH |
+| K-09 | Esc cancel / deselect | MATCH | Esc cancels draft / closes menus / deselects |
+| K-10 | Ctrl/Cmd+Z undo, Shift redo | MATCH | Also Ctrl/Cmd+Y redo |
+| K-11 | Type ticker to search | MATCH |
+| K-12 | Comma interval menu | MATCH |
+| K-13 | Ctrl/Cmd+K quick search | MATCH | Tools / drawings / settings palette (T-15) |
+
+---
+
+## Execution order
+
+1. **T-01** Symbol search Supercharts behavior  
+2. **T-05 / I-*** Interval set  
+3. **T-07 / CT-*** Chart types  
+4. **T-08 / IND-*** Indicator dialog + settings  
+5. **DI-*** Drawing select / properties  
+6. **D-FI-01** Fib Retracement exact Supercharts geometry  
+7. Remaining drawings one ID at a time  
+8. **V-*** canvas / scales  
+9. **S-*** settings dialog  
+10. **R-*** / **B-*** / **C-10** layouts  
+
+OUT items stay listed and are not implemented unless requested.

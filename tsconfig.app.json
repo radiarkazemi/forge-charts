@@ -7,7 +7,7 @@
     "skipLibCheck": true,
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
-    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
     "moduleDetection": "force",
     "noEmit": true,
     "jsx": "react-jsx",
@@ -15,13 +15,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true,
-    "noUncheckedIndexedAccess": true,
-    "paths": {
-      "@/*": ["./src/*"],
-      "@charting-library": ["./public/charting_library/charting_library"]
-    },
-    "types": ["vite/client"]
+    "noUncheckedSideEffectImports": true
   },
   "include": ["src"]
 }
