@@ -1,0 +1,154 @@
+export function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+export function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+export function uid(prefix = "id"): string {
+  return `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+export function niceTicks(min: number, max: number, count: number): number[] {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
+    return [min || 0];
+  }
+  const span = max - min;
+  const raw = span / Math.max(1, count);
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const residual = raw / mag;
+  const step = residual >= 5 ? 5 * mag : residual >= 2 ? 2 * mag : mag;
+  const start = Math.ceil(min / step) * step;
+  const ticks: number[] = [];
+  for (let v = start; v <= max + step * 0.01; v += step) {
+    ticks.push(Number(v.toPrecision(12)));
+  }
+  return ticks;
+}
+
+export function formatPrice(value: number, precision: number): string {
+  if (!Number.isFinite(value)) return "—";
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
+  if (abs >= 10_000) return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  return value.toFixed(precision);
+}
+
+export function formatVolume(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(2)}K`;
+  return value.toFixed(0);
+}
+
+export function formatTime(
+  unix: number,
+  interval: string,
+  timezone = "UTC",
+  dateFormat: "default" | "ymd" | "dmy" | "mdy" = "default",
+): string {
+  const d = new Date(unix * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  let y: number, mo: number, day: number, h: number, mi: number, s: number;
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone || "UTC",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).formatToParts(d);
+    const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+    y = get("year");
+    mo = get("month");
+    day = get("day");
+    h = get("hour") % 24;
+    mi = get("minute");
+    s = get("second");
+  } catch {
+    y = d.getUTCFullYear();
+    mo = d.getUTCMonth() + 1;
+    day = d.getUTCDate();
+    h = d.getUTCHours();
+    mi = d.getUTCMinutes();
+    s = d.getUTCSeconds();
+  }
+  const upper = interval.toUpperCase();
+  if (/^\d+S$/.test(upper)) return `${pad(h)}:${pad(mi)}:${pad(s)}`;
+  const date =
+    dateFormat === "dmy"
+      ? `${pad(day)}/${pad(mo)}/${y}`
+      : dateFormat === "mdy"
+        ? `${pad(mo)}/${pad(day)}/${y}`
+        : `${y}-${pad(mo)}-${pad(day)}`;
+  if (/^\d+[DWM]$/.test(upper) || dateFormat !== "default") {
+    if (/^\d+[DWM]$/.test(upper)) return date;
+  }
+  if (dateFormat === "ymd" || dateFormat === "dmy" || dateFormat === "mdy") {
+    return `${date} ${pad(h)}:${pad(mi)}`;
+  }
+  return `${pad(mo)}-${pad(day)} ${pad(h)}:${pad(mi)}`;
+}
+
+export function hashString(input: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+export function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export function distToSegment(
+  px: number,
+  py: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): number {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  if (dx === 0 && dy === 0) return Math.hypot(px - x1, py - y1);
+  const t = clamp(((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy), 0, 1);
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
+
+export function distToLine(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len = Math.hypot(dx, dy) || 1;
+  return Math.abs((px - x1) * dy - (py - y1) * dx) / len;
+}
+
+
+/** Snap chart point B to nearest 45° from A in screen space (DI-14). */
+export function snapAngle45(
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): { x: number; y: number } {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return { x: bx, y: by };
+  const ang = Math.atan2(dy, dx);
+  const step = Math.PI / 4;
+  const snapped = Math.round(ang / step) * step;
+  return { x: ax + Math.cos(snapped) * len, y: ay + Math.sin(snapped) * len };
+}
