@@ -36,13 +36,16 @@ export const SUPPORTED_RESOLUTIONS = [
   "120",
   "180",
   "240",
+  "360",
+  "480",
+  "720",
   "1D",
   "1W",
   "1M",
 ] as ResolutionString[];
 
 const SECONDS_MULTIPLIERS = ["1", "5", "10", "15", "30", "45"];
-const INTRADAY_MULTIPLIERS = ["1", "2", "3", "5", "10", "15", "30", "45", "60", "120", "180", "240"];
+const INTRADAY_MULTIPLIERS = ["1", "2", "3", "5", "10", "15", "30", "45", "60", "120", "180", "240", "360", "480", "720"];
 
 export interface DataSourceInfo {
   readonly ticker: string;

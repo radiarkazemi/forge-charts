@@ -37,6 +37,9 @@ export const GERMANY_NATIVE_INTERVALS: readonly Interval[] = [
   "120",
   "180",
   "240",
+  "360",
+  "480",
+  "720",
   "1D",
   "1W",
   "1M",
@@ -53,6 +56,9 @@ const CRYPTO_HISTORY_TF: Readonly<Record<string, string>> = {
   "60": "1h",
   "120": "2h",
   "240": "4h",
+  "360": "6h",
+  "480": "8h",
+  "720": "12h",
   "1D": "1d",
   "1W": "1w",
   "1M": "1M",
@@ -68,6 +74,9 @@ const OHLC_INTERVAL: Readonly<Record<string, string>> = {
   "120": "60",
   "180": "60",
   "240": "240",
+  "360": "240",
+  "480": "240",
+  "720": "240",
   "1D": "1D",
   "1W": "1D",
   "1M": "1D",
@@ -283,20 +292,25 @@ function aggregateBars(bars: readonly Bar[], stepSec: number): Bar[] {
 /**
  * Fill missing 1-second slots with flat candles (O=H=L=C=prev close).
  * Keeps TV second charts continuous when the upstream skips quiet seconds.
+ * Extends forward to `toSec` (exclusive) so trailing gaps up to "now" are covered.
  */
 function fillSecondGaps(bars: readonly Bar[], fromSec: number, toSec: number): Bar[] {
-  if (!bars.length) return [];
+  if (!bars.length && toSec <= fromSec) return [];
   const byTime = new Map(bars.map((b) => [b.time, b]));
-  const start = Math.max(fromSec, bars[0]!.time);
-  const end = Math.min(toSec - 1, bars[bars.length - 1]!.time);
+  const first = bars[0]?.time ?? fromSec;
+  const last = bars[bars.length - 1]?.time ?? fromSec;
+  const start = Math.min(fromSec, first);
+  const end = Math.max(toSec - 1, last);
+  if (end < start) return [...bars];
+
   const out: Bar[] = [];
-  let prevClose = bars[0]!.open;
+  let prevClose = bars[0]?.open ?? bars[0]?.close ?? 0;
   for (let t = start; t <= end; t += 1) {
     const hit = byTime.get(t);
     if (hit) {
       out.push(hit);
       prevClose = hit.close;
-    } else {
+    } else if (Number.isFinite(prevClose) && prevClose > 0) {
       out.push({ time: t, open: prevClose, high: prevClose, low: prevClose, close: prevClose, volume: 0 });
     }
   }
@@ -592,7 +606,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
     if (routeFor(symbol) === null) return false;
     const { unit, count } = parseInterval(interval);
     if (unit === "seconds") return count >= 1 && count <= 45;
-    if (unit === "minutes") return count >= 1 && count <= 240;
+    if (unit === "minutes") return count >= 1 && count <= 720;
     if (unit === "days" || unit === "weeks" || unit === "months") return count >= 1;
     return false;
   }
@@ -669,6 +683,21 @@ export class GermanyMarketProvider implements MarketDataProvider {
         /* ticks will create */
       }
     })();
+
+    // Seconds charts: advance flat O=H=L=C bars on each step boundary when no tick arrives.
+    // Standard quiet-second formula — carry previous close forward.
+    if (parseInterval(interval).unit === "seconds" && typeof window !== "undefined") {
+      const clock = window.setInterval(() => {
+        const lastPrice = current?.close;
+        if (!Number.isFinite(lastPrice)) return;
+        const tsSec = Math.floor(Date.now() / 1000);
+        const bucket = alignTime(tsSec, step);
+        if (!current || current.time < bucket) {
+          emit({ time: bucket, open: lastPrice!, high: lastPrice!, low: lastPrice!, close: lastPrice!, volume: 0 });
+        }
+      }, Math.min(250, Math.max(50, (step * 1000) / 4)));
+      disposers.push(() => clearInterval(clock));
+    }
 
     // Binance tick stream (crypto + PAXG proxy for gold/FXPRO/FOREXCOM XAU).
     if (route.tickSymbol) {
@@ -865,27 +894,41 @@ export class GermanyMarketProvider implements MarketDataProvider {
     const step = intervalSeconds(interval);
     const directTf = CRYPTO_HISTORY_TF[interval];
 
-    if (directTf) {
-      const bars = await fetchCryptoHistory(apiSymbol, directTf, limit);
-      if (directTf === "1s") {
-        return fillSecondGaps(bars, range.to - limit - 5, range.to);
-      }
-      return bars;
+    // Seconds: Germany 1s history is short/sparse — fill gaps, then prepend from 1m synth.
+    if (unit === "seconds" || directTf === "1s") {
+      return this.fetchCryptoSecondBars(apiSymbol, step, limit, range);
     }
 
-    // Seconds other than 1S: fetch 1s and aggregate (+ fill gaps).
-    if (unit === "seconds") {
-      const need = Math.min(MAX_1S_FETCH, limit * count + 30);
-      const raw = await fetchCryptoHistory(apiSymbol, "1s", need);
-      const filled = fillSecondGaps(raw, range.to - need - 5, range.to);
-      return aggregateBars(filled, step);
+    if (directTf) {
+      return fetchCryptoHistory(apiSymbol, directTf, limit);
     }
 
     // Minutes without native TF (2, 10, 45, 180…): aggregate from next-finer native.
     if (unit === "minutes") {
       const baseTf =
-        count <= 3 ? "1m" : count <= 10 ? "5m" : count <= 45 ? "15m" : count <= 180 ? "1h" : "4h";
-      const baseStep = baseTf === "1m" ? 60 : baseTf === "5m" ? 300 : baseTf === "15m" ? 900 : baseTf === "1h" ? 3600 : 14400;
+        count <= 3
+          ? "1m"
+          : count <= 10
+            ? "5m"
+            : count <= 45
+              ? "15m"
+              : count <= 180
+                ? "1h"
+                : count <= 360
+                  ? "4h"
+                  : "6h";
+      const baseStep =
+        baseTf === "1m"
+          ? 60
+          : baseTf === "5m"
+            ? 300
+            : baseTf === "15m"
+              ? 900
+              : baseTf === "1h"
+                ? 3600
+                : baseTf === "4h"
+                  ? 14_400
+                  : 21_600;
       const need = Math.min(MAX_BARS, Math.ceil((limit * step) / baseStep) + 10);
       const raw = await fetchCryptoHistory(apiSymbol, baseTf, need);
       return aggregateBars(raw, step);
@@ -898,6 +941,47 @@ export class GermanyMarketProvider implements MarketDataProvider {
     }
 
     return fetchCryptoHistory(apiSymbol, "1m", limit);
+  }
+
+  /**
+   * Build second (and multi-second) history:
+   * 1) pull native 1s where available
+   * 2) fill quiet seconds with flat O=H=L=C=prevClose
+   * 3) if still short, synthesize older seconds from 1m OHLC (open→close path)
+   */
+  private async fetchCryptoSecondBars(
+    apiSymbol: string,
+    step: number,
+    limit: number,
+    range: BarRange,
+  ): Promise<Bar[]> {
+    const needSeconds = Math.min(MAX_1S_FETCH, Math.max(limit * step + 30, step * 60));
+    let ones: Bar[] = [];
+    try {
+      const raw = await fetchCryptoHistory(apiSymbol, "1s", Math.min(500, needSeconds));
+      ones = fillSecondGaps(raw, range.to - needSeconds - 5, range.to);
+    } catch {
+      ones = [];
+    }
+
+    if (ones.length < needSeconds) {
+      const parentNeed = Math.min(MAX_BARS, Math.ceil(needSeconds / 60) + 5);
+      try {
+        const parents = await fetchCryptoHistory(apiSymbol, "1m", parentNeed);
+        const synth = synthesizeFromHigher(parents, 1);
+        const byTime = new Map(ones.map((b) => [b.time, b]));
+        for (const bar of synth) {
+          if (!byTime.has(bar.time)) byTime.set(bar.time, bar);
+        }
+        ones = [...byTime.values()].sort((a, b) => a.time - b.time);
+        ones = fillSecondGaps(ones, range.to - needSeconds - 5, range.to);
+      } catch {
+        /* keep whatever 1s we have */
+      }
+    }
+
+    const bars = step <= 1 ? ones : aggregateBars(ones, step);
+    return bars.filter((b) => b.time < range.to).slice(-Math.max(limit, 1));
   }
 
   private async fetchMetalBars(
