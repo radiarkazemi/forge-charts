@@ -17,10 +17,10 @@ const LIVE_POLL_MS = 5_000;
 const DAY = 86_400;
 
 const YAHOO_BY_TICKER: Readonly<Record<string, string>> = {
-  XAUUSD: "GC=F",
+  // Gold (XAUUSD / GC1!) is owned by Germany FOREXCOM/FXPRO — do not map to GC=F
+  // or watchlist prices drift ~$40 from the broker series.
   XAGUSD: "SI=F",
   USOIL: "CL=F",
-  "GC1!": "GC=F",
   "CL1!": "CL=F",
   "ES1!": "ES=F",
   "NQ1!": "NQ=F",

@@ -608,9 +608,15 @@ export class GermanyMarketProvider implements MarketDataProvider {
   private async fetchForexXau(force = false): Promise<ForexXau> {
     const now = Date.now();
     if (!force && this.forexCache && now - this.forexCache.at < 1_000) return this.forexCache.data;
-    const fx = await fetchJson<ForexXau>(`${BASE}/forex/xauusd/`, { timeoutMs: 1_500 });
-    this.forexCache = { at: now, data: fx };
-    return fx;
+    try {
+      const fx = await fetchJson<ForexXau>(`${BASE}/forex/xauusd/`, { timeoutMs: 1_500 });
+      this.forexCache = { at: now, data: fx };
+      return fx;
+    } catch (error) {
+      // Keep serving last good FOREXCOM tick through Germany 429 windows.
+      if (this.forexCache && now - this.forexCache.at < 15_000) return this.forexCache.data;
+      throw error;
+    }
   }
 
   supports(symbol: SymbolInfo, interval: Interval): boolean {
