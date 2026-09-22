@@ -610,6 +610,8 @@ export class GermanyMarketProvider implements MarketDataProvider {
     let lastEmittedClose = Number.NaN;
     let lastEmittedTime = -1;
     let lastTickMs = 0;
+    let readyForTicks = false;
+    const pendingTicks: Array<{ price: number; tsSec: number; volumeDelta: number }> = [];
 
     const emit = (bar: Bar) => {
       current = bar;
@@ -621,10 +623,15 @@ export class GermanyMarketProvider implements MarketDataProvider {
 
     const onTick = (price: number, tsSec: number, volumeDelta = 0) => {
       lastTickMs = Date.now();
+      if (!readyForTicks) {
+        pendingTicks.push({ price, tsSec, volumeDelta });
+        if (pendingTicks.length > 50) pendingTicks.shift();
+        return;
+      }
       emit(applyTick(current, price, tsSec, step, volumeDelta));
     };
 
-    // Seed forming bar quickly.
+    // Seed forming bar from real OHLC before applying live ticks (avoids flat O=H=L=C).
     void (async () => {
       try {
         const seed = await this.fetchBars(symbol, interval, {
@@ -636,6 +643,11 @@ export class GermanyMarketProvider implements MarketDataProvider {
         if (last) emit({ ...last, time: alignTime(last.time, step) });
       } catch {
         /* ticks will create */
+      } finally {
+        readyForTicks = true;
+        for (const tick of pendingTicks.splice(0)) {
+          emit(applyTick(current, tick.price, tick.tsSec, tick.volumeDelta));
+        }
       }
     })();
 
