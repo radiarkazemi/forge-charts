@@ -37,7 +37,9 @@ export const SYMBOL_TYPE_LABELS: Readonly<Record<SymbolType, string>> = {
 };
 
 export function normalizeTicker(ticker: string): string {
-  return ticker.trim().toUpperCase();
+  const raw = ticker.trim().toUpperCase();
+  const idx = raw.lastIndexOf(":");
+  return idx >= 0 ? raw.slice(idx + 1) : raw;
 }
 
 export function symbolMatches(symbol: SymbolInfo, query: string, type?: SymbolType | ""): boolean {

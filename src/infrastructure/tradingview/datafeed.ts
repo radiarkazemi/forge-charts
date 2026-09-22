@@ -16,7 +16,33 @@ import type {
   Timezone,
 } from "./types";
 
-export const SUPPORTED_RESOLUTIONS = ["1", "5", "15", "30", "60", "240", "1D", "1W", "1M"] as ResolutionString[];
+/** Full TradingView resolution set (seconds → months). */
+export const SUPPORTED_RESOLUTIONS = [
+  "1S",
+  "5S",
+  "10S",
+  "15S",
+  "30S",
+  "45S",
+  "1",
+  "2",
+  "3",
+  "5",
+  "10",
+  "15",
+  "30",
+  "45",
+  "60",
+  "120",
+  "180",
+  "240",
+  "1D",
+  "1W",
+  "1M",
+] as ResolutionString[];
+
+const SECONDS_MULTIPLIERS = ["1", "5", "10", "15", "30", "45"];
+const INTRADAY_MULTIPLIERS = ["1", "2", "3", "5", "10", "15", "30", "45", "60", "120", "180", "240"];
 
 export interface DataSourceInfo {
   readonly ticker: string;
@@ -31,6 +57,11 @@ function toTvBar(bar: Bar) {
 function stripExchange(symbolName: string): string {
   const idx = symbolName.lastIndexOf(":");
   return idx >= 0 ? symbolName.slice(idx + 1) : symbolName;
+}
+
+function parseExchangePrefix(symbolName: string): string | undefined {
+  const idx = symbolName.lastIndexOf(":");
+  return idx >= 0 ? symbolName.slice(0, idx) : undefined;
 }
 
 /**
@@ -70,12 +101,21 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     const results = this.symbols
       .search(userInput, type)
       .filter((s) => !exchange || s.exchange === exchange)
-      .map((s) => ({ symbol: s.ticker, ticker: s.ticker, description: s.name, exchange: s.exchange, type: s.type }));
+      .map((s) => ({
+        symbol: s.ticker,
+        ticker: `${s.exchange}:${s.ticker}`,
+        description: s.name,
+        exchange: s.exchange,
+        type: s.type,
+      }));
     onResult(results);
   }
 
   resolveSymbol(symbolName: string, onResolve: ResolveCallback, onError: DatafeedErrorCallback): void {
-    const symbol = this.symbols.findByTicker(stripExchange(symbolName));
+    const exchange = parseExchangePrefix(symbolName);
+    const ticker = stripExchange(symbolName);
+    const symbol =
+      (exchange ? this.symbols.findByTicker(ticker, exchange) : undefined) ?? this.symbols.findByTicker(ticker);
     if (!symbol) {
       setTimeout(() => onError(`Unknown symbol: ${symbolName}`), 0);
       return;
@@ -142,21 +182,21 @@ export class TradingViewDatafeed implements IBasicDataFeed {
 
   private requireSymbol(symbolInfo: LibrarySymbolInfo): SymbolInfo {
     const ticker = normalizeTicker(stripExchange(symbolInfo.ticker ?? symbolInfo.name));
-    const symbol = this.symbols.findByTicker(ticker);
+    const exchange = symbolInfo.exchange || parseExchangePrefix(symbolInfo.ticker ?? symbolInfo.name);
+    const symbol =
+      (exchange ? this.symbols.findByTicker(ticker, exchange) : undefined) ?? this.symbols.findByTicker(ticker);
     if (!symbol) throw new Error(`Unknown symbol: ${ticker}`);
     return symbol;
   }
 
   private toLibrarySymbolInfo(symbol: SymbolInfo): LibrarySymbolInfo {
     const native = this.marketData.describe(symbol).nativeIntervals;
-    const intradayMultipliers = native
-      .filter((iv) => parseInterval(iv).unit === "minutes")
-      .map((iv) => String(parseInterval(iv).count))
-      .sort((a, b) => Number(a) - Number(b));
+    const hasSeconds = native.some((iv) => parseInterval(iv).unit === "seconds");
+    const hasIntraday = native.some((iv) => parseInterval(iv).unit === "minutes");
 
     return {
       name: symbol.ticker,
-      ticker: symbol.ticker,
+      ticker: `${symbol.exchange}:${symbol.ticker}`,
       description: symbol.name,
       type: symbol.type,
       session: symbol.session,
@@ -166,8 +206,10 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       format: "price",
       minmov: 1,
       pricescale: 10 ** symbol.pricePrecision,
-      has_intraday: intradayMultipliers.length > 0,
-      intraday_multipliers: intradayMultipliers,
+      has_seconds: hasSeconds,
+      seconds_multipliers: hasSeconds ? SECONDS_MULTIPLIERS : [],
+      has_intraday: hasIntraday,
+      intraday_multipliers: hasIntraday ? INTRADAY_MULTIPLIERS : [],
       has_daily: true,
       daily_multipliers: ["1"],
       has_weekly_and_monthly: true,

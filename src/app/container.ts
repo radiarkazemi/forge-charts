@@ -13,6 +13,7 @@ import {
   BinanceProvider,
   BrowserNotifier,
   CpFetcherProvider,
+  GermanyMarketProvider,
   generateId,
   LocalSaveLoadAdapter,
   LocalStorageAdapter,
@@ -43,10 +44,11 @@ export interface Services {
 }
 
 function buildProviders(config: AppConfig): MarketDataProvider[] {
-  const providers: MarketDataProvider[] = [];
+  // Germany Market Price API first — BINANCE + FOREXCOM/FXPRO (XAU) real OHLC.
+  const providers: MarketDataProvider[] = [new GermanyMarketProvider()];
   if (config.cpFetcherEnabled) providers.push(new CpFetcherProvider());
+  // Direct Binance is often geo-blocked from the VPS; Yahoo is delayed fallback.
   providers.push(new BinanceProvider(), new YahooProvider());
-  // Synthetic data is the last resort so the chart is never empty.
   providers.push(new SyntheticProvider());
   return providers;
 }
@@ -62,7 +64,7 @@ export function createServices(config: AppConfig = readConfig()): Services {
   const providers = buildProviders(config);
 
   const marketData = new MarketDataService(providers);
-  const quotes = new QuoteService(providers, { refreshMs: 10_000 });
+  const quotes = new QuoteService(providers, { refreshMs: 1_000 });
   const alerts = new AlertService({ storage, symbols, notifier, generateId });
   const settings = new SettingsService(storage);
 
