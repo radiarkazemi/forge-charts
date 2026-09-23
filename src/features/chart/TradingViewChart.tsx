@@ -14,11 +14,13 @@ interface TradingViewChartProps {
 }
 
 export function TradingViewChart({ onCreateAlert }: TradingViewChartProps) {
-  const { chart, datafeed, saveLoadAdapter, storage, settings, alerts, config } = useServices();
+  const { chart, datafeed, saveLoadAdapter, storage, settings, alerts, quotes, config } = useServices();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const theme = useStore(settings.settings, (s) => s.theme);
-  const { ready, error } = useStore(chart.state);
+  const { ready, error, symbol } = useStore(chart.state);
   const source = useStore(datafeed.source);
+  const alertCount = useStore(alerts.alerts, (list) => list.filter((a) => a.status === "active").length);
+  const quote = useStore(quotes.quotes, (book) => book[symbol]);
 
   useTradingViewWidget(containerRef, {
     controller: chart,
@@ -29,7 +31,12 @@ export function TradingViewChart({ onCreateAlert }: TradingViewChartProps) {
     initialSymbol: settings.settings.get().lastSymbol,
     initialInterval: settings.settings.get().lastInterval,
     theme,
+    alertCount,
     onCreateAlert,
+    onToggleTheme: () => settings.toggleTheme(),
+    onOpenAlertsPanel: () => settings.setSidePanel("alerts"),
+    onOpenWatchlist: () => settings.setSidePanel("watchlist"),
+    getLastPrice: () => quote?.price ?? null,
   });
   useChartAlertLines(chart, alerts);
 

@@ -21,15 +21,32 @@ export interface WidgetOptionsInput {
   readonly savedState?: object;
 }
 
+/** Keep library header tools on; add study templates + seconds + fullscreen chrome. */
 const ENABLED_FEATURES: ChartingLibraryFeatureset[] = [
-  "study_templates",
-  "items_favoriting",
-  "side_toolbar_in_fullscreen_mode",
+  "header_widget",
+  "header_symbol_search",
+  "header_resolutions",
+  "header_chart_type",
+  "header_indicators",
+  "header_compare",
+  "header_undo_redo",
+  "header_quick_search",
+  "header_screenshot",
+  "header_settings",
+  "header_fullscreen_button",
+  "header_saveload",
   "header_in_fullscreen_mode",
+  "side_toolbar_in_fullscreen_mode",
+  "study_templates",
+  "chart_template_storage",
+  "items_favoriting",
   "use_localstorage_for_settings",
   "pre_post_market_sessions",
-  "chart_template_storage",
   "seconds_resolution",
+  "display_market_status",
+  "show_interval_dialog_on_key_press",
+  "legend_widget",
+  "edit_buttons_in_legend",
 ];
 
 const DISABLED_FEATURES: ChartingLibraryFeatureset[] = [
@@ -39,23 +56,8 @@ const DISABLED_FEATURES: ChartingLibraryFeatureset[] = [
   "widget_logo" as ChartingLibraryFeatureset,
 ];
 
-const FAVORITE_INTERVALS = [
-  "1",
-  "3",
-  "5",
-  "15",
-  "30",
-  "60",
-  "120",
-  "240",
-  "1D",
-  "1W",
-  "1M",
-  "1S",
-  "5S",
-  "15S",
-  "30S",
-] as ResolutionString[];
+/** Match TradingView's common top-bar favorites: 1m 5m 15m 30m 1h 4h D W M 3M */
+const FAVORITE_INTERVALS = ["1", "5", "15", "30", "60", "240", "1D", "1W", "1M", "3M"] as ResolutionString[];
 
 const TIME_FRAMES: TimeFrameItem[] = [
   { text: "1d", resolution: "5" as ResolutionString, description: "1 Day", title: "1D" },
@@ -128,12 +130,14 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
     fullscreen: false,
     debug: false,
     custom_font_family: FONT_FAMILY,
-    header_widget_buttons_mode: "adaptive",
+    // Show text labels (Indicators, Save, …) like TradingView desktop.
+    header_widget_buttons_mode: "fullsize",
+    custom_css_url: "/charts/tv-header.css",
     enabled_features: ENABLED_FEATURES,
     disabled_features: DISABLED_FEATURES,
     favorites: {
       intervals: FAVORITE_INTERVALS,
-      chartTypes: ["Candles", "Heiken Ashi", "Line", "Area"],
+      chartTypes: ["Candles", "Heiken Ashi", "Line", "Area", "Bars"],
     },
     time_frames: TIME_FRAMES,
     loading_screen: { backgroundColor: tokens.background, foregroundColor: tokens.accent },
