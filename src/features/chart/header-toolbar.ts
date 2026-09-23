@@ -1,5 +1,8 @@
 import type { IChartingLibraryWidget } from "@/infrastructure/tradingview";
 
+const ACCOUNT_ICON =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28"><circle cx="14" cy="14" r="14" fill="#9c27b0"/><text x="14" y="18" text-anchor="middle" fill="#fff" font-size="13" font-weight="700" font-family="Arial,sans-serif">F</text></svg>';
+
 export interface HeaderToolbarHandlers {
   readonly onCreateAlert: () => void;
   readonly onToggleTheme: () => void;
@@ -21,6 +24,7 @@ export function mountHeaderToolbar(widget: IChartingLibraryWidget, handlers: Hea
     title: handlers.userInitial,
     tooltip: handlers.alertCount > 0 ? `Account (${handlers.alertCount} alerts)` : "Account & preferences",
     align: "left",
+    icon: ACCOUNT_ICON,
     items: [
       { title: `Theme: ${handlers.themeLabel}`, onSelect: () => handlers.onToggleTheme() },
       { title: "Alerts panel", onSelect: () => handlers.onOpenAlertsPanel() },
