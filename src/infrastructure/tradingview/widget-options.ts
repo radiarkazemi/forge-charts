@@ -32,7 +32,12 @@ const ENABLED_FEATURES: ChartingLibraryFeatureset[] = [
   "seconds_resolution",
 ];
 
-const DISABLED_FEATURES: ChartingLibraryFeatureset[] = ["popup_hints", "symbol_info_price_source"];
+const DISABLED_FEATURES: ChartingLibraryFeatureset[] = [
+  "popup_hints",
+  "symbol_info_price_source",
+  // Runtime featureset (not always in public d.ts): hides bottom-left TradingView logo.
+  "widget_logo" as ChartingLibraryFeatureset,
+];
 
 const FAVORITE_INTERVALS = [
   "1",
