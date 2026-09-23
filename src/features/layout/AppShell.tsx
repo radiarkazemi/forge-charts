@@ -5,10 +5,13 @@ import { AlertToaster } from "@/features/alerts/AlertToaster";
 import { CreateAlertDialog } from "@/features/alerts/CreateAlertDialog";
 import { TradingViewChart } from "@/features/chart/TradingViewChart";
 import { useStore } from "@/shared/hooks/useStore";
-import { AppHeader } from "./AppHeader";
 import { SidePanel } from "./SidePanel";
 import { SideRail } from "./SideRail";
 
+/**
+ * Chart shell: TradingView's own top toolbar is the primary navbar
+ * (symbol, intervals, indicators, save, etc.). Side rail stays for watchlist/alerts.
+ */
 export function AppShell() {
   const { settings, chart } = useServices();
   const sidePanel = useStore(settings.settings, (s) => s.sidePanel);
@@ -23,7 +26,6 @@ export function AppShell() {
 
   return (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", bgcolor: "background.default" }}>
-      <AppHeader onCreateAlert={openAlertDialog} />
       <Box component="main" sx={{ flex: 1, display: "flex", minHeight: 0 }}>
         <TradingViewChart onCreateAlert={openAlertDialog} />
         {sidePanel ? (

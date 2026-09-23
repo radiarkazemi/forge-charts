@@ -9,6 +9,7 @@ import {
   type IExternalSaveLoadAdapter,
 } from "@/infrastructure/tradingview";
 import type { ChartController } from "./chart-controller";
+import { mountHeaderToolbar } from "./header-toolbar";
 
 export interface TradingViewWidgetDeps {
   readonly controller: ChartController;
@@ -19,28 +20,35 @@ export interface TradingViewWidgetDeps {
   readonly initialSymbol: string;
   readonly initialInterval: Interval;
   readonly theme: ThemeMode;
+  readonly alertCount: number;
   readonly onCreateAlert: () => void;
+  readonly onToggleTheme: () => void;
+  readonly onOpenAlertsPanel: () => void;
+  readonly onOpenWatchlist: () => void;
+  readonly getLastPrice: () => number | null;
 }
 
 const AUTOSAVE_KEY = "forge.tv.autosave";
 
 /**
  * Owns the TradingView widget lifecycle: script loading, construction,
- * auto-save, the custom header button and teardown. Theme changes are applied
- * in place so the widget is created exactly once per mount.
+ * auto-save, TradingView-style header controls, and teardown.
  */
 export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | null>, deps: TradingViewWidgetDeps): void {
   const { controller, datafeed, saveLoadAdapter, storage, libraryPath, theme } = deps;
 
-  // Effect events read the latest props without becoming effect dependencies.
   const onCreateAlert = useEffectEvent(() => deps.onCreateAlert());
+  const onToggleTheme = useEffectEvent(() => deps.onToggleTheme());
+  const onOpenAlertsPanel = useEffectEvent(() => deps.onOpenAlertsPanel());
+  const onOpenWatchlist = useEffectEvent(() => deps.onOpenWatchlist());
+  const getLastPrice = useEffectEvent(() => deps.getLastPrice());
   const readInitial = useEffectEvent(() => ({
     symbol: deps.initialSymbol,
     interval: deps.initialInterval,
     theme: deps.theme,
+    alertCount: deps.alertCount,
   }));
 
-  // Create / destroy the widget once per mount.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -73,12 +81,15 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
 
         void widget.headerReady().then(() => {
           if (cancelled || !widget) return;
-          widget.createButton({
-            align: "right",
-            useTradingViewStyle: true,
-            text: "Alert",
-            title: "Create a price alert",
-            onClick: onCreateAlert,
+          mountHeaderToolbar(widget, {
+            onCreateAlert,
+            onToggleTheme,
+            onOpenAlertsPanel,
+            onOpenWatchlist,
+            getLastPrice,
+            themeLabel: initial.theme === "dark" ? "Dark" : "Light",
+            userInitial: "F",
+            alertCount: initial.alertCount,
           });
         });
       })
@@ -94,7 +105,6 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
     };
   }, [containerRef, controller, datafeed, libraryPath, saveLoadAdapter, storage]);
 
-  // Apply theme changes in place; the controller defers until the widget is ready.
   useEffect(() => {
     void controller.changeTheme(theme);
   }, [controller, theme]);
