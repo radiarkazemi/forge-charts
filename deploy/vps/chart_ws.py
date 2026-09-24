@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
-"""Realtime chart WebSocket + compact Mongo history HTTP for cp_fetcher.
+"""Realtime chart WebSocket + Mongo history with derived timeframe aggregation.
 
-WS (port CHART_WS_PORT, default 8002):
-  client -> {"op":"subscribe","exchange":"BINANCE","symbol":"BTCUSDT","interval":"1m"}
-  server -> {"type":"bar", ...}
+Base candles in Mongo: 1m / 1h / 1d (cp_fetcher live + historical).
+All other TFs (2m, 5m, 15m, 4h, 1W, …) are built by aggregating those parents
+for both HTTP history and live WS forming bars.
 
 HTTP (port CHART_HTTP_PORT, default 8003):
-  GET /health
-  GET /history?symbol=btcusdt&timeframe=1m&limit=400&group=1&before=<unix>
-  -> {"symbol":"btcusdt","timeframe":"1m","group":1,"bars":[[t,o,h,l,c,v],...]}
+  GET /history?symbol=btcusdt&interval=5&limit=10000&before=<unix>
+  GET /history?symbol=btcusdt&timeframe=1m&group=5&limit=10000
+  -> {"symbol","parent","group","count","bars":[[t,o,h,l,c,v],...]}
 
-Deep history targets (TradingView scroll-back):
-  1m → up to 20_000 bars
-  5m (1m×group=5) → up to 10_000 bars
-  other TF → up to 5_000 bars
+WS (port CHART_WS_PORT, default 8002):
+  client -> {"op":"subscribe","symbol":"BTCUSDT","interval":"5"}
+  server -> aggregated forming bar for that TF (from 1m parents)
 """
 
 from __future__ import annotations
@@ -42,10 +41,10 @@ HTTP_PORT = int(os.environ.get("CHART_HTTP_PORT", "8003"))
 POLL_SEC = float(os.environ.get("CHART_WS_POLL_SEC", "1.0"))
 CACHE_TTL = float(os.environ.get("CHART_HIST_CACHE_TTL", "15"))
 
-# Serve deep Mongo history for TV scroll-back (1m 20k / 5m 10k / others 5k).
 MAX_HISTORY_LIMIT = int(os.environ.get("CHART_HIST_MAX_LIMIT", "25000"))
 MAX_RAW_LIMIT = int(os.environ.get("CHART_HIST_MAX_RAW", "60000"))
 
+# Native Mongo bases written by cp_fetcher live/historical scrapers.
 TF_COLL = {"1m": "1", "1h": "1h", "1d": "1D"}
 HIST_SUFFIX = {"1m": "_1m", "1h": "_1h", "1d": ""}
 ID_FORMAT = {
@@ -53,28 +52,50 @@ ID_FORMAT = {
     "1h": "%Y-%m-%d %H:%M:%S",
     "1d": "%Y-%m-%d",
 }
-INTERVAL_ALIAS = {
-    "1": "1m",
-    "1m": "1m",
-    "5": "1m",
-    "5m": "1m",
-    "15": "1m",
-    "15m": "1m",
-    "30": "1m",
-    "30m": "1m",
-    "60": "1h",
-    "1h": "1h",
-    "120": "1h",
-    "2h": "1h",
-    "240": "1h",
-    "4h": "1h",
-    "1D": "1d",
-    "1d": "1d",
-    "D": "1d",
-    "1W": "1d",
-    "1M": "1d",
-}
 STEP_SEC = {"1m": 60, "1h": 3600, "1d": 86400}
+
+# TV / client interval → (parent base TF, group multiplier).
+# Higher TFs are always derived from an existing base candle stream.
+INTERVAL_SPEC: dict[str, tuple[str, int]] = {
+    "1": ("1m", 1),
+    "1m": ("1m", 1),
+    "2": ("1m", 2),
+    "2m": ("1m", 2),
+    "3": ("1m", 3),
+    "3m": ("1m", 3),
+    "5": ("1m", 5),
+    "5m": ("1m", 5),
+    "10": ("1m", 10),
+    "10m": ("1m", 10),
+    "15": ("1m", 15),
+    "15m": ("1m", 15),
+    "30": ("1m", 30),
+    "30m": ("1m", 30),
+    "45": ("1m", 45),
+    "45m": ("1m", 45),
+    "60": ("1h", 1),
+    "1h": ("1h", 1),
+    "120": ("1h", 2),
+    "2h": ("1h", 2),
+    "180": ("1h", 3),
+    "3h": ("1h", 3),
+    "240": ("1h", 4),
+    "4h": ("1h", 4),
+    "360": ("1h", 6),
+    "6h": ("1h", 6),
+    "480": ("1h", 8),
+    "8h": ("1h", 8),
+    "720": ("1h", 12),
+    "12h": ("1h", 12),
+    "1D": ("1d", 1),
+    "1d": ("1d", 1),
+    "D": ("1d", 1),
+    "1W": ("1d", 7),
+    "1w": ("1d", 7),
+    "W": ("1d", 7),
+    "1M": ("1d", 30),
+    "1mo": ("1d", 30),
+}
 
 
 def normalize_symbol(symbol: str) -> str:
@@ -84,8 +105,20 @@ def normalize_symbol(symbol: str) -> str:
     return symbol.lower()
 
 
-def resolve_interval(raw: str) -> str:
-    return INTERVAL_ALIAS.get(str(raw).strip(), "1m")
+def resolve_spec(raw: str) -> tuple[str, int]:
+    key = str(raw).strip()
+    if key in INTERVAL_SPEC:
+        return INTERVAL_SPEC[key]
+    # Numeric minutes fallback (e.g. "20")
+    try:
+        n = int(float(key))
+        if 1 <= n <= 720:
+            if n % 60 == 0:
+                return ("1h", max(1, n // 60))
+            return ("1m", n)
+    except ValueError:
+        pass
+    return ("1m", 1)
 
 
 def to_unix(value: Any) -> int | None:
@@ -102,7 +135,6 @@ def to_unix(value: Any) -> int | None:
             n /= 1000.0
         return int(n)
     if isinstance(value, str) and value:
-        # "2026-08-25 16:31:00" or ISO
         try:
             text = value.strip().replace("Z", "+00:00")
             if "T" not in text and " " in text:
@@ -118,11 +150,16 @@ def to_unix(value: Any) -> int | None:
 
 
 def before_id(before_sec: int | None, timeframe: str) -> str | None:
-    """Mongo hist `_id` is a zero-padded UTC datetime string — lexicographic $lt works."""
     if not before_sec or before_sec <= 0:
         return None
     fmt = ID_FORMAT.get(timeframe) or ID_FORMAT["1m"]
     return datetime.fromtimestamp(int(before_sec), tz=timezone.utc).strftime(fmt)
+
+
+def close_to_open(close_sec: int, step: int) -> int:
+    if step <= 0:
+        return close_sec
+    return ((int(close_sec) - 1) // step) * step
 
 
 def aggregate(bars: list[list[float]], group: int, step: int) -> list[list[float]]:
@@ -149,57 +186,160 @@ def aggregate(bars: list[list[float]], group: int, step: int) -> list[list[float
     return out
 
 
+def pack_bar(rows: list[list[float]]) -> list[float] | None:
+    if not rows:
+        return None
+    t0 = float(rows[0][0])
+    o = float(rows[0][1])
+    h = max(r[2] for r in rows)
+    l = min(r[3] for r in rows)
+    c = float(rows[-1][4])
+    v = sum(r[5] for r in rows)
+    return [t0, o, h, l, c, v]
+
+
 class PriceHub:
     def __init__(self) -> None:
         self.client = MongoClient(MONGO_URI, maxPoolSize=20, serverSelectionTimeoutMS=5000)
         self.db = self.client[MONGO_DB_LAST]
         self.hist = self.client[MONGO_DB_HIST]
-        self.subs: dict[WebSocketServerProtocol, dict[str, str]] = {}
+        # sub value: symbol, parent, group, label (requested interval string)
+        self.subs: dict[WebSocketServerProtocol, dict[str, Any]] = {}
         self._cache: dict[str, tuple[float, bytes]] = {}
 
     def ping(self) -> None:
         self.client.admin.command("ping")
 
-    def read_bar(self, symbol: str, interval: str) -> dict[str, Any] | None:
-        coll_name = TF_COLL[interval]
+    def read_parent_last(self, symbol: str, parent: str) -> dict[str, Any] | None:
+        coll_name = TF_COLL[parent]
         doc = self.db[coll_name].find_one({"_id": symbol})
         if not doc or doc.get("_id") == "time":
             return None
         bct = doc.get("bct")
+        if bct is None:
+            return None
+        step = STEP_SEC[parent]
+        open_t = close_to_open(int(bct), step)
+        return {
+            "open": open_t,
+            "close_t": int(bct),
+            "o": float(doc.get("po") or 0),
+            "h": float(doc.get("pmax") or 0),
+            "l": float(doc.get("pmin") or 0),
+            "c": float(doc.get("pl") or 0),
+            "v": float(doc.get("vol") or 0),
+            "ex": (doc.get("ex") or "").lower() or None,
+            "pc": doc.get("pc") or 0,
+        }
+
+    def _hist_parents_in_range(
+        self, symbol: str, parent: str, start: int, end: int
+    ) -> list[list[float]]:
+        """Load parent hist bars with open time in [start, end)."""
+        coll = self.hist[f"{symbol}{HIST_SUFFIX[parent]}"]
+        start_id = before_id(start, parent) or ""
+        end_id = before_id(end, parent) or "9999"
+        # Inclusive start via $gte on _id string; exclusive end via $lt.
+        query = {"_id": {"$gte": start_id, "$lt": end_id}}
+        bars: list[list[float]] = []
+        for doc in coll.find(query, projection={"data": 1}).sort("_id", 1):
+            data = doc.get("data") or {}
+            t = to_unix(data.get("time") or doc.get("_id"))
+            if t is None or t < start or t >= end:
+                continue
+            try:
+                bars.append(
+                    [
+                        float(t),
+                        float(data["open"]),
+                        float(data["high"]),
+                        float(data["low"]),
+                        float(data["close"]),
+                        float(data.get("volume") or 0),
+                    ]
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+        return bars
+
+    def read_forming_bar(self, symbol: str, parent: str, group: int, label: str) -> dict[str, Any] | None:
+        """Build the current (possibly multi-parent) forming candle for a derived TF."""
+        live = self.read_parent_last(symbol, parent)
+        if not live:
+            return None
+        parent_step = STEP_SEC[parent]
+        target_step = parent_step * max(1, group)
+        bucket = (live["open"] // target_step) * target_step
+
+        if group <= 1:
+            return {
+                "type": "bar",
+                "exchange": live["ex"],
+                "symbol": symbol,
+                "interval": label,
+                "parent": parent,
+                "group": 1,
+                # Period OPEN — TradingView countdown / bar alignment.
+                "t": bucket,
+                "bct": live["close_t"],
+                "o": live["o"],
+                "h": live["h"],
+                "l": live["l"],
+                "c": live["c"],
+                "v": live["v"],
+                "pc": live["pc"],
+            }
+
+        rows = self._hist_parents_in_range(symbol, parent, bucket, bucket + target_step)
+        # Overlay / append the live forming parent (may be ahead of hist flush).
+        live_row = [float(live["open"]), live["o"], live["h"], live["l"], live["c"], live["v"]]
+        if rows and int(rows[-1][0]) == live["open"]:
+            rows[-1] = live_row
+        elif live["open"] >= bucket and live["open"] < bucket + target_step:
+            rows.append(live_row)
+            rows.sort(key=lambda r: r[0])
+
+        packed = pack_bar(rows) if rows else live_row
+        if not packed:
+            return None
+        # Force bucket open time even if first parent is later (gap).
+        packed[0] = float(bucket)
         return {
             "type": "bar",
-            "exchange": (doc.get("ex") or "").lower() or None,
+            "exchange": live["ex"],
             "symbol": symbol,
-            "interval": interval,
-            "t": int(bct) if bct is not None else None,
-            "o": doc.get("po"),
-            "h": doc.get("pmax"),
-            "l": doc.get("pmin"),
-            "c": doc.get("pl"),
-            "v": doc.get("vol") or 0,
-            "pc": doc.get("pc") or 0,
+            "interval": label,
+            "parent": parent,
+            "group": group,
+            "t": int(packed[0]),
+            "bct": bucket + target_step,
+            "o": packed[1],
+            "h": packed[2],
+            "l": packed[3],
+            "c": packed[4],
+            "v": packed[5],
+            "pc": live["pc"],
         }
 
     def read_history(
         self,
         symbol: str,
-        timeframe: str,
+        parent: str,
         limit: int,
         group: int,
         before: int | None = None,
     ) -> dict[str, Any]:
-        cache_key = f"{symbol}|{timeframe}|{limit}|{group}|{before or 0}"
+        cache_key = f"{symbol}|{parent}|{limit}|{group}|{before or 0}"
         now = time.time()
         hit = self._cache.get(cache_key)
         if hit and now - hit[0] <= CACHE_TTL:
             return json.loads(hit[1])
 
-        coll_name = f"{symbol}{HIST_SUFFIX[timeframe]}"
+        coll_name = f"{symbol}{HIST_SUFFIX[parent]}"
         coll = self.hist[coll_name]
-        # Raw parents needed for aggregation (e.g. 10k of 5m → 50k of 1m).
         raw_limit = min(MAX_RAW_LIMIT, max(limit, limit * max(group, 1)))
         query: dict[str, Any] = {}
-        bid = before_id(before, timeframe)
+        bid = before_id(before, parent)
         if bid:
             query["_id"] = {"$lt": bid}
 
@@ -222,7 +362,7 @@ class PriceHub:
                 continue
             bars.append([t, o, h, l, c, v])
         bars.reverse()
-        step = STEP_SEC[timeframe]
+        step = STEP_SEC[parent]
         if group > 1:
             bars = aggregate(bars, group, step)
             if before:
@@ -234,14 +374,14 @@ class PriceHub:
 
         payload = {
             "symbol": symbol,
-            "timeframe": timeframe,
+            "parent": parent,
+            "timeframe": parent,
             "group": group,
             "before": before,
             "count": len(bars),
             "bars": bars,
         }
         self._cache[cache_key] = (now, json.dumps(payload, separators=(",", ":")).encode())
-        # Opportunistic cache trim
         if len(self._cache) > 256:
             oldest = sorted(self._cache.items(), key=lambda kv: kv[1][0])[:64]
             for key, _ in oldest:
@@ -267,18 +407,26 @@ async def handle(ws: WebSocketServerProtocol) -> None:
             op = str(msg.get("op") or msg.get("action") or msg.get("type") or "").lower()
             if op in {"subscribe", "sub"}:
                 symbol = normalize_symbol(str(msg.get("symbol") or ""))
-                interval = resolve_interval(str(msg.get("interval") or msg.get("resolution") or "1m"))
+                label = str(msg.get("interval") or msg.get("resolution") or "1m").strip()
+                parent, group = resolve_spec(label)
                 if not symbol:
                     await ws.send(json.dumps({"type": "error", "detail": "symbol required"}))
                     continue
-                hub.subs[ws] = {"symbol": symbol, "interval": interval}
-                bar = hub.read_bar(symbol, interval)
+                hub.subs[ws] = {
+                    "symbol": symbol,
+                    "parent": parent,
+                    "group": group,
+                    "label": label,
+                }
+                bar = hub.read_forming_bar(symbol, parent, group, label)
                 await ws.send(
                     json.dumps(
                         {
                             "type": "subscribed",
                             "symbol": symbol,
-                            "interval": interval,
+                            "interval": label,
+                            "parent": parent,
+                            "group": group,
                             "bar": bar,
                         }
                     )
@@ -301,25 +449,25 @@ async def handle(ws: WebSocketServerProtocol) -> None:
 
 
 async def broadcaster() -> None:
-    last_payload: dict[tuple[str, str], str] = {}
+    last_payload: dict[tuple[str, str, int], str] = {}
     while True:
         await asyncio.sleep(POLL_SEC)
-        targets: dict[tuple[str, str], list[WebSocketServerProtocol]] = {}
+        targets: dict[tuple[str, str, int, str], list[WebSocketServerProtocol]] = {}
         for ws, sub in list(hub.subs.items()):
             if not sub:
                 continue
-            key = (sub["symbol"], sub["interval"])
+            key = (sub["symbol"], sub["parent"], int(sub["group"]), str(sub["label"]))
             targets.setdefault(key, []).append(ws)
-        for (symbol, interval), sockets in targets.items():
+        for (symbol, parent, group, label), sockets in targets.items():
             try:
-                bar = hub.read_bar(symbol, interval)
+                bar = hub.read_forming_bar(symbol, parent, group, label)
             except Exception:
-                LOG.exception("mongo read failed %s %s", symbol, interval)
+                LOG.exception("mongo read failed %s %s x%s", symbol, parent, group)
                 continue
             if not bar:
                 continue
             payload = json.dumps(bar, separators=(",", ":"))
-            cache_key = (symbol, interval)
+            cache_key = (symbol, parent, group)
             if last_payload.get(cache_key) == payload:
                 continue
             last_payload[cache_key] = payload
@@ -343,17 +491,27 @@ async def http_health(_: web.Request) -> web.Response:
 
 async def http_history(request: web.Request) -> web.Response:
     symbol = normalize_symbol(str(request.query.get("symbol") or ""))
-    timeframe = resolve_interval(str(request.query.get("timeframe") or request.query.get("interval") or "1m"))
-    if timeframe not in HIST_SUFFIX:
-        timeframe = "1m"
+    # Prefer explicit timeframe+group; else derive from TV `interval`.
+    raw_interval = request.query.get("interval") or request.query.get("resolution")
+    if request.query.get("timeframe") or request.query.get("group"):
+        parent = str(request.query.get("timeframe") or "1m").strip()
+        if parent not in HIST_SUFFIX:
+            parent, _g = resolve_spec(parent)
+        try:
+            group = int(request.query.get("group") or 1)
+        except ValueError:
+            group = 1
+    elif raw_interval:
+        parent, group = resolve_spec(str(raw_interval))
+    else:
+        parent, group = "1m", 1
+
+    if parent not in HIST_SUFFIX:
+        parent = "1m"
     try:
         limit = int(request.query.get("limit") or 400)
     except ValueError:
         limit = 400
-    try:
-        group = int(request.query.get("group") or 1)
-    except ValueError:
-        group = 1
     before: int | None = None
     before_raw = request.query.get("before") or request.query.get("to") or request.query.get("end")
     if before_raw:
@@ -368,7 +526,7 @@ async def http_history(request: web.Request) -> web.Response:
     if not symbol:
         return web.json_response({"detail": "symbol required"}, status=400)
     try:
-        payload = await asyncio.to_thread(hub.read_history, symbol, timeframe, limit, group, before)
+        payload = await asyncio.to_thread(hub.read_history, symbol, parent, limit, group, before)
     except Exception as exc:
         LOG.exception("history failed")
         return web.json_response({"detail": str(exc)}, status=500)
@@ -403,7 +561,7 @@ async def main() -> None:
     http_runner = await start_http()
     asyncio.create_task(broadcaster())
     async with websockets.serve(handle, HOST, PORT, ping_interval=20, ping_timeout=20, max_size=8 * 1024 * 1024):
-        LOG.info("chart WS on ws://%s:%s", HOST, PORT)
+        LOG.info("chart WS on ws://%s:%s (derived TF aggregation on)", HOST, PORT)
         await asyncio.Future()
     await http_runner.cleanup()
 

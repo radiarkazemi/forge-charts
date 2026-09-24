@@ -221,17 +221,6 @@ function alignTime(tsSec: number, step: number): number {
   return tsSec - (tsSec % step);
 }
 
-/**
- * cp_fetcher chart_ws / Mongo `bct` is bar CLOSE time. TradingView bars + countdown
- * need period OPEN — otherwise 1m countdown runs ~2:00 or freezes.
- */
-function closeTimeToOpen(closeSec: number, step: number): number {
-  if (!Number.isFinite(closeSec) || !Number.isFinite(step) || step <= 0) {
-    return alignTime(closeSec, step);
-  }
-  return Math.floor((closeSec - 1) / step) * step;
-}
-
 function parseUpdatedAt(raw?: string): number {
   if (!raw) return Math.floor(Date.now() / 1000);
   const ms = Date.parse(raw);
@@ -747,15 +736,13 @@ export class GermanyMarketProvider implements MarketDataProvider {
       }),
     );
 
-    // cp_fetcher chart_ws — crypto + metals (xauusd etc. live in Mongo from TV).
-    // lastTickMs is owned by real ticks only — Mongo must never fake "liveness"
-    // or the series would keep minting empty candles when the feed is quiet.
+    // cp_fetcher chart_ws — emits the subscribed TF already aggregated from base
+    // 1m/1h/1d candles (server sets `t` = period OPEN). Ticks still own liveness.
     disposers.push(
       openCpFetcherSocket(route.apiSymbol, interval, (bar) => {
         if (!isMarketSessionOpen(symbol)) return;
-        // chart_ws `t` is bar_close_time — convert to period open for countdown.
-        const openTime = closeTimeToOpen(bar.time, step);
-        const aligned = { ...bar, time: openTime };
+        // Server sends period open in `t` for native + derived TFs.
+        const aligned = { ...bar, time: alignTime(bar.time, step) };
         const quietMs = Math.max(5_000, step * 1_000);
         const quiet = lastTickMs === 0 || Date.now() - lastTickMs > quietMs;
         const wallBucket = alignTime(Math.floor(Date.now() / 1000), step);
@@ -952,13 +939,15 @@ export class GermanyMarketProvider implements MarketDataProvider {
     return out;
   }
 
-  /** Fresh minute+ history from Germany `/ohlc/` (never the stale crypto /history/ archive). */
+  /** Fresh minute+ history from Germany `/ohlc/` — aggregate non-native TFs from parents. */
   private async fetchOhlcBars(route: Route, interval: Interval, limit: number): Promise<Bar[]> {
     const plan = ohlcPlan(interval);
     const requestLimit =
       plan.aggregateStep > 0 ? Math.min(MAX_BARS, Math.max(limit * 12, limit + 30)) : Math.min(MAX_BARS, limit);
     const raw = await fetchOhlc(route.apiSymbol, route.exchange, plan.request, requestLimit);
     if (plan.aggregateStep > 0) return aggregateBars(raw, plan.aggregateStep);
+    // Even for "native" Germany intervals, when the request TF differs from what we store
+    // deeply in Mongo we already preferred Mongo. Here just return Germany's bars.
     return raw;
   }
 

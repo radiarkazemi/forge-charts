@@ -14,8 +14,8 @@ export function targetHistoryDepth(interval: Interval): number {
 }
 
 /**
- * Map a TV interval onto Mongo hist collections.
- * Use deep 1m parents for sub-hour TFs; native 1h/1d after cp_fetcher backfill.
+ * Map a TV interval onto a native Mongo parent + group multiplier.
+ * Other TFs are created by aggregating existing 1m / 1h / 1d candles.
  */
 export function mongoHistoryPlan(interval: Interval): { timeframe: "1m" | "1h" | "1d"; group: number } | null {
   const { unit, count } = parseInterval(interval);
@@ -39,6 +39,7 @@ export function mongoHistoryPlan(interval: Interval): { timeframe: "1m" | "1h" |
 
 interface ChartHistoryResponse {
   symbol?: string;
+  parent?: string;
   timeframe?: string;
   group?: number;
   count?: number;
@@ -66,7 +67,7 @@ function parsePackedBar(row: unknown): Bar | null {
 }
 
 /**
- * Deep OHLC from VPS Mongo via chart_ws.
+ * Deep OHLC from VPS Mongo via chart_ws — derived TFs aggregated from base candles.
  * `before` (= exclusive `range.to`) enables TradingView left-scroll paging.
  */
 export async function fetchCpChartHistory(
@@ -78,11 +79,12 @@ export async function fetchCpChartHistory(
   if (!plan) throw new Error(`cp-chart-history: unsupported interval ${interval}`);
 
   const target = targetHistoryDepth(interval);
-  // Large pages so scroll-back reaches 20k/10k/5k without dozens of round-trips.
   const limit = Math.min(target, Math.max(range.countBack + 100, 2_000));
 
+  // Pass TV interval so the server can resolve parent+group (and still accept explicit group).
   const url = buildUrl(CHART_HISTORY_BASE, {
     symbol: apiSymbol.toLowerCase(),
+    interval,
     timeframe: plan.timeframe,
     group: plan.group,
     limit,
