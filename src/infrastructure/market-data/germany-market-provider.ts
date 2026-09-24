@@ -600,12 +600,16 @@ export class GermanyMarketProvider implements MarketDataProvider {
       bars = await this.fetchOhlcBars(route, interval, limit);
     }
 
-    // TV PeriodParams.to is exclusive; keep bars that can still fill countBack.
-    // If the exclusive filter empties a non-empty series (edge `to` alignment), keep the series.
-    const beforeTo = bars.filter((b) => b.time < range.to).sort((a, b) => a.time - b.time);
-    bars = beforeTo.length > 0 ? beforeTo : [...bars].sort((a, b) => a.time - b.time);
-    if (!bars.length) throw new Error(`germany-market: empty history for ${route.apiSymbol} @ ${interval}`);
-    return bars.slice(-Math.max(range.countBack, 1));
+    if (!bars.length) {
+      throw new Error(`germany-market: empty history for ${route.apiSymbol} @ ${interval}`);
+    }
+
+    // Exclusive `to`: bars at/after `to` belong to already-loaded pages.
+    // Return [] (noData) — do NOT throw, or synthetic would invent fake history
+    // and TradingView would keep paging forever.
+    const filtered = bars.filter((b) => b.time < range.to).sort((a, b) => a.time - b.time);
+    if (!filtered.length) return [];
+    return filtered.slice(-Math.max(range.countBack, 1));
   }
 
   subscribeBars(symbol: SymbolInfo, interval: Interval, onBar: (bar: Bar) => void): Unsubscribe {
