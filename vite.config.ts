@@ -2,17 +2,24 @@ import { fileURLToPath, URL } from "node:url";
 import { defineConfig, loadEnv, type ProxyOptions } from "vite";
 import react from "@vitejs/plugin-react";
 
-/**
- * Upstream market-data hosts are reached through the dev-server proxy so that
- * browser code never deals with CORS and server-side API keys never ship to
- * the client bundle. The same paths must be provided by whatever serves the
- * production build (nginx, Cloudflare Worker, etc.).
- */
 function buildProxy(env: Record<string, string>): Record<string, ProxyOptions> {
   const cpTarget = env.VITE_CP_FETCHER_TARGET || "http://185.222.163.116/crypto-api";
-  const cpKey = env.CP_FETCHER_API_KEY || "";
+  const marketTarget = env.VITE_MARKET_API_TARGET || "http://185.222.163.116/market-api";
+  const chartTarget = env.VITE_CP_CHART_TARGET || "http://185.222.163.116/crypto-chart";
+  const cpKey = env.CP_FETCHER_API_KEY || env.MARKET_API_KEY || "";
 
   return {
+    "/market-api": {
+      target: marketTarget,
+      changeOrigin: true,
+      rewrite: (path) => path.replace(/^\/market-api/, ""),
+      headers: cpKey ? { "X-API-Key": cpKey } : {},
+    },
+    "/crypto-chart": {
+      target: chartTarget,
+      changeOrigin: true,
+      rewrite: (path) => path.replace(/^\/crypto-chart/, ""),
+    },
     "/api/crypto": {
       target: cpTarget,
       changeOrigin: true,
@@ -35,6 +42,7 @@ function buildProxy(env: Record<string, string>): Record<string, ProxyOptions> {
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
+  const production = mode === "production";
 
   return {
     plugins: [react()],
@@ -43,8 +51,10 @@ export default defineConfig(({ mode }) => {
         "@": fileURLToPath(new URL("./src", import.meta.url)),
       },
     },
+    // SPA at /charts/; hashed bundles under /assets/forge/ (nginx).
+    base: production ? "/charts/" : "/",
     build: {
-      // Keep long-lived vendor code in its own chunks so app changes don't bust their cache.
+      assetsDir: "assets",
       rolldownOptions: {
         output: {
           codeSplitting: {
@@ -54,6 +64,14 @@ export default defineConfig(({ mode }) => {
             ],
           },
         },
+      },
+    },
+    experimental: {
+      renderBuiltUrl(filename) {
+        if (production && filename.startsWith("assets/")) {
+          return `/assets/forge/${filename.slice("assets/".length)}`;
+        }
+        return { relative: true as const };
       },
     },
     server: {

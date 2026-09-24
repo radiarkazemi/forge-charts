@@ -15,6 +15,10 @@ export class LocalStorageAdapter implements KeyValueStorage {
 
   set(key: string, value: unknown): void {
     try {
+      if (value === undefined) {
+        this.storage?.removeItem(key);
+        return;
+      }
       this.storage?.setItem(key, JSON.stringify(value));
     } catch {
       /* quota exceeded or private mode */

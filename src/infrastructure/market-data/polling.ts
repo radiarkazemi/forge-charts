@@ -1,31 +1,32 @@
 import type { Unsubscribe } from "@/application";
 
 /**
- * Run `task` immediately and then every `intervalMs`, skipping ticks while a
- * previous run is still in flight. Errors are swallowed so a flaky upstream
- * does not kill the loop.
+ * Run `task` immediately, then again every `intervalMs` measured from the
+ * previous *start*. If a request takes longer than `intervalMs`, the next
+ * run starts immediately when it finishes (no idle gap) so slow upstreams
+ * still refresh as fast as RTT allows.
  */
 export function startPolling(task: () => Promise<void>, intervalMs: number): Unsubscribe {
   let active = true;
-  let busy = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
 
-  const tick = async () => {
-    if (!active || busy) return;
-    busy = true;
+  const loop = async () => {
+    if (!active) return;
+    const started = Date.now();
     try {
       await task();
     } catch {
       /* transient upstream failure — try again next tick */
-    } finally {
-      busy = false;
     }
+    if (!active) return;
+    const wait = Math.max(0, intervalMs - (Date.now() - started));
+    timer = setTimeout(() => void loop(), wait);
   };
 
-  void tick();
-  const timer = setInterval(() => void tick(), intervalMs);
+  void loop();
 
   return () => {
     active = false;
-    clearInterval(timer);
+    if (timer) clearTimeout(timer);
   };
 }

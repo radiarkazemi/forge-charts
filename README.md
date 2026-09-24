@@ -4,6 +4,9 @@ Trading terminal built on the **TradingView Charting Library** (Pro), React 19 a
 The chart, drawing tools, indicators, layouts and templates come from the library; Forge adds
 multi-source market data, a watchlist, price alerts and a data window around it.
 
+**Parity vs TradingView (full checklist):** see [`TV-FULL-PARITY-CHECKLIST.md`](./TV-FULL-PARITY-CHECKLIST.md) —
+live Forge (CL v29.3.0) vs latest Advanced Charts / Trading Platform / tradingview.com Supercharts (~183 tracked items).
+
 ## Requirements
 
 - Node ≥ 22, [pnpm](https://pnpm.io) (`corepack enable` or `npm i -g pnpm`)

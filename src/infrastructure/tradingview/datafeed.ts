@@ -1,4 +1,4 @@
-import { normalizeTicker, parseInterval, SYMBOL_TYPE_LABELS, type Bar, type SymbolInfo } from "@/domain";
+import { normalizeTicker, parseInterval, isMarketSessionOpen, SYMBOL_TYPE_LABELS, type Bar, type SymbolInfo } from "@/domain";
 import { createStore, type MarketDataService, type Store, type SymbolRepository, type Unsubscribe } from "@/application";
 import type {
   DatafeedConfiguration,
@@ -16,7 +16,36 @@ import type {
   Timezone,
 } from "./types";
 
-export const SUPPORTED_RESOLUTIONS = ["1", "5", "15", "30", "60", "240", "1D", "1W", "1M"] as ResolutionString[];
+/** Full TradingView resolution set (seconds → months). */
+export const SUPPORTED_RESOLUTIONS = [
+  "1S",
+  "5S",
+  "10S",
+  "15S",
+  "30S",
+  "45S",
+  "1",
+  "2",
+  "3",
+  "5",
+  "10",
+  "15",
+  "30",
+  "45",
+  "60",
+  "120",
+  "180",
+  "240",
+  "360",
+  "480",
+  "720",
+  "1D",
+  "1W",
+  "1M",
+] as ResolutionString[];
+
+const SECONDS_MULTIPLIERS = ["1", "5", "10", "15", "30", "45"];
+const INTRADAY_MULTIPLIERS = ["1", "2", "3", "5", "10", "15", "30", "45", "60", "120", "180", "240", "360", "480", "720"];
 
 export interface DataSourceInfo {
   readonly ticker: string;
@@ -25,12 +54,29 @@ export interface DataSourceInfo {
 }
 
 function toTvBar(bar: Bar) {
-  return { time: bar.time * 1000, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume };
+  // Library crashes with RangeError: Invalid time value if `time` is NaN/non-finite.
+  const timeSec = Number(bar.time);
+  if (!Number.isFinite(timeSec) || timeSec <= 0) {
+    throw new Error(`Invalid bar time: ${String(bar.time)}`);
+  }
+  return {
+    time: timeSec * 1000,
+    open: bar.open,
+    high: bar.high,
+    low: bar.low,
+    close: bar.close,
+    volume: bar.volume,
+  };
 }
 
 function stripExchange(symbolName: string): string {
   const idx = symbolName.lastIndexOf(":");
   return idx >= 0 ? symbolName.slice(idx + 1) : symbolName;
+}
+
+function parseExchangePrefix(symbolName: string): string | undefined {
+  const idx = symbolName.lastIndexOf(":");
+  return idx >= 0 ? symbolName.slice(0, idx) : undefined;
 }
 
 /**
@@ -67,15 +113,26 @@ export class TradingViewDatafeed implements IBasicDataFeed {
 
   searchSymbols(userInput: string, exchange: string, symbolType: string, onResult: SearchSymbolsCallback): void {
     const type = symbolType as SymbolInfo["type"] | "";
+    const exchangeNeedle = exchange.trim().toUpperCase();
     const results = this.symbols
       .search(userInput, type)
-      .filter((s) => !exchange || s.exchange === exchange)
-      .map((s) => ({ symbol: s.ticker, ticker: s.ticker, description: s.name, exchange: s.exchange, type: s.type }));
+      .filter((s) => !exchangeNeedle || s.exchange.toUpperCase() === exchangeNeedle)
+      .map((s) => ({
+        symbol: s.ticker,
+        full_name: `${s.exchange}:${s.ticker}`,
+        ticker: `${s.exchange}:${s.ticker}`,
+        description: s.name,
+        exchange: s.exchange,
+        type: s.type,
+      }));
     onResult(results);
   }
 
   resolveSymbol(symbolName: string, onResolve: ResolveCallback, onError: DatafeedErrorCallback): void {
-    const symbol = this.symbols.findByTicker(stripExchange(symbolName));
+    const exchange = parseExchangePrefix(symbolName);
+    const ticker = stripExchange(symbolName);
+    const symbol =
+      (exchange ? this.symbols.findByTicker(ticker, exchange) : undefined) ?? this.symbols.findByTicker(ticker);
     if (!symbol) {
       setTimeout(() => onError(`Unknown symbol: ${symbolName}`), 0);
       return;
@@ -120,7 +177,13 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   ): void {
     this.unsubscribeBars(listenerGuid);
     const symbol = this.requireSymbol(symbolInfo);
-    const unsubscribe = this.marketData.subscribe(symbol, resolution, (bar) => onTick(toTvBar(bar)));
+    const unsubscribe = this.marketData.subscribe(symbol, resolution, (bar) => {
+      try {
+        onTick(toTvBar(bar));
+      } catch {
+        /* drop corrupt realtime bars instead of crashing the widget */
+      }
+    });
     this.subscriptions.set(listenerGuid, unsubscribe);
   }
 
@@ -142,21 +205,22 @@ export class TradingViewDatafeed implements IBasicDataFeed {
 
   private requireSymbol(symbolInfo: LibrarySymbolInfo): SymbolInfo {
     const ticker = normalizeTicker(stripExchange(symbolInfo.ticker ?? symbolInfo.name));
-    const symbol = this.symbols.findByTicker(ticker);
+    const exchange = symbolInfo.exchange || parseExchangePrefix(symbolInfo.ticker ?? symbolInfo.name);
+    const symbol =
+      (exchange ? this.symbols.findByTicker(ticker, exchange) : undefined) ?? this.symbols.findByTicker(ticker);
     if (!symbol) throw new Error(`Unknown symbol: ${ticker}`);
     return symbol;
   }
 
   private toLibrarySymbolInfo(symbol: SymbolInfo): LibrarySymbolInfo {
     const native = this.marketData.describe(symbol).nativeIntervals;
-    const intradayMultipliers = native
-      .filter((iv) => parseInterval(iv).unit === "minutes")
-      .map((iv) => String(parseInterval(iv).count))
-      .sort((a, b) => Number(a) - Number(b));
+    const hasSeconds = native.some((iv) => parseInterval(iv).unit === "seconds");
+    const hasIntraday = native.some((iv) => parseInterval(iv).unit === "minutes");
+    const sessionOpen = isMarketSessionOpen(symbol);
 
     return {
       name: symbol.ticker,
-      ticker: symbol.ticker,
+      ticker: `${symbol.exchange}:${symbol.ticker}`,
       description: symbol.name,
       type: symbol.type,
       session: symbol.session,
@@ -166,17 +230,22 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       format: "price",
       minmov: 1,
       pricescale: 10 ** symbol.pricePrecision,
-      has_intraday: intradayMultipliers.length > 0,
-      intraday_multipliers: intradayMultipliers,
+      has_seconds: hasSeconds,
+      seconds_multipliers: hasSeconds ? SECONDS_MULTIPLIERS : [],
+      has_intraday: hasIntraday,
+      intraday_multipliers: hasIntraday ? INTRADAY_MULTIPLIERS : [],
       has_daily: true,
       daily_multipliers: ["1"],
       has_weekly_and_monthly: true,
       weekly_multipliers: ["1"],
       monthly_multipliers: ["1"],
+      // Do not invent empty candles when the feed is quiet / market closed.
+      has_empty_bars: false,
       supported_resolutions: SUPPORTED_RESOLUTIONS,
       volume_precision: symbol.type === "crypto" ? 3 : 0,
       visible_plots_set: "ohlcv",
-      data_status: "streaming",
+      // endofday freezes countdown + market-status like TradingView when closed.
+      data_status: sessionOpen ? "streaming" : "endofday",
     };
   }
 }

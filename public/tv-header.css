@@ -1,0 +1,55 @@
+/* TradingView-style header + left-toolbar polish injected into the chart iframe. */
+
+.tv-header {
+  border-bottom: 1px solid rgba(120, 123, 134, 0.25) !important;
+}
+
+/* Keep custom avatar/trade/publish buttons compact and TV-like */
+.forge-header-avatar {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: 0 6px 0 8px;
+  border-radius: 50%;
+  border: none;
+  background: #9c27b0;
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  position: relative;
+}
+
+.forge-header-avatar__badge {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #f23645;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.forge-header-publish {
+  font-weight: 700 !important;
+}
+
+/* Leave room for touch targets on phones; keep drawing toolbar reachable */
+@media (max-width: 900px) {
+  .tv-header {
+    min-height: 40px !important;
+  }
+
+  /* Drawing toolbar icons: slightly larger hit area on touch */
+  .layout__area--left .tv-group {
+    min-width: 38px;
+  }
+}

@@ -1,6 +1,7 @@
 import {
   alignToInterval,
   intervalSeconds,
+  isMarketSessionOpen,
   type Bar,
   type BarRange,
   type Interval,
@@ -134,6 +135,7 @@ export class SyntheticProvider implements MarketDataProvider {
   subscribeBars(symbol: SymbolInfo, interval: Interval, onBar: (bar: Bar) => void): Unsubscribe {
     let current: Bar | null = null;
     const timer = setInterval(() => {
+      if (!isMarketSessionOpen(symbol)) return;
       const now = Math.floor(Date.now() / 1000);
       const barTime = alignToInterval(now, interval);
       if (!current || current.time !== barTime) {

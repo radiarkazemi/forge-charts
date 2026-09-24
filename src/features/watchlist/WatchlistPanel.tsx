@@ -28,15 +28,26 @@ export function WatchlistPanel({ onClose }: WatchlistPanelProps) {
   const current = useStore(chart.state, (s) => s.symbol);
   const [pending, setPending] = useState<SymbolInfo | null>(null);
 
-  const rows = useMemo(
-    () => watchlist.map((t) => symbols.findByTicker(t)).filter((s): s is SymbolInfo => s !== undefined),
+  const rows = useMemo(() => {
+    return watchlist.flatMap((entry) => {
+      const symbol = symbols.findByTicker(entry);
+      if (!symbol) return [];
+      return [{ entry, symbol }];
+    });
+  }, [symbols, watchlist]);
+
+  const options = useMemo(
+    () =>
+      symbols.all().filter((s) => {
+        const key = `${s.exchange}:${s.ticker}`;
+        return !watchlist.includes(s.ticker) && !watchlist.includes(key);
+      }),
     [symbols, watchlist],
   );
-  const options = useMemo(() => symbols.all().filter((s) => !watchlist.includes(s.ticker)), [symbols, watchlist]);
 
   const add = (symbol: SymbolInfo | null) => {
     if (!symbol) return;
-    settings.addToWatchlist(symbol.ticker);
+    settings.addToWatchlist(`${symbol.exchange}:${symbol.ticker}`);
     setPending(null);
   };
 
@@ -49,12 +60,12 @@ export function WatchlistPanel({ onClose }: WatchlistPanelProps) {
           options={options}
           value={pending}
           onChange={(_, value) => add(value)}
-          getOptionLabel={(s) => s.ticker}
-          isOptionEqualToValue={(a, b) => a.ticker === b.ticker}
+          getOptionLabel={(s) => `${s.exchange}:${s.ticker}`}
+          isOptionEqualToValue={(a, b) => a.ticker === b.ticker && a.exchange === b.exchange}
           renderOption={(props, s) => {
             const { key, ...rest } = props;
             return (
-              <li key={key} {...rest}>
+              <li key={`${s.exchange}:${s.ticker}`} {...rest}>
                 <Box sx={{ display: "flex", flexDirection: "column" }}>
                   <Typography variant="body2" sx={{ fontWeight: 600 }}>
                     {s.ticker}
@@ -74,19 +85,20 @@ export function WatchlistPanel({ onClose }: WatchlistPanelProps) {
         <EmptyState title="Your watchlist is empty" description="Search above to add symbols." />
       ) : (
         <List dense disablePadding sx={{ overflowY: "auto", flex: 1 }}>
-          {rows.map((s) => {
-            const quote = book[s.ticker];
+          {rows.map(({ entry, symbol: s }) => {
+            const key = entry.includes(":") ? entry : `${s.exchange}:${s.ticker}`;
+            const quote = book[s.ticker] ?? book[key];
             return (
               <ListItem
-                key={s.ticker}
+                key={entry}
                 disablePadding
                 secondaryAction={
                   <Tooltip title="Remove">
                     <IconButton
                       edge="end"
                       size="small"
-                      aria-label={`Remove ${s.ticker}`}
-                      onClick={() => settings.removeFromWatchlist(s.ticker)}
+                      aria-label={`Remove ${key}`}
+                      onClick={() => settings.removeFromWatchlist(entry)}
                     >
                       <DeleteOutlineIcon fontSize="small" />
                     </IconButton>
@@ -94,7 +106,11 @@ export function WatchlistPanel({ onClose }: WatchlistPanelProps) {
                 }
                 sx={{ "& .MuiListItemSecondaryAction-root": { opacity: 0 }, "&:hover .MuiListItemSecondaryAction-root": { opacity: 1 } }}
               >
-                <ListItemButton selected={s.ticker === current} onClick={() => chart.setSymbol(s.ticker)} sx={{ pr: 6 }}>
+                <ListItemButton
+                  selected={current === s.ticker || current === key || current === entry}
+                  onClick={() => chart.setSymbol(key)}
+                  sx={{ pr: 6 }}
+                >
                   <Box sx={{ flex: 1, minWidth: 0 }}>
                     <Typography variant="body2" noWrap sx={{ fontWeight: 700 }}>
                       {s.ticker}
