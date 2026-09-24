@@ -15,16 +15,15 @@ export function targetHistoryDepth(interval: Interval): number {
 
 /**
  * Map a TV interval onto Mongo hist collections.
- * Prefer aggregating from 1m (deepest) so 5m/15m/1h can reach multi-thousand bars.
+ * Use deep 1m parents for sub-hour TFs; native 1h/1d after cp_fetcher backfill.
  */
 export function mongoHistoryPlan(interval: Interval): { timeframe: "1m" | "1h" | "1d"; group: number } | null {
   const { unit, count } = parseInterval(interval);
   if (unit === "seconds") return null;
   if (unit === "minutes") {
-    if (count >= 1 && count <= 720) {
-      // Always roll from 1m parents — native 1h collections are thin (~hundreds).
-      return { timeframe: "1m", group: count };
-    }
+    if (count === 60) return { timeframe: "1h", group: 1 };
+    if (count > 60 && count % 60 === 0) return { timeframe: "1h", group: count / 60 };
+    if (count >= 1 && count <= 720) return { timeframe: "1m", group: count };
     return null;
   }
   if (unit === "days" && count === 1) return { timeframe: "1d", group: 1 };
