@@ -1,10 +1,8 @@
-import { normalizeTicker, symbolMatches, type SymbolInfo, type SymbolType } from "@/domain";
+import { normalizeTicker, symbolMatches, SESSION_24X7, SESSION_FX, SESSION_US_EQUITY, type SymbolInfo, type SymbolType } from "@/domain";
 import type { SymbolRepository } from "@/application";
 
 const NY = "America/New_York";
 const UTC = "Etc/UTC";
-const US_EQUITY_SESSION = "0930-1600";
-const ALWAYS_OPEN = "24x7";
 
 type Seed = [ticker: string, name: string, exchange: string, type: SymbolType, precision: number];
 
@@ -61,11 +59,16 @@ function sessionFor(type: SymbolType): { session: string; timezone: string } {
     case "stock":
     case "fund":
     case "option":
-      return { session: US_EQUITY_SESSION, timezone: NY };
     case "index":
-      return { session: US_EQUITY_SESSION, timezone: NY };
+      return { session: SESSION_US_EQUITY, timezone: NY };
+    case "forex":
+    case "commodity":
+    case "futures":
+      // Spot FX/metals close for the weekend — required for TV countdown/market status.
+      return { session: SESSION_FX, timezone: UTC };
+    case "crypto":
     default:
-      return { session: ALWAYS_OPEN, timezone: UTC };
+      return { session: SESSION_24X7, timezone: UTC };
   }
 }
 

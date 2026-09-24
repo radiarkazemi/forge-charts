@@ -1,4 +1,4 @@
-import { normalizeTicker, parseInterval, SYMBOL_TYPE_LABELS, type Bar, type SymbolInfo } from "@/domain";
+import { normalizeTicker, parseInterval, isMarketSessionOpen, SYMBOL_TYPE_LABELS, type Bar, type SymbolInfo } from "@/domain";
 import { createStore, type MarketDataService, type Store, type SymbolRepository, type Unsubscribe } from "@/application";
 import type {
   DatafeedConfiguration,
@@ -216,6 +216,7 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     const native = this.marketData.describe(symbol).nativeIntervals;
     const hasSeconds = native.some((iv) => parseInterval(iv).unit === "seconds");
     const hasIntraday = native.some((iv) => parseInterval(iv).unit === "minutes");
+    const sessionOpen = isMarketSessionOpen(symbol);
 
     return {
       name: symbol.ticker,
@@ -238,10 +239,13 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       has_weekly_and_monthly: true,
       weekly_multipliers: ["1"],
       monthly_multipliers: ["1"],
+      // Do not invent empty candles when the feed is quiet / market closed.
+      has_empty_bars: false,
       supported_resolutions: SUPPORTED_RESOLUTIONS,
       volume_precision: symbol.type === "crypto" ? 3 : 0,
       visible_plots_set: "ohlcv",
-      data_status: "streaming",
+      // endofday freezes countdown + market-status like TradingView when closed.
+      data_status: sessionOpen ? "streaming" : "endofday",
     };
   }
 }

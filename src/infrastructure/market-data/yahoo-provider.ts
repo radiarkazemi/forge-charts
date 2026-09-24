@@ -1,6 +1,7 @@
 import {
   intervalSeconds,
   parseInterval,
+  isMarketSessionOpen,
   type Bar,
   type BarRange,
   type Interval,
@@ -165,11 +166,21 @@ export class YahooProvider implements MarketDataProvider {
 
   subscribeBars(symbol: SymbolInfo, interval: Interval, onBar: (bar: Bar) => void): Unsubscribe {
     const step = intervalSeconds(interval);
+    let lastTime = -1;
     return startPolling(async () => {
+      if (!isMarketSessionOpen(symbol)) return;
       const to = Math.floor(Date.now() / 1000) + step;
       const bars = await this.fetchBars(symbol, interval, { from: to - step * 4, to, countBack: 3 });
       const last = bars.at(-1);
-      if (last) onBar(last);
+      if (!last) return;
+      // Do not invent new periods when Yahoo has no fresh bar.
+      if (lastTime >= 0 && last.time > lastTime) {
+        // allow roll only if bar time is not far in the future / wall-clock empty
+        const nowBucket = Math.floor(Date.now() / 1000 / step) * step;
+        if (last.time > nowBucket) return;
+      }
+      lastTime = last.time;
+      onBar(last);
     }, LIVE_POLL_MS);
   }
 
