@@ -1,47 +1,85 @@
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Tooltip from "@mui/material/Tooltip";
 import { useServices } from "@/app/use-services";
+import { ChartController } from "@/features/chart/chart-controller";
 import { useStore } from "@/shared/hooks/useStore";
 import { useChartAlertLines } from "./useChartAlertLines";
 import { useTradingViewWidget } from "./useTradingViewWidget";
 
 interface TradingViewChartProps {
   readonly onCreateAlert: () => void;
+  /** 0 = primary (alerts, Forge header, shared controller). */
+  readonly paneIndex?: number;
+  readonly initialSymbol?: string;
 }
 
-export function TradingViewChart({ onCreateAlert }: TradingViewChartProps) {
+export function TradingViewChart({ onCreateAlert, paneIndex = 0, initialSymbol }: TradingViewChartProps) {
   const { chart, datafeed, saveLoadAdapter, storage, settings, alerts, quotes, config } = useServices();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const theme = useStore(settings.settings, (s) => s.theme);
-  const { ready, error, symbol } = useStore(chart.state);
+  const isPrimary = paneIndex === 0;
+
+  const localController = useMemo(
+    () => (isPrimary ? null : new ChartController(initialSymbol ?? "XAUUSD", settings.settings.get().lastInterval)),
+    // One controller per secondary pane lifetime; symbol is applied at widget construct.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pane identity only
+    [isPrimary, paneIndex],
+  );
+  const controller = isPrimary ? chart : (localController as ChartController);
+
+  const { ready, error, symbol } = useStore(controller.state);
   const source = useStore(datafeed.source);
   const alertCount = useStore(alerts.alerts, (list) => list.filter((a) => a.status === "active").length);
   const quote = useStore(quotes.quotes, (book) => book[symbol]);
 
+  const symbolForPane =
+    initialSymbol ??
+    settings.settings.get().paneSymbols[paneIndex] ??
+    settings.settings.get().lastSymbol;
+
   useTradingViewWidget(containerRef, {
-    controller: chart,
+    controller,
     datafeed,
     saveLoadAdapter,
     storage,
     libraryPath: config.tvLibraryPath,
-    initialSymbol: settings.settings.get().lastSymbol,
+    initialSymbol: symbolForPane,
     initialInterval: settings.settings.get().lastInterval,
     theme,
     alertCount,
+    isPrimary,
+    paneIndex,
     onCreateAlert,
     onToggleTheme: () => settings.toggleTheme(),
     onOpenAlertsPanel: () => settings.setSidePanel("alerts"),
     onOpenWatchlist: () => settings.setSidePanel("watchlist"),
+    onOpenObjectTree: () => chart.openObjectTree(),
+    onSetChartLayout: (layout) => settings.setChartLayout(layout),
+    onSymbolChanged: (index, ticker) => settings.setPaneSymbol(index, ticker),
     getLastPrice: () => quote?.price ?? null,
   });
-  useChartAlertLines(chart, alerts);
+
+  useChartAlertLines(isPrimary ? controller : null, alerts);
 
   return (
-    <Box sx={{ position: "relative", flex: 1, minWidth: 0, minHeight: 0, bgcolor: "background.default" }}>
+    <Box
+      sx={{
+        position: "relative",
+        flex: 1,
+        minWidth: 0,
+        minHeight: 0,
+        width: "100%",
+        height: "100%",
+        bgcolor: "background.default",
+        borderRight: isPrimary ? 0 : 1,
+        borderBottom: 1,
+        borderColor: "divider",
+      }}
+    >
       <Box ref={containerRef} sx={{ position: "absolute", inset: 0 }} />
 
       {!ready && !error ? (
@@ -58,14 +96,19 @@ export function TradingViewChart({ onCreateAlert }: TradingViewChartProps) {
         </Box>
       ) : null}
 
-      {ready && source?.isSynthetic ? (
+      {ready && isPrimary && source?.isSynthetic ? (
         <Tooltip title="No live provider covers this symbol; showing deterministic demo data.">
           <Chip
             size="small"
             color="warning"
             variant="outlined"
             label="Demo data"
-            sx={{ position: "absolute", left: 56, bottom: 44, zIndex: 2 }}
+            sx={{
+              position: "absolute",
+              left: { xs: 8, sm: 56 },
+              bottom: { xs: 72, sm: 44 },
+              zIndex: 2,
+            }}
           />
         </Tooltip>
       ) : null}

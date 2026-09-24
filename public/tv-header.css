@@ -1,4 +1,4 @@
-/* TradingView-style header polish injected into the chart iframe. */
+/* TradingView-style header + left-toolbar polish injected into the chart iframe. */
 
 .tv-header {
   border-bottom: 1px solid rgba(120, 123, 134, 0.25) !important;
@@ -40,4 +40,16 @@
 
 .forge-header-publish {
   font-weight: 700 !important;
+}
+
+/* Leave room for touch targets on phones; keep drawing toolbar reachable */
+@media (max-width: 900px) {
+  .tv-header {
+    min-height: 40px !important;
+  }
+
+  /* Drawing toolbar icons: slightly larger hit area on touch */
+  .layout__area--left .tv-group {
+    min-width: 38px;
+  }
 }

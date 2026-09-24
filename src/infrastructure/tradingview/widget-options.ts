@@ -4,6 +4,7 @@ import { FONT_FAMILY, TOKENS } from "@/shared/theme/tokens";
 import type {
   ChartingLibraryFeatureset,
   ChartingLibraryWidgetOptions,
+  DrawingToolIdentifier,
   IBasicDataFeed,
   IExternalSaveLoadAdapter,
   ResolutionString,
@@ -19,9 +20,15 @@ export interface WidgetOptionsInput {
   readonly interval: Interval;
   readonly theme: ThemeMode;
   readonly savedState?: object;
+  /** Narrow viewports get adaptive header labels and mobile chart features. */
+  readonly isMobile?: boolean;
+  /**
+   * Secondary panes in a Forge multi-chart grid: compact header, no left toolbar
+   * (primary pane keeps the full TradingView drawing strip).
+   */
+  readonly secondaryPane?: boolean;
 }
 
-/** Keep library header tools on; add study templates + seconds + fullscreen chrome. */
 const ENABLED_FEATURES: ChartingLibraryFeatureset[] = [
   "header_widget",
   "header_symbol_search",
@@ -37,6 +44,9 @@ const ENABLED_FEATURES: ChartingLibraryFeatureset[] = [
   "header_saveload",
   "header_in_fullscreen_mode",
   "side_toolbar_in_fullscreen_mode",
+  "left_toolbar",
+  "show_object_tree",
+  "object_tree_legend_mode",
   "study_templates",
   "chart_template_storage",
   "items_favoriting",
@@ -47,17 +57,43 @@ const ENABLED_FEATURES: ChartingLibraryFeatureset[] = [
   "show_interval_dialog_on_key_press",
   "legend_widget",
   "edit_buttons_in_legend",
+  "always_show_legend_values_on_mobile",
+  "show_zoom_and_move_buttons_on_touch",
 ];
 
 const DISABLED_FEATURES: ChartingLibraryFeatureset[] = [
   "popup_hints",
   "symbol_info_price_source",
+  // Keep the drawing toolbar visible on first visit (matches TradingView).
+  "hide_left_toolbar_by_default",
   // Runtime featureset (not always in public d.ts): hides bottom-left TradingView logo.
   "widget_logo" as ChartingLibraryFeatureset,
 ];
 
+const SECONDARY_DISABLED: ChartingLibraryFeatureset[] = [
+  ...DISABLED_FEATURES,
+  "left_toolbar",
+  "header_saveload",
+  "header_fullscreen_button",
+  "header_screenshot",
+  "header_compare",
+  "side_toolbar_in_fullscreen_mode",
+];
+
 /** Match TradingView's common top-bar favorites: 1m 5m 15m 30m 1h 4h D W M 3M */
 const FAVORITE_INTERVALS = ["1", "5", "15", "30", "60", "240", "1D", "1W", "1M", "3M"] as ResolutionString[];
+
+/** Favorites for the left drawing toolbar (TV-style quick tools). */
+const FAVORITE_DRAWING_TOOLS = [
+  "LineToolTrendLine",
+  "LineToolHorzLine",
+  "LineToolRay",
+  "LineToolFibRetracement",
+  "LineToolRectangle",
+  "LineToolText",
+  "LineToolBrush",
+  "LineToolCrossLine",
+] as DrawingToolIdentifier[];
 
 const TIME_FRAMES: TimeFrameItem[] = [
   { text: "1d", resolution: "5" as ResolutionString, description: "1 Day", title: "1D" },
@@ -116,6 +152,8 @@ export function studiesOverrides(theme: ThemeMode): ChartingLibraryWidgetOptions
 /** Assemble the full widget options object (Builder-style factory). */
 export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWidgetOptions {
   const tokens = TOKENS[input.theme];
+  const mobile = Boolean(input.isMobile);
+  const secondary = Boolean(input.secondaryPane);
 
   return {
     container: input.container,
@@ -130,24 +168,26 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
     fullscreen: false,
     debug: false,
     custom_font_family: FONT_FAMILY,
-    // Show text labels (Indicators, Save, …) like TradingView desktop.
-    header_widget_buttons_mode: "fullsize",
+    // Desktop primary: full labels; mobile / secondary panes: compact.
+    header_widget_buttons_mode: mobile || secondary ? "adaptive" : "fullsize",
     custom_css_url: "/charts/tv-header.css",
     enabled_features: ENABLED_FEATURES,
-    disabled_features: DISABLED_FEATURES,
+    disabled_features: secondary ? SECONDARY_DISABLED : DISABLED_FEATURES,
     favorites: {
       intervals: FAVORITE_INTERVALS,
       chartTypes: ["Candles", "Heiken Ashi", "Line", "Area", "Bars"],
+      drawingTools: FAVORITE_DRAWING_TOOLS,
     },
     time_frames: TIME_FRAMES,
     loading_screen: { backgroundColor: tokens.background, foregroundColor: tokens.accent },
     overrides: chartOverrides(input.theme),
     studies_overrides: studiesOverrides(input.theme),
     save_load_adapter: input.saveLoadAdapter,
-    saved_data: input.savedState,
+    // Only the primary pane restores autosaved single-chart state.
+    saved_data: secondary ? undefined : input.savedState,
     auto_save_delay: 5,
     charts_storage_api_version: "1.1",
     client_id: "forge-charts",
-    user_id: "local",
+    user_id: secondary ? `local-pane-${input.symbol}` : "local",
   };
 }

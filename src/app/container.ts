@@ -78,10 +78,11 @@ export function createServices(config: AppConfig = readConfig()): Services {
   // Quotes feed alert evaluation.
   disposers.push(quotes.quotes.subscribe(() => alerts.evaluate(quotes.quotes.get())));
 
-  // Quote polling covers the watchlist, every alerted ticker and the charted symbol.
+  // Quote polling covers the watchlist, every alerted ticker and every chart pane symbol.
   const syncTrackedSymbols = () => {
     const tickers = new Set<string>([
       ...settings.settings.get().watchlist,
+      ...settings.settings.get().paneSymbols,
       ...alerts.alerts.get().map((a) => a.ticker),
       chart.state.get().symbol,
     ]);

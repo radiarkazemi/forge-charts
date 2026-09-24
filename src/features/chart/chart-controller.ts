@@ -135,6 +135,15 @@ export class ChartController {
     this.widget?.save(onSaved);
   }
 
+  /** Open the library Object Tree (layers) for drawings / studies. */
+  openObjectTree(): void {
+    try {
+      this.activeChart()?.executeActionById("paneObjectTree");
+    } catch {
+      /* chart not ready */
+    }
+  }
+
   /* ── internals ─────────────────────────────────────────────────────── */
 
   private async applyTheme(mode: ThemeMode): Promise<void> {

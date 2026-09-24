@@ -1,13 +1,21 @@
+import type { ChartLayoutId } from "@/application";
+import { CHART_LAYOUT_CHOICES } from "./chart-layouts";
 import type { IChartingLibraryWidget } from "@/infrastructure/tradingview";
 
 const ACCOUNT_ICON =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28"><circle cx="14" cy="14" r="14" fill="#9c27b0"/><text x="14" y="18" text-anchor="middle" fill="#fff" font-size="13" font-weight="700" font-family="Arial,sans-serif">F</text></svg>';
+
+const LAYOUT_ICON =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28"><rect x="4" y="4" width="9" height="9" rx="1" fill="currentColor"/><rect x="15" y="4" width="9" height="9" rx="1" fill="currentColor"/><rect x="4" y="15" width="9" height="9" rx="1" fill="currentColor"/><rect x="15" y="15" width="9" height="9" rx="1" fill="currentColor"/></svg>';
 
 export interface HeaderToolbarHandlers {
   readonly onCreateAlert: () => void;
   readonly onToggleTheme: () => void;
   readonly onOpenAlertsPanel: () => void;
   readonly onOpenWatchlist: () => void;
+  readonly onOpenObjectTree: () => void;
+  /** Forge multi-pane layout (2 / 3 / 4 charts on one page). */
+  readonly onSetChartLayout: (layout: ChartLayoutId) => void;
   readonly getLastPrice: () => number | null;
   readonly themeLabel: string;
   readonly userInitial: string;
@@ -29,6 +37,7 @@ export function mountHeaderToolbar(widget: IChartingLibraryWidget, handlers: Hea
       { title: `Theme: ${handlers.themeLabel}`, onSelect: () => handlers.onToggleTheme() },
       { title: "Alerts panel", onSelect: () => handlers.onOpenAlertsPanel() },
       { title: "Watchlist", onSelect: () => handlers.onOpenWatchlist() },
+      { title: "Object tree (layers)", onSelect: () => handlers.onOpenObjectTree() },
       { title: "Create alert", onSelect: () => handlers.onCreateAlert() },
     ],
   });
@@ -60,6 +69,17 @@ export function mountHeaderToolbar(widget: IChartingLibraryWidget, handlers: Hea
         },
       },
     ],
+  });
+
+  void widget.createDropdown({
+    title: "Layout",
+    tooltip: "Select chart layout (1 / 2 / 3 / 4 charts on this page)",
+    align: "right",
+    icon: LAYOUT_ICON,
+    items: CHART_LAYOUT_CHOICES.map((choice) => ({
+      title: choice.title,
+      onSelect: () => handlers.onSetChartLayout(choice.id),
+    })),
   });
 
   void widget.createDropdown({
