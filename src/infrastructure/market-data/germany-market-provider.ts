@@ -218,6 +218,17 @@ function alignTime(tsSec: number, step: number): number {
   return tsSec - (tsSec % step);
 }
 
+/**
+ * cp_fetcher chart_ws / Mongo `bct` is bar CLOSE time. TradingView bars + countdown
+ * need period OPEN — otherwise 1m countdown runs ~2:00 or freezes.
+ */
+function closeTimeToOpen(closeSec: number, step: number): number {
+  if (!Number.isFinite(closeSec) || !Number.isFinite(step) || step <= 0) {
+    return alignTime(closeSec, step);
+  }
+  return Math.floor((closeSec - 1) / step) * step;
+}
+
 function parseUpdatedAt(raw?: string): number {
   if (!raw) return Math.floor(Date.now() / 1000);
   const ms = Date.parse(raw);
@@ -701,7 +712,9 @@ export class GermanyMarketProvider implements MarketDataProvider {
     // cp_fetcher chart_ws — crypto + metals (xauusd etc. live in Mongo from TV).
     disposers.push(
       openCpFetcherSocket(route.apiSymbol, interval, (bar) => {
-        const aligned = { ...bar, time: alignTime(bar.time, step) };
+        // chart_ws `t` is bar_close_time — convert to period open for countdown.
+        const openTime = closeTimeToOpen(bar.time, step);
+        const aligned = { ...bar, time: openTime };
         // Prefer raw ticks when they are fresh; otherwise apply forming-bar close.
         if (Date.now() - lastTickMs < 400) {
           if (current && aligned.time === current.time) {

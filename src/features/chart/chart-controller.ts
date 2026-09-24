@@ -55,18 +55,37 @@ export class ChartController {
     this.widget = widget;
     const chart = widget.activeChart();
 
+    const forceCountdown = () => {
+      try {
+        widget.applyOverrides({ "mainSeriesProperties.showCountdown": true });
+      } catch {
+        /* chart tearing down */
+      }
+    };
+
     const syncSymbol = () => {
       const ext = chart.symbolExt();
       this.patch({ symbol: stripExchange(ext?.ticker ?? ext?.name ?? chart.symbol()) });
+      forceCountdown();
     };
     chart.onSymbolChanged().subscribe(null, syncSymbol);
-    chart.onIntervalChanged().subscribe(null, (interval) => this.patch({ interval }));
+    chart.onIntervalChanged().subscribe(null, (interval) => {
+      this.patch({ interval });
+      forceCountdown();
+    });
     chart.crossHairMoved().subscribe(null, (params) => this.scheduleCrosshair(params));
 
     this.patch({ ready: true, error: null, symbol: stripExchange(chart.symbol()), interval: chart.resolution() });
 
     // Force candle close countdown even if autosaved chart state turned it off.
-    widget.applyOverrides({ "mainSeriesProperties.showCountdown": true });
+    forceCountdown();
+    // Re-apply after series/data settle — saved_data can race the first override.
+    try {
+      chart.dataReady(() => forceCountdown());
+    } catch {
+      window.setTimeout(forceCountdown, 500);
+    }
+    window.setTimeout(forceCountdown, 1_200);
 
     if (this.desiredTheme && this.desiredTheme !== widget.getTheme()) void this.applyTheme(this.desiredTheme);
   }

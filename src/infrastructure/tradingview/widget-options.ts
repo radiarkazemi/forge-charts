@@ -59,6 +59,8 @@ const ENABLED_FEATURES: ChartingLibraryFeatureset[] = [
   "edit_buttons_in_legend",
   "always_show_legend_values_on_mobile",
   "show_zoom_and_move_buttons_on_touch",
+  // Candle close countdown on the price scale (intraday resolutions).
+  "countdown",
 ];
 
 const DISABLED_FEATURES: ChartingLibraryFeatureset[] = [
@@ -183,6 +185,10 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
     time_frames: TIME_FRAMES,
     loading_screen: { backgroundColor: tokens.background, foregroundColor: tokens.accent },
     overrides: chartOverrides(input.theme),
+    // Beat localStorage / autosave that may have turned countdown off.
+    settings_overrides: {
+      "mainSeriesProperties.showCountdown": true,
+    },
     studies_overrides: studiesOverrides(input.theme),
     save_load_adapter: input.saveLoadAdapter,
     // Only the primary pane restores autosaved single-chart state.
