@@ -71,10 +71,11 @@ export function mountHeaderToolbar(widget: IChartingLibraryWidget, handlers: Hea
     ],
   });
 
+  // Keep Layout on the left so it stays visible on crowded / mobile headers.
   void widget.createDropdown({
     title: "Layout",
     tooltip: "Select chart layout (1 / 2 / 3 / 4 charts on this page)",
-    align: "right",
+    align: "left",
     icon: LAYOUT_ICON,
     items: CHART_LAYOUT_CHOICES.map((choice) => ({
       title: choice.title,

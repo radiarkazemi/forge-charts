@@ -171,7 +171,9 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
     // Desktop primary: full labels; mobile / secondary panes: compact.
     header_widget_buttons_mode: mobile || secondary ? "adaptive" : "fullsize",
     custom_css_url: "/charts/tv-header.css",
-    enabled_features: ENABLED_FEATURES,
+    enabled_features: secondary
+      ? ENABLED_FEATURES.filter((f) => f !== "left_toolbar" && f !== "show_object_tree" && f !== "object_tree_legend_mode")
+      : ENABLED_FEATURES,
     disabled_features: secondary ? SECONDARY_DISABLED : DISABLED_FEATURES,
     favorites: {
       intervals: FAVORITE_INTERVALS,
