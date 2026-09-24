@@ -113,11 +113,13 @@ export class TradingViewDatafeed implements IBasicDataFeed {
 
   searchSymbols(userInput: string, exchange: string, symbolType: string, onResult: SearchSymbolsCallback): void {
     const type = symbolType as SymbolInfo["type"] | "";
+    const exchangeNeedle = exchange.trim().toUpperCase();
     const results = this.symbols
       .search(userInput, type)
-      .filter((s) => !exchange || s.exchange === exchange)
+      .filter((s) => !exchangeNeedle || s.exchange.toUpperCase() === exchangeNeedle)
       .map((s) => ({
         symbol: s.ticker,
+        full_name: `${s.exchange}:${s.ticker}`,
         ticker: `${s.exchange}:${s.ticker}`,
         description: s.name,
         exchange: s.exchange,

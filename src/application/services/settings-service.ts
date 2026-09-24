@@ -136,7 +136,11 @@ export class SettingsService {
   addToWatchlist(ticker: string): void {
     const watchlist = sanitizeStringList(this.settings.get().watchlist, DEFAULT_WATCHLIST);
     if (watchlist.includes(ticker)) return;
-    this.patch({ watchlist: [...watchlist, ticker] });
+    // Prefer exchange:ticker keys; drop a bare duplicate of the same symbol.
+    const bare = ticker.includes(":") ? ticker.slice(ticker.lastIndexOf(":") + 1) : ticker;
+    const next = watchlist.filter((t) => t !== bare || t.includes(":"));
+    if (next.includes(ticker)) return;
+    this.patch({ watchlist: [...next, ticker] });
   }
 
   removeFromWatchlist(ticker: string): void {

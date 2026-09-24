@@ -33,9 +33,11 @@ const SEEDS: readonly Seed[] = [
   ["PAXGUSDT", "PAX Gold / Tether", "BINANCE", "crypto", 2],
   ["BTCUSD", "Bitcoin / U.S. Dollar", "BINANCE", "crypto", 2],
   ["ETHUSD", "Ethereum / U.S. Dollar", "BINANCE", "crypto", 2],
-  // FOREXCOM + FXPRO gold (same Germany iran-forexcom feed; exchange selects routing)
-  ["XAUUSD", "Gold Spot / U.S. Dollar", "FOREXCOM", "commodity", 2],
-  ["XAUUSD", "Gold Spot / U.S. Dollar", "FXPRO", "commodity", 2],
+  // Gold — FOREXCOM first so bare "XAUUSD" still resolves to spot CFD (not PAXG).
+  // Typed as forex so they show under the Forex filter in symbol search.
+  ["XAUUSD", "Gold Spot / U.S. Dollar", "FOREXCOM", "forex", 2],
+  ["XAUUSD", "Gold Spot / U.S. Dollar", "FXPRO", "forex", 2],
+  ["XAUUSD", "Gold Spot / U.S. Dollar (PAXG)", "BINANCE", "forex", 2],
   ["GC1!", "Gold Futures", "FOREXCOM", "futures", 2],
   // Broader (Yahoo fallback)
   ["AAPL", "Apple Inc.", "NASDAQ", "stock", 2],
@@ -46,6 +48,10 @@ const SEEDS: readonly Seed[] = [
   ["GBPUSD", "British Pound / U.S. Dollar", "FOREXCOM", "forex", 5],
   ["USDJPY", "U.S. Dollar / Japanese Yen", "FOREXCOM", "forex", 3],
   ["XAGUSD", "Silver Spot / U.S. Dollar", "FOREXCOM", "commodity", 3],
+  ["EURUSD", "Euro / U.S. Dollar", "FXPRO", "forex", 5],
+  ["GBPUSD", "British Pound / U.S. Dollar", "FXPRO", "forex", 5],
+  ["USDJPY", "U.S. Dollar / Japanese Yen", "FXPRO", "forex", 3],
+  ["XAGUSD", "Silver Spot / U.S. Dollar", "FXPRO", "commodity", 3],
   ["USOIL", "WTI Crude Oil", "TVC", "commodity", 2],
   ["SPX", "S&P 500", "SP", "index", 2],
 ];
@@ -80,8 +86,10 @@ export class StaticSymbolRepository implements SymbolRepository {
   }
 
   findByTicker(ticker: string, exchange?: string): SymbolInfo | undefined {
-    const needle = normalizeTicker(ticker);
-    const ex = exchange?.trim().toUpperCase();
+    const raw = ticker.trim();
+    const fromPrefix = raw.includes(":") ? raw.slice(0, raw.lastIndexOf(":")).trim().toUpperCase() : undefined;
+    const ex = (exchange?.trim() || fromPrefix || "").toUpperCase() || undefined;
+    const needle = normalizeTicker(raw);
     if (ex) {
       return this.symbols.find((s) => s.ticker === needle && s.exchange.toUpperCase() === ex);
     }
