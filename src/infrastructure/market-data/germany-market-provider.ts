@@ -603,7 +603,6 @@ export class GermanyMarketProvider implements MarketDataProvider {
   }
 
   async fetchBars(symbol: SymbolInfo, interval: Interval, range: BarRange): Promise<Bar[]> {
-    await this.assertHealthy();
     const route = routeFor(symbol);
     if (!route) throw new Error(`germany-market: unsupported ${symbol.ticker}`);
     const { unit } = parseInterval(interval);
@@ -612,6 +611,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
 
     let bars: Bar[] = [];
     if (unit === "seconds") {
+      await this.assertHealthy();
       bars = await this.fetchSecondBars(route, step, germanyLimit, range);
     } else {
       // Prefer VPS Mongo deep history (20k/10k/5k + `before` paging). Germany `/ohlc/`
@@ -624,10 +624,12 @@ export class GermanyMarketProvider implements MarketDataProvider {
         }
       }
       if (!bars.length) {
+        await this.assertHealthy();
         bars = await this.fetchOhlcBars(route, interval, germanyLimit);
       } else if (bars.length < Math.min(range.countBack, 50)) {
         // Mongo thin on this page — splice in recent Germany bars if available.
         try {
+          await this.assertHealthy();
           const recent = await this.fetchOhlcBars(route, interval, germanyLimit);
           const byTime = new Map<number, Bar>();
           for (const b of [...bars, ...recent]) byTime.set(b.time, b);
