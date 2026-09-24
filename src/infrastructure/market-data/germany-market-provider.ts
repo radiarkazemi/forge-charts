@@ -6,15 +6,16 @@ import { startPolling } from "./polling";
 /**
  * Germany Market Price API via `/market-api/` + browser Binance tick streams.
  * History: crypto `/crypto/prices/.../history/` (incl. 1s) + `/ohlc/` for metals.
- * Realtime: Binance trade+bookTicker (crypto & PAXG), `/market-ticks` push, 1s poll.
+ * Realtime: Binance trade+bookTicker (crypto & PAXG), VPS `/market-ticks`
+ * (TradingView quote feed + Germany/Mongo fallback), `/crypto-ws` (cp_fetcher).
  */
 const BASE = "/market-api";
 const REQUEST_TIMEOUT_MS = 15_000;
 const HEALTH_TTL_MS = 60_000;
-const TICK_POLL_MS = 150;
-/** Browser forex HTTP is fallback only — VPS /market-ticks owns the 1 req/s budget. */
-const FOREX_POLL_MS = 2_500;
-const BAR_RECONCILE_MS = 15_000;
+const TICK_POLL_MS = 120;
+/** Browser forex HTTP is fallback only — VPS /market-ticks owns the Germany budget. */
+const FOREX_POLL_MS = 3_500;
+const BAR_RECONCILE_MS = 12_000;
 const MAX_BARS = 1_000;
 
 /** Full TradingView-style resolution set we advertise and serve. */
@@ -454,7 +455,7 @@ function openMarketTicksSocket(
         retryTimer = setTimeout(() => {
           retryTimer = null;
           connect();
-        }, 1_500);
+        }, 600);
       }
     };
   };
@@ -486,7 +487,9 @@ function openCpFetcherSocket(apiSymbol: string, interval: Interval, onBar: (bar:
       return;
     }
     socket.onopen = () => {
-      socket?.send(JSON.stringify({ op: "subscribe", exchange: "BINANCE", symbol: apiSymbol, interval }));
+      // cp_fetcher chart_ws accepts any symbol id present in Mongo `last`
+      // (btcusdt, xauusd, eurusd, …) — interval aliases map to 1m/1h/1d.
+      socket?.send(JSON.stringify({ op: "subscribe", symbol: apiSymbol, interval }));
     };
     socket.onmessage = (event) => {
       try {
@@ -512,7 +515,7 @@ function openCpFetcherSocket(apiSymbol: string, interval: Interval, onBar: (bar:
         retryTimer = setTimeout(() => {
           retryTimer = null;
           connect();
-        }, 2500);
+        }, 1_200);
       }
     };
   };
@@ -686,7 +689,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
       );
     }
 
-    // VPS market-ticks push (Germany polled server-side — works when Binance WS is blocked).
+    // VPS market-ticks (TradingView quote feed primary; Germany/Mongo fallback).
     const channel =
       route.kind === "metal" ? `forex:xauusd:${route.exchange}` : `crypto:${route.apiSymbol.toLowerCase()}`;
     disposers.push(
@@ -695,33 +698,48 @@ export class GermanyMarketProvider implements MarketDataProvider {
       }),
     );
 
-    // Local cp_fetcher WS for BINANCE symbols.
-    if (route.kind === "crypto") {
-      disposers.push(
-        openCpFetcherSocket(route.apiSymbol, interval, (bar) => {
-          const aligned = { ...bar, time: alignTime(bar.time, step) };
-          if (!current || aligned.time > current.time) {
-            emit(aligned);
-            return;
-          }
-          if (aligned.time === current.time) {
+    // cp_fetcher chart_ws — crypto + metals (xauusd etc. live in Mongo from TV).
+    disposers.push(
+      openCpFetcherSocket(route.apiSymbol, interval, (bar) => {
+        const aligned = { ...bar, time: alignTime(bar.time, step) };
+        // Prefer raw ticks when they are fresh; otherwise apply forming-bar close.
+        if (Date.now() - lastTickMs < 400) {
+          if (current && aligned.time === current.time) {
             emit({
               time: aligned.time,
               open: current.open || aligned.open,
               high: Math.max(current.high, aligned.high, current.close),
               low: Math.min(current.low, aligned.low, current.close),
-              close: Date.now() - lastTickMs < 1500 ? current.close : aligned.close,
+              close: current.close,
               volume: Math.max(current.volume, aligned.volume),
             });
           }
-        }),
-      );
-    }
+          return;
+        }
+        if (!current || aligned.time > current.time) {
+          emit(aligned);
+          lastTickMs = Date.now();
+          return;
+        }
+        if (aligned.time === current.time) {
+          emit({
+            time: aligned.time,
+            open: current.open || aligned.open,
+            high: Math.max(current.high, aligned.high, aligned.close),
+            low: Math.min(current.low, aligned.low, aligned.close),
+            close: aligned.close,
+            volume: Math.max(current.volume, aligned.volume),
+          });
+          lastTickMs = Date.now();
+        }
+      }),
+    );
 
-    // HTTP poll fallback — always-on when WS quiet.
+    // HTTP poll fallback — only when WS paths have been quiet.
     if (route.kind === "crypto") {
       disposers.push(
         startPolling(async () => {
+          if (Date.now() - lastTickMs < 450) return;
           const latest = await fetchJson<CryptoLatest>(
             buildUrl(`${BASE}/crypto/prices/${encodeURIComponent(route.apiSymbol.toLowerCase())}/`, {
               timeframe: "1s",
@@ -730,15 +748,13 @@ export class GermanyMarketProvider implements MarketDataProvider {
           );
           const price = +latest.price;
           if (!Number.isFinite(price)) return;
-          if (Date.now() - lastTickMs < 600) return;
           onTick(price, parseUpdatedAt(latest.updated_at), 0);
         }, TICK_POLL_MS),
       );
     } else {
-      // Prefer /market-ticks; HTTP only if the WS has been quiet (avoids Germany 429).
       disposers.push(
         startPolling(async () => {
-          if (Date.now() - lastTickMs < 2_000) return;
+          if (Date.now() - lastTickMs < 1_800) return;
           const fx = await this.fetchForexXau();
           const price = +fx.price;
           if (!Number.isFinite(price)) return;
