@@ -9,7 +9,7 @@ import { startPolling } from "./polling";
  * Realtime: Binance trade+bookTicker (crypto & PAXG), `/market-ticks` push, 1s poll.
  */
 const BASE = "/market-api";
-const REQUEST_TIMEOUT_MS = 8_000;
+const REQUEST_TIMEOUT_MS = 15_000;
 const HEALTH_TTL_MS = 60_000;
 const TICK_POLL_MS = 150;
 /** Browser forex HTTP is fallback only — VPS /market-ticks owns the 1 req/s budget. */
@@ -210,6 +210,10 @@ function parseBar(row: unknown): Bar | null {
 }
 
 function alignTime(tsSec: number, step: number): number {
+  // step<=0 would make `%` yield NaN and crash the Charting Library (`Invalid time value`).
+  if (!Number.isFinite(tsSec) || !Number.isFinite(step) || step <= 0) {
+    return Number.isFinite(tsSec) ? Math.floor(tsSec) : Math.floor(Date.now() / 1000);
+  }
   return tsSec - (tsSec % step);
 }
 
@@ -596,7 +600,10 @@ export class GermanyMarketProvider implements MarketDataProvider {
       bars = await this.fetchOhlcBars(route, interval, limit);
     }
 
-    bars = bars.filter((b) => b.time < range.to).sort((a, b) => a.time - b.time);
+    // TV PeriodParams.to is exclusive; keep bars that can still fill countBack.
+    // If the exclusive filter empties a non-empty series (edge `to` alignment), keep the series.
+    const beforeTo = bars.filter((b) => b.time < range.to).sort((a, b) => a.time - b.time);
+    bars = beforeTo.length > 0 ? beforeTo : [...bars].sort((a, b) => a.time - b.time);
     if (!bars.length) throw new Error(`germany-market: empty history for ${route.apiSymbol} @ ${interval}`);
     return bars.slice(-Math.max(range.countBack, 1));
   }
@@ -646,7 +653,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
       } finally {
         readyForTicks = true;
         for (const tick of pendingTicks.splice(0)) {
-          emit(applyTick(current, tick.price, tick.tsSec, tick.volumeDelta));
+          emit(applyTick(current, tick.price, tick.tsSec, step, tick.volumeDelta));
         }
       }
     })();

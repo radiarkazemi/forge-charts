@@ -54,7 +54,19 @@ export interface DataSourceInfo {
 }
 
 function toTvBar(bar: Bar) {
-  return { time: bar.time * 1000, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume };
+  // Library crashes with RangeError: Invalid time value if `time` is NaN/non-finite.
+  const timeSec = Number(bar.time);
+  if (!Number.isFinite(timeSec) || timeSec <= 0) {
+    throw new Error(`Invalid bar time: ${String(bar.time)}`);
+  }
+  return {
+    time: timeSec * 1000,
+    open: bar.open,
+    high: bar.high,
+    low: bar.low,
+    close: bar.close,
+    volume: bar.volume,
+  };
 }
 
 function stripExchange(symbolName: string): string {
@@ -163,7 +175,13 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   ): void {
     this.unsubscribeBars(listenerGuid);
     const symbol = this.requireSymbol(symbolInfo);
-    const unsubscribe = this.marketData.subscribe(symbol, resolution, (bar) => onTick(toTvBar(bar)));
+    const unsubscribe = this.marketData.subscribe(symbol, resolution, (bar) => {
+      try {
+        onTick(toTvBar(bar));
+      } catch {
+        /* drop corrupt realtime bars instead of crashing the widget */
+      }
+    });
     this.subscriptions.set(listenerGuid, unsubscribe);
   }
 
