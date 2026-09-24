@@ -2,10 +2,12 @@ import { intervalSeconds, parseInterval, isMarketSessionOpen, type Bar, type Bar
 import type { MarketDataProvider, Unsubscribe } from "@/application";
 import { buildUrl, fetchJson } from "../http/fetch-json";
 import { startPolling } from "./polling";
+import { fetchCpChartHistory, mongoHistoryPlan } from "./cp-chart-history";
 
 /**
  * Germany Market Price API via `/market-api/` + browser Binance tick streams.
- * History: crypto `/crypto/prices/.../history/` (incl. 1s) + `/ohlc/` for metals.
+ * History: VPS Mongo via `/crypto-chart/history` (deep 20k/10k/5k) with Germany
+ * `/ohlc/` fallback for the recent window / seconds synth.
  * Realtime: Binance trade+bookTicker (crypto & PAXG), VPS `/market-ticks`
  * (TradingView quote feed + Germany/Mongo fallback), `/crypto-ws` (cp_fetcher).
  */
@@ -16,6 +18,7 @@ const TICK_POLL_MS = 120;
 /** Browser forex HTTP is fallback only — VPS /market-ticks owns the Germany budget. */
 const FOREX_POLL_MS = 3_500;
 const BAR_RECONCILE_MS = 12_000;
+/** Germany `/ohlc/` hard ceiling (API truncates above this). Deep history uses Mongo. */
 const MAX_BARS = 1_000;
 
 /** Full TradingView-style resolution set we advertise and serve. */
@@ -605,13 +608,34 @@ export class GermanyMarketProvider implements MarketDataProvider {
     if (!route) throw new Error(`germany-market: unsupported ${symbol.ticker}`);
     const { unit } = parseInterval(interval);
     const step = intervalSeconds(interval);
-    const limit = Math.min(MAX_BARS, Math.max(50, range.countBack + 20));
+    const germanyLimit = Math.min(MAX_BARS, Math.max(50, range.countBack + 20));
 
-    let bars: Bar[];
+    let bars: Bar[] = [];
     if (unit === "seconds") {
-      bars = await this.fetchSecondBars(route, step, limit, range);
+      bars = await this.fetchSecondBars(route, step, germanyLimit, range);
     } else {
-      bars = await this.fetchOhlcBars(route, interval, limit);
+      // Prefer VPS Mongo deep history (20k/10k/5k + `before` paging). Germany `/ohlc/`
+      // only returns the latest ~1–2k and cannot page older windows.
+      if (mongoHistoryPlan(interval)) {
+        try {
+          bars = await fetchCpChartHistory(route.apiSymbol, interval, range);
+        } catch {
+          bars = [];
+        }
+      }
+      if (!bars.length) {
+        bars = await this.fetchOhlcBars(route, interval, germanyLimit);
+      } else if (bars.length < Math.min(range.countBack, 50)) {
+        // Mongo thin on this page — splice in recent Germany bars if available.
+        try {
+          const recent = await this.fetchOhlcBars(route, interval, germanyLimit);
+          const byTime = new Map<number, Bar>();
+          for (const b of [...bars, ...recent]) byTime.set(b.time, b);
+          bars = [...byTime.values()].sort((a, b) => a.time - b.time);
+        } catch {
+          /* keep mongo bars */
+        }
+      }
     }
 
     if (!bars.length) {

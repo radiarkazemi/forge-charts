@@ -5,6 +5,7 @@ import react from "@vitejs/plugin-react";
 function buildProxy(env: Record<string, string>): Record<string, ProxyOptions> {
   const cpTarget = env.VITE_CP_FETCHER_TARGET || "http://185.222.163.116/crypto-api";
   const marketTarget = env.VITE_MARKET_API_TARGET || "http://185.222.163.116/market-api";
+  const chartTarget = env.VITE_CP_CHART_TARGET || "http://185.222.163.116/crypto-chart";
   const cpKey = env.CP_FETCHER_API_KEY || env.MARKET_API_KEY || "";
 
   return {
@@ -13,6 +14,11 @@ function buildProxy(env: Record<string, string>): Record<string, ProxyOptions> {
       changeOrigin: true,
       rewrite: (path) => path.replace(/^\/market-api/, ""),
       headers: cpKey ? { "X-API-Key": cpKey } : {},
+    },
+    "/crypto-chart": {
+      target: chartTarget,
+      changeOrigin: true,
+      rewrite: (path) => path.replace(/^\/crypto-chart/, ""),
     },
     "/api/crypto": {
       target: cpTarget,

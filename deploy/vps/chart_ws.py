@@ -7,8 +7,13 @@ WS (port CHART_WS_PORT, default 8002):
 
 HTTP (port CHART_HTTP_PORT, default 8003):
   GET /health
-  GET /history?symbol=btcusdt&timeframe=1m&limit=400&group=1
+  GET /history?symbol=btcusdt&timeframe=1m&limit=400&group=1&before=<unix>
   -> {"symbol":"btcusdt","timeframe":"1m","group":1,"bars":[[t,o,h,l,c,v],...]}
+
+Deep history targets (TradingView scroll-back):
+  1m → up to 20_000 bars
+  5m (1m×group=5) → up to 10_000 bars
+  other TF → up to 5_000 bars
 """
 
 from __future__ import annotations
@@ -18,6 +23,7 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 import websockets
@@ -34,10 +40,19 @@ HOST = os.environ.get("CHART_WS_HOST", "127.0.0.1")
 PORT = int(os.environ.get("CHART_WS_PORT", "8002"))
 HTTP_PORT = int(os.environ.get("CHART_HTTP_PORT", "8003"))
 POLL_SEC = float(os.environ.get("CHART_WS_POLL_SEC", "1.0"))
-CACHE_TTL = float(os.environ.get("CHART_HIST_CACHE_TTL", "20"))
+CACHE_TTL = float(os.environ.get("CHART_HIST_CACHE_TTL", "15"))
+
+# Serve deep Mongo history for TV scroll-back (1m 20k / 5m 10k / others 5k).
+MAX_HISTORY_LIMIT = int(os.environ.get("CHART_HIST_MAX_LIMIT", "25000"))
+MAX_RAW_LIMIT = int(os.environ.get("CHART_HIST_MAX_RAW", "60000"))
 
 TF_COLL = {"1m": "1", "1h": "1h", "1d": "1D"}
 HIST_SUFFIX = {"1m": "_1m", "1h": "_1h", "1d": ""}
+ID_FORMAT = {
+    "1m": "%Y-%m-%d %H:%M:%S",
+    "1h": "%Y-%m-%d %H:%M:%S",
+    "1d": "%Y-%m-%d",
+}
 INTERVAL_ALIAS = {
     "1": "1m",
     "1m": "1m",
@@ -89,8 +104,6 @@ def to_unix(value: Any) -> int | None:
     if isinstance(value, str) and value:
         # "2026-08-25 16:31:00" or ISO
         try:
-            from datetime import datetime, timezone
-
             text = value.strip().replace("Z", "+00:00")
             if "T" not in text and " " in text:
                 dt = datetime.strptime(text, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
@@ -102,6 +115,14 @@ def to_unix(value: Any) -> int | None:
         except Exception:
             return None
     return None
+
+
+def before_id(before_sec: int | None, timeframe: str) -> str | None:
+    """Mongo hist `_id` is a zero-padded UTC datetime string — lexicographic $lt works."""
+    if not before_sec or before_sec <= 0:
+        return None
+    fmt = ID_FORMAT.get(timeframe) or ID_FORMAT["1m"]
+    return datetime.fromtimestamp(int(before_sec), tz=timezone.utc).strftime(fmt)
 
 
 def aggregate(bars: list[list[float]], group: int, step: int) -> list[list[float]]:
@@ -159,8 +180,15 @@ class PriceHub:
             "pc": doc.get("pc") or 0,
         }
 
-    def read_history(self, symbol: str, timeframe: str, limit: int, group: int) -> dict[str, Any]:
-        cache_key = f"{symbol}|{timeframe}|{limit}|{group}"
+    def read_history(
+        self,
+        symbol: str,
+        timeframe: str,
+        limit: int,
+        group: int,
+        before: int | None = None,
+    ) -> dict[str, Any]:
+        cache_key = f"{symbol}|{timeframe}|{limit}|{group}|{before or 0}"
         now = time.time()
         hit = self._cache.get(cache_key)
         if hit and now - hit[0] <= CACHE_TTL:
@@ -168,14 +196,21 @@ class PriceHub:
 
         coll_name = f"{symbol}{HIST_SUFFIX[timeframe]}"
         coll = self.hist[coll_name]
-        # Fetch raw bars needed for aggregation; skip expensive count_documents.
-        raw_limit = min(5000, max(limit, limit * max(group, 1)))
-        cursor = coll.find({}, projection={"data": 1}).sort("_id", -1).limit(raw_limit)
+        # Raw parents needed for aggregation (e.g. 10k of 5m → 50k of 1m).
+        raw_limit = min(MAX_RAW_LIMIT, max(limit, limit * max(group, 1)))
+        query: dict[str, Any] = {}
+        bid = before_id(before, timeframe)
+        if bid:
+            query["_id"] = {"$lt": bid}
+
+        cursor = coll.find(query, projection={"data": 1}).sort("_id", -1).limit(raw_limit)
         bars: list[list[float]] = []
         for doc in cursor:
             data = doc.get("data") or {}
             t = to_unix(data.get("time") or doc.get("_id"))
             if t is None:
+                continue
+            if before and t >= before:
                 continue
             try:
                 o = float(data["open"])
@@ -190,6 +225,8 @@ class PriceHub:
         step = STEP_SEC[timeframe]
         if group > 1:
             bars = aggregate(bars, group, step)
+            if before:
+                bars = [b for b in bars if b[0] < before]
             if len(bars) > limit:
                 bars = bars[-limit:]
         elif len(bars) > limit:
@@ -199,6 +236,7 @@ class PriceHub:
             "symbol": symbol,
             "timeframe": timeframe,
             "group": group,
+            "before": before,
             "count": len(bars),
             "bars": bars,
         }
@@ -316,12 +354,21 @@ async def http_history(request: web.Request) -> web.Response:
         group = int(request.query.get("group") or 1)
     except ValueError:
         group = 1
-    limit = max(1, min(limit, 2000))
-    group = max(1, min(group, 60))
+    before: int | None = None
+    before_raw = request.query.get("before") or request.query.get("to") or request.query.get("end")
+    if before_raw:
+        try:
+            before = int(float(before_raw))
+            if before > 1e12:
+                before = int(before / 1000)
+        except ValueError:
+            before = None
+    limit = max(1, min(limit, MAX_HISTORY_LIMIT))
+    group = max(1, min(group, 720))
     if not symbol:
         return web.json_response({"detail": "symbol required"}, status=400)
     try:
-        payload = await asyncio.to_thread(hub.read_history, symbol, timeframe, limit, group)
+        payload = await asyncio.to_thread(hub.read_history, symbol, timeframe, limit, group, before)
     except Exception as exc:
         LOG.exception("history failed")
         return web.json_response({"detail": str(exc)}, status=500)
@@ -337,7 +384,7 @@ async def http_history(request: web.Request) -> web.Response:
 
 
 async def start_http() -> web.AppRunner:
-    app = web.Application()
+    app = web.Application(client_max_size=16 * 1024 * 1024)
     app.router.add_get("/health", http_health)
     app.router.add_get("/health/", http_health)
     app.router.add_get("/history", http_history)
@@ -346,18 +393,23 @@ async def start_http() -> web.AppRunner:
     await runner.setup()
     site = web.TCPSite(runner, HOST, HTTP_PORT)
     await site.start()
-    LOG.info("HTTP history on http://%s:%s", HOST, HTTP_PORT)
+    LOG.info("HTTP history on http://%s:%s (max_limit=%s)", HOST, HTTP_PORT, MAX_HISTORY_LIMIT)
     return runner
 
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     hub.ping()
-    LOG.info("Mongo OK — WS ws://%s:%s  HTTP http://%s:%s", HOST, PORT, HOST, HTTP_PORT)
-    await start_http()
-    async with websockets.serve(handle, HOST, PORT, ping_interval=20, ping_timeout=20):
-        await broadcaster()
+    http_runner = await start_http()
+    asyncio.create_task(broadcaster())
+    async with websockets.serve(handle, HOST, PORT, ping_interval=20, ping_timeout=20, max_size=8 * 1024 * 1024):
+        LOG.info("chart WS on ws://%s:%s", HOST, PORT)
+        await asyncio.Future()
+    await http_runner.cleanup()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
