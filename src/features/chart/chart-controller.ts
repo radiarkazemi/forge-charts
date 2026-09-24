@@ -85,7 +85,9 @@ export class ChartController {
     } catch {
       window.setTimeout(forceCountdown, 500);
     }
+    window.setTimeout(forceCountdown, 500);
     window.setTimeout(forceCountdown, 1_200);
+    window.setTimeout(forceCountdown, 3_000);
 
     if (this.desiredTheme && this.desiredTheme !== widget.getTheme()) void this.applyTheme(this.desiredTheme);
   }

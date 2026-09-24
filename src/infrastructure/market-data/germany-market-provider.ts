@@ -228,7 +228,10 @@ function parseUpdatedAt(raw?: string): number {
 }
 
 function applyTick(current: Bar | null, price: number, tsSec: number, step: number, volumeDelta = 0): Bar {
-  const t = alignTime(tsSec, step);
+  // Never open a candle in the future (e.g. mongo `bct` = period close was used as ts).
+  const wallBucket = alignTime(Math.floor(Date.now() / 1000), step);
+  let t = alignTime(tsSec, step);
+  if (t > wallBucket) t = wallBucket;
   if (!current || current.time < t) {
     return { time: t, open: price, high: price, low: price, close: price, volume: Math.max(0, volumeDelta) };
   }
@@ -664,16 +667,20 @@ export class GermanyMarketProvider implements MarketDataProvider {
     const onTick = (price: number, tsSec: number, volumeDelta = 0) => {
       // Market closed → no new forming candles (TradingView freezes the series).
       if (!isMarketSessionOpen(symbol)) return;
+      // Clamp futuristic timestamps (mongo bct = period end) to "now".
+      const nowSec = Math.floor(Date.now() / 1000);
+      let ts = tsSec;
+      if (ts > nowSec + 1) ts = nowSec;
       // Stale timestamps must not roll the series into empty future candles.
       const maxAgeSec = Math.max(45, step * 3);
-      if (Math.abs(Date.now() / 1000 - tsSec) > maxAgeSec) return;
+      if (nowSec - ts > maxAgeSec) return;
       lastTickMs = Date.now();
       if (!readyForTicks) {
-        pendingTicks.push({ price, tsSec, volumeDelta });
+        pendingTicks.push({ price, tsSec: ts, volumeDelta });
         if (pendingTicks.length > 50) pendingTicks.shift();
         return;
       }
-      emit(applyTick(current, price, tsSec, step, volumeDelta));
+      emit(applyTick(current, price, ts, step, volumeDelta));
     };
 
     // Seed forming bar from real OHLC before applying live ticks (avoids flat O=H=L=C).
@@ -685,7 +692,24 @@ export class GermanyMarketProvider implements MarketDataProvider {
           countBack: 3,
         });
         const last = seed[seed.length - 1];
-        if (last) emit({ ...last, time: alignTime(last.time, step) });
+        if (last) {
+          const wallBucket = alignTime(Math.floor(Date.now() / 1000), step);
+          const t = alignTime(last.time, step);
+          // If history ended on a prior period, open the current wall-clock forming bar
+          // so countdown works immediately (has_empty_bars: false otherwise hides it).
+          if (t < wallBucket) {
+            emit({
+              time: wallBucket,
+              open: last.close,
+              high: last.close,
+              low: last.close,
+              close: last.close,
+              volume: 0,
+            });
+          } else {
+            emit({ ...last, time: Math.min(t, wallBucket) });
+          }
+        }
       } catch {
         /* ticks will create */
       } finally {
@@ -742,10 +766,13 @@ export class GermanyMarketProvider implements MarketDataProvider {
       openCpFetcherSocket(route.apiSymbol, interval, (bar) => {
         if (!isMarketSessionOpen(symbol)) return;
         // Server sends period open in `t` for native + derived TFs.
-        const aligned = { ...bar, time: alignTime(bar.time, step) };
+        const wallBucket = alignTime(Math.floor(Date.now() / 1000), step);
+        let openTime = alignTime(bar.time, step);
+        // Refuse future buckets — only the current wall-clock candle may form.
+        if (openTime > wallBucket) openTime = wallBucket;
+        const aligned = { ...bar, time: openTime };
         const quietMs = Math.max(5_000, step * 1_000);
         const quiet = lastTickMs === 0 || Date.now() - lastTickMs > quietMs;
-        const wallBucket = alignTime(Math.floor(Date.now() / 1000), step);
 
         const mergeSame = (base: Bar, next: Bar, closeFrom: "tick" | "mongo"): Bar => ({
           time: next.time,
@@ -756,17 +783,29 @@ export class GermanyMarketProvider implements MarketDataProvider {
           volume: Math.max(base.volume, next.volume),
         });
 
-        // Prefer raw ticks when they are fresh.
+        // Prefer raw ticks when they are fresh — but still allow chart_ws to present
+        // the current wall-clock bucket (required for candle-close countdown).
         if (lastTickMs > 0 && Date.now() - lastTickMs < 400) {
+          if (aligned.time === wallBucket && (!current || current.time < wallBucket)) {
+            emit(aligned);
+            return;
+          }
           if (current && aligned.time === current.time) {
             emit(mergeSame(current, aligned, "tick"));
           }
           return;
         }
 
-        // Feed quiet → freeze like TradingView: update the printed bar only, never roll.
+        // Feed quiet: never invent *future* periods. Always keep/update the current
+        // wall-clock forming bar so TradingView countdown keeps running.
         if (quiet) {
-          if (current && aligned.time === current.time) {
+          if (aligned.time === wallBucket) {
+            if (!current || current.time < wallBucket) {
+              emit(aligned);
+            } else if (current.time === wallBucket) {
+              emit(mergeSame(current, aligned, "mongo"));
+            }
+          } else if (current && aligned.time === current.time) {
             emit(mergeSame(current, aligned, "mongo"));
           }
           return;
