@@ -692,7 +692,24 @@ export class GermanyMarketProvider implements MarketDataProvider {
           countBack: 3,
         });
         const last = seed[seed.length - 1];
-        if (last) emit({ ...last, time: alignTime(last.time, step) });
+        if (last) {
+          const wallBucket = alignTime(Math.floor(Date.now() / 1000), step);
+          const t = alignTime(last.time, step);
+          // If history ended on a prior period, open the current wall-clock forming bar
+          // so countdown works immediately (has_empty_bars: false otherwise hides it).
+          if (t < wallBucket) {
+            emit({
+              time: wallBucket,
+              open: last.close,
+              high: last.close,
+              low: last.close,
+              close: last.close,
+              volume: 0,
+            });
+          } else {
+            emit({ ...last, time: Math.min(t, wallBucket) });
+          }
+        }
       } catch {
         /* ticks will create */
       } finally {
@@ -766,17 +783,29 @@ export class GermanyMarketProvider implements MarketDataProvider {
           volume: Math.max(base.volume, next.volume),
         });
 
-        // Prefer raw ticks when they are fresh.
+        // Prefer raw ticks when they are fresh — but still allow chart_ws to present
+        // the current wall-clock bucket (required for candle-close countdown).
         if (lastTickMs > 0 && Date.now() - lastTickMs < 400) {
+          if (aligned.time === wallBucket && (!current || current.time < wallBucket)) {
+            emit(aligned);
+            return;
+          }
           if (current && aligned.time === current.time) {
             emit(mergeSame(current, aligned, "tick"));
           }
           return;
         }
 
-        // Feed quiet → freeze like TradingView: update the printed bar only, never roll.
+        // Feed quiet: never invent *future* periods. Always keep/update the current
+        // wall-clock forming bar so TradingView countdown keeps running.
         if (quiet) {
-          if (current && aligned.time === current.time) {
+          if (aligned.time === wallBucket) {
+            if (!current || current.time < wallBucket) {
+              emit(aligned);
+            } else if (current.time === wallBucket) {
+              emit(mergeSame(current, aligned, "mongo"));
+            }
+          } else if (current && aligned.time === current.time) {
             emit(mergeSame(current, aligned, "mongo"));
           }
           return;
