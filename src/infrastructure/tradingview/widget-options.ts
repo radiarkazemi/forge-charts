@@ -85,17 +85,50 @@ const SECONDARY_DISABLED: ChartingLibraryFeatureset[] = [
 /** Match TradingView's common top-bar favorites: 1m 5m 15m 30m 1h 4h D W M 3M */
 const FAVORITE_INTERVALS = ["1", "5", "15", "30", "60", "240", "1D", "1W", "1M", "3M"] as ResolutionString[];
 
-/** Favorites for the left drawing toolbar (TV-style quick tools). */
+/**
+ * Stars in the left drawing toolbar flyouts — match tradingview.com Supercharts
+ * (Lines / Channels groups). Icons, labels, shortcuts, and draw behavior come
+ * from the Charting Library; favorites only control which tools are starred.
+ *
+ * LINES starred: Trendline, Ray, Horizontal line, Horizontal ray
+ * CHANNELS starred: Parallel channel, Flat top/bottom, Disjoint channel
+ */
 const FAVORITE_DRAWING_TOOLS = [
   "LineToolTrendLine",
-  "LineToolHorzLine",
   "LineToolRay",
-  "LineToolFibRetracement",
-  "LineToolRectangle",
-  "LineToolText",
-  "LineToolBrush",
-  "LineToolCrossLine",
+  "LineToolHorzLine",
+  "LineToolHorzRay",
+  "LineToolParallelChannel",
+  "LineToolFlatBottom",
+  "LineToolDisjointAngle",
 ] as DrawingToolIdentifier[];
+
+/** Bump to re-seed TV `chart.favoriteDrawings` when the default star set changes. */
+export const DRAWING_FAVORITES_SEED = "forge.drawingFavorites.v2";
+
+/** Clear stale Charting Library drawing favorites so Widget `favorites` apply. */
+export function seedDrawingFavorites(tools: readonly DrawingToolIdentifier[] = FAVORITE_DRAWING_TOOLS): void {
+  if (typeof window === "undefined" || typeof localStorage === "undefined") return;
+  try {
+    if (localStorage.getItem(DRAWING_FAVORITES_SEED) === "1") return;
+    const payload = JSON.stringify([...tools]);
+    const keys = new Set<string>(["chart.favoriteDrawings"]);
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key && /favoriteDrawings/i.test(key)) keys.add(key);
+    }
+    for (const key of keys) {
+      try {
+        localStorage.setItem(key, payload);
+      } catch {
+        /* ignore quota / private mode */
+      }
+    }
+    localStorage.setItem(DRAWING_FAVORITES_SEED, "1");
+  } catch {
+    /* ignore */
+  }
+}
 
 const TIME_FRAMES: TimeFrameItem[] = [
   { text: "1d", resolution: "5" as ResolutionString, description: "1 Day", title: "1D" },

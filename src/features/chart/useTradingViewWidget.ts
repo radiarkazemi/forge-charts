@@ -4,6 +4,7 @@ import type { Interval } from "@/domain";
 import {
   buildWidgetOptions,
   loadChartingLibrary,
+  seedDrawingFavorites,
   type IBasicDataFeed,
   type IChartingLibraryWidget,
   type IExternalSaveLoadAdapter,
@@ -107,6 +108,8 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
       } catch {
         /* previous instance may already be torn down */
       }
+      // Force TV-matching drawing stars before the iframe reads localStorage.
+      seedDrawingFavorites();
       widget = new Widget(
         buildWidgetOptions({
           container,
