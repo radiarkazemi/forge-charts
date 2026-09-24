@@ -36,6 +36,15 @@ function runBootRecovery(): void {
           settings.paneSymbols = [last];
         }
         if (typeof settings.chartLayout !== "string") settings.chartLayout = "s";
+        if (!settings.layoutSync || typeof settings.layoutSync !== "object") {
+          settings.layoutSync = {
+            symbol: false,
+            interval: false,
+            crosshair: true,
+            time: false,
+            dateRange: false,
+          };
+        }
         localStorage.setItem("forge.settings.v1", JSON.stringify(settings));
       } catch {
         localStorage.removeItem("forge.settings.v1");

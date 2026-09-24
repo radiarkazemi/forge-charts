@@ -1,7 +1,9 @@
 import Box from "@mui/material/Box";
+import { useEffect } from "react";
 import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
-import { chartPaneArea, getChartLayoutGrid } from "./chart-layouts";
+import { chartPaneArea, getChartLayoutGrid, MAX_CHART_PANES } from "./chart-layouts";
+import { layoutSyncBus } from "./layout-sync";
 import { TradingViewChart } from "./TradingViewChart";
 
 interface ChartWorkspaceProps {
@@ -9,18 +11,32 @@ interface ChartWorkspaceProps {
 }
 
 /**
- * One or more chart panes in a TradingView-style layout grid.
- * Advanced Charts is single-widget only, so Forge mounts N widgets when the user
- * picks 2 / 3 / 4 charts from the Layout control.
+ * TradingView-style multi-chart workspace.
+ * Panes stay mounted (stable keys) so changing layout only updates the CSS grid —
+ * widgets are not closed / re-created.
  */
 export function ChartWorkspace({ onCreateAlert }: ChartWorkspaceProps) {
   const { settings } = useServices();
   const chartLayout = useStore(settings.settings, (s) => s.chartLayout ?? "s");
   const paneSymbols = useStore(settings.settings, (s) => (Array.isArray(s.paneSymbols) ? s.paneSymbols : []));
   const lastSymbol = useStore(settings.settings, (s) => s.lastSymbol || "XAUUSD");
+  const layoutSync = useStore(settings.settings, (s) => s.layoutSync);
   const grid = getChartLayoutGrid(chartLayout ?? "s");
 
-  const symbols = Array.from({ length: grid.count }, (_, i) => paneSymbols[i] ?? lastSymbol);
+  useEffect(() => {
+    layoutSyncBus.setFlags(layoutSync ?? { symbol: false, interval: false, crosshair: true, time: false, dateRange: false });
+  }, [layoutSync]);
+
+  useEffect(() => {
+    layoutSyncBus.setActiveCount(grid.count);
+    // Reflow after CSS grid / visibility changes so iframes pick up new size.
+    const t1 = window.setTimeout(() => layoutSyncBus.reflowVisible(), 50);
+    const t2 = window.setTimeout(() => layoutSyncBus.reflowVisible(), 250);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [chartLayout, grid.count]);
 
   return (
     <Box
@@ -36,20 +52,24 @@ export function ChartWorkspace({ onCreateAlert }: ChartWorkspaceProps) {
         bgcolor: "divider",
       }}
     >
-      {symbols.map((symbol, index) => (
-        <Box
-          key={`${chartLayout}-${index}`}
-          sx={{
-            gridArea: chartPaneArea(index),
-            minWidth: 0,
-            minHeight: 0,
-            display: "flex",
-            position: "relative",
-          }}
-        >
-          <TradingViewChart onCreateAlert={onCreateAlert} paneIndex={index} initialSymbol={symbol} />
-        </Box>
-      ))}
+      {Array.from({ length: MAX_CHART_PANES }, (_, index) => {
+        const visible = index < grid.count;
+        const symbol = paneSymbols[index] ?? lastSymbol;
+        return (
+          <Box
+            key={`forge-pane-${index}`}
+            sx={{
+              gridArea: visible ? chartPaneArea(index) : undefined,
+              minWidth: 0,
+              minHeight: 0,
+              display: visible ? "flex" : "none",
+              position: "relative",
+            }}
+          >
+            <TradingViewChart onCreateAlert={onCreateAlert} paneIndex={index} initialSymbol={symbol} />
+          </Box>
+        );
+      })}
     </Box>
   );
 }

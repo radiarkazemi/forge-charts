@@ -32,6 +32,14 @@ export interface TradingViewWidgetDeps {
   readonly onOpenWatchlist: () => void;
   readonly onOpenObjectTree: () => void;
   readonly onSetChartLayout: (layout: ChartLayoutId) => void;
+  readonly onToggleLayoutSync?: (key: "symbol" | "interval" | "crosshair" | "time" | "dateRange") => void;
+  readonly getLayoutSync?: () => {
+    symbol: boolean;
+    interval: boolean;
+    crosshair: boolean;
+    time: boolean;
+    dateRange: boolean;
+  };
   readonly onSymbolChanged?: (paneIndex: number, symbol: string) => void;
   readonly getLastPrice: () => number | null;
 }
@@ -81,6 +89,19 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
   const onOpenWatchlist = useEffectEvent(() => deps.onOpenWatchlist());
   const onOpenObjectTree = useEffectEvent(() => deps.onOpenObjectTree());
   const onSetChartLayout = useEffectEvent((layout: ChartLayoutId) => deps.onSetChartLayout(layout));
+  const onToggleLayoutSync = useEffectEvent(
+    (key: "symbol" | "interval" | "crosshair" | "time" | "dateRange") => deps.onToggleLayoutSync?.(key),
+  );
+  const getLayoutSync = useEffectEvent(
+    () =>
+      deps.getLayoutSync?.() ?? {
+        symbol: false,
+        interval: false,
+        crosshair: true,
+        time: false,
+        dateRange: false,
+      },
+  );
   const onSymbolChanged = useEffectEvent((symbol: string) => deps.onSymbolChanged?.(paneIndex, symbol));
   const getLastPrice = useEffectEvent(() => deps.getLastPrice());
   const readInitial = useEffectEvent(() => ({
@@ -176,6 +197,8 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
             onOpenWatchlist,
             onOpenObjectTree,
             onSetChartLayout,
+            onToggleLayoutSync,
+            getLayoutSync,
             getLastPrice,
             themeLabel: initial.theme === "dark" ? "Dark" : "Light",
             userInitial: "F",
@@ -211,8 +234,9 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
       }
       widget = null;
     };
-    // Remount when the pane's starting symbol changes (layout / pane assignment).
-  }, [containerRef, controller, datafeed, libraryPath, saveLoadAdapter, storage, isPrimary, paneIndex, deps.initialSymbol]);
+    // Keep the widget alive across layout / symbol changes (TradingView in-place).
+    // Symbol updates go through chart.setSymbol via TradingViewChart effect.
+  }, [containerRef, controller, datafeed, libraryPath, saveLoadAdapter, storage, isPrimary, paneIndex]);
 
   useEffect(() => {
     void controller.changeTheme(theme);

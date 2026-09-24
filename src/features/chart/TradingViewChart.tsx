@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
@@ -7,6 +7,7 @@ import Tooltip from "@mui/material/Tooltip";
 import { useServices } from "@/app/use-services";
 import { ChartController } from "@/features/chart/chart-controller";
 import { useStore } from "@/shared/hooks/useStore";
+import { layoutSyncBus } from "./layout-sync";
 import { useChartAlertLines } from "./useChartAlertLines";
 import { useTradingViewWidget } from "./useTradingViewWidget";
 
@@ -25,7 +26,7 @@ export function TradingViewChart({ onCreateAlert, paneIndex = 0, initialSymbol }
 
   const localController = useMemo(
     () => (isPrimary ? null : new ChartController(initialSymbol ?? "XAUUSD", settings.settings.get().lastInterval)),
-    // One controller per secondary pane lifetime; symbol is applied at widget construct.
+    // One controller per secondary pane lifetime; symbol updates via setSymbol.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- pane identity only
     [isPrimary, paneIndex],
   );
@@ -40,6 +41,38 @@ export function TradingViewChart({ onCreateAlert, paneIndex = 0, initialSymbol }
     initialSymbol ??
     settings.settings.get().paneSymbols[paneIndex] ??
     settings.settings.get().lastSymbol;
+
+  useEffect(() => {
+    const unregister = layoutSyncBus.register(paneIndex, controller);
+    controller.setSyncHooks({
+      onSymbolChanged: (ticker) => {
+        settings.setPaneSymbol(paneIndex, ticker);
+        layoutSyncBus.notifySymbol(paneIndex, ticker);
+      },
+      onIntervalChanged: (interval) => {
+        if (paneIndex === 0) settings.rememberChart(settings.settings.get().lastSymbol, interval);
+        layoutSyncBus.notifyInterval(paneIndex, interval);
+      },
+      onVisibleRangeChanged: (from, to) => layoutSyncBus.notifyVisibleRange(paneIndex, from, to),
+      onCrosshairMoved: (time) => layoutSyncBus.notifyCrosshair(paneIndex, time),
+    });
+    return () => {
+      unregister();
+      controller.setSyncHooks({});
+    };
+  }, [controller, paneIndex, settings]);
+
+  // Apply symbol without remounting the widget (TradingView in-place behavior).
+  useEffect(() => {
+    if (!ready || !symbolForPane) return;
+    const current = controller.state.get().symbol;
+    const bare = symbolForPane.includes(":")
+      ? symbolForPane.slice(symbolForPane.lastIndexOf(":") + 1)
+      : symbolForPane;
+    if (current !== bare && current !== symbolForPane) {
+      controller.setSymbol(symbolForPane);
+    }
+  }, [controller, ready, symbolForPane]);
 
   useTradingViewWidget(containerRef, {
     controller,
@@ -59,6 +92,8 @@ export function TradingViewChart({ onCreateAlert, paneIndex = 0, initialSymbol }
     onOpenWatchlist: () => settings.setSidePanel("watchlist"),
     onOpenObjectTree: () => chart.openObjectTree(),
     onSetChartLayout: (layout) => settings.setChartLayout(layout),
+    onToggleLayoutSync: (key) => settings.toggleLayoutSync(key),
+    getLayoutSync: () => settings.settings.get().layoutSync,
     onSymbolChanged: (index, ticker) => settings.setPaneSymbol(index, ticker),
     getLastPrice: () => quote?.price ?? null,
   });

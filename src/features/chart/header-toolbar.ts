@@ -1,4 +1,4 @@
-import type { ChartLayoutId } from "@/application";
+import type { ChartLayoutId, LayoutSyncSettings } from "@/application";
 import { CHART_LAYOUT_CHOICES } from "./chart-layouts";
 import type { IChartingLibraryWidget } from "@/infrastructure/tradingview";
 
@@ -8,18 +8,64 @@ const ACCOUNT_ICON =
 const LAYOUT_ICON =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28"><rect x="4" y="4" width="9" height="9" rx="1" fill="currentColor"/><rect x="15" y="4" width="9" height="9" rx="1" fill="currentColor"/><rect x="4" y="15" width="9" height="9" rx="1" fill="currentColor"/><rect x="15" y="15" width="9" height="9" rx="1" fill="currentColor"/></svg>';
 
+type SyncKey = keyof LayoutSyncSettings;
+
 export interface HeaderToolbarHandlers {
   readonly onCreateAlert: () => void;
   readonly onToggleTheme: () => void;
   readonly onOpenAlertsPanel: () => void;
   readonly onOpenWatchlist: () => void;
   readonly onOpenObjectTree: () => void;
-  /** Forge multi-pane layout (2 / 3 / 4 charts on one page). */
+  /** In-place multi-pane layout (widgets stay mounted). */
   readonly onSetChartLayout: (layout: ChartLayoutId) => void;
+  readonly onToggleLayoutSync?: (key: SyncKey) => void;
+  readonly getLayoutSync?: () => LayoutSyncSettings;
   readonly getLastPrice: () => number | null;
   readonly themeLabel: string;
   readonly userInitial: string;
   readonly alertCount: number;
+}
+
+function syncLabel(key: SyncKey, on: boolean): string {
+  const names: Record<SyncKey, string> = {
+    symbol: "Symbol",
+    interval: "Interval",
+    crosshair: "Crosshair",
+    time: "Time",
+    dateRange: "Date range",
+  };
+  return `${names[key]}  ${on ? "● ON" : "○ OFF"}`;
+}
+
+function buildLayoutMenuItems(handlers: HeaderToolbarHandlers) {
+  const sync = handlers.getLayoutSync?.() ?? {
+    symbol: false,
+    interval: false,
+    crosshair: true,
+    time: false,
+    dateRange: false,
+  };
+  const syncKeys: SyncKey[] = ["symbol", "interval", "crosshair", "time", "dateRange"];
+  return [
+    ...CHART_LAYOUT_CHOICES.map((choice) => ({
+      title: choice.title,
+      icon: choice.icon,
+      onSelect: () => handlers.onSetChartLayout(choice.id),
+    })),
+    {
+      title: "── SYNC IN LAYOUT ──",
+      onSelect: () => {
+        /* section header */
+      },
+    },
+    ...syncKeys.map((key) => ({
+      title: syncLabel(key, sync[key]),
+      onSelect: () => {
+        handlers.onToggleLayoutSync?.(key);
+        // Refresh labels on next open via recreate is handled by applyOptions caller.
+      },
+    })),
+  ];
 }
 
 /**
@@ -71,17 +117,38 @@ export function mountHeaderToolbar(widget: IChartingLibraryWidget, handlers: Hea
     ],
   });
 
-  // Keep Layout on the left so it stays visible on crowded / mobile headers.
-  void widget.createDropdown({
-    title: "Layout",
-    tooltip: "Select chart layout (1 / 2 / 3 / 4 charts on this page)",
-    align: "left",
-    icon: LAYOUT_ICON,
-    items: CHART_LAYOUT_CHOICES.map((choice) => ({
-      title: choice.title,
-      onSelect: () => handlers.onSetChartLayout(choice.id),
-    })),
-  });
+  // Select Layout — glyphs + SYNC IN LAYOUT. Widgets stay mounted on change.
+  type DropdownApi = { applyOptions: (o: { items: ReturnType<typeof buildLayoutMenuItems> }) => void };
+  let layoutDropdown: DropdownApi | null = null;
+  const refreshLayoutMenu = () => {
+    try {
+      layoutDropdown?.applyOptions({ items: buildLayoutMenuItems(handlers) });
+    } catch {
+      /* dropdown gone */
+    }
+  };
+  const wrapped: HeaderToolbarHandlers = {
+    ...handlers,
+    onSetChartLayout: (layout) => {
+      handlers.onSetChartLayout(layout);
+      refreshLayoutMenu();
+    },
+    onToggleLayoutSync: (key) => {
+      handlers.onToggleLayoutSync?.(key);
+      window.setTimeout(refreshLayoutMenu, 0);
+    },
+  };
+  void widget
+    .createDropdown({
+      title: "Select Layout",
+      tooltip: "Change chart layout without reloading charts · SYNC IN LAYOUT",
+      align: "left",
+      icon: LAYOUT_ICON,
+      items: buildLayoutMenuItems(wrapped),
+    })
+    .then((api) => {
+      layoutDropdown = api as DropdownApi;
+    });
 
   void widget.createDropdown({
     title: "Trade",
@@ -118,14 +185,9 @@ async function shiftVisibleRange(widget: IChartingLibraryWidget, deltaSec: numbe
   try {
     const chart = widget.activeChart();
     const range = await chart.getVisibleRange();
-    if (!range) return;
     await chart.setVisibleRange({ from: range.from + deltaSec, to: range.to + deltaSec });
   } catch {
-    widget.showNoticeDialog({
-      title: "Replay",
-      body: "Could not move the visible range for this chart.",
-      callback: () => undefined,
-    });
+    /* ignore */
   }
 }
 
@@ -134,40 +196,25 @@ async function placeTradeMarker(
   handlers: HeaderToolbarHandlers,
   side: "buy" | "sell",
 ): Promise<void> {
-  const price = handlers.getLastPrice();
-  if (price == null || Number.isNaN(price)) {
-    widget.showNoticeDialog({
-      title: "Trade",
-      body: "No live price available yet. Wait for the quote to load, then try again.",
-      callback: () => undefined,
-    });
-    return;
-  }
-
-  const color = side === "buy" ? "#089981" : "#f23645";
   try {
-    await widget.activeChart().createShape(
+    const chart = widget.activeChart();
+    const price = handlers.getLastPrice();
+    if (price == null || !Number.isFinite(price)) return;
+    await chart.createShape(
       { time: Math.floor(Date.now() / 1000), price },
       {
-        shape: "horizontal_line",
-        text: side === "buy" ? "BUY" : "SELL",
+        shape: side === "buy" ? "arrow_up" : "arrow_down",
+        text: side.toUpperCase(),
         lock: false,
-        disableSave: false,
+        disableSave: true,
         overrides: {
-          linecolor: color,
-          linestyle: 0,
-          linewidth: 2,
-          showLabel: true,
-          textcolor: color,
+          color: side === "buy" ? "#26a69a" : "#ef5350",
+          fontsize: 12,
         },
       },
     );
   } catch {
-    widget.showNoticeDialog({
-      title: "Trade",
-      body: "Could not place a paper trade marker on the current series.",
-      callback: () => undefined,
-    });
+    /* ignore */
   }
 }
 
@@ -175,19 +222,11 @@ async function publishSnapshot(widget: IChartingLibraryWidget): Promise<void> {
   try {
     const canvas = await widget.takeClientScreenshot();
     const url = canvas.toDataURL("image/png");
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `forge-chart-${Date.now()}.png`;
-    anchor.click();
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `forge-chart-${Date.now()}.png`;
+    a.click();
   } catch {
-    try {
-      widget.takeScreenshot();
-    } catch {
-      widget.showNoticeDialog({
-        title: "Publish",
-        body: "Snapshot is unavailable in this session.",
-        callback: () => undefined,
-      });
-    }
+    /* ignore */
   }
 }

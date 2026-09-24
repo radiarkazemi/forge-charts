@@ -1,6 +1,13 @@
 import { createStore, type Store, type ThemeMode } from "@/application";
 import type { Interval } from "@/domain";
-import { chartOverrides, type CrossHairMovedEventParams, type EntityId, type IChartingLibraryWidget, type IChartWidgetApi, type ResolutionString } from "@/infrastructure/tradingview";
+import {
+  chartOverrides,
+  type CrossHairMovedEventParams,
+  type EntityId,
+  type IChartingLibraryWidget,
+  type IChartWidgetApi,
+  type ResolutionString,
+} from "@/infrastructure/tradingview";
 
 export interface ChartState {
   readonly symbol: string;
@@ -26,6 +33,13 @@ export interface HorizontalLineOptions {
   readonly color: string;
 }
 
+export interface ChartSyncHooks {
+  readonly onSymbolChanged?: (ticker: string) => void;
+  readonly onIntervalChanged?: (interval: Interval) => void;
+  readonly onVisibleRangeChanged?: (from: number, to: number) => void;
+  readonly onCrosshairMoved?: (time: number) => void;
+}
+
 const MAIN_SERIES_ID = "_seriesId";
 
 function stripExchange(symbol: string): string {
@@ -45,9 +59,14 @@ export class ChartController {
   private widget: IChartingLibraryWidget | null = null;
   private desiredTheme: ThemeMode | null = null;
   private crosshairFrame = 0;
+  private syncHooks: ChartSyncHooks = {};
 
   constructor(symbol: string, interval: Interval) {
     this.state = createStore<ChartState>({ symbol, interval, ready: false, error: null });
+  }
+
+  setSyncHooks(hooks: ChartSyncHooks): void {
+    this.syncHooks = hooks;
   }
 
   /** Call from `onChartReady`. */
@@ -65,21 +84,35 @@ export class ChartController {
 
     const syncSymbol = () => {
       const ext = chart.symbolExt();
-      this.patch({ symbol: stripExchange(ext?.ticker ?? ext?.name ?? chart.symbol()) });
+      const ticker = stripExchange(ext?.ticker ?? ext?.name ?? chart.symbol());
+      this.patch({ symbol: ticker });
       forceCountdown();
+      this.syncHooks.onSymbolChanged?.(ticker);
     };
     chart.onSymbolChanged().subscribe(null, syncSymbol);
     chart.onIntervalChanged().subscribe(null, (interval) => {
       this.patch({ interval });
       forceCountdown();
+      this.syncHooks.onIntervalChanged?.(interval);
     });
-    chart.crossHairMoved().subscribe(null, (params) => this.scheduleCrosshair(params));
+    chart.crossHairMoved().subscribe(null, (params) => {
+      this.scheduleCrosshair(params);
+      if (typeof params.time === "number" && Number.isFinite(params.time)) {
+        this.syncHooks.onCrosshairMoved?.(params.time);
+      }
+    });
+
+    try {
+      chart.onVisibleRangeChanged().subscribe(null, (range) => {
+        this.syncHooks.onVisibleRangeChanged?.(range.from, range.to);
+      });
+    } catch {
+      /* older builds */
+    }
 
     this.patch({ ready: true, error: null, symbol: stripExchange(chart.symbol()), interval: chart.resolution() });
 
-    // Force candle close countdown even if autosaved chart state turned it off.
     forceCountdown();
-    // Re-apply after series/data settle — saved_data can race the first override.
     try {
       chart.dataReady(() => forceCountdown());
     } catch {
@@ -114,6 +147,35 @@ export class ChartController {
 
   setInterval(interval: Interval): void {
     this.activeChart()?.setResolution(interval as ResolutionString);
+  }
+
+  getVisibleRange(): { from: number; to: number } | null {
+    try {
+      const range = this.activeChart()?.getVisibleRange();
+      if (!range || !Number.isFinite(range.from) || !Number.isFinite(range.to)) return null;
+      return { from: range.from, to: range.to };
+    } catch {
+      return null;
+    }
+  }
+
+  async setVisibleRange(from: number, to: number): Promise<void> {
+    const chart = this.activeChart();
+    if (!chart) return;
+    try {
+      await chart.setVisibleRange({ from, to });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Ask the library iframe to reflow after CSS grid / visibility changes. */
+  requestResize(): void {
+    try {
+      window.dispatchEvent(new Event("resize"));
+    } catch {
+      /* ignore */
+    }
   }
 
   /** Switch theme now, or as soon as the widget becomes ready. */

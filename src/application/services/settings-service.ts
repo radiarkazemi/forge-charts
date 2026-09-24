@@ -9,12 +9,21 @@ export type SidePanelId = "watchlist" | "alerts" | "data";
 /** Multi-chart page layout (1 / 2 / 3 / 4 panes). */
 export type ChartLayoutId = "s" | "2h" | "2v" | "3s" | "3h" | "3v" | "2-1" | "1-2" | "4";
 
+export interface LayoutSyncSettings {
+  readonly symbol: boolean;
+  readonly interval: boolean;
+  readonly crosshair: boolean;
+  readonly time: boolean;
+  readonly dateRange: boolean;
+}
+
 export interface Settings {
   readonly theme: ThemeMode;
   readonly sidePanel: SidePanelId | null;
   readonly chartLayout: ChartLayoutId;
   /** Per-pane symbols for multi-chart (index 0 = primary). */
   readonly paneSymbols: readonly string[];
+  readonly layoutSync: LayoutSyncSettings;
   readonly lastSymbol: string;
   readonly lastInterval: Interval;
   readonly watchlist: readonly string[];
@@ -34,11 +43,20 @@ export const DEFAULT_WATCHLIST: readonly string[] = [
   "USOIL",
 ];
 
+export const DEFAULT_LAYOUT_SYNC: LayoutSyncSettings = {
+  symbol: false,
+  interval: false,
+  crosshair: true,
+  time: false,
+  dateRange: false,
+};
+
 export const DEFAULT_SETTINGS: Settings = {
   theme: "dark",
   sidePanel: null,
   chartLayout: "s",
   paneSymbols: ["XAUUSD"],
+  layoutSync: DEFAULT_LAYOUT_SYNC,
   lastSymbol: "XAUUSD",
   lastInterval: "15",
   watchlist: DEFAULT_WATCHLIST,
@@ -62,6 +80,17 @@ function sanitizeSidePanel(value: unknown): SidePanelId | null {
   return value === "watchlist" || value === "alerts" || value === "data" ? value : null;
 }
 
+function sanitizeLayoutSync(value: unknown): LayoutSyncSettings {
+  const raw = value && typeof value === "object" ? (value as Partial<LayoutSyncSettings>) : {};
+  return {
+    symbol: Boolean(raw.symbol),
+    interval: Boolean(raw.interval),
+    crosshair: raw.crosshair !== false,
+    time: Boolean(raw.time),
+    dateRange: Boolean(raw.dateRange),
+  };
+}
+
 /** Normalize any persisted blob into a full Settings object (legacy-safe). */
 export function sanitizeSettings(raw: unknown): Settings {
   const persisted = raw && typeof raw === "object" ? (raw as Partial<Settings>) : {};
@@ -75,6 +104,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     sidePanel: sanitizeSidePanel(persisted.sidePanel),
     chartLayout: sanitizeLayout(persisted.chartLayout),
     paneSymbols,
+    layoutSync: sanitizeLayoutSync(persisted.layoutSync),
     lastSymbol,
     lastInterval:
       typeof persisted.lastInterval === "string" && persisted.lastInterval.length > 0
@@ -91,7 +121,6 @@ export class SettingsService {
   constructor(storage: KeyValueStorage) {
     const persisted = storage.get<unknown>(STORAGE_KEY, DEFAULT_SETTINGS);
     const sanitized = sanitizeSettings(persisted);
-    // createPersistentStore prefers the raw stored value; force the sanitized shape.
     this.settings = createPersistentStore<Settings>(storage, STORAGE_KEY, sanitized);
     this.settings.set(sanitized);
   }
@@ -116,6 +145,17 @@ export class SettingsService {
     this.patch({ chartLayout: sanitizeLayout(chartLayout) });
   }
 
+  setLayoutSync(partial: Partial<LayoutSyncSettings>): void {
+    this.patch({
+      layoutSync: sanitizeLayoutSync({ ...this.settings.get().layoutSync, ...partial }),
+    });
+  }
+
+  toggleLayoutSync(key: keyof LayoutSyncSettings): void {
+    const current = this.settings.get().layoutSync;
+    this.setLayoutSync({ [key]: !current[key] });
+  }
+
   setPaneSymbol(paneIndex: number, ticker: string): void {
     if (paneIndex < 0 || paneIndex > 7) return;
     const current = sanitizeStringList(this.settings.get().paneSymbols, [this.settings.get().lastSymbol]);
@@ -136,7 +176,6 @@ export class SettingsService {
   addToWatchlist(ticker: string): void {
     const watchlist = sanitizeStringList(this.settings.get().watchlist, DEFAULT_WATCHLIST);
     if (watchlist.includes(ticker)) return;
-    // Prefer exchange:ticker keys; drop a bare duplicate of the same symbol.
     const bare = ticker.includes(":") ? ticker.slice(ticker.lastIndexOf(":") + 1) : ticker;
     const next = watchlist.filter((t) => t !== bare || t.includes(":"));
     if (next.includes(ticker)) return;
