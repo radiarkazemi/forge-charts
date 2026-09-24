@@ -80,9 +80,10 @@ export function createServices(config: AppConfig = readConfig()): Services {
 
   // Quote polling covers the watchlist, every alerted ticker and every chart pane symbol.
   const syncTrackedSymbols = () => {
+    const { watchlist, paneSymbols } = settings.settings.get();
     const tickers = new Set<string>([
-      ...settings.settings.get().watchlist,
-      ...settings.settings.get().paneSymbols,
+      ...(Array.isArray(watchlist) ? watchlist : []),
+      ...(Array.isArray(paneSymbols) ? paneSymbols : []),
       ...alerts.alerts.get().map((a) => a.ticker),
       chart.state.get().symbol,
     ]);

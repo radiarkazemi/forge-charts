@@ -4,7 +4,7 @@ import { App } from "./app/App";
 import { createServices } from "./app/container";
 
 /** One-shot wipe of known-bad chart snapshots that left /charts spinning for users. */
-const BOOT_RECOVERY = "forge.boot.recovery.v3";
+const BOOT_RECOVERY = "forge.boot.recovery.v4";
 
 function runBootRecovery(): void {
   try {
@@ -26,12 +26,16 @@ function runBootRecovery(): void {
     }
     for (const key of keysToRemove) localStorage.removeItem(key);
 
-    // Reset multi-pane layout back to a single chart if settings exist.
+    // Migrate legacy settings: ensure paneSymbols exists (pre-multi-chart saves crash otherwise).
     const raw = localStorage.getItem("forge.settings.v1");
     if (raw) {
       try {
         const settings = JSON.parse(raw) as Record<string, unknown>;
-        settings.chartLayout = "s";
+        if (!Array.isArray(settings.paneSymbols)) {
+          const last = typeof settings.lastSymbol === "string" ? settings.lastSymbol : "XAUUSD";
+          settings.paneSymbols = [last];
+        }
+        if (typeof settings.chartLayout !== "string") settings.chartLayout = "s";
         localStorage.setItem("forge.settings.v1", JSON.stringify(settings));
       } catch {
         localStorage.removeItem("forge.settings.v1");

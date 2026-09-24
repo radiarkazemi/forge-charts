@@ -15,10 +15,10 @@ interface ChartWorkspaceProps {
  */
 export function ChartWorkspace({ onCreateAlert }: ChartWorkspaceProps) {
   const { settings } = useServices();
-  const chartLayout = useStore(settings.settings, (s) => s.chartLayout);
-  const paneSymbols = useStore(settings.settings, (s) => s.paneSymbols);
-  const lastSymbol = useStore(settings.settings, (s) => s.lastSymbol);
-  const grid = getChartLayoutGrid(chartLayout);
+  const chartLayout = useStore(settings.settings, (s) => s.chartLayout ?? "s");
+  const paneSymbols = useStore(settings.settings, (s) => (Array.isArray(s.paneSymbols) ? s.paneSymbols : []));
+  const lastSymbol = useStore(settings.settings, (s) => s.lastSymbol || "XAUUSD");
+  const grid = getChartLayoutGrid(chartLayout ?? "s");
 
   const symbols = Array.from({ length: grid.count }, (_, i) => paneSymbols[i] ?? lastSymbol);
 

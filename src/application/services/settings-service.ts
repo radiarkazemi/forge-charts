@@ -52,22 +52,48 @@ function sanitizeLayout(value: unknown): ChartLayoutId {
     : DEFAULT_SETTINGS.chartLayout;
 }
 
+function sanitizeStringList(value: unknown, fallback: readonly string[]): readonly string[] {
+  if (!Array.isArray(value)) return fallback;
+  const next = value.filter((s): s is string => typeof s === "string" && s.length > 0);
+  return next.length > 0 ? next : fallback;
+}
+
+function sanitizeSidePanel(value: unknown): SidePanelId | null {
+  return value === "watchlist" || value === "alerts" || value === "data" ? value : null;
+}
+
+/** Normalize any persisted blob into a full Settings object (legacy-safe). */
+export function sanitizeSettings(raw: unknown): Settings {
+  const persisted = raw && typeof raw === "object" ? (raw as Partial<Settings>) : {};
+  const lastSymbol =
+    typeof persisted.lastSymbol === "string" && persisted.lastSymbol.length > 0
+      ? persisted.lastSymbol
+      : DEFAULT_SETTINGS.lastSymbol;
+  const paneSymbols = sanitizeStringList(persisted.paneSymbols, [lastSymbol]);
+  return {
+    theme: persisted.theme === "light" ? "light" : "dark",
+    sidePanel: sanitizeSidePanel(persisted.sidePanel),
+    chartLayout: sanitizeLayout(persisted.chartLayout),
+    paneSymbols,
+    lastSymbol,
+    lastInterval:
+      typeof persisted.lastInterval === "string" && persisted.lastInterval.length > 0
+        ? persisted.lastInterval
+        : DEFAULT_SETTINGS.lastInterval,
+    watchlist: sanitizeStringList(persisted.watchlist, DEFAULT_WATCHLIST),
+  };
+}
+
 /** User preferences persisted across sessions. */
 export class SettingsService {
   readonly settings: Store<Settings>;
 
   constructor(storage: KeyValueStorage) {
-    const persisted = storage.get<Partial<Settings>>(STORAGE_KEY, {});
-    const chartLayout = sanitizeLayout(persisted.chartLayout);
-    const paneSymbols = Array.isArray(persisted.paneSymbols)
-      ? persisted.paneSymbols.filter((s): s is string => typeof s === "string" && s.length > 0)
-      : [];
-    this.settings = createPersistentStore<Settings>(storage, STORAGE_KEY, {
-      ...DEFAULT_SETTINGS,
-      ...persisted,
-      chartLayout,
-      paneSymbols: paneSymbols.length > 0 ? paneSymbols : DEFAULT_SETTINGS.paneSymbols,
-    });
+    const persisted = storage.get<unknown>(STORAGE_KEY, DEFAULT_SETTINGS);
+    const sanitized = sanitizeSettings(persisted);
+    // createPersistentStore prefers the raw stored value; force the sanitized shape.
+    this.settings = createPersistentStore<Settings>(storage, STORAGE_KEY, sanitized);
+    this.settings.set(sanitized);
   }
 
   setTheme(theme: ThemeMode): void {
@@ -92,7 +118,7 @@ export class SettingsService {
 
   setPaneSymbol(paneIndex: number, ticker: string): void {
     if (paneIndex < 0 || paneIndex > 7) return;
-    const current = this.settings.get().paneSymbols;
+    const current = sanitizeStringList(this.settings.get().paneSymbols, [this.settings.get().lastSymbol]);
     const next = [...current];
     while (next.length <= paneIndex) next.push(this.settings.get().lastSymbol);
     next[paneIndex] = ticker;
@@ -101,23 +127,24 @@ export class SettingsService {
   }
 
   rememberChart(lastSymbol: string, lastInterval: Interval): void {
-    const paneSymbols = [...this.settings.get().paneSymbols];
+    const paneSymbols = [...sanitizeStringList(this.settings.get().paneSymbols, [lastSymbol])];
     if (paneSymbols.length === 0) paneSymbols.push(lastSymbol);
     else paneSymbols[0] = lastSymbol;
     this.patch({ lastSymbol, lastInterval, paneSymbols });
   }
 
   addToWatchlist(ticker: string): void {
-    const { watchlist } = this.settings.get();
+    const watchlist = sanitizeStringList(this.settings.get().watchlist, DEFAULT_WATCHLIST);
     if (watchlist.includes(ticker)) return;
     this.patch({ watchlist: [...watchlist, ticker] });
   }
 
   removeFromWatchlist(ticker: string): void {
-    this.patch({ watchlist: this.settings.get().watchlist.filter((t) => t !== ticker) });
+    const watchlist = sanitizeStringList(this.settings.get().watchlist, DEFAULT_WATCHLIST);
+    this.patch({ watchlist: watchlist.filter((t) => t !== ticker) });
   }
 
   private patch(partial: Partial<Settings>): void {
-    this.settings.update((current) => ({ ...current, ...partial }));
+    this.settings.update((current) => sanitizeSettings({ ...current, ...partial }));
   }
 }
