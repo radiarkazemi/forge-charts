@@ -327,7 +327,10 @@ async def poll_mongo() -> None:
                     except (TypeError, ValueError):
                         continue
                     vol = float(doc.get("vol") or 0)
-                    ts = int(doc.get("bct") or time.time())
+                    # CRITICAL: Mongo `bct` is bar CLOSE time (period end). Using it as a
+                    # trade timestamp makes the chart open the *next* candle early and
+                    # keeps countdown inventing bars. Always stamp "price now" with wall clock.
+                    ts = int(time.time())
                     await broadcast(channel, price_f, ts, vol, src="mongo")
         except Exception as exc:
             LOG.debug("mongo poll: %s", exc)
