@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
@@ -34,6 +34,8 @@ export function TradingViewChart({
   const headerApiRef = useRef<HeaderToolbarApi | null>(null);
   const theme = useStore(settings.settings, (s) => s.theme);
   const profile = useStore(settings.settings, (s) => activeProfile(s));
+  const replayActive = useStore(barReplay.state, (s) => s.active);
+  const [forceReplayUi, setForceReplayUi] = useState(false);
   const isPrimary = paneIndex === 0;
 
   const localController = useMemo(
@@ -92,9 +94,12 @@ export function TradingViewChart({
   }, [profile]);
 
   useEffect(() => {
+    if (!replayActive) setForceReplayUi(false);
+  }, [replayActive]);
+
+  useEffect(() => {
     if (!isPrimary) return;
     return () => {
-      // Keep attach across React Strict Mode remounts; only stop playback timers.
       barReplay.pause();
     };
   }, [isPrimary, barReplay]);
@@ -115,6 +120,7 @@ export function TradingViewChart({
     onOpenProfile,
     getProfile: () => activeProfile(settings.settings.get()),
     onEnterBarReplay: () => {
+      setForceReplayUi(true);
       const w = chart.getWidget();
       if (w) barReplay.attach(w, datafeed);
       void barReplay.enter();
@@ -139,6 +145,8 @@ export function TradingViewChart({
 
   useChartAlertLines(isPrimary ? controller : null, alerts);
 
+  const showReplayToolbar = isPrimary && (replayActive || forceReplayUi);
+
   return (
     <Box
       sx={{
@@ -152,11 +160,12 @@ export function TradingViewChart({
         borderRight: isPrimary ? 0 : 1,
         borderBottom: 1,
         borderColor: "divider",
+        overflow: "hidden",
       }}
     >
       <Box ref={containerRef} sx={{ position: "absolute", inset: 0 }} />
 
-      {isPrimary ? <BarReplayToolbar controller={barReplay} /> : null}
+      {showReplayToolbar ? <BarReplayToolbar controller={barReplay} forceVisible={forceReplayUi} /> : null}
 
       {!ready && !error ? (
         <Box

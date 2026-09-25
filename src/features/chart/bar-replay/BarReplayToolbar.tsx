@@ -9,6 +9,8 @@ import type { BarReplayController, BarReplaySpeed } from "./bar-replay-controlle
 
 interface BarReplayToolbarProps {
   readonly controller: BarReplayController;
+  /** Show even if controller.active is briefly false (React click → enter race). */
+  readonly forceVisible?: boolean;
 }
 
 const SPEEDS: BarReplaySpeed[] = [0.5, 1, 2, 5, 10];
@@ -29,12 +31,12 @@ const btnSx = {
  * TradingView-style floating Bar Replay bar (bottom of chart).
  * Select bar → play / step / speed → jump to realtime / close.
  */
-export function BarReplayToolbar({ controller }: BarReplayToolbarProps) {
+export function BarReplayToolbar({ controller, forceVisible = false }: BarReplayToolbarProps) {
   const snap = useStore(controller.state);
   const [speedAnchor, setSpeedAnchor] = useState<null | HTMLElement>(null);
   const [selectAnchor, setSelectAnchor] = useState<null | HTMLElement>(null);
 
-  if (!snap.active) return null;
+  if (!snap.active && !forceVisible) return null;
 
   const playing = snap.phase === "playing";
   const canStep = snap.cursorIndex >= 0 && snap.cursorIndex < snap.bufferLength - 1;
