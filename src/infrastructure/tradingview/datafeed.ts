@@ -243,23 +243,21 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     this.unsubscribeBars(listenerGuid);
     const symbol = this.requireSymbol(symbolInfo);
 
-    if (this.replayActive) {
-      // Mute live feed; Bar Replay controller pushes bars via pushReplayBar.
-      this.replayOnTick = onTick;
-      this.subscriptions.set(listenerGuid, () => {
-        if (this.replayOnTick === onTick) this.replayOnTick = null;
-      });
-      return;
-    }
+    // Always keep the library callback so pushReplayBar can feed stepped candles.
+    this.replayOnTick = onTick;
 
     const unsubscribe = this.marketData.subscribe(symbol, resolution, (bar) => {
+      if (this.replayActive) return; // muted during Bar Replay
       try {
         onTick(toTvBar(bar));
       } catch {
         /* drop corrupt realtime bars instead of crashing the widget */
       }
     });
-    this.subscriptions.set(listenerGuid, unsubscribe);
+    this.subscriptions.set(listenerGuid, () => {
+      unsubscribe();
+      if (this.replayOnTick === onTick) this.replayOnTick = null;
+    });
   }
 
   unsubscribeBars(listenerGuid: string): void {

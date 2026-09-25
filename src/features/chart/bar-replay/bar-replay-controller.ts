@@ -113,9 +113,8 @@ export class BarReplayController {
       selecting: true,
     });
 
-    // Re-subscribe so live ticks are muted while picking a bar.
-    this.reloadSeries();
-
+    // Do NOT resetData here — it cancels requestSelectBar. Live ticks are muted
+    // via datafeed.beginReplay(); cutoff + reload happen after the bar is picked.
     await this.selectBar();
   }
 
