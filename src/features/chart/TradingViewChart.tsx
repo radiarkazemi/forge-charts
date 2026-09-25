@@ -94,8 +94,8 @@ export function TradingViewChart({
   useEffect(() => {
     if (!isPrimary) return;
     return () => {
-      void barReplay.exit();
-      barReplay.detach();
+      // Keep attach across React Strict Mode remounts; only stop playback timers.
+      barReplay.pause();
     };
   }, [isPrimary, barReplay]);
 
@@ -115,6 +115,8 @@ export function TradingViewChart({
     onOpenProfile,
     getProfile: () => activeProfile(settings.settings.get()),
     onEnterBarReplay: () => {
+      const w = chart.getWidget();
+      if (w) barReplay.attach(w, datafeed);
       void barReplay.enter();
     },
     onToggleTheme: () => settings.toggleTheme(),
