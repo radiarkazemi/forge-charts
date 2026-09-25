@@ -1,9 +1,14 @@
-import type { ChartLayoutId, LayoutSyncSettings } from "@/application";
+import type { ChartLayoutId, LayoutSyncSettings, UserProfile } from "@/application";
+import { activeProfile, type Settings } from "@/application";
+import type { IChartingLibraryWidget, IDropdownApi } from "@/infrastructure/tradingview";
 import { CHART_LAYOUT_CHOICES } from "./chart-layouts";
-import type { IChartingLibraryWidget } from "@/infrastructure/tradingview";
+import { activateDealingRange } from "./dealing-range";
 
-const ACCOUNT_ICON =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28"><circle cx="14" cy="14" r="14" fill="#9c27b0"/><text x="14" y="18" text-anchor="middle" fill="#fff" font-size="13" font-weight="700" font-family="Arial,sans-serif">F</text></svg>';
+function avatarIcon(profile: UserProfile): string {
+  const initial = (profile.avatarInitial || "F").slice(0, 2).replace(/[<>&"']/g, "");
+  const color = /^#[0-9a-fA-F]{6}$/.test(profile.avatarColor) ? profile.avatarColor : "#9c27b0";
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28"><circle cx="14" cy="14" r="14" fill="${color}"/><text x="14" y="18.5" text-anchor="middle" fill="#fff" font-size="12" font-weight="700" font-family="Arial,sans-serif">${initial}</text></svg>`;
+}
 
 const LAYOUT_ICON =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28"><rect x="4" y="4" width="9" height="9" rx="1" fill="currentColor"/><rect x="15" y="4" width="9" height="9" rx="1" fill="currentColor"/><rect x="4" y="15" width="9" height="9" rx="1" fill="currentColor"/><rect x="15" y="15" width="9" height="9" rx="1" fill="currentColor"/></svg>';
@@ -16,14 +21,19 @@ export interface HeaderToolbarHandlers {
   readonly onOpenAlertsPanel: () => void;
   readonly onOpenWatchlist: () => void;
   readonly onOpenObjectTree: () => void;
+  readonly onOpenProfile: () => void;
   /** In-place multi-pane layout (widgets stay mounted). */
   readonly onSetChartLayout: (layout: ChartLayoutId) => void;
   readonly onToggleLayoutSync?: (key: SyncKey) => void;
   readonly getLayoutSync?: () => LayoutSyncSettings;
   readonly getLastPrice: () => number | null;
+  readonly getProfile: () => UserProfile;
   readonly themeLabel: string;
-  readonly userInitial: string;
   readonly alertCount: number;
+}
+
+export interface HeaderToolbarApi {
+  readonly updateProfile: (profile: UserProfile) => void;
 }
 
 function syncLabel(key: SyncKey, on: boolean): string {
@@ -62,32 +72,34 @@ function buildLayoutMenuItems(handlers: HeaderToolbarHandlers) {
       title: syncLabel(key, sync[key]),
       onSelect: () => {
         handlers.onToggleLayoutSync?.(key);
-        // Refresh labels on next open via recreate is handled by applyOptions caller.
       },
     })),
   ];
 }
 
+function profileMenuItems(handlers: HeaderToolbarHandlers, profile: UserProfile) {
+  return [
+    {
+      title: `${profile.displayName}  (@${profile.username})`,
+      onSelect: () => handlers.onOpenProfile(),
+    },
+    { title: "Profile & accounts…", onSelect: () => handlers.onOpenProfile() },
+    { title: `Theme: ${handlers.themeLabel}`, onSelect: () => handlers.onToggleTheme() },
+    { title: "Alerts panel", onSelect: () => handlers.onOpenAlertsPanel() },
+    { title: "Watchlist", onSelect: () => handlers.onOpenWatchlist() },
+    { title: "Object tree (layers)", onSelect: () => handlers.onOpenObjectTree() },
+    { title: "Create alert", onSelect: () => handlers.onCreateAlert() },
+  ];
+}
+
 /**
  * Adds TradingView-style custom header controls on top of the library toolbar.
- * Built-in buttons (symbol, intervals, chart type, indicators, templates,
- * undo/redo, save, settings, fullscreen, snapshot, compare) stay enabled.
+ * Profile avatar sits on the far-right corner (TradingView account menu).
  */
-export function mountHeaderToolbar(widget: IChartingLibraryWidget, handlers: HeaderToolbarHandlers): void {
-  void widget.createDropdown({
-    title: handlers.userInitial,
-    tooltip: handlers.alertCount > 0 ? `Account (${handlers.alertCount} alerts)` : "Account & preferences",
-    align: "left",
-    icon: ACCOUNT_ICON,
-    items: [
-      { title: `Theme: ${handlers.themeLabel}`, onSelect: () => handlers.onToggleTheme() },
-      { title: "Alerts panel", onSelect: () => handlers.onOpenAlertsPanel() },
-      { title: "Watchlist", onSelect: () => handlers.onOpenWatchlist() },
-      { title: "Object tree (layers)", onSelect: () => handlers.onOpenObjectTree() },
-      { title: "Create alert", onSelect: () => handlers.onCreateAlert() },
-    ],
-  });
-
+export function mountHeaderToolbar(
+  widget: IChartingLibraryWidget,
+  handlers: HeaderToolbarHandlers,
+): HeaderToolbarApi {
   widget.createButton({
     align: "left",
     useTradingViewStyle: true,
@@ -117,7 +129,6 @@ export function mountHeaderToolbar(widget: IChartingLibraryWidget, handlers: Hea
     ],
   });
 
-  // Select Layout — glyphs + SYNC IN LAYOUT. Widgets stay mounted on change.
   type DropdownApi = { applyOptions: (o: { items: ReturnType<typeof buildLayoutMenuItems> }) => void };
   let layoutDropdown: DropdownApi | null = null;
   const refreshLayoutMenu = () => {
@@ -179,6 +190,56 @@ export function mountHeaderToolbar(widget: IChartingLibraryWidget, handlers: Hea
       void publishSnapshot(widget);
     },
   });
+
+  // Tools — Dealing Range (ICT premium / discount) via Fib template.
+  void widget.createDropdown({
+    title: "Tools",
+    tooltip: "Drawing helpers",
+    align: "right",
+    items: [
+      {
+        title: "Dealing Range (Premium / Discount)",
+        onSelect: () => {
+          void activateDealingRange(widget);
+        },
+      },
+    ],
+  });
+
+  // Profile — outermost right corner, TradingView-style.
+  let accountDropdown: IDropdownApi | null = null;
+  const profile = handlers.getProfile();
+  void widget
+    .createDropdown({
+      title: profile.avatarInitial,
+      tooltip: `${profile.displayName} (@${profile.username})`,
+      align: "right",
+      icon: avatarIcon(profile),
+      items: profileMenuItems(handlers, profile),
+    })
+    .then((api) => {
+      accountDropdown = api;
+    });
+
+  return {
+    updateProfile: (next) => {
+      try {
+        accountDropdown?.applyOptions({
+          title: next.avatarInitial,
+          tooltip: `${next.displayName} (@${next.username})`,
+          icon: avatarIcon(next),
+          items: profileMenuItems(handlers, next),
+        });
+      } catch {
+        /* ignore */
+      }
+    },
+  };
+}
+
+/** Helper for callers that only have Settings. */
+export function profileFromSettings(settings: Settings): UserProfile {
+  return activeProfile(settings);
 }
 
 async function shiftVisibleRange(widget: IChartingLibraryWidget, deltaSec: number): Promise<void> {

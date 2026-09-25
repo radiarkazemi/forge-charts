@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, type RefObject } from "react";
-import type { ChartLayoutId, KeyValueStorage, ThemeMode } from "@/application";
+import type { ChartLayoutId, KeyValueStorage, ThemeMode, UserProfile } from "@/application";
 import type { Interval } from "@/domain";
 import {
   buildWidgetOptions,
@@ -11,7 +11,12 @@ import {
   type WidgetConstructor,
 } from "@/infrastructure/tradingview";
 import type { ChartController } from "./chart-controller";
-import { mountHeaderToolbar } from "./header-toolbar";
+import {
+  activateDealingRange,
+  mountDealingRangeFlyoutInjector,
+  seedDealingRangeTemplate,
+} from "./dealing-range";
+import { mountHeaderToolbar, type HeaderToolbarApi } from "./header-toolbar";
 
 export interface TradingViewWidgetDeps {
   readonly controller: ChartController;
@@ -31,6 +36,8 @@ export interface TradingViewWidgetDeps {
   readonly onOpenAlertsPanel: () => void;
   readonly onOpenWatchlist: () => void;
   readonly onOpenObjectTree: () => void;
+  readonly onOpenProfile: () => void;
+  readonly getProfile: () => UserProfile;
   readonly onSetChartLayout: (layout: ChartLayoutId) => void;
   readonly onToggleLayoutSync?: (key: "symbol" | "interval" | "crosshair" | "time" | "dateRange") => void;
   readonly getLayoutSync?: () => {
@@ -42,6 +49,7 @@ export interface TradingViewWidgetDeps {
   };
   readonly onSymbolChanged?: (paneIndex: number, symbol: string) => void;
   readonly getLastPrice: () => number | null;
+  readonly onHeaderReady?: (api: HeaderToolbarApi) => void;
 }
 
 /** Bump when autosave recovery needs a clean slate for all browsers. */
@@ -88,6 +96,9 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
   const onOpenAlertsPanel = useEffectEvent(() => deps.onOpenAlertsPanel());
   const onOpenWatchlist = useEffectEvent(() => deps.onOpenWatchlist());
   const onOpenObjectTree = useEffectEvent(() => deps.onOpenObjectTree());
+  const onOpenProfile = useEffectEvent(() => deps.onOpenProfile());
+  const getProfile = useEffectEvent(() => deps.getProfile());
+  const onHeaderReady = useEffectEvent((api: HeaderToolbarApi) => deps.onHeaderReady?.(api));
   const onSetChartLayout = useEffectEvent((layout: ChartLayoutId) => deps.onSetChartLayout(layout));
   const onToggleLayoutSync = useEffectEvent(
     (key: "symbol" | "interval" | "crosshair" | "time" | "dateRange") => deps.onToggleLayoutSync?.(key),
@@ -120,8 +131,11 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
     let cancelled = false;
     let ready = false;
     let readyTimer = 0;
+    let unmountDealingRange: (() => void) | null = null;
     const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches;
     const autosaveKey = isPrimary ? AUTOSAVE_KEY : `${AUTOSAVE_KEY}.pane.${paneIndex}`;
+
+    seedDealingRangeTemplate(storage);
 
     const mount = (Widget: WidgetConstructor, savedState: object | undefined) => {
       try {
@@ -168,6 +182,10 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         controller.attach(widget);
         if (isPrimary) {
           widget.subscribe("onAutoSaveNeeded", () => widget?.save((state) => storage.set(autosaveKey, state)));
+          unmountDealingRange?.();
+          unmountDealingRange = mountDealingRangeFlyoutInjector(container, () => {
+            if (widget) void activateDealingRange(widget);
+          });
         }
         try {
           widget
@@ -190,20 +208,22 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
       if (isPrimary) {
         void widget.headerReady().then(() => {
           if (cancelled || !widget) return;
-          mountHeaderToolbar(widget, {
+          const api = mountHeaderToolbar(widget, {
             onCreateAlert,
             onToggleTheme,
             onOpenAlertsPanel,
             onOpenWatchlist,
             onOpenObjectTree,
+            onOpenProfile,
             onSetChartLayout,
             onToggleLayoutSync,
             getLayoutSync,
             getLastPrice,
+            getProfile,
             themeLabel: initial.theme === "dark" ? "Dark" : "Light",
-            userInitial: "F",
             alertCount: initial.alertCount,
           });
+          onHeaderReady(api);
         });
       }
     };
@@ -226,6 +246,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
     return () => {
       cancelled = true;
       window.clearTimeout(readyTimer);
+      unmountDealingRange?.();
       controller.detach();
       try {
         widget?.remove();

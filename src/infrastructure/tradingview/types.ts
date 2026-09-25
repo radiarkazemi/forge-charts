@@ -20,6 +20,7 @@ export type {
   IBasicDataFeed,
   IChartingLibraryWidget,
   IChartWidgetApi,
+  IDropdownApi,
   IExternalSaveLoadAdapter,
   LayoutType,
   LibrarySymbolInfo,

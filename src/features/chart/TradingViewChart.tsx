@@ -5,23 +5,33 @@ import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Tooltip from "@mui/material/Tooltip";
 import { useServices } from "@/app/use-services";
+import { activeProfile } from "@/application";
 import { ChartController } from "@/features/chart/chart-controller";
 import { useStore } from "@/shared/hooks/useStore";
+import type { HeaderToolbarApi } from "./header-toolbar";
 import { layoutSyncBus } from "./layout-sync";
 import { useChartAlertLines } from "./useChartAlertLines";
 import { useTradingViewWidget } from "./useTradingViewWidget";
 
 interface TradingViewChartProps {
   readonly onCreateAlert: () => void;
+  readonly onOpenProfile: () => void;
   /** 0 = primary (alerts, Forge header, shared controller). */
   readonly paneIndex?: number;
   readonly initialSymbol?: string;
 }
 
-export function TradingViewChart({ onCreateAlert, paneIndex = 0, initialSymbol }: TradingViewChartProps) {
+export function TradingViewChart({
+  onCreateAlert,
+  onOpenProfile,
+  paneIndex = 0,
+  initialSymbol,
+}: TradingViewChartProps) {
   const { chart, datafeed, saveLoadAdapter, storage, settings, alerts, quotes, config } = useServices();
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const headerApiRef = useRef<HeaderToolbarApi | null>(null);
   const theme = useStore(settings.settings, (s) => s.theme);
+  const profile = useStore(settings.settings, (s) => activeProfile(s));
   const isPrimary = paneIndex === 0;
 
   const localController = useMemo(
@@ -74,6 +84,11 @@ export function TradingViewChart({ onCreateAlert, paneIndex = 0, initialSymbol }
     }
   }, [controller, ready, symbolForPane]);
 
+  // Keep corner avatar in sync when the active profile changes.
+  useEffect(() => {
+    headerApiRef.current?.updateProfile(profile);
+  }, [profile]);
+
   useTradingViewWidget(containerRef, {
     controller,
     datafeed,
@@ -87,6 +102,8 @@ export function TradingViewChart({ onCreateAlert, paneIndex = 0, initialSymbol }
     isPrimary,
     paneIndex,
     onCreateAlert,
+    onOpenProfile,
+    getProfile: () => activeProfile(settings.settings.get()),
     onToggleTheme: () => settings.toggleTheme(),
     onOpenAlertsPanel: () => settings.setSidePanel("alerts"),
     onOpenWatchlist: () => settings.setSidePanel("watchlist"),
@@ -96,6 +113,10 @@ export function TradingViewChart({ onCreateAlert, paneIndex = 0, initialSymbol }
     getLayoutSync: () => settings.settings.get().layoutSync,
     onSymbolChanged: (index, ticker) => settings.setPaneSymbol(index, ticker),
     getLastPrice: () => quote?.price ?? null,
+    onHeaderReady: (api) => {
+      headerApiRef.current = api;
+      api.updateProfile(activeProfile(settings.settings.get()));
+    },
   });
 
   useChartAlertLines(isPrimary ? controller : null, alerts);
@@ -118,17 +139,25 @@ export function TradingViewChart({ onCreateAlert, paneIndex = 0, initialSymbol }
       <Box ref={containerRef} sx={{ position: "absolute", inset: 0 }} />
 
       {!ready && !error ? (
-        <Box sx={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" }}>
-          <CircularProgress size={28} />
+        <Box
+          sx={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            bgcolor: "background.default",
+            zIndex: 2,
+          }}
+        >
+          <CircularProgress size={36} />
         </Box>
       ) : null}
 
       {error ? (
-        <Box sx={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", p: 3 }}>
-          <Alert severity="error" variant="outlined" sx={{ maxWidth: 520 }}>
-            {error}. Make sure the TradingView Charting Library is available at <code>{config.tvLibraryPath}</code>.
-          </Alert>
-        </Box>
+        <Alert severity="error" sx={{ position: "absolute", top: 8, left: 8, right: 8, zIndex: 3 }}>
+          {error}
+        </Alert>
       ) : null}
 
       {ready && isPrimary && source?.isSynthetic ? (

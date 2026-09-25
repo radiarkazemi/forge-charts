@@ -17,6 +17,15 @@ export interface LayoutSyncSettings {
   readonly dateRange: boolean;
 }
 
+/** Per-person local profile (TradingView-style account identity). */
+export interface UserProfile {
+  readonly id: string;
+  readonly displayName: string;
+  readonly username: string;
+  readonly avatarInitial: string;
+  readonly avatarColor: string;
+}
+
 export interface Settings {
   readonly theme: ThemeMode;
   readonly sidePanel: SidePanelId | null;
@@ -27,6 +36,8 @@ export interface Settings {
   readonly lastSymbol: string;
   readonly lastInterval: Interval;
   readonly watchlist: readonly string[];
+  readonly profiles: readonly UserProfile[];
+  readonly activeProfileId: string;
 }
 
 const STORAGE_KEY = "forge.settings.v1";
@@ -51,6 +62,18 @@ export const DEFAULT_LAYOUT_SYNC: LayoutSyncSettings = {
   dateRange: false,
 };
 
+export const AVATAR_COLORS = ["#9c27b0", "#2962ff", "#089981", "#f57c00", "#e91e63", "#00bcd4"] as const;
+
+export function createDefaultProfile(): UserProfile {
+  return {
+    id: "local-1",
+    displayName: "Forge Trader",
+    username: "forge",
+    avatarInitial: "F",
+    avatarColor: AVATAR_COLORS[0],
+  };
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   theme: "dark",
   sidePanel: null,
@@ -60,6 +83,8 @@ export const DEFAULT_SETTINGS: Settings = {
   lastSymbol: "XAUUSD",
   lastInterval: "15",
   watchlist: DEFAULT_WATCHLIST,
+  profiles: [createDefaultProfile()],
+  activeProfileId: "local-1",
 };
 
 const VALID_LAYOUTS = new Set<ChartLayoutId>(["s", "2h", "2v", "3s", "3h", "3v", "2-1", "1-2", "4"]);
@@ -91,6 +116,43 @@ function sanitizeLayoutSync(value: unknown): LayoutSyncSettings {
   };
 }
 
+function sanitizeProfile(raw: unknown, fallback: UserProfile): UserProfile {
+  if (!raw || typeof raw !== "object") return fallback;
+  const p = raw as Partial<UserProfile>;
+  const displayName =
+    typeof p.displayName === "string" && p.displayName.trim() ? p.displayName.trim().slice(0, 48) : fallback.displayName;
+  const username =
+    typeof p.username === "string" && p.username.trim()
+      ? p.username.trim().replace(/\s+/g, "").slice(0, 24).toLowerCase()
+      : fallback.username;
+  const initial =
+    typeof p.avatarInitial === "string" && p.avatarInitial.trim()
+      ? p.avatarInitial.trim().slice(0, 2).toUpperCase()
+      : displayName.slice(0, 1).toUpperCase() || "F";
+  const avatarColor =
+    typeof p.avatarColor === "string" && /^#[0-9a-fA-F]{6}$/.test(p.avatarColor)
+      ? p.avatarColor
+      : fallback.avatarColor;
+  return {
+    id: typeof p.id === "string" && p.id ? p.id : fallback.id,
+    displayName,
+    username,
+    avatarInitial: initial,
+    avatarColor,
+  };
+}
+
+function sanitizeProfiles(value: unknown): readonly UserProfile[] {
+  if (!Array.isArray(value) || value.length === 0) return [createDefaultProfile()];
+  return value.map((item, i) =>
+    sanitizeProfile(item, {
+      ...createDefaultProfile(),
+      id: `local-${i + 1}`,
+      avatarColor: AVATAR_COLORS[i % AVATAR_COLORS.length] ?? AVATAR_COLORS[0],
+    }),
+  );
+}
+
 /** Normalize any persisted blob into a full Settings object (legacy-safe). */
 export function sanitizeSettings(raw: unknown): Settings {
   const persisted = raw && typeof raw === "object" ? (raw as Partial<Settings>) : {};
@@ -99,6 +161,11 @@ export function sanitizeSettings(raw: unknown): Settings {
       ? persisted.lastSymbol
       : DEFAULT_SETTINGS.lastSymbol;
   const paneSymbols = sanitizeStringList(persisted.paneSymbols, [lastSymbol]);
+  const profiles = sanitizeProfiles(persisted.profiles);
+  const activeProfileId =
+    typeof persisted.activeProfileId === "string" && profiles.some((p) => p.id === persisted.activeProfileId)
+      ? persisted.activeProfileId
+      : profiles[0]!.id;
   return {
     theme: persisted.theme === "light" ? "light" : "dark",
     sidePanel: sanitizeSidePanel(persisted.sidePanel),
@@ -111,7 +178,13 @@ export function sanitizeSettings(raw: unknown): Settings {
         ? persisted.lastInterval
         : DEFAULT_SETTINGS.lastInterval,
     watchlist: sanitizeStringList(persisted.watchlist, DEFAULT_WATCHLIST),
+    profiles,
+    activeProfileId,
   };
+}
+
+export function activeProfile(settings: Settings): UserProfile {
+  return settings.profiles.find((p) => p.id === settings.activeProfileId) ?? settings.profiles[0]!;
 }
 
 /** User preferences persisted across sessions. */
@@ -185,6 +258,52 @@ export class SettingsService {
   removeFromWatchlist(ticker: string): void {
     const watchlist = sanitizeStringList(this.settings.get().watchlist, DEFAULT_WATCHLIST);
     this.patch({ watchlist: watchlist.filter((t) => t !== ticker) });
+  }
+
+  setActiveProfile(id: string): void {
+    const { profiles } = this.settings.get();
+    if (!profiles.some((p) => p.id === id)) return;
+    this.patch({ activeProfileId: id });
+  }
+
+  upsertProfile(profile: UserProfile): void {
+    const profiles = [...this.settings.get().profiles];
+    const idx = profiles.findIndex((p) => p.id === profile.id);
+    const next = sanitizeProfile(profile, createDefaultProfile());
+    if (idx >= 0) profiles[idx] = next;
+    else profiles.push(next);
+    this.patch({ profiles, activeProfileId: next.id });
+  }
+
+  addProfile(partial?: Partial<UserProfile>): UserProfile {
+    const n = this.settings.get().profiles.length + 1;
+    const profile = sanitizeProfile(
+      {
+        id: `local-${Date.now().toString(36)}`,
+        displayName: partial?.displayName ?? `Trader ${n}`,
+        username: partial?.username ?? `trader${n}`,
+        avatarInitial: partial?.avatarInitial,
+        avatarColor: partial?.avatarColor ?? AVATAR_COLORS[(n - 1) % AVATAR_COLORS.length] ?? AVATAR_COLORS[0],
+      },
+      createDefaultProfile(),
+    );
+    this.patch({
+      profiles: [...this.settings.get().profiles, profile],
+      activeProfileId: profile.id,
+    });
+    return profile;
+  }
+
+  removeProfile(id: string): void {
+    const profiles = this.settings.get().profiles.filter((p) => p.id !== id);
+    if (profiles.length === 0) {
+      const fallback = createDefaultProfile();
+      this.patch({ profiles: [fallback], activeProfileId: fallback.id });
+      return;
+    }
+    const activeProfileId =
+      this.settings.get().activeProfileId === id ? profiles[0]!.id : this.settings.get().activeProfileId;
+    this.patch({ profiles, activeProfileId });
   }
 
   private patch(partial: Partial<Settings>): void {
