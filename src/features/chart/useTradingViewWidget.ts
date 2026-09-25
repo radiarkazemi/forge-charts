@@ -38,6 +38,7 @@ export interface TradingViewWidgetDeps {
   readonly onOpenObjectTree: () => void;
   readonly onOpenProfile: () => void;
   readonly getProfile: () => UserProfile;
+  readonly onEnterBarReplay: () => void;
   readonly onSetChartLayout: (layout: ChartLayoutId) => void;
   readonly onToggleLayoutSync?: (key: "symbol" | "interval" | "crosshair" | "time" | "dateRange") => void;
   readonly getLayoutSync?: () => {
@@ -50,6 +51,8 @@ export interface TradingViewWidgetDeps {
   readonly onSymbolChanged?: (paneIndex: number, symbol: string) => void;
   readonly getLastPrice: () => number | null;
   readonly onHeaderReady?: (api: HeaderToolbarApi) => void;
+  /** Fired once when the primary chart widget is ready (Bar Replay attach). */
+  readonly onWidgetReady?: (widget: IChartingLibraryWidget) => void;
 }
 
 /** Bump when autosave recovery needs a clean slate for all browsers. */
@@ -98,7 +101,9 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
   const onOpenObjectTree = useEffectEvent(() => deps.onOpenObjectTree());
   const onOpenProfile = useEffectEvent(() => deps.onOpenProfile());
   const getProfile = useEffectEvent(() => deps.getProfile());
+  const onEnterBarReplay = useEffectEvent(() => deps.onEnterBarReplay());
   const onHeaderReady = useEffectEvent((api: HeaderToolbarApi) => deps.onHeaderReady?.(api));
+  const onWidgetReady = useEffectEvent((widget: IChartingLibraryWidget) => deps.onWidgetReady?.(widget));
   const onSetChartLayout = useEffectEvent((layout: ChartLayoutId) => deps.onSetChartLayout(layout));
   const onToggleLayoutSync = useEffectEvent(
     (key: "symbol" | "interval" | "crosshair" | "time" | "dateRange") => deps.onToggleLayoutSync?.(key),
@@ -180,6 +185,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         ready = true;
         window.clearTimeout(readyTimer);
         controller.attach(widget);
+        onWidgetReady(widget);
         if (isPrimary) {
           widget.subscribe("onAutoSaveNeeded", () => widget?.save((state) => storage.set(autosaveKey, state)));
           unmountDealingRange?.();
@@ -215,6 +221,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
             onOpenWatchlist,
             onOpenObjectTree,
             onOpenProfile,
+            onEnterBarReplay,
             onSetChartLayout,
             onToggleLayoutSync,
             getLayoutSync,

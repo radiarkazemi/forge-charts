@@ -8,6 +8,7 @@ import { useServices } from "@/app/use-services";
 import { activeProfile } from "@/application";
 import { ChartController } from "@/features/chart/chart-controller";
 import { useStore } from "@/shared/hooks/useStore";
+import { BarReplayToolbar } from "./bar-replay/BarReplayToolbar";
 import type { HeaderToolbarApi } from "./header-toolbar";
 import { layoutSyncBus } from "./layout-sync";
 import { useChartAlertLines } from "./useChartAlertLines";
@@ -27,7 +28,8 @@ export function TradingViewChart({
   paneIndex = 0,
   initialSymbol,
 }: TradingViewChartProps) {
-  const { chart, datafeed, saveLoadAdapter, storage, settings, alerts, quotes, config } = useServices();
+  const { chart, barReplay, datafeed, saveLoadAdapter, storage, settings, alerts, quotes, config } =
+    useServices();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const headerApiRef = useRef<HeaderToolbarApi | null>(null);
   const theme = useStore(settings.settings, (s) => s.theme);
@@ -89,6 +91,14 @@ export function TradingViewChart({
     headerApiRef.current?.updateProfile(profile);
   }, [profile]);
 
+  useEffect(() => {
+    if (!isPrimary) return;
+    return () => {
+      void barReplay.exit();
+      barReplay.detach();
+    };
+  }, [isPrimary, barReplay]);
+
   useTradingViewWidget(containerRef, {
     controller,
     datafeed,
@@ -104,6 +114,9 @@ export function TradingViewChart({
     onCreateAlert,
     onOpenProfile,
     getProfile: () => activeProfile(settings.settings.get()),
+    onEnterBarReplay: () => {
+      void barReplay.enter();
+    },
     onToggleTheme: () => settings.toggleTheme(),
     onOpenAlertsPanel: () => settings.setSidePanel("alerts"),
     onOpenWatchlist: () => settings.setSidePanel("watchlist"),
@@ -116,6 +129,9 @@ export function TradingViewChart({
     onHeaderReady: (api) => {
       headerApiRef.current = api;
       api.updateProfile(activeProfile(settings.settings.get()));
+    },
+    onWidgetReady: (widget) => {
+      if (isPrimary) barReplay.attach(widget, datafeed);
     },
   });
 
@@ -137,6 +153,8 @@ export function TradingViewChart({
       }}
     >
       <Box ref={containerRef} sx={{ position: "absolute", inset: 0 }} />
+
+      {isPrimary ? <BarReplayToolbar controller={barReplay} /> : null}
 
       {!ready && !error ? (
         <Box

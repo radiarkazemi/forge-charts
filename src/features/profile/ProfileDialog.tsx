@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Avatar from "@mui/material/Avatar";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -23,18 +23,18 @@ interface ProfileDialogProps {
 }
 
 export function ProfileDialog({ open, onClose }: ProfileDialogProps) {
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">
+      {open ? <ProfileDialogBody onClose={onClose} /> : null}
+    </Dialog>
+  );
+}
+
+function ProfileDialogBody({ onClose }: { readonly onClose: () => void }) {
   const { settings } = useServices();
   const snap = useStore(settings.settings);
-  const current = activeProfile(snap);
-
-  const [editing, setEditing] = useState<UserProfile>(current);
+  const [editing, setEditing] = useState<UserProfile>(() => activeProfile(settings.settings.get()));
   const [mode, setMode] = useState<"list" | "edit">("list");
-
-  useEffect(() => {
-    if (!open) return;
-    setEditing(activeProfile(settings.settings.get()));
-    setMode("list");
-  }, [open, settings]);
 
   const save = () => {
     const initial =
@@ -51,7 +51,7 @@ export function ProfileDialog({ open, onClose }: ProfileDialogProps) {
   };
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">
+    <>
       <DialogTitle sx={{ pb: 1 }}>{mode === "list" ? "Profiles" : "Edit profile"}</DialogTitle>
       <DialogContent>
         {mode === "list" ? (
@@ -204,6 +204,6 @@ export function ProfileDialog({ open, onClose }: ProfileDialogProps) {
           <Button onClick={onClose}>Close</Button>
         )}
       </DialogActions>
-    </Dialog>
+    </>
   );
 }

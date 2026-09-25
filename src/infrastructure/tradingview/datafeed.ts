@@ -90,10 +90,66 @@ export class TradingViewDatafeed implements IBasicDataFeed {
 
   private readonly subscriptions = new Map<string, Unsubscribe>();
 
+  /** When set, history past this unix-second is hidden and live ticks are muted. */
+  private replayCutoffSec: number | null = null;
+  private replayActive = false;
+  private replayOnTick: SubscribeBarsCallback | null = null;
+
   constructor(
     private readonly marketData: MarketDataService,
     private readonly symbols: SymbolRepository,
   ) {}
+
+  /** Enable Bar Replay truncation (mute live, filter getBars). */
+  beginReplay(): void {
+    this.replayActive = true;
+    this.replayCutoffSec = null;
+  }
+
+  /** Hide bars with time (unix sec) strictly after cutoff. */
+  setReplayCutoff(cutoffSec: number | null): void {
+    this.replayCutoffSec = cutoffSec;
+  }
+
+  getReplayCutoff(): number | null {
+    return this.replayCutoffSec;
+  }
+
+  isReplayActive(): boolean {
+    return this.replayActive;
+  }
+
+  /** Push one synthetic realtime bar while live feed is muted. */
+  pushReplayBar(bar: Bar): void {
+    if (!this.replayOnTick) return;
+    try {
+      this.replayOnTick(toTvBar(bar));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  endReplay(): void {
+    this.replayActive = false;
+    this.replayCutoffSec = null;
+  }
+
+  /** Prefetch a deep history buffer for stepping (before cutoff is applied). */
+  async fetchReplayBuffer(
+    ticker: string,
+    resolution: string,
+    countBack = 5_000,
+  ): Promise<readonly Bar[]> {
+    const symbol = this.symbols.findByTicker(normalizeTicker(stripExchange(ticker)));
+    if (!symbol) return [];
+    const to = Math.floor(Date.now() / 1000) + 60;
+    const { bars } = await this.marketData.fetchHistory(symbol, resolution, {
+      from: 0,
+      to,
+      countBack,
+    });
+    return bars;
+  }
 
   onReady(callback: OnReadyCallback): void {
     const exchanges = [...new Set(this.symbols.all().map((s) => s.exchange))].sort();
@@ -163,7 +219,16 @@ export class TradingViewDatafeed implements IBasicDataFeed {
         onResult([], { noData: true });
         return;
       }
-      onResult(bars.map(toTvBar), { noData: false });
+      const cutoff = this.replayCutoffSec;
+      const filtered =
+        cutoff != null && Number.isFinite(cutoff)
+          ? bars.filter((b) => Number(b.time) <= cutoff)
+          : bars;
+      if (filtered.length === 0) {
+        onResult([], { noData: true });
+        return;
+      }
+      onResult(filtered.map(toTvBar), { noData: false });
     } catch (error) {
       onError(error instanceof Error ? error.message : String(error));
     }
@@ -177,6 +242,16 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   ): void {
     this.unsubscribeBars(listenerGuid);
     const symbol = this.requireSymbol(symbolInfo);
+
+    if (this.replayActive) {
+      // Mute live feed; Bar Replay controller pushes bars via pushReplayBar.
+      this.replayOnTick = onTick;
+      this.subscriptions.set(listenerGuid, () => {
+        if (this.replayOnTick === onTick) this.replayOnTick = null;
+      });
+      return;
+    }
+
     const unsubscribe = this.marketData.subscribe(symbol, resolution, (bar) => {
       try {
         onTick(toTvBar(bar));

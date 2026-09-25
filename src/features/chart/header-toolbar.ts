@@ -22,6 +22,8 @@ export interface HeaderToolbarHandlers {
   readonly onOpenWatchlist: () => void;
   readonly onOpenObjectTree: () => void;
   readonly onOpenProfile: () => void;
+  /** Open TradingView-style Bar Replay toolbar. */
+  readonly onEnterBarReplay: () => void;
   /** In-place multi-pane layout (widgets stay mounted). */
   readonly onSetChartLayout: (layout: ChartLayoutId) => void;
   readonly onToggleLayoutSync?: (key: SyncKey) => void;
@@ -108,25 +110,12 @@ export function mountHeaderToolbar(
     onClick: () => handlers.onCreateAlert(),
   });
 
-  void widget.createDropdown({
-    title: "Replay",
-    tooltip: "Jump the chart in time",
+  widget.createButton({
     align: "left",
-    items: [
-      { title: "Jump back 1 day", onSelect: () => void shiftVisibleRange(widget, -86_400) },
-      { title: "Jump back 1 week", onSelect: () => void shiftVisibleRange(widget, -604_800) },
-      { title: "Jump back 1 month", onSelect: () => void shiftVisibleRange(widget, -2_592_000) },
-      {
-        title: "Reset time scale",
-        onSelect: () => {
-          try {
-            widget.activeChart().executeActionById("timeScaleReset");
-          } catch {
-            /* chart not ready */
-          }
-        },
-      },
-    ],
+    useTradingViewStyle: true,
+    text: "Replay",
+    title: "Bar Replay — select a bar and play history forward",
+    onClick: () => handlers.onEnterBarReplay(),
   });
 
   type DropdownApi = { applyOptions: (o: { items: ReturnType<typeof buildLayoutMenuItems> }) => void };
@@ -240,16 +229,6 @@ export function mountHeaderToolbar(
 /** Helper for callers that only have Settings. */
 export function profileFromSettings(settings: Settings): UserProfile {
   return activeProfile(settings);
-}
-
-async function shiftVisibleRange(widget: IChartingLibraryWidget, deltaSec: number): Promise<void> {
-  try {
-    const chart = widget.activeChart();
-    const range = await chart.getVisibleRange();
-    await chart.setVisibleRange({ from: range.from + deltaSec, to: range.to + deltaSec });
-  } catch {
-    /* ignore */
-  }
 }
 
 async function placeTradeMarker(

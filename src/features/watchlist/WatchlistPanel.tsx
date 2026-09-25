@@ -62,21 +62,21 @@ export function WatchlistPanel({ onClose }: WatchlistPanelProps) {
           onChange={(_, value) => add(value)}
           getOptionLabel={(s) => `${s.exchange}:${s.ticker}`}
           isOptionEqualToValue={(a, b) => a.ticker === b.ticker && a.exchange === b.exchange}
-          renderOption={(props, s) => {
-            const { key, ...rest } = props;
-            return (
-              <li key={`${s.exchange}:${s.ticker}`} {...rest}>
-                <Box sx={{ display: "flex", flexDirection: "column" }}>
-                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                    {s.ticker}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {s.name} · {s.exchange}
-                  </Typography>
-                </Box>
-              </li>
-            );
-          }}
+          renderOption={(props, s) => (
+            <li
+              {...props}
+              key={`${s.exchange}:${s.ticker}`}
+            >
+              <Box sx={{ display: "flex", flexDirection: "column" }}>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  {s.ticker}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {s.name} · {s.exchange}
+                </Typography>
+              </Box>
+            </li>
+          )}
           renderInput={(params) => <TextField {...params} placeholder="Add symbol…" />}
         />
       </Box>
