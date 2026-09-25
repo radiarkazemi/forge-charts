@@ -113,9 +113,8 @@ export class BarReplayController {
       selecting: true,
     });
 
-    // Do NOT resetData here — it cancels requestSelectBar. Live ticks are muted
-    // via datafeed.beginReplay(); cutoff + reload happen after the bar is picked.
-    await this.selectBar();
+    // Fire-and-forget so the toolbar paints before the picker blocks.
+    void this.selectBar();
   }
 
   /** Activate CL bar picker; on click, cut history at that bar. */
