@@ -234,28 +234,28 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         }
       });
 
-      if (isPrimary) {
-        void widget.headerReady().then(() => {
-          if (cancelled || !widget) return;
-          const api = mountHeaderToolbar(widget, {
-            onCreateAlert,
-            onToggleTheme,
-            onOpenAlertsPanel,
-            onOpenWatchlist,
-            onOpenObjectTree,
-            onOpenProfile,
-            onEnterBarReplay,
-            onSetChartLayout,
-            onToggleLayoutSync,
-            getLayoutSync,
-            getLastPrice,
-            getProfile,
-            themeLabel: initial.theme === "dark" ? "Dark" : "Light",
-            alertCount: initial.alertCount,
-          });
-          onHeaderReady(api);
+      // Primary: full Forge header. Secondary: layout + sync menu (both sides).
+      void widget.headerReady().then(() => {
+        if (cancelled || !widget) return;
+        const api = mountHeaderToolbar(widget, {
+          onCreateAlert,
+          onToggleTheme,
+          onOpenAlertsPanel,
+          onOpenWatchlist,
+          onOpenObjectTree,
+          onOpenProfile,
+          onEnterBarReplay,
+          onSetChartLayout,
+          onToggleLayoutSync,
+          getLayoutSync,
+          getLastPrice,
+          getProfile,
+          themeLabel: initial.theme === "dark" ? "Dark" : "Light",
+          alertCount: initial.alertCount,
+          compact: !isPrimary,
         });
-      }
+        if (isPrimary) onHeaderReady(api);
+      });
     };
 
     loadChartingLibrary(libraryPath)

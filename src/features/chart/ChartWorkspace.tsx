@@ -13,11 +13,7 @@ interface ChartWorkspaceProps {
 
 /**
  * TradingView-style multi-chart workspace.
- * Panes stay mounted (stable keys) so changing layout only updates the CSS grid —
- * widgets are not closed / re-created.
- *
- * Active pane gets a blue focus ring (TV sample). Drawings sync across panes
- * by absolute time/price so a 4H trend line maps onto the matching 15m candles.
+ * Active pane: blue ring + star badge. Drawings sync by absolute time/price.
  */
 export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceProps) {
   const { settings } = useServices();
@@ -43,7 +39,6 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
 
   useEffect(() => {
     layoutSyncBus.setActiveCount(grid.count);
-    // Reflow after CSS grid / visibility changes so iframes pick up new size.
     const t1 = window.setTimeout(() => layoutSyncBus.reflowVisible(), 50);
     const t2 = window.setTimeout(() => layoutSyncBus.reflowVisible(), 250);
     return () => {
@@ -92,6 +87,27 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
               bgcolor: "background.default",
             }}
           >
+            {isActive ? (
+              <Box
+                aria-hidden
+                title="Active chart"
+                sx={{
+                  position: "absolute",
+                  left: 10,
+                  bottom: 36,
+                  zIndex: 5,
+                  width: 18,
+                  height: 18,
+                  pointerEvents: "none",
+                  color: "#2962FF",
+                  filter: "drop-shadow(0 0 2px rgba(0,0,0,0.6))",
+                }}
+              >
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                  <path d="M12 2.5l2.9 6.1 6.7.9-4.9 4.6 1.3 6.6L12 17.8 5.9 20.7l1.3-6.6L2.4 9.5l6.7-.9L12 2.5z" />
+                </svg>
+              </Box>
+            ) : null}
             <TradingViewChart
               onCreateAlert={onCreateAlert}
               onOpenProfile={onOpenProfile}

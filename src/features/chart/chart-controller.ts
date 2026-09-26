@@ -70,6 +70,8 @@ export class ChartController {
   private orcaEntityIds: EntityId[] = [];
   private readonly drawingHandlers = new Set<(entityId: EntityId, eventType: string) => void>();
   private drawingBridge: ((entityId: EntityId, eventType: string) => void) | null = null;
+  private readonly mouseDownHandlers = new Set<() => void>();
+  private mouseDownBridge: (() => void) | null = null;
 
   constructor(symbol: string, interval: Interval) {
     this.state = createStore<ChartState>({ symbol, interval, ready: false, error: null });
@@ -134,8 +136,9 @@ export class ChartController {
 
     if (this.desiredTheme && this.desiredTheme !== widget.getTheme()) void this.applyTheme(this.desiredTheme);
 
-    // Bind drawing_event bridge (handlers may have registered before attach).
+    // Bind drawing_event + mouse_down bridges (handlers may register before attach).
     this.bindDrawingBridge(widget);
+    this.bindMouseDownBridge(widget);
   }
 
   private bindDrawingBridge(widget: IChartingLibraryWidget): void {
@@ -164,6 +167,32 @@ export class ChartController {
     }
   }
 
+  private bindMouseDownBridge(widget: IChartingLibraryWidget): void {
+    if (this.mouseDownBridge) {
+      try {
+        widget.unsubscribe("mouse_down", this.mouseDownBridge);
+      } catch {
+        /* ignore */
+      }
+      this.mouseDownBridge = null;
+    }
+    const bridge = () => {
+      for (const handler of this.mouseDownHandlers) {
+        try {
+          handler();
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+    try {
+      widget.subscribe("mouse_down", bridge);
+      this.mouseDownBridge = bridge;
+    } catch {
+      this.mouseDownBridge = null;
+    }
+  }
+
   detach(): void {
     cancelAnimationFrame(this.crosshairFrame);
     if (this.widget && this.drawingBridge) {
@@ -173,7 +202,15 @@ export class ChartController {
         /* ignore */
       }
     }
+    if (this.widget && this.mouseDownBridge) {
+      try {
+        this.widget.unsubscribe("mouse_down", this.mouseDownBridge);
+      } catch {
+        /* ignore */
+      }
+    }
     this.drawingBridge = null;
+    this.mouseDownBridge = null;
     this.widget = null;
     this.patch({ ready: false });
   }
@@ -415,6 +452,17 @@ export class ChartController {
     }
     return () => {
       this.drawingHandlers.delete(handler);
+    };
+  }
+
+  /** Clicks inside the chart iframe (for active-pane selection). */
+  onMouseDown(handler: () => void): () => void {
+    this.mouseDownHandlers.add(handler);
+    if (this.widget && !this.mouseDownBridge) {
+      this.bindMouseDownBridge(this.widget);
+    }
+    return () => {
+      this.mouseDownHandlers.delete(handler);
     };
   }
 

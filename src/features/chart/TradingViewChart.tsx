@@ -86,7 +86,13 @@ export function TradingViewChart({
     return controller.onSelectedLineToolChanged(sync);
   }, [controller, isPrimary, paneIndex, ready]);
 
-  // Click / touch on any pane focuses it and applies the shared drawing tool.
+  // After a pane is ready, seed drawings from the primary onto new panes.
+  useEffect(() => {
+    if (!ready) return;
+    layoutSyncBus.notifyPaneReady(paneIndex);
+  }, [paneIndex, ready]);
+
+  // Click / touch on any pane focuses it (React shell — iframe uses mouse_down too).
   useEffect(() => {
     const el = containerRef.current;
     if (!el || !ready) return;

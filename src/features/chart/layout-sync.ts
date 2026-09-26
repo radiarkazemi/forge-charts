@@ -5,7 +5,8 @@ import {
   applyShapeSnapshot,
   createShapeFromSnapshot,
   normalizeShapeName,
-  readShapeSnapshot,
+  readAllShapeSnapshots,
+  readShapeSnapshotRetry,
 } from "./drawing-sync";
 
 export interface LayoutSyncFlags {
@@ -19,14 +20,11 @@ export interface LayoutSyncFlags {
 }
 
 export const DEFAULT_LAYOUT_SYNC: LayoutSyncFlags = {
-  // Same ticker on every pane (TV multi-chart default for linked layouts).
   symbol: true,
-  // Independent intervals so 15m + 4H can sit side by side.
   interval: false,
   crosshair: false,
   time: false,
   dateRange: false,
-  // Drawings share absolute time/price across panes (TV behavior in the sample).
   drawings: true,
 };
 
@@ -34,21 +32,20 @@ interface PaneEntry {
   readonly index: number;
   readonly controller: ChartController;
   unsubDrawing?: () => void;
+  unsubMouse?: () => void;
 }
 
-/** One logical drawing mirrored onto N panes. */
 interface DrawingGroup {
   readonly key: string;
-  /** paneIndex → entity id on that widget */
   readonly entities: Map<number, EntityId>;
 }
 
 /**
- * Coordinates multi-pane Advanced Charts widgets:
- * - SYNC IN LAYOUT (symbol / interval / range)
- * - Shared drawing tool from the primary left toolbar
- * - Drawing sync by absolute time + price (cross-timeframe)
- * - Active pane selection for TV-style blue focus ring
+ * Multi-pane coordination matching TradingView linked layouts:
+ * - blue active pane (mouse_down inside each CL iframe)
+ * - one shared drawing tool from primary toolbar
+ * - drawings synced by absolute time/price both ways
+ * - seed existing drawings onto newly visible panes
  */
 class LayoutSyncBus {
   private readonly panes = new Map<number, PaneEntry>();
@@ -62,11 +59,16 @@ class LayoutSyncBus {
   private readonly groups: DrawingGroup[] = [];
   private readonly entityToGroup = new Map<string, DrawingGroup>();
   private readonly activeListeners = new Set<(paneIndex: number) => void>();
-  /** Last non-toolbar drawing target — restored after picking a tool on pane 0. */
   private drawTargetPane = 0;
+  private seedTimer = 0;
 
   setFlags(flags: LayoutSyncFlags): void {
-    this.flags = { ...DEFAULT_LAYOUT_SYNC, ...flags };
+    // Always keep drawings ON unless the user explicitly turns them off.
+    this.flags = {
+      ...DEFAULT_LAYOUT_SYNC,
+      ...flags,
+      drawings: flags.drawings !== false,
+    };
   }
 
   getFlags(): LayoutSyncFlags {
@@ -74,9 +76,13 @@ class LayoutSyncBus {
   }
 
   setActiveCount(count: number): void {
+    const prev = this.activeCount;
     this.activeCount = Math.max(1, count);
     if (this.activePane >= this.activeCount) {
       this.focusPane(0);
+    }
+    if (this.activeCount > prev) {
+      this.scheduleSeedFromPrimary();
     }
   }
 
@@ -88,7 +94,6 @@ class LayoutSyncBus {
     return this.sharedTool;
   }
 
-  /** React / UI: blue focus ring around the active chart. */
   subscribeActivePane(listener: (paneIndex: number) => void): () => void {
     this.activeListeners.add(listener);
     listener(this.activePane);
@@ -98,22 +103,38 @@ class LayoutSyncBus {
   register(index: number, controller: ChartController): () => void {
     const prev = this.panes.get(index);
     prev?.unsubDrawing?.();
+    prev?.unsubMouse?.();
     const entry: PaneEntry = { index, controller };
     entry.unsubDrawing = controller.onDrawingEvent((entityId, eventType) => {
       void this.onDrawingEvent(index, entityId, eventType);
     });
+    // Clicks inside the CL iframe never bubble to React — use library mouse_down.
+    entry.unsubMouse = controller.onMouseDown(() => {
+      this.focusPane(index);
+    });
     this.panes.set(index, entry);
+    if (controller.isReady && this.activeCount > 1) {
+      this.scheduleSeedFromPrimary();
+    }
     return () => {
       const cur = this.panes.get(index);
       if (cur?.controller === controller) {
         cur.unsubDrawing?.();
+        cur.unsubMouse?.();
         this.panes.delete(index);
         this.pruneGroupsForPane(index);
       }
     };
   }
 
-  /** After CSS layout changes, ask visible panes to reflow. */
+  /** Call when a pane's widget becomes ready so we can seed drawings. */
+  notifyPaneReady(paneIndex: number): void {
+    void paneIndex;
+    if (this.activeCount > 1 && this.flags.drawings) {
+      this.scheduleSeedFromPrimary();
+    }
+  }
+
   reflowVisible(): void {
     for (const { index, controller } of this.panes.values()) {
       if (index >= this.activeCount) continue;
@@ -121,17 +142,14 @@ class LayoutSyncBus {
     }
   }
 
-  /**
-   * Primary toolbar selected a tool — remember it and push onto the focused
-   * drawing target (so a 4H pane stays active after you pick Trend Line).
-   */
   notifyToolSelected(sourceIndex: number, tool: string | null): void {
     if (this.applyingTool) return;
     if (sourceIndex !== 0) return;
     this.sharedTool = tool;
-    const target = this.drawTargetPane > 0 && this.drawTargetPane < this.activeCount
-      ? this.drawTargetPane
-      : this.activePane;
+    const target =
+      this.drawTargetPane > 0 && this.drawTargetPane < this.activeCount
+        ? this.drawTargetPane
+        : this.activePane;
     if (target > 0 && tool) {
       this.activePane = target;
       this.emitActive();
@@ -139,14 +157,12 @@ class LayoutSyncBus {
     }
   }
 
-  /**
-   * User focused a chart pane. Make it the drawing target and apply the shared tool.
-   */
   focusPane(paneIndex: number): void {
     if (paneIndex < 0 || paneIndex >= this.activeCount) return;
+    const changed = this.activePane !== paneIndex;
     this.activePane = paneIndex;
     this.drawTargetPane = paneIndex;
-    this.emitActive();
+    if (changed) this.emitActive();
     const tool = this.sharedTool;
     if (tool && paneIndex > 0) {
       void this.applyToolToPane(paneIndex, tool);
@@ -211,6 +227,61 @@ class LayoutSyncBus {
     void time;
   }
 
+  private scheduleSeedFromPrimary(): void {
+    window.clearTimeout(this.seedTimer);
+    this.seedTimer = window.setTimeout(() => {
+      void this.seedDrawingsFromPane(0);
+    }, 350);
+  }
+
+  /** Copy every drawing on `sourceIndex` onto other visible panes (first open / join). */
+  private async seedDrawingsFromPane(sourceIndex: number): Promise<void> {
+    if (!this.flags.drawings || this.syncingDrawings) return;
+    if (this.activeCount < 2) return;
+    const source = this.panes.get(sourceIndex);
+    if (!source?.controller.isReady) return;
+    const chart = source.controller.getWidget()?.activeChart();
+    if (!chart) return;
+
+    const snaps = readAllShapeSnapshots(chart);
+    if (snaps.length === 0) return;
+
+    this.syncingDrawings = true;
+    try {
+      const sourceSymbol = this.normalizeSymbol(source.controller.state.get().symbol);
+      for (const { id, snap } of snaps) {
+        let group = this.entityToGroup.get(String(id));
+        if (!group) {
+          group = {
+            key: `seed-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            entities: new Map([[sourceIndex, id]]),
+          };
+          this.entityToGroup.set(String(id), group);
+          this.groups.push(group);
+        } else {
+          group.entities.set(sourceIndex, id);
+        }
+
+        for (const { index, controller } of this.panes.values()) {
+          if (index === sourceIndex || index >= this.activeCount) continue;
+          if (!controller.isReady) continue;
+          const destSymbol = this.normalizeSymbol(controller.state.get().symbol);
+          if (sourceSymbol && destSymbol && sourceSymbol !== destSymbol) continue;
+          if (group.entities.has(index)) continue;
+          const destChart = controller.getWidget()?.activeChart();
+          if (!destChart) continue;
+          const created = await createShapeFromSnapshot(destChart, snap);
+          if (created) {
+            group.entities.set(index, created);
+            this.entityToGroup.set(String(created), group);
+          }
+        }
+      }
+    } finally {
+      this.syncingDrawings = false;
+    }
+  }
+
   private async onDrawingEvent(
     paneIndex: number,
     entityId: EntityId,
@@ -232,7 +303,8 @@ class LayoutSyncBus {
           this.panes.get(p)?.controller.removeEntity(eid);
           this.entityToGroup.delete(String(eid));
         }
-        this.groups.splice(this.groups.indexOf(group), 1);
+        const gi = this.groups.indexOf(group);
+        if (gi >= 0) this.groups.splice(gi, 1);
         group.entities.clear();
         this.entityToGroup.delete(idKey);
       } finally {
@@ -250,34 +322,31 @@ class LayoutSyncBus {
       return;
     }
 
+    // Selecting a drawing also focuses that pane.
+    this.focusPane(paneIndex);
+
     const source = this.panes.get(paneIndex);
     if (!source?.controller.isReady) return;
     const chart = source.controller.getWidget()?.activeChart();
     if (!chart) return;
 
-    // Small delay so CL finishes writing points on create
-    if (eventType === "create") {
-      await new Promise((r) => window.setTimeout(r, 40));
-    }
-
-    const snapRaw = readShapeSnapshot(chart, entityId);
-    if (!snapRaw) return;
     const toolHint =
       normalizeShapeName(source.controller.selectedLineTool()) ??
       normalizeShapeName(this.sharedTool);
-    const snap =
-      toolHint && (snapRaw.shape === "trend_line" || snapRaw.shape === "horizontal_line")
-        ? { ...snapRaw, shape: toolHint }
-        : snapRaw;
+
+    const snap = await readShapeSnapshotRetry(chart, entityId, toolHint);
+    if (!snap) return;
 
     let group = this.entityToGroup.get(idKey);
-    if (!group && eventType === "create") {
-      group = { key: `draw-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, entities: new Map() };
-      group.entities.set(paneIndex, entityId);
-      this.entityToGroup.set(idKey, group);
+    if (!group) {
+      group = {
+        key: `draw-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        entities: new Map(),
+      };
       this.groups.push(group);
     }
-    if (!group) return;
+    group.entities.set(paneIndex, entityId);
+    this.entityToGroup.set(idKey, group);
 
     this.syncingDrawings = true;
     try {
@@ -285,7 +354,6 @@ class LayoutSyncBus {
       for (const { index, controller } of this.panes.values()) {
         if (index === paneIndex || index >= this.activeCount) continue;
         if (!controller.isReady) continue;
-        // Only mirror onto panes showing the same symbol
         const destSymbol = this.normalizeSymbol(controller.state.get().symbol);
         if (sourceSymbol && destSymbol && sourceSymbol !== destSymbol) continue;
 
@@ -310,7 +378,7 @@ class LayoutSyncBus {
 
   private normalizeSymbol(symbol: string): string {
     if (!symbol) return "";
-    return symbol.includes(":") ? symbol.slice(symbol.lastIndexOf(":") + 1) : symbol;
+    return (symbol.includes(":") ? symbol.slice(symbol.lastIndexOf(":") + 1) : symbol).toUpperCase();
   }
 
   private pruneGroupsForPane(paneIndex: number): void {

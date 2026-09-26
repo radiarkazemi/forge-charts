@@ -12,6 +12,28 @@ export interface ShapeSnapshot {
   readonly text?: string;
 }
 
+/** Shapes that Charting Library creates with a single point via createShape. */
+const SINGLE_POINT_SHAPES = new Set([
+  "horizontal_line",
+  "vertical_line",
+  "cross_line",
+  "horizontal_ray",
+  "arrow_up",
+  "arrow_down",
+  "flag",
+  "icon",
+  "emoji",
+  "sticker",
+  "text",
+  "anchored_text",
+  "note",
+  "anchored_note",
+  "price_label",
+  "price_note",
+  "long_position",
+  "short_position",
+]);
+
 /** Map Charting Library entity / LineTool names → createMultipointShape ids. */
 const SHAPE_ALIASES: Record<string, string> = {
   trend_line: "trend_line",
@@ -93,47 +115,73 @@ export function normalizeShapeName(raw: string | null | undefined): string | nul
   if (SHAPE_ALIASES[key]) return SHAPE_ALIASES[key]!;
   const stripped = key.replace(/^linetool/, "");
   if (SHAPE_ALIASES[stripped]) return SHAPE_ALIASES[stripped]!;
-  // Already a SupportedLineTools-style id
   if (/^[a-z0-9_]+$/.test(key) && key.length > 2) return key;
   return null;
 }
 
+function chartFallbackTime(chart: IChartWidgetApi): number {
+  try {
+    const range = chart.getVisibleRange();
+    if (range && Number.isFinite(range.to)) return Math.floor(range.to);
+  } catch {
+    /* ignore */
+  }
+  return Math.floor(Date.now() / 1000);
+}
+
 function sanitizePoints(
   points: ReadonlyArray<{ time?: number; price?: number; channel?: string }>,
+  fallbackTime: number,
 ): Array<{ time: number; price: number }> {
   const out: Array<{ time: number; price: number }> = [];
   for (const p of points) {
-    const time = Number(p.time);
     const price = Number(p.price);
-    if (!Number.isFinite(time) || !Number.isFinite(price)) continue;
+    if (!Number.isFinite(price)) continue;
+    let time = Number(p.time);
+    if (!Number.isFinite(time) || time <= 0) time = fallbackTime;
     out.push({ time: time > 1e12 ? Math.floor(time / 1000) : Math.floor(time), price });
   }
   return out;
 }
 
-/** Flatten getProperties() into createMultipointShape overrides (drop nested junk). */
 function sanitizeOverrides(props: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(props)) {
     if (v == null) continue;
     if (typeof v === "object" && !Array.isArray(v)) continue;
     if (typeof v === "function") continue;
-    // Skip internal / huge fields
     if (/^(symbol|interval|state|points)/i.test(k)) continue;
     out[k] = v;
   }
   return out;
 }
 
-export function readShapeSnapshot(chart: IChartWidgetApi, entityId: EntityId): ShapeSnapshot | null {
+export function readShapeSnapshot(
+  chart: IChartWidgetApi,
+  entityId: EntityId,
+  preferredShape?: string | null,
+): ShapeSnapshot | null {
   try {
     const shapeApi = chart.getShapeById(entityId);
-    const points = sanitizePoints(shapeApi.getPoints() as Array<{ time?: number; price?: number }>);
-    if (points.length === 0) return null;
+    const fallbackTime = chartFallbackTime(chart);
+    let points = sanitizePoints(
+      shapeApi.getPoints() as Array<{ time?: number; price?: number }>,
+      fallbackTime,
+    );
     const props = (shapeApi.getProperties() ?? {}) as Record<string, unknown>;
+    // Some tools (esp. horizontal line mid-create) expose price only via properties.
+    if (points.length === 0) {
+      const price = Number(props.price ?? props.level ?? props.linePrice);
+      if (Number.isFinite(price)) {
+        points = [{ time: fallbackTime, price }];
+      }
+    }
+    if (points.length === 0) return null;
+
     const all = chart.getAllShapes();
     const info = all.find((s) => s.id === entityId);
     const shape =
+      normalizeShapeName(preferredShape) ??
       normalizeShapeName(info?.name) ??
       normalizeShapeName(typeof props.toolName === "string" ? props.toolName : null) ??
       normalizeShapeName(typeof props.name === "string" ? props.name : null) ??
@@ -150,26 +198,65 @@ export function readShapeSnapshot(chart: IChartWidgetApi, entityId: EntityId): S
   }
 }
 
+/** Snapshot every drawable on a chart (for seeding a newly opened pane). */
+export function readAllShapeSnapshots(chart: IChartWidgetApi): Array<{ id: EntityId; snap: ShapeSnapshot }> {
+  const out: Array<{ id: EntityId; snap: ShapeSnapshot }> = [];
+  try {
+    for (const info of chart.getAllShapes()) {
+      const snap = readShapeSnapshot(chart, info.id, info.name);
+      if (snap) out.push({ id: info.id, snap });
+    }
+  } catch {
+    /* ignore */
+  }
+  return out;
+}
+
 export async function createShapeFromSnapshot(
   chart: IChartWidgetApi,
   snap: ShapeSnapshot,
 ): Promise<EntityId | null> {
+  const overrides = snap.overrides as never;
+  const useSingle =
+    SINGLE_POINT_SHAPES.has(snap.shape) || (snap.points.length === 1 && snap.shape === "horizontal_line");
+
+  if (useSingle) {
+    const p = snap.points[0]!;
+    try {
+      const id = await chart.createShape(
+        { time: p.time, price: p.price },
+        {
+          shape: snap.shape as never,
+          text: snap.text,
+          disableUndo: true,
+          overrides,
+        },
+      );
+      if (id) return id;
+    } catch {
+      /* fall through */
+    }
+  }
+
   try {
     const id = await chart.createMultipointShape([...snap.points], {
       shape: snap.shape as never,
       text: snap.text,
       disableUndo: true,
-      overrides: snap.overrides as never,
+      overrides,
     });
     return id ?? null;
   } catch {
-    // Fallback: trend_line if shape id rejected
     try {
-      const id = await chart.createMultipointShape([...snap.points], {
-        shape: "trend_line",
-        disableUndo: true,
-        overrides: snap.overrides as never,
-      });
+      const p = snap.points[0]!;
+      const id = await chart.createShape(
+        { time: p.time, price: p.price },
+        {
+          shape: "horizontal_line",
+          disableUndo: true,
+          overrides,
+        },
+      );
       return id ?? null;
     } catch {
       return null;
@@ -187,4 +274,20 @@ export function applyShapeSnapshot(chart: IChartWidgetApi, entityId: EntityId, s
   } catch {
     /* gone */
   }
+}
+
+/** Retry reading a shape until points exist (CL often fires create before points settle). */
+export async function readShapeSnapshotRetry(
+  chart: IChartWidgetApi,
+  entityId: EntityId,
+  preferredShape?: string | null,
+  attempts = 8,
+  delayMs = 60,
+): Promise<ShapeSnapshot | null> {
+  for (let i = 0; i < attempts; i += 1) {
+    const snap = readShapeSnapshot(chart, entityId, preferredShape);
+    if (snap && snap.points.length > 0) return snap;
+    await new Promise((r) => window.setTimeout(r, delayMs));
+  }
+  return readShapeSnapshot(chart, entityId, preferredShape);
 }

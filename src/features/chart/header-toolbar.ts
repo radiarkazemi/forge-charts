@@ -36,6 +36,11 @@ export interface HeaderToolbarHandlers {
   readonly getProfile: () => UserProfile;
   readonly themeLabel: string;
   readonly alertCount: number;
+  /**
+   * Secondary panes: only Select Layout + Sync-in-layout (options on both sides).
+   * Primary keeps the full Forge header chrome.
+   */
+  readonly compact?: boolean;
 }
 
 export interface HeaderToolbarApi {
@@ -97,22 +102,6 @@ export function mountHeaderToolbar(
   widget: IChartingLibraryWidget,
   handlers: HeaderToolbarHandlers,
 ): HeaderToolbarApi {
-  widget.createButton({
-    align: "left",
-    useTradingViewStyle: true,
-    text: "Alert",
-    title: "Create a price alert",
-    onClick: () => handlers.onCreateAlert(),
-  });
-
-  widget.createButton({
-    align: "left",
-    useTradingViewStyle: true,
-    text: "Replay",
-    title: "Bar Replay — select a bar and play history forward",
-    onClick: () => handlers.onEnterBarReplay(),
-  });
-
   type DropdownApi = { applyOptions: (o: { items: ReturnType<typeof buildLayoutMenuItems> }) => void };
   let layoutDropdown: DropdownApi | null = null;
   const refreshLayoutMenu = () => {
@@ -133,6 +122,42 @@ export function mountHeaderToolbar(
       window.setTimeout(refreshLayoutMenu, 0);
     },
   };
+
+  // Secondary panes get the same Select Layout + Sync menu (options on both sides).
+  if (handlers.compact) {
+    void widget
+      .createDropdown({
+        title: " ",
+        tooltip: "Select layout / Sync in layout",
+        align: "right",
+        icon: LAYOUT_GRID_ICON,
+        items: buildLayoutMenuItems(wrapped),
+      })
+      .then((api) => {
+        layoutDropdown = api as DropdownApi;
+      });
+    return {
+      updateProfile: () => {
+        /* no avatar on secondary panes */
+      },
+    };
+  }
+
+  widget.createButton({
+    align: "left",
+    useTradingViewStyle: true,
+    text: "Alert",
+    title: "Create a price alert",
+    onClick: () => handlers.onCreateAlert(),
+  });
+
+  widget.createButton({
+    align: "left",
+    useTradingViewStyle: true,
+    text: "Replay",
+    title: "Bar Replay — select a bar and play history forward",
+    onClick: () => handlers.onEnterBarReplay(),
+  });
 
   void widget.createDropdown({
     title: "Trade",
