@@ -99,12 +99,16 @@ export async function activateDealingRange(widget: IChartingLibraryWidget): Prom
   }
 }
 
+/**
+ * Monochrome TV-style icon (28×28, fill=currentColor) — Premium / EQ / Discount
+ * bands as horizontal lines with endpoint nodes, matching Fib Retracement language.
+ */
 const DEALING_RANGE_ICON =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="18" height="18"><rect x="4" y="5" width="20" height="8" rx="1" fill="#ef5350" opacity="0.45"/><rect x="4" y="13" width="20" height="8" rx="1" fill="#26a69a" opacity="0.45"/><path d="M4 14h20" stroke="#ff9800" stroke-width="1.5"/><path d="M4 5h20M4 21h20" stroke="currentColor" stroke-width="1.2"/></svg>';
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28"><g fill="currentColor" fill-rule="nonzero"><path d="M3 6h22v-1H3z"/><path d="M3 14h22v-1H3z"/><path d="M3 22h22v-1H3z"/><path d="M3 6v15h1V6z"/><path d="M3.5 23a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm0 1a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/><path d="M24.5 7a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm0 1a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/><path d="M24.5 15a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm0 1a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></g></svg>';
 
 /**
  * Inject "Dealing Range" under Pitchfan in the Fibonacci flyout (CL has no API for this).
- * Best-effort DOM patch inside the chart iframe.
+ * Best-effort DOM patch inside the chart iframe — clones a native row so icon/theme match.
  */
 export function mountDealingRangeFlyoutInjector(
   container: HTMLElement,
@@ -119,53 +123,76 @@ export function mountDealingRangeFlyoutInjector(
     // Already injected?
     if (doc.querySelector("[data-forge-dealing-range]")) return;
 
-    // Find Pitchfan row by visible text.
-    const candidates = Array.from(doc.querySelectorAll("div,span,button,a,li"));
-    const pitchfan = candidates.find((el) => {
-      const t = (el.textContent ?? "").trim();
-      return t === "Pitchfan" || t.startsWith("Pitchfan");
-    });
-    if (!pitchfan) return;
+    // Prefer the native Pitchfan menuitem (correct classes + icon wrapper).
+    const pitchfanRow =
+      (doc.querySelector('[data-name="LineToolPitchfan"]') as HTMLElement | null) ??
+      (() => {
+        const label = Array.from(doc.querySelectorAll("div,span,button,a,li")).find((el) => {
+          const t = (el.textContent ?? "").trim();
+          return t === "Pitchfan" || t.startsWith("Pitchfan");
+        });
+        if (!label) return null;
+        let row: HTMLElement | null = label as HTMLElement;
+        for (let i = 0; i < 6 && row; i += 1) {
+          if (row.getAttribute("data-role") === "menuitem" || row.getAttribute("role") === "menuitem") {
+            return row;
+          }
+          if ((row.textContent ?? "").includes("Pitchfan") && row.querySelector("svg") && row.childElementCount <= 6) {
+            return row;
+          }
+          row = row.parentElement;
+        }
+        return row;
+      })();
+    if (!pitchfanRow || !pitchfanRow.parentElement) return;
 
-    // Climb to a list-item-ish row.
-    let row: HTMLElement | null = pitchfan as HTMLElement;
-    for (let i = 0; i < 6 && row; i += 1) {
-      const parent: HTMLElement | null = row.parentElement;
-      if (!parent) break;
-      if (parent.childElementCount >= 2 && parent !== doc.body) {
-        // Prefer the row that only contains this tool label.
-        if ((row.textContent ?? "").includes("Pitchfan") && row.childElementCount <= 6) break;
-      }
-      row = parent;
-    }
-    if (!row || !row.parentElement) return;
-
-    const item = doc.createElement("div");
+    const item = pitchfanRow.cloneNode(true) as HTMLElement;
     item.setAttribute("data-forge-dealing-range", "1");
-    item.setAttribute("role", "menuitem");
-    item.style.cssText =
-      "display:flex;align-items:center;gap:10px;padding:6px 12px;cursor:pointer;color:inherit;font:inherit;user-select:none;";
-    item.innerHTML = `${DEALING_RANGE_ICON}<span>Dealing Range</span>`;
-    item.addEventListener("mouseenter", () => {
-      item.style.background = "rgba(255,255,255,0.06)";
-    });
-    item.addEventListener("mouseleave", () => {
-      item.style.background = "transparent";
-    });
-    item.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      onActivate();
-      // Close open menus by clicking elsewhere.
-      try {
-        doc.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-      } catch {
-        /* ignore */
-      }
-    });
+    item.setAttribute("data-name", "ForgeDealingRange");
+    item.removeAttribute("data-tooltip");
+    item.removeAttribute("aria-keyshortcuts");
 
-    if (row.nextSibling) row.parentElement.insertBefore(item, row.nextSibling);
-    else row.parentElement.appendChild(item);
+    const iconHost = item.querySelector(".icon-jFqVJoPk, [class*='icon-']") ?? item.querySelector("svg")?.parentElement;
+    if (iconHost) {
+      iconHost.innerHTML = DEALING_RANGE_ICON;
+    } else {
+      const svg = item.querySelector("svg");
+      if (svg) svg.outerHTML = DEALING_RANGE_ICON;
+    }
+
+    // Replace label text while keeping hotkey / layout spans intact when present.
+    const walker = doc.createTreeWalker(item, NodeFilter.SHOW_TEXT);
+    let replaced = false;
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const value = node.textContent ?? "";
+      if (value.includes("Pitchfan")) {
+        node.textContent = value.replace(/Pitchfan/g, "Dealing Range");
+        replaced = true;
+        break;
+      }
+    }
+    if (!replaced) {
+      item.appendChild(doc.createTextNode("Dealing Range"));
+    }
+
+    item.addEventListener(
+      "click",
+      (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        onActivate();
+        try {
+          doc.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+        } catch {
+          /* ignore */
+        }
+      },
+      true,
+    );
+
+    if (pitchfanRow.nextSibling) pitchfanRow.parentElement.insertBefore(item, pitchfanRow.nextSibling);
+    else pitchfanRow.parentElement.appendChild(item);
   };
 
   const watchDoc = (doc: Document) => {
