@@ -23,8 +23,8 @@ import {
   TV_DEFAULT_INDICATOR,
 } from "./pine-runner";
 
-const DRAFT_KEY = "forge.pine.draft.v3";
-const TITLE_KEY = "forge.pine.title.v3";
+const DRAFT_KEY = "forge.pine.draft.v4";
+const TITLE_KEY = "forge.pine.title.v4";
 
 interface PineEditorPanelProps {
   readonly onClose: () => void;
@@ -128,11 +128,31 @@ export function PineEditorPanel({ onClose, onOpenObjectTree, onRun }: PineEditor
       localStorage.setItem(DRAFT_KEY, code);
       localStorage.setItem(TITLE_KEY, title);
       setStatus("Script saved");
-      pushLog(`Saved “${title}” locally`);
+      pushLog(`Saved “${title}” (Forge cloud draft)`);
     } catch {
       setStatus("Save failed");
     }
   };
+
+  // TradingView: Ctrl/Cmd+S saves the Pine script — never the browser "Save page" dialog.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      if (!(e.ctrlKey || e.metaKey) || key !== "s") return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation?.();
+      handleSave();
+    };
+    // Capture so we beat Charting Library layout-save and the browser.
+    window.addEventListener("keydown", onKey, true);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("keydown", onKey, true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- save latest code/title via closure each render is fine; rebind on change
+  }, [code, title]);
 
   const rename = () => {
     const next = window.prompt("Rename script", title);

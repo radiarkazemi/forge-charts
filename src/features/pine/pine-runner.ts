@@ -1,12 +1,15 @@
 /**
  * Pine Script bridge + starter templates (TradingView Pine Editor defaults).
- * Charting Library cannot compile Pine; supported drafts map onto built-in studies.
+ * Charting Library createStudy inputs MUST be a Record, not an array.
  */
+
+export type PineStudyInputs = Record<string, string | number | boolean>;
 
 export interface PineStudyRequest {
   readonly studyName: string;
   readonly forceOverlay: boolean;
-  readonly inputs: readonly (number | string)[];
+  readonly inputs: PineStudyInputs;
+  readonly overrides?: Record<string, string | number | boolean>;
   readonly label: string;
 }
 
@@ -30,7 +33,8 @@ export function resolvePineStudy(code: string): PineStudyRequest {
     return {
       studyName: "MACD",
       forceOverlay: false,
-      inputs: [12, 26, "close", 9],
+      // CL example: in_0=fast, in_1=slow, in_3=source, in_2=signal
+      inputs: { in_0: 12, in_1: 26, in_3: "close", in_2: 9 },
       label: "MACD",
     };
   }
@@ -39,7 +43,7 @@ export function resolvePineStudy(code: string): PineStudyRequest {
     return {
       studyName: "Relative Strength Index",
       forceOverlay: false,
-      inputs: [length, "close"],
+      inputs: { length, source: "close" },
       label: `RSI (${length})`,
     };
   }
@@ -47,27 +51,30 @@ export function resolvePineStudy(code: string): PineStudyRequest {
   if (/\bta\.ema\b/.test(lower) || /\bema\b/.test(lower)) {
     return {
       studyName: "Moving Average Exponential",
-      forceOverlay: true,
-      inputs: [length, "close"],
+      forceOverlay: false,
+      inputs: { length, source: "close" },
+      overrides: { "plot.color": "#FF6D00", "plot.linewidth": 2 },
       label: `EMA (${length})`,
     };
   }
 
-  if (/\bta\.sma\b/.test(lower) || /\bsma\b/.test(lower)) {
+  if (/\bta\.sma\b/.test(lower) || /\bsma\b/.test(lower) || /\bmoving average\b/.test(lower)) {
     return {
       studyName: "Moving Average",
-      forceOverlay: true,
-      inputs: [length, "close"],
+      forceOverlay: false,
+      inputs: { length, source: "close" },
+      overrides: { "plot.color": "#2962FF", "plot.linewidth": 2 },
       label: `SMA (${length})`,
     };
   }
 
-  // TradingView default `plot(close)` — show close as MA(1)-like overlay via MA
+  // TV blank `plot(close)` — add a visible SMA 14 so the chart clearly updates.
   return {
     studyName: "Moving Average",
-    forceOverlay: true,
-    inputs: [1, "close"],
-    label: "Close plot (MA 1)",
+    forceOverlay: false,
+    inputs: { length: 14, source: "close" },
+    overrides: { "plot.color": "#2962FF", "plot.linewidth": 2 },
+    label: "SMA (14)",
   };
 }
 
@@ -76,8 +83,8 @@ export const TV_DEFAULT_INDICATOR = `// This Pine Script® code is subject to th
 // © Forge
 
 //@version=6
-indicator("My script")
-plot(close)
+indicator("My script", overlay=true)
+plot(ta.sma(close, 14), "SMA 14", color=color.new(#2962FF, 0), linewidth=2)
 `;
 
 /** First-indicator tutorial MACD from Pine docs. */

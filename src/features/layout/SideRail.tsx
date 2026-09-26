@@ -19,6 +19,14 @@ import {
   WatchlistRailIcon,
 } from "./rail-icons";
 
+/** TradingView dark widget-bar colors */
+const RAIL_BG = "#131722";
+const RAIL_BORDER = "#2a2e39";
+const ICON_IDLE = "#D1D4DC";
+const ICON_ACTIVE = "#2962FF";
+const ICON_HOVER_BG = "rgba(209, 212, 220, 0.08)";
+const ICON_ACTIVE_BG = "rgba(41, 98, 255, 0.12)";
+
 interface SideRailProps {
   readonly active: SidePanelId | null;
   readonly onToggle: (id: SidePanelId) => void;
@@ -37,10 +45,6 @@ interface RailItem {
   readonly mobile?: boolean;
 }
 
-/**
- * TradingView Supercharts right widget bar order (dark theme):
- * Watchlist → Alerts → Object tree → Chats | Hotlists → Pine → Calendar → News → Notifications → Apps | Help
- */
 const ITEMS: readonly RailItem[] = [
   { id: "watchlist", label: "Watchlist, details, and news", icon: WatchlistRailIcon, group: "top", mobile: true },
   { id: "alerts", label: "Alerts", icon: AlertsRailIcon, group: "top", mobile: true },
@@ -62,7 +66,7 @@ const ITEMS: readonly RailItem[] = [
   },
 ];
 
-/** TradingView-style right icon rail. */
+/** TradingView dark-theme right icon rail. */
 export function SideRail({ active, onToggle, onOpenObjectTree, onOpenPine, compact = false }: SideRailProps) {
   const visible = compact ? ITEMS.filter((item) => item.mobile) : ITEMS;
   const top = visible.filter((i) => i.group === "top");
@@ -86,16 +90,34 @@ export function SideRail({ active, onToggle, onOpenObjectTree, onOpenPine, compa
           aria-label={item.label}
           aria-pressed={pressed}
           onClick={onClick}
+          disableRipple
           sx={{
-            width: 36,
-            height: 36,
-            color: pressed ? "primary.main" : "text.secondary",
-            bgcolor: pressed ? "action.selected" : "transparent",
-            borderRadius: 1,
-            "&:hover": { bgcolor: "action.hover", color: "text.primary" },
+            position: "relative",
+            width: 40,
+            height: 40,
+            color: pressed ? ICON_ACTIVE : ICON_IDLE,
+            bgcolor: pressed ? ICON_ACTIVE_BG : "transparent",
+            borderRadius: "4px",
+            "&:hover": {
+              bgcolor: pressed ? ICON_ACTIVE_BG : ICON_HOVER_BG,
+              color: pressed ? ICON_ACTIVE : "#FFFFFF",
+            },
+            // TV active indicator: thin blue bar on the left edge of the rail button
+            "&::before": pressed
+              ? {
+                  content: '""',
+                  position: "absolute",
+                  left: -6,
+                  top: 8,
+                  bottom: 8,
+                  width: 2,
+                  borderRadius: 1,
+                  bgcolor: ICON_ACTIVE,
+                }
+              : undefined,
           }}
         >
-          <Icon sx={{ fontSize: 22 }} />
+          <Icon sx={{ fontSize: 22, color: "inherit" }} />
         </IconButton>
       </Tooltip>
     );
@@ -106,14 +128,15 @@ export function SideRail({ active, onToggle, onOpenObjectTree, onOpenPine, compa
       component="nav"
       aria-label="Side panels"
       sx={{
-        width: compact ? 42 : 52,
+        width: compact ? 44 : 52,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        gap: 0.2,
-        py: 1,
-        bgcolor: "#131722",
-        borderLeft: "1px solid #2a2e39",
+        gap: 0.35,
+        py: 1.25,
+        px: 0.5,
+        bgcolor: RAIL_BG,
+        borderLeft: `1px solid ${RAIL_BORDER}`,
         flexShrink: 0,
         zIndex: 21,
       }}
@@ -121,13 +144,13 @@ export function SideRail({ active, onToggle, onOpenObjectTree, onOpenPine, compa
       {top.map(renderButton)}
       {!compact && mid.length > 0 ? (
         <>
-          <Box sx={{ flex: 1, minHeight: 28 }} />
+          <Box sx={{ flex: 1, minHeight: 32 }} />
           {mid.map(renderButton)}
         </>
       ) : (
         <Box sx={{ flex: 1 }} />
       )}
-      <Divider flexItem sx={{ my: 0.75, borderColor: "#2a2e39", width: "50%" }} />
+      <Divider flexItem sx={{ my: 0.75, borderColor: RAIL_BORDER, width: "48%" }} />
       {bottom.map(renderButton)}
     </Box>
   );

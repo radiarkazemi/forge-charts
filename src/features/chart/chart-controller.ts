@@ -253,25 +253,25 @@ export class ChartController {
 
   /**
    * Run a Pine draft by mapping it onto a built-in Charting Library study
-   * (SMA / EMA / RSI). Full Pine compilation is not available in CL embeds.
+   * (SMA / EMA / RSI / MACD). Inputs must be a Record (CL API), not an array.
    */
   async runPineDraft(code: string): Promise<{ ok: boolean; message: string }> {
     const req = resolvePineStudy(code);
     try {
-      const chart = this.activeChart() as
-        | (IChartWidgetApi & {
-            createStudy?: (
-              name: string,
-              forceOverlay?: boolean,
-              lock?: boolean,
-              inputs?: unknown,
-            ) => Promise<unknown>;
-          })
-        | null;
-      if (!chart?.createStudy) {
-        return { ok: false, message: "Chart not ready — wait for candles, then Run again" };
+      const chart = this.activeChart();
+      if (!chart) {
+        return { ok: false, message: "Chart not ready — wait for candles, then Add to chart again" };
       }
-      await chart.createStudy(req.studyName, req.forceOverlay, false, [...req.inputs]);
+      const id = await chart.createStudy(
+        req.studyName,
+        req.forceOverlay,
+        false,
+        req.inputs,
+        req.overrides ?? {},
+      );
+      if (id == null) {
+        return { ok: false, message: `Could not add ${req.label} — study API returned null` };
+      }
       return { ok: true, message: `Added ${req.label} to chart` };
     } catch (error) {
       return {
