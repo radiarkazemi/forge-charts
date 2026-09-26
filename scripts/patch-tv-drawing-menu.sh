@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Re-apply TradingView-matching labels on Charting Library drawing flyout.
+# Re-apply TradingView-matching labels + Long/Short icons on Charting Library.
 # Safe to re-run. Requires public/charting_library present.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUNDLES="$ROOT/public/charting_library/bundles"
 TB="$BUNDLES/drawing-toolbar.ae90b75d73d48a9b8e94.js"
+ICONS="$BUNDLES/line-tools-icons.6270f97faffd65a49d40.js"
 
 python3 - <<PY
 from pathlib import Path
@@ -49,5 +50,19 @@ for fname, idmap in renames.items():
         t = nt
         print(f"{fname}:{mid} -> {label}")
     p.write_text(t)
+
+# Long / Short position icons → TradingView L/S artwork
+LONG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28" fill="none"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M5.5 8a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM3 9.5A2.5 2.5 0 0 1 7.95 9h12.1a2.5 2.5 0 1 1 0 1H7.95A2.5 2.5 0 0 1 3 9.5zM22.5 8a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/><text x="8.5" y="22" fill="currentColor" font-size="10" font-family="Trebuchet MS,Arial,sans-serif" font-weight="600">L</text></svg>'
+SHORT = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28" fill="none"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M5.5 8a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM3 9.5A2.5 2.5 0 0 1 7.95 9h12.1a2.5 2.5 0 1 1 0 1H7.95A2.5 2.5 0 0 1 3 9.5zM22.5 8a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/><text x="8.5" y="22" fill="currentColor" font-size="10" font-family="Trebuchet MS,Arial,sans-serif" font-weight="600">S</text></svg>'
+icons = Path("$ICONS")
+it = icons.read_text()
+it2, n1 = re.subn(r"70802:l=>\{l\.exports='<svg[^']+</svg>'\}", f"70802:l=>{{l.exports='{LONG}'}}", it, count=1)
+it3, n2 = re.subn(r"10568:l=>\{\nl\.exports='<svg[^']+</svg>'\}", f"10568:l=>{{\nl.exports='{SHORT}'}}", it2, count=1)
+if n2 == 0:
+    it3, n2 = re.subn(r"10568:l=>\{l\.exports='<svg[^']+</svg>'\}", f"10568:l=>{{l.exports='{SHORT}'}}", it2, count=1)
+if n1 != 1 or n2 != 1:
+    raise SystemExit(f"icon patch failed long={n1} short={n2}")
+icons.write_text(it3)
+print("line-tools-icons: Long/Short → L/S")
 print("ok")
 PY

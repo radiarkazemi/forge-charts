@@ -16,6 +16,7 @@ import {
   mountDealingRangeFlyoutInjector,
   seedDealingRangeTemplate,
 } from "./dealing-range";
+import { mountPositionToolIconPatcher } from "./position-tool-icons";
 import { mountHeaderToolbar, type HeaderToolbarApi } from "./header-toolbar";
 
 export interface TradingViewWidgetDeps {
@@ -137,6 +138,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
     let ready = false;
     let readyTimer = 0;
     let unmountDealingRange: (() => void) | null = null;
+    let unmountPositionIcons: (() => void) | null = null;
     const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches;
     const autosaveKey = isPrimary ? AUTOSAVE_KEY : `${AUTOSAVE_KEY}.pane.${paneIndex}`;
 
@@ -192,6 +194,8 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
           unmountDealingRange = mountDealingRangeFlyoutInjector(container, () => {
             if (widget) void activateDealingRange(widget);
           });
+          unmountPositionIcons?.();
+          unmountPositionIcons = mountPositionToolIconPatcher(container);
         }
         try {
           widget
@@ -254,6 +258,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
       cancelled = true;
       window.clearTimeout(readyTimer);
       unmountDealingRange?.();
+      unmountPositionIcons?.();
       controller.detach();
       try {
         widget?.remove();
