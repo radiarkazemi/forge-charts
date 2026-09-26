@@ -26,28 +26,27 @@ export function SidePanel({
   overlay = false,
 }: SidePanelProps) {
   const pine = panel === "pine";
-  const width = pine ? "100%" : 320;
   return (
     <Paper
       square
       elevation={overlay ? 8 : 0}
       sx={{
-        width: pine ? "100%" : { xs: `min(100%, ${PANEL_WIDTH}px)`, sm: width },
-        height: pine ? "100%" : undefined,
+        width: pine ? "100%" : { xs: `min(100%, ${PANEL_WIDTH}px)`, sm: 320 },
+        height: "100%",
         display: "flex",
         flexDirection: "column",
         borderLeft: pine || overlay ? 0 : 1,
         borderColor: "divider",
         minHeight: 0,
-        flex: pine ? 1 : undefined,
+        flex: 1,
         ...(overlay
           ? {
               position: "absolute",
               top: 0,
-              right: 48,
+              right: 52,
               bottom: 0,
               zIndex: 20,
-              maxWidth: "calc(100% - 48px)",
+              maxWidth: "calc(100% - 52px)",
             }
           : {}),
       }}

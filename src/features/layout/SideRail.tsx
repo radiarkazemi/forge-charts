@@ -1,32 +1,23 @@
+import type { ComponentType } from "react";
 import Box from "@mui/material/Box";
 import Divider from "@mui/material/Divider";
 import IconButton from "@mui/material/IconButton";
 import Tooltip from "@mui/material/Tooltip";
-import BookmarkBorderOutlinedIcon from "@mui/icons-material/BookmarkBorderOutlined";
-import AccessTimeIcon from "@mui/icons-material/AccessTime";
-import LayersOutlinedIcon from "@mui/icons-material/LayersOutlined";
-import ChatBubbleOutlineOutlinedIcon from "@mui/icons-material/ChatBubbleOutlineOutlined";
-import RadarIcon from "@mui/icons-material/Radar";
-import CalendarMonthOutlinedIcon from "@mui/icons-material/CalendarMonthOutlined";
-import CellTowerOutlinedIcon from "@mui/icons-material/CellTowerOutlined";
-import NotificationsNoneIcon from "@mui/icons-material/NotificationsNone";
-import AppsIcon from "@mui/icons-material/Apps";
-import HelpOutlineOutlinedIcon from "@mui/icons-material/HelpOutlineOutlined";
-import SvgIcon from "@mui/material/SvgIcon";
 import type { SvgIconProps } from "@mui/material/SvgIcon";
 import type { SidePanelId } from "@/application";
-
-/** TradingView-style pine-tree glyph used for Pine Editor on the right rail. */
-function PineTreeIcon(props: SvgIconProps) {
-  return (
-    <SvgIcon {...props} viewBox="0 0 28 28">
-      <path
-        fill="currentColor"
-        d="M14 3.5 21.5 14h-3.2l3.4 5.2H17.5L20 23H8l2.5-3.8H6.3L9.7 14H6.5L14 3.5z"
-      />
-    </SvgIcon>
-  );
-}
+import {
+  AlertsRailIcon,
+  AppsRailIcon,
+  CalendarRailIcon,
+  ChatsRailIcon,
+  HelpRailIcon,
+  HotlistsRailIcon,
+  NewsRailIcon,
+  NotificationsRailIcon,
+  ObjectTreeRailIcon,
+  PineRailIcon,
+  WatchlistRailIcon,
+} from "./rail-icons";
 
 interface SideRailProps {
   readonly active: SidePanelId | null;
@@ -39,27 +30,31 @@ interface SideRailProps {
 interface RailItem {
   readonly id?: SidePanelId;
   readonly label: string;
-  readonly icon: typeof BookmarkBorderOutlinedIcon | typeof PineTreeIcon;
+  readonly icon: ComponentType<SvgIconProps>;
   readonly action?: "objectTree" | "pine" | "external";
   readonly href?: string;
   readonly group: "top" | "mid" | "bottom";
   readonly mobile?: boolean;
 }
 
+/**
+ * TradingView Supercharts right widget bar order (dark theme):
+ * Watchlist → Alerts → Object tree → Chats | Hotlists → Pine → Calendar → News → Notifications → Apps | Help
+ */
 const ITEMS: readonly RailItem[] = [
-  { id: "watchlist", label: "Watchlist", icon: BookmarkBorderOutlinedIcon, group: "top", mobile: true },
-  { id: "alerts", label: "Alerts", icon: AccessTimeIcon, group: "top", mobile: true },
-  { label: "Object tree", icon: LayersOutlinedIcon, action: "objectTree", group: "top", mobile: true },
-  { id: "data", label: "Chats", icon: ChatBubbleOutlineOutlinedIcon, group: "top" },
-  { label: "Hotlists", icon: RadarIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },
-  { label: "Pine Editor", icon: PineTreeIcon, action: "pine", group: "mid", mobile: true },
-  { label: "Calendar", icon: CalendarMonthOutlinedIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },
-  { label: "News", icon: CellTowerOutlinedIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },
-  { label: "Notifications", icon: NotificationsNoneIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },
-  { label: "Apps", icon: AppsIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },
+  { id: "watchlist", label: "Watchlist, details, and news", icon: WatchlistRailIcon, group: "top", mobile: true },
+  { id: "alerts", label: "Alerts", icon: AlertsRailIcon, group: "top", mobile: true },
+  { label: "Object tree and data window", icon: ObjectTreeRailIcon, action: "objectTree", group: "top", mobile: true },
+  { id: "data", label: "Chats", icon: ChatsRailIcon, group: "top" },
+  { label: "Hotlists", icon: HotlistsRailIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },
+  { label: "Pine", icon: PineRailIcon, action: "pine", group: "mid", mobile: true },
+  { label: "Calendars", icon: CalendarRailIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },
+  { label: "News", icon: NewsRailIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },
+  { label: "Notifications", icon: NotificationsRailIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },
+  { label: "Products", icon: AppsRailIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },
   {
     label: "Help Center",
-    icon: HelpOutlineOutlinedIcon,
+    icon: HelpRailIcon,
     action: "external",
     href: "https://forgechart.ir/",
     group: "bottom",
@@ -90,15 +85,17 @@ export function SideRail({ active, onToggle, onOpenObjectTree, onOpenPine, compa
           size="small"
           aria-label={item.label}
           aria-pressed={pressed}
-          color={pressed ? "primary" : "default"}
           onClick={onClick}
           sx={{
+            width: 36,
+            height: 36,
             color: pressed ? "primary.main" : "text.secondary",
-            bgcolor: pressed ? "action.selected" : undefined,
+            bgcolor: pressed ? "action.selected" : "transparent",
             borderRadius: 1,
+            "&:hover": { bgcolor: "action.hover", color: "text.primary" },
           }}
         >
-          <Icon fontSize="small" />
+          <Icon sx={{ fontSize: 22 }} />
         </IconButton>
       </Tooltip>
     );
@@ -109,15 +106,14 @@ export function SideRail({ active, onToggle, onOpenObjectTree, onOpenPine, compa
       component="nav"
       aria-label="Side panels"
       sx={{
-        width: compact ? 40 : 48,
+        width: compact ? 42 : 52,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        gap: 0.15,
+        gap: 0.2,
         py: 1,
-        bgcolor: "background.paper",
-        borderLeft: 1,
-        borderColor: "divider",
+        bgcolor: "#131722",
+        borderLeft: "1px solid #2a2e39",
         flexShrink: 0,
         zIndex: 21,
       }}
@@ -125,13 +121,13 @@ export function SideRail({ active, onToggle, onOpenObjectTree, onOpenPine, compa
       {top.map(renderButton)}
       {!compact && mid.length > 0 ? (
         <>
-          <Box sx={{ flex: 1, minHeight: 24 }} />
+          <Box sx={{ flex: 1, minHeight: 28 }} />
           {mid.map(renderButton)}
         </>
       ) : (
         <Box sx={{ flex: 1 }} />
       )}
-      <Divider flexItem sx={{ my: 0.75, borderColor: "divider", width: "55%" }} />
+      <Divider flexItem sx={{ my: 0.75, borderColor: "#2a2e39", width: "50%" }} />
       {bottom.map(renderButton)}
     </Box>
   );

@@ -14,9 +14,10 @@ import { SidePanel } from "./SidePanel";
 import { SideRail } from "./SideRail";
 
 /**
- * Chart shell: TradingView toolbar is the primary chrome.
- * On mobile the right panel overlays the chart so the canvas stays usable.
- * Pine Editor docks at the bottom (TradingView parity).
+ * Chart shell matching TradingView Supercharts:
+ * - Right widget rail (Watchlist / Alerts / Object tree / Pine / …)
+ * - Pine Editor docks to the right of the chart (like TV “Pine” button)
+ * - Other panels also open from the rail
  */
 export function AppShell() {
   const theme = useTheme();
@@ -65,8 +66,8 @@ export function AppShell() {
   const openAlertDialog = () => setAlertDialogOpen(true);
   const openProfileMenu = () => setProfileMenuAnchor(profileAnchorRef);
 
-  const sideDock = sidePanel && sidePanel !== "pine" ? sidePanel : null;
   const pineOpen = sidePanel === "pine";
+  const sideDock = sidePanel && sidePanel !== "pine" ? sidePanel : null;
 
   return (
     <Box
@@ -80,55 +81,56 @@ export function AppShell() {
       }}
     >
       <Box component="main" sx={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
-        <Box sx={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
-          <Box sx={{ flex: pineOpen ? "1 1 45%" : 1, minHeight: 0, position: "relative", display: "flex" }}>
-            <ChartWorkspace onCreateAlert={openAlertDialog} onOpenProfile={openProfileMenu} />
-            {sideDock ? (
-              <>
-                {isMobile ? (
-                  <Box
-                    onClick={() => settings.setSidePanel(null)}
-                    sx={{
-                      position: "absolute",
-                      inset: 0,
-                      right: 48,
-                      bgcolor: "rgba(0,0,0,0.45)",
-                      zIndex: 19,
-                    }}
-                  />
-                ) : null}
-                <SidePanel
-                  panel={sideDock}
-                  onClose={() => settings.setSidePanel(null)}
-                  onCreateAlert={openAlertDialog}
-                  onOpenObjectTree={() => chart.openObjectTree()}
-                  onRunPine={(code) => chart.runPineDraft(code)}
-                  overlay={isMobile}
+        <Box sx={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0, position: "relative" }}>
+          <ChartWorkspace onCreateAlert={openAlertDialog} onOpenProfile={openProfileMenu} />
+          {sideDock ? (
+            <>
+              {isMobile ? (
+                <Box
+                  onClick={() => settings.setSidePanel(null)}
+                  sx={{
+                    position: "absolute",
+                    inset: 0,
+                    right: 52,
+                    bgcolor: "rgba(0,0,0,0.45)",
+                    zIndex: 19,
+                  }}
                 />
-              </>
-            ) : null}
-          </Box>
-          {pineOpen ? (
-            <Box
-              sx={{
-                flex: "0 0 42%",
-                minHeight: { xs: 220, md: 280 },
-                maxHeight: "55%",
-                borderTop: 1,
-                borderColor: "divider",
-                zIndex: 18,
-              }}
-            >
+              ) : null}
               <SidePanel
-                panel="pine"
+                panel={sideDock}
                 onClose={() => settings.setSidePanel(null)}
                 onCreateAlert={openAlertDialog}
                 onOpenObjectTree={() => chart.openObjectTree()}
                 onRunPine={(code) => chart.runPineDraft(code)}
+                overlay={isMobile}
               />
-            </Box>
+            </>
           ) : null}
         </Box>
+
+        {/* Pine docks to the RIGHT of the chart (TradingView default when opening from rail). */}
+        {pineOpen ? (
+          <Box
+            sx={{
+              width: { xs: "min(100%, 420px)", md: "min(48vw, 640px)" },
+              flexShrink: 0,
+              minHeight: 0,
+              display: "flex",
+              flexDirection: "column",
+              zIndex: 18,
+            }}
+          >
+            <SidePanel
+              panel="pine"
+              onClose={() => settings.setSidePanel(null)}
+              onCreateAlert={openAlertDialog}
+              onOpenObjectTree={() => chart.openObjectTree()}
+              onRunPine={(code) => chart.runPineDraft(code)}
+            />
+          </Box>
+        ) : null}
+
         <SideRail
           active={sidePanel}
           onToggle={(id) => settings.toggleSidePanel(id)}
