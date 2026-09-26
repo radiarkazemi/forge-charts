@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Divider from "@mui/material/Divider";
@@ -32,26 +32,6 @@ interface PineEditorPanelProps {
   readonly onRun?: (code: string) => Promise<{ ok: boolean; message: string }>;
 }
 
-function highlightPine(code: string): string {
-  const esc = code
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-  return esc
-    .replace(/(\/\/[^\n]*)/g, '<span style="color:#787b86">$1</span>')
-    .replace(/(@version=\d+)/g, '<span style="color:#787b86">$1</span>')
-    .replace(
-      /\b(indicator|strategy|library|plot|plotshape|hline|fill|color|input|ta|math|str|array|map|matrix|request|ticker|timeframe|barstate|session|syminfo|chart|line|label|box|table|polyline|alert|alertcondition)\b/g,
-      '<span style="color:#2962ff">$1</span>',
-    )
-    .replace(/("[^"]*")/g, '<span style="color:#ef5350">$1</span>')
-    .replace(
-      /\b(close|open|high|low|volume|hl2|hlc3|ohlc4|time|timenow|bar_index|last_bar_index)\b/g,
-      '<span style="color:#ff9800">$1</span>',
-    )
-    .replace(/\b(\d+(?:\.\d+)?)\b/g, '<span style="color:#26a69a">$1</span>');
-}
-
 /**
  * TradingView-style Pine Editor (right-docked chrome).
  * Add to chart maps supported drafts onto Charting Library studies.
@@ -80,7 +60,6 @@ export function PineEditorPanel({ onClose, onOpenObjectTree, onRun }: PineEditor
   const [scriptMenuEl, setScriptMenuEl] = useState<null | HTMLElement>(null);
   const [moreMenuEl, setMoreMenuEl] = useState<null | HTMLElement>(null);
   const areaRef = useRef<HTMLTextAreaElement>(null);
-  const highlight = useMemo(() => highlightPine(code), [code]);
   const lines = code.split("\n");
 
   useEffect(() => {
@@ -390,26 +369,8 @@ export function PineEditorPanel({ onClose, onOpenObjectTree, onRun }: PineEditor
             </div>
           ))}
         </Box>
-        <Box sx={{ flex: 1, minWidth: 0, position: "relative" }}>
-          <Box
-            aria-hidden
-            sx={{
-              position: "absolute",
-              inset: 0,
-              p: 1.5,
-              m: 0,
-              overflow: "hidden",
-              pointerEvents: "none",
-              whiteSpace: "pre",
-              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-              fontSize: 13,
-              lineHeight: "20px",
-              color: "#d1d4dc",
-            }}
-            dangerouslySetInnerHTML={{ __html: highlight + "\n" }}
-          />
-          <Box
-            component="textarea"
+        <Box sx={{ flex: 1, minWidth: 0, position: "relative", bgcolor: "#131722" }}>
+          <textarea
             ref={areaRef}
             value={code}
             onChange={(e) => {
@@ -418,15 +379,8 @@ export function PineEditorPanel({ onClose, onOpenObjectTree, onRun }: PineEditor
             }}
             onSelect={updateCursor}
             onKeyUp={updateCursor}
-            onScroll={(e) => {
-              const pre = e.currentTarget.previousElementSibling as HTMLElement | null;
-              if (pre) {
-                pre.scrollTop = e.currentTarget.scrollTop;
-                pre.scrollLeft = e.currentTarget.scrollLeft;
-              }
-            }}
             spellCheck={false}
-            sx={{
+            style={{
               position: "absolute",
               inset: 0,
               width: "100%",
@@ -434,17 +388,17 @@ export function PineEditorPanel({ onClose, onOpenObjectTree, onRun }: PineEditor
               resize: "none",
               border: 0,
               outline: "none",
-              p: 1.5,
-              m: 0,
-              bgcolor: "transparent",
-              color: "transparent",
-              caretColor: "#d1d4dc",
+              padding: 12,
+              margin: 0,
+              background: "#131722",
+              color: "#d1d4dc",
               fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
               fontSize: 13,
               lineHeight: "20px",
               tabSize: 4,
               whiteSpace: "pre",
               overflow: "auto",
+              boxSizing: "border-box",
             }}
           />
         </Box>
