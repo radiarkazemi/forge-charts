@@ -23,8 +23,8 @@ export interface WidgetOptionsInput {
   /** Narrow viewports get adaptive header labels and mobile chart features. */
   readonly isMobile?: boolean;
   /**
-   * Secondary panes in a Forge multi-chart grid: compact header, no left toolbar
-   * (primary pane keeps the full TradingView drawing strip).
+   * Secondary panes in a Forge multi-chart grid: compact header.
+   * Drawing toolbar stays enabled on every pane (TradingView parity).
    */
   readonly secondaryPane?: boolean;
 }
@@ -74,7 +74,7 @@ const DISABLED_FEATURES: ChartingLibraryFeatureset[] = [
 
 const SECONDARY_DISABLED: ChartingLibraryFeatureset[] = [
   ...DISABLED_FEATURES,
-  "left_toolbar",
+  // Keep left drawing toolbar on every pane (TradingView multi-chart).
   "header_saveload",
   "header_fullscreen_button",
   "header_screenshot",
@@ -223,9 +223,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
       };
       return map[originalText] ?? null;
     },
-    enabled_features: secondary
-      ? ENABLED_FEATURES.filter((f) => f !== "left_toolbar" && f !== "show_object_tree" && f !== "object_tree_legend_mode")
-      : ENABLED_FEATURES,
+    enabled_features: ENABLED_FEATURES,
     disabled_features: secondary ? SECONDARY_DISABLED : DISABLED_FEATURES,
     favorites: {
       intervals: FAVORITE_INTERVALS,

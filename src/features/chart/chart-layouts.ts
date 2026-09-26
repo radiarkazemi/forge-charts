@@ -23,19 +23,19 @@ export const CHART_LAYOUT_CHOICES: readonly ChartLayoutChoice[] = [
   },
   {
     id: "2h",
-    title: "2 · side by side",
+    title: "2",
     paneCount: 2,
     icon: layoutIcon(`<path d="M14 3v22" stroke="currentColor" stroke-width="1.5"/>`),
   },
   {
     id: "2v",
-    title: "2 · stacked",
+    title: "2",
     paneCount: 2,
     icon: layoutIcon(`<path d="M3 14h22" stroke="currentColor" stroke-width="1.5"/>`),
   },
   {
     id: "3h",
-    title: "3 · columns",
+    title: "3",
     paneCount: 3,
     icon: layoutIcon(
       `<path d="M10.3 3v22M17.7 3v22" stroke="currentColor" stroke-width="1.5"/>`,
@@ -43,7 +43,7 @@ export const CHART_LAYOUT_CHOICES: readonly ChartLayoutChoice[] = [
   },
   {
     id: "3v",
-    title: "3 · rows",
+    title: "3",
     paneCount: 3,
     icon: layoutIcon(
       `<path d="M3 10.3h22M3 17.7h22" stroke="currentColor" stroke-width="1.5"/>`,
@@ -51,7 +51,7 @@ export const CHART_LAYOUT_CHOICES: readonly ChartLayoutChoice[] = [
   },
   {
     id: "3s",
-    title: "3 · stacked",
+    title: "3",
     paneCount: 3,
     icon: layoutIcon(
       `<path d="M3 10.3h22M3 17.7h22" stroke="currentColor" stroke-width="1.5"/>`,
@@ -59,7 +59,7 @@ export const CHART_LAYOUT_CHOICES: readonly ChartLayoutChoice[] = [
   },
   {
     id: "2-1",
-    title: "3 · 2 top / 1 bottom",
+    title: "3",
     paneCount: 3,
     icon: layoutIcon(
       `<path d="M14 3v11M3 14h22" stroke="currentColor" stroke-width="1.5"/>`,
@@ -67,7 +67,7 @@ export const CHART_LAYOUT_CHOICES: readonly ChartLayoutChoice[] = [
   },
   {
     id: "1-2",
-    title: "3 · 1 top / 2 bottom",
+    title: "3",
     paneCount: 3,
     icon: layoutIcon(
       `<path d="M3 14h22M14 14v11" stroke="currentColor" stroke-width="1.5"/>`,
@@ -75,7 +75,7 @@ export const CHART_LAYOUT_CHOICES: readonly ChartLayoutChoice[] = [
   },
   {
     id: "4",
-    title: "4 · grid",
+    title: "4",
     paneCount: 4,
     icon: layoutIcon(
       `<path d="M14 3v22M3 14h22" stroke="currentColor" stroke-width="1.5"/>`,

@@ -53,11 +53,12 @@ function buildLayoutMenuItems(handlers: HeaderToolbarHandlers) {
   const sync = handlers.getLayoutSync?.() ?? {
     symbol: false,
     interval: false,
-    crosshair: true,
+    crosshair: false,
     time: false,
     dateRange: false,
   };
   const syncKeys: SyncKey[] = ["symbol", "interval", "crosshair", "time", "dateRange"];
+  // TradingView groups layouts by pane count; keep compact numbered titles + icons.
   return [
     ...CHART_LAYOUT_CHOICES.map((choice) => ({
       title: choice.title,
@@ -65,7 +66,7 @@ function buildLayoutMenuItems(handlers: HeaderToolbarHandlers) {
       onSelect: () => handlers.onSetChartLayout(choice.id),
     })),
     {
-      title: "── SYNC IN LAYOUT ──",
+      title: "── Sync in layout ──",
       onSelect: () => {
         /* section header */
       },
@@ -86,11 +87,27 @@ function profileMenuItems(handlers: HeaderToolbarHandlers, profile: UserProfile)
       onSelect: () => handlers.onOpenProfile(),
     },
     { title: "Profile & accounts…", onSelect: () => handlers.onOpenProfile() },
-    { title: `Theme: ${handlers.themeLabel}`, onSelect: () => handlers.onToggleTheme() },
+    {
+      title: "──────────",
+      onSelect: () => {
+        /* divider */
+      },
+    },
+    {
+      title: handlers.themeLabel === "Dark" ? "Dark theme  ● ON" : "Dark theme  ○ OFF",
+      onSelect: () => handlers.onToggleTheme(),
+    },
     { title: "Alerts panel", onSelect: () => handlers.onOpenAlertsPanel() },
     { title: "Watchlist", onSelect: () => handlers.onOpenWatchlist() },
-    { title: "Object tree (layers)", onSelect: () => handlers.onOpenObjectTree() },
+    { title: "Object tree", onSelect: () => handlers.onOpenObjectTree() },
     { title: "Create alert", onSelect: () => handlers.onCreateAlert() },
+    {
+      title: "──────────",
+      onSelect: () => {
+        /* divider */
+      },
+    },
+    { title: "Help Center", onSelect: () => window.open("https://forgechart.ir/", "_blank", "noopener") },
   ];
 }
 
