@@ -8,6 +8,7 @@ import {
   type IChartWidgetApi,
   type ResolutionString,
 } from "@/infrastructure/tradingview";
+import { resolvePineStudy } from "@/features/pine/pine-runner";
 
 export interface ChartState {
   readonly symbol: string;
@@ -255,7 +256,6 @@ export class ChartController {
    * (SMA / EMA / RSI). Full Pine compilation is not available in CL embeds.
    */
   async runPineDraft(code: string): Promise<{ ok: boolean; message: string }> {
-    const { resolvePineStudy } = await import("@/features/pine/pine-runner");
     const req = resolvePineStudy(code);
     try {
       const chart = this.activeChart() as
