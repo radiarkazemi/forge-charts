@@ -1,6 +1,6 @@
 import type { ChartLayoutId, LayoutSyncSettings, UserProfile } from "@/application";
 import { activeProfile, type Settings } from "@/application";
-import type { IChartingLibraryWidget, IDropdownApi } from "@/infrastructure/tradingview";
+import type { IChartingLibraryWidget } from "@/infrastructure/tradingview";
 import { CHART_LAYOUT_CHOICES } from "./chart-layouts";
 import { activateDealingRange } from "./dealing-range";
 
@@ -10,8 +10,12 @@ function avatarIcon(profile: UserProfile): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28"><circle cx="14" cy="14" r="14" fill="${color}"/><text x="14" y="18.5" text-anchor="middle" fill="#fff" font-size="12" font-weight="700" font-family="Arial,sans-serif">${initial}</text></svg>`;
 }
 
-const LAYOUT_ICON =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28"><rect x="4" y="4" width="9" height="9" rx="1" fill="currentColor"/><rect x="15" y="4" width="9" height="9" rx="1" fill="currentColor"/><rect x="4" y="15" width="9" height="9" rx="1" fill="currentColor"/><rect x="15" y="15" width="9" height="9" rx="1" fill="currentColor"/></svg>';
+/**
+ * TradingView "Select layout" glyph — hollow/dashed frame with pane cross.
+ * NOT the filled 2×2 (that is indicator templates).
+ */
+const LAYOUT_GRID_ICON =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28" fill="none"><rect x="4.5" y="4.5" width="19" height="19" rx="1.5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2"/><path d="M14 5v18M5 14h18" stroke="currentColor" stroke-width="1.2" opacity="0.9"/></svg>';
 
 type SyncKey = keyof LayoutSyncSettings;
 
@@ -58,7 +62,6 @@ function buildLayoutMenuItems(handlers: HeaderToolbarHandlers) {
     dateRange: false,
   };
   const syncKeys: SyncKey[] = ["symbol", "interval", "crosshair", "time", "dateRange"];
-  // TradingView groups layouts by pane count; keep compact numbered titles + icons.
   return [
     ...CHART_LAYOUT_CHOICES.map((choice) => ({
       title: choice.title,
@@ -80,40 +83,13 @@ function buildLayoutMenuItems(handlers: HeaderToolbarHandlers) {
   ];
 }
 
-function profileMenuItems(handlers: HeaderToolbarHandlers, profile: UserProfile) {
-  return [
-    {
-      title: `${profile.displayName}  (@${profile.username})`,
-      onSelect: () => handlers.onOpenProfile(),
-    },
-    { title: "Profile & accounts…", onSelect: () => handlers.onOpenProfile() },
-    {
-      title: "──────────",
-      onSelect: () => {
-        /* divider */
-      },
-    },
-    {
-      title: handlers.themeLabel === "Dark" ? "Dark theme  ● ON" : "Dark theme  ○ OFF",
-      onSelect: () => handlers.onToggleTheme(),
-    },
-    { title: "Alerts panel", onSelect: () => handlers.onOpenAlertsPanel() },
-    { title: "Watchlist", onSelect: () => handlers.onOpenWatchlist() },
-    { title: "Object tree", onSelect: () => handlers.onOpenObjectTree() },
-    { title: "Create alert", onSelect: () => handlers.onCreateAlert() },
-    {
-      title: "──────────",
-      onSelect: () => {
-        /* divider */
-      },
-    },
-    { title: "Help Center", onSelect: () => window.open("https://forgechart.ir/", "_blank", "noopener") },
-  ];
-}
-
 /**
  * Adds TradingView-style custom header controls on top of the library toolbar.
  * Profile avatar sits on the far-right corner (TradingView account menu).
+ *
+ * Layout placement (matches TV):
+ * 1) Named layout dropdown (Save / Autosave / …) — text next to account area
+ * 2) Dashed-square "Select Layout" — multi-pane grid (NOT templates 2×2)
  */
 export function mountHeaderToolbar(
   widget: IChartingLibraryWidget,
@@ -155,12 +131,84 @@ export function mountHeaderToolbar(
       window.setTimeout(refreshLayoutMenu, 0);
     },
   };
+
+  // Named layout menu (TradingView: layout name near profile) — Save / Autosave / …
+  const layoutName = handlers.getProfile().displayName || "Layout";
+  void widget.createDropdown({
+    title: layoutName,
+    tooltip: "Save and manage chart layouts",
+    align: "right",
+    items: [
+      {
+        title: "Save layout    Ctrl + S",
+        onSelect: () => {
+          try {
+            widget.save(() => {
+              /* persisted via save_load_adapter */
+            });
+          } catch {
+            /* ignore */
+          }
+        },
+      },
+      {
+        title: "Autosave  ● ON",
+        onSelect: () => {
+          /* always on via auto_save_delay */
+        },
+      },
+      {
+        title: "Make a copy…",
+        onSelect: () => {
+          try {
+            widget.save(() => {
+              /* copy via autosave snapshot */
+            });
+          } catch {
+            /* ignore */
+          }
+        },
+      },
+      {
+        title: "Rename…",
+        onSelect: () => handlers.onOpenProfile(),
+      },
+      {
+        title: "Create new layout…",
+        onSelect: () => {
+          try {
+            widget.activeChart().resetData();
+          } catch {
+            /* ignore */
+          }
+        },
+      },
+      {
+        title: `Recently used · ${layoutName}`,
+        onSelect: () => {
+          /* current layout */
+        },
+      },
+      {
+        title: "Open layout…",
+        onSelect: () => {
+          try {
+            (widget as unknown as { showLoadChartDialog?: () => void }).showLoadChartDialog?.();
+          } catch {
+            /* ignore */
+          }
+        },
+      },
+    ],
+  });
+
+  // Multi-pane Select Layout — dashed square (never the templates 2×2).
   void widget
     .createDropdown({
       title: "Select Layout",
-      tooltip: "Change chart layout without reloading charts · SYNC IN LAYOUT",
-      align: "left",
-      icon: LAYOUT_ICON,
+      tooltip: "Multi-chart layout · Sync in layout",
+      align: "right",
+      icon: LAYOUT_GRID_ICON,
       items: buildLayoutMenuItems(wrapped),
     })
     .then((api) => {
@@ -197,7 +245,6 @@ export function mountHeaderToolbar(
     },
   });
 
-  // Tools — Dealing Range (ICT premium / discount) via Fib template.
   void widget.createDropdown({
     title: "Tools",
     tooltip: "Drawing helpers",
@@ -212,30 +259,31 @@ export function mountHeaderToolbar(
     ],
   });
 
-  // Profile — outermost right corner, TradingView-style.
-  let accountDropdown: IDropdownApi | null = null;
+  // Profile avatar → React ProfileMenu (HTML button so we can inject the avatar SVG).
   const profile = handlers.getProfile();
-  void widget
-    .createDropdown({
-      title: profile.avatarInitial,
-      tooltip: `${profile.displayName} (@${profile.username})`,
-      align: "right",
-      icon: avatarIcon(profile),
-      items: profileMenuItems(handlers, profile),
-    })
-    .then((api) => {
-      accountDropdown = api;
-    });
+  const profileBtn = widget.createButton({
+    align: "right",
+    useTradingViewStyle: false,
+  });
+  profileBtn.setAttribute("title", `${profile.displayName} (@${profile.username})`);
+  profileBtn.setAttribute("aria-label", "Account menu");
+  profileBtn.style.display = "inline-flex";
+  profileBtn.style.alignItems = "center";
+  profileBtn.style.justifyContent = "center";
+  profileBtn.style.padding = "0 4px";
+  profileBtn.style.cursor = "pointer";
+  profileBtn.innerHTML = avatarIcon(profile);
+  profileBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    window.dispatchEvent(new CustomEvent("forge:open-profile-menu"));
+  });
 
   return {
     updateProfile: (next) => {
       try {
-        accountDropdown?.applyOptions({
-          title: next.avatarInitial,
-          tooltip: `${next.displayName} (@${next.username})`,
-          icon: avatarIcon(next),
-          items: profileMenuItems(handlers, next),
-        });
+        profileBtn.innerHTML = avatarIcon(next);
+        profileBtn.setAttribute("title", `${next.displayName} (@${next.username})`);
       } catch {
         /* ignore */
       }

@@ -4,7 +4,8 @@ import { createPersistentStore, type Store } from "../store";
 
 export type ThemeMode = "dark" | "light";
 
-export type SidePanelId = "watchlist" | "alerts" | "data";
+export type SidePanelId = "watchlist" | "alerts" | "data" | "pine";
+
 
 /** Multi-chart page layout (1 / 2 / 3 / 4 panes). */
 export type ChartLayoutId = "s" | "2h" | "2v" | "3s" | "3h" | "3v" | "2-1" | "1-2" | "4";
@@ -103,7 +104,7 @@ function sanitizeStringList(value: unknown, fallback: readonly string[]): readon
 }
 
 function sanitizeSidePanel(value: unknown): SidePanelId | null {
-  return value === "watchlist" || value === "alerts" || value === "data" ? value : null;
+  return value === "watchlist" || value === "alerts" || value === "data" || value === "pine" ? value : null;
 }
 
 function sanitizeLayoutSync(value: unknown): LayoutSyncSettings {

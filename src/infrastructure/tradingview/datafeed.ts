@@ -59,13 +59,15 @@ function toTvBar(bar: Bar) {
   if (!Number.isFinite(timeSec) || timeSec <= 0) {
     throw new Error(`Invalid bar time: ${String(bar.time)}`);
   }
+  const volume = Number(bar.volume);
   return {
     time: timeSec * 1000,
     open: bar.open,
     high: bar.high,
     low: bar.low,
     close: bar.close,
-    volume: bar.volume,
+    // Always include volume so the Volume study can render (0 when feed has none).
+    volume: Number.isFinite(volume) && volume >= 0 ? volume : 0,
   };
 }
 

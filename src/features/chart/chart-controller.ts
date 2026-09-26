@@ -223,6 +223,33 @@ export class ChartController {
     this.widget?.save(onSaved);
   }
 
+  /** Ensure a Volume study exists (TradingView default bottom pane). */
+  ensureVolumeStudy(): void {
+    try {
+      const chart = this.activeChart() as
+        | (IChartWidgetApi & {
+            getAllStudies?: () => Array<{ name?: string; id?: string }>;
+            createStudy?: (
+              name: string,
+              forceOverlay?: boolean,
+              lock?: boolean,
+              inputs?: unknown,
+            ) => Promise<unknown>;
+          })
+        | null;
+      if (!chart?.createStudy) return;
+      const studies = chart.getAllStudies?.() ?? [];
+      const hasVolume = studies.some(
+        (s) => /volume/i.test(s.name ?? "") || /volume/i.test(String(s.id ?? "")),
+      );
+      if (hasVolume) return;
+      // forceOverlay=false → dedicated pane under price (TV default).
+      void chart.createStudy("Volume", false, false);
+    } catch {
+      /* study API unavailable */
+    }
+  }
+
   /** Open the library Object Tree (layers) for drawings / studies. */
   openObjectTree(): void {
     try {
