@@ -10,13 +10,21 @@ interface SidePanelProps {
   readonly onClose: () => void;
   readonly onCreateAlert: () => void;
   readonly onOpenObjectTree?: () => void;
+  readonly onRunPine?: (code: string) => Promise<{ ok: boolean; message: string }>;
   /** When true, panel floats over the chart (mobile) instead of shrinking it. */
   readonly overlay?: boolean;
 }
 
 const PANEL_WIDTH = 420;
 
-export function SidePanel({ panel, onClose, onCreateAlert, onOpenObjectTree, overlay = false }: SidePanelProps) {
+export function SidePanel({
+  panel,
+  onClose,
+  onCreateAlert,
+  onOpenObjectTree,
+  onRunPine,
+  overlay = false,
+}: SidePanelProps) {
   const pine = panel === "pine";
   const width = pine ? "100%" : 320;
   return (
@@ -47,7 +55,9 @@ export function SidePanel({ panel, onClose, onCreateAlert, onOpenObjectTree, ove
       {panel === "watchlist" ? <WatchlistPanel onClose={onClose} /> : null}
       {panel === "alerts" ? <AlertsPanel onClose={onClose} onCreate={onCreateAlert} /> : null}
       {panel === "data" ? <DataWindowPanel onClose={onClose} /> : null}
-      {panel === "pine" ? <PineEditorPanel onClose={onClose} onOpenObjectTree={onOpenObjectTree} /> : null}
+      {panel === "pine" ? (
+        <PineEditorPanel onClose={onClose} onOpenObjectTree={onOpenObjectTree} onRun={onRunPine} />
+      ) : null}
     </Paper>
   );
 }

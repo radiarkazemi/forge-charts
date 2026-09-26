@@ -250,6 +250,37 @@ export class ChartController {
     }
   }
 
+  /**
+   * Run a Pine draft by mapping it onto a built-in Charting Library study
+   * (SMA / EMA / RSI). Full Pine compilation is not available in CL embeds.
+   */
+  async runPineDraft(code: string): Promise<{ ok: boolean; message: string }> {
+    const { resolvePineStudy } = await import("@/features/pine/pine-runner");
+    const req = resolvePineStudy(code);
+    try {
+      const chart = this.activeChart() as
+        | (IChartWidgetApi & {
+            createStudy?: (
+              name: string,
+              forceOverlay?: boolean,
+              lock?: boolean,
+              inputs?: unknown,
+            ) => Promise<unknown>;
+          })
+        | null;
+      if (!chart?.createStudy) {
+        return { ok: false, message: "Chart not ready — wait for candles, then Run again" };
+      }
+      await chart.createStudy(req.studyName, req.forceOverlay, false, [...req.inputs]);
+      return { ok: true, message: `Added ${req.label} to chart` };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : "Failed to add study",
+      };
+    }
+  }
+
   /** Open the library Object Tree (layers) for drawings / studies. */
   openObjectTree(): void {
     try {

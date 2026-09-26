@@ -102,6 +102,7 @@ export function AppShell() {
                   onClose={() => settings.setSidePanel(null)}
                   onCreateAlert={openAlertDialog}
                   onOpenObjectTree={() => chart.openObjectTree()}
+                  onRunPine={(code) => chart.runPineDraft(code)}
                   overlay={isMobile}
                 />
               </>
@@ -123,6 +124,7 @@ export function AppShell() {
                 onClose={() => settings.setSidePanel(null)}
                 onCreateAlert={openAlertDialog}
                 onOpenObjectTree={() => chart.openObjectTree()}
+                onRunPine={(code) => chart.runPineDraft(code)}
               />
             </Box>
           ) : null}

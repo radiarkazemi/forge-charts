@@ -10,38 +10,34 @@ import MoreVertIcon from "@mui/icons-material/MoreVert";
 import TerminalIcon from "@mui/icons-material/Terminal";
 import CloseIcon from "@mui/icons-material/Close";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import { BASIC_SMA_SCRIPT } from "./pine-runner";
 
-const DEFAULT_SCRIPT = `//@version=6
-indicator("Forge Script", overlay=true)
-
-len = input.int(14, "Length")
-src = close
-ma = ta.sma(src, len)
-
-plot(ma, "MA", color=color.new(color.blue, 0))
-`;
+const DRAFT_KEY = "forge.pine.draft.v2";
 
 interface PineEditorPanelProps {
   readonly onClose: () => void;
   readonly onOpenObjectTree?: () => void;
+  /** Add mapped study to the active chart (SMA / EMA / RSI). */
+  readonly onRun?: (code: string) => Promise<{ ok: boolean; message: string }>;
 }
 
-/** TradingView-style Pine Editor chrome (local editor; scripts are not compiled). */
-export function PineEditorPanel({ onClose, onOpenObjectTree }: PineEditorPanelProps) {
+/** TradingView-style Pine Editor — Run maps basic scripts onto built-in studies. */
+export function PineEditorPanel({ onClose, onOpenObjectTree, onRun }: PineEditorPanelProps) {
   const [code, setCode] = useState(() => {
     try {
-      return localStorage.getItem("forge.pine.draft") ?? DEFAULT_SCRIPT;
+      return localStorage.getItem(DRAFT_KEY) ?? BASIC_SMA_SCRIPT;
     } catch {
-      return DEFAULT_SCRIPT;
+      return BASIC_SMA_SCRIPT;
     }
   });
-  const [status, setStatus] = useState("Ready");
+  const [status, setStatus] = useState("Ready — click ▶ to add SMA 14 to the chart");
+  const [running, setRunning] = useState(false);
   const [cursor, setCursor] = useState({ line: 1, col: 1 });
   const areaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     try {
-      localStorage.setItem("forge.pine.draft", code);
+      localStorage.setItem(DRAFT_KEY, code);
     } catch {
       /* ignore */
     }
@@ -55,6 +51,25 @@ export function PineEditorPanel({ onClose, onOpenObjectTree }: PineEditorPanelPr
     const line = before.split("\n").length;
     const col = before.length - before.lastIndexOf("\n");
     setCursor({ line, col });
+  };
+
+  const handleRun = async () => {
+    if (!onRun) {
+      setStatus("Run is not connected");
+      onOpenObjectTree?.();
+      return;
+    }
+    setRunning(true);
+    setStatus("Adding study to chart…");
+    try {
+      const result = await onRun(code);
+      setStatus(result.message);
+      if (result.ok) onOpenObjectTree?.();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Run failed");
+    } finally {
+      setRunning(false);
+    }
   };
 
   const lines = code.split("\n");
@@ -116,23 +131,27 @@ export function PineEditorPanel({ onClose, onOpenObjectTree }: PineEditorPanelPr
           }}
         >
           <Typography variant="body2" sx={{ color: "#d1d4dc", fontSize: 13 }}>
-            Untitled script
+            Forge SMA 14
           </Typography>
           <KeyboardArrowDownIcon sx={{ fontSize: 16, color: "#787b86" }} />
         </Box>
         <IconButton
           size="small"
           aria-label="Add to chart"
-          title="Open object tree to manage studies"
-          onClick={() => {
-            setStatus("Open Object tree to manage studies");
-            onOpenObjectTree?.();
-          }}
+          title="Add to chart"
+          disabled={running}
+          onClick={() => void handleRun()}
           sx={{ color: "#2962ff" }}
         >
           <PlayArrowIcon fontSize="small" />
         </IconButton>
-        <IconButton size="small" aria-label="Save" title="Save draft locally" sx={{ color: "#d1d4dc" }}>
+        <IconButton
+          size="small"
+          aria-label="Save"
+          title="Save draft locally"
+          onClick={() => setStatus("Draft saved locally")}
+          sx={{ color: "#d1d4dc" }}
+        >
           <CloudUploadOutlinedIcon fontSize="small" />
         </IconButton>
         <Box sx={{ flex: 1 }} />
@@ -140,6 +159,8 @@ export function PineEditorPanel({ onClose, onOpenObjectTree }: PineEditorPanelPr
           size="small"
           variant="contained"
           disableElevation
+          disabled={running}
+          onClick={() => void handleRun()}
           sx={{
             textTransform: "none",
             bgcolor: "#2962ff",
@@ -147,7 +168,7 @@ export function PineEditorPanel({ onClose, onOpenObjectTree }: PineEditorPanelPr
             fontWeight: 600,
           }}
         >
-          Publish script
+          {running ? "Running…" : "Add to chart"}
         </Button>
         <IconButton size="small" aria-label="More" sx={{ color: "#d1d4dc" }}>
           <MoreVertIcon fontSize="small" />
@@ -203,7 +224,6 @@ export function PineEditorPanel({ onClose, onOpenObjectTree }: PineEditorPanelPr
             minWidth: 0,
           }}
         />
-        {/* Minimap strip */}
         <Box
           aria-hidden
           sx={{
@@ -235,7 +255,7 @@ export function PineEditorPanel({ onClose, onOpenObjectTree }: PineEditorPanelPr
         }}
       >
         <TerminalIcon sx={{ fontSize: 15, color: "#787b86" }} />
-        <Typography variant="caption" sx={{ flex: 1, color: "#787b86" }}>
+        <Typography variant="caption" sx={{ flex: 1, color: status.startsWith("Added") ? "#26a69a" : "#787b86" }}>
           {status}
         </Typography>
         <Typography variant="caption" sx={{ color: "#787b86" }}>
