@@ -8,6 +8,7 @@ import {
   type IChartWidgetApi,
   type ResolutionString,
 } from "@/infrastructure/tradingview";
+import { resolvePineStudy } from "@/features/pine/pine-runner";
 
 export interface ChartState {
   readonly symbol: string;
@@ -221,6 +222,63 @@ export class ChartController {
 
   saveState(onSaved: (state: object) => void): void {
     this.widget?.save(onSaved);
+  }
+
+  /** Ensure a Volume study exists (TradingView default bottom pane). */
+  ensureVolumeStudy(): void {
+    try {
+      const chart = this.activeChart() as
+        | (IChartWidgetApi & {
+            getAllStudies?: () => Array<{ name?: string; id?: string }>;
+            createStudy?: (
+              name: string,
+              forceOverlay?: boolean,
+              lock?: boolean,
+              inputs?: unknown,
+            ) => Promise<unknown>;
+          })
+        | null;
+      if (!chart?.createStudy) return;
+      const studies = chart.getAllStudies?.() ?? [];
+      const hasVolume = studies.some(
+        (s) => /volume/i.test(s.name ?? "") || /volume/i.test(String(s.id ?? "")),
+      );
+      if (hasVolume) return;
+      // forceOverlay=false → dedicated pane under price (TV default).
+      void chart.createStudy("Volume", false, false);
+    } catch {
+      /* study API unavailable */
+    }
+  }
+
+  /**
+   * Run a Pine draft by mapping it onto a built-in Charting Library study
+   * (SMA / EMA / RSI / MACD). Inputs must be a Record (CL API), not an array.
+   */
+  async runPineDraft(code: string): Promise<{ ok: boolean; message: string }> {
+    const req = resolvePineStudy(code);
+    try {
+      const chart = this.activeChart();
+      if (!chart) {
+        return { ok: false, message: "Chart not ready — wait for candles, then Add to chart again" };
+      }
+      const id = await chart.createStudy(
+        req.studyName,
+        req.forceOverlay,
+        false,
+        req.inputs,
+        req.overrides ?? {},
+      );
+      if (id == null) {
+        return { ok: false, message: `Could not add ${req.label} — study API returned null` };
+      }
+      return { ok: true, message: `Added ${req.label} to chart` };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : "Failed to add study",
+      };
+    }
   }
 
   /** Open the library Object Tree (layers) for drawings / studies. */

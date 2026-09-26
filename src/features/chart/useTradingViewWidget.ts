@@ -188,14 +188,20 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         window.clearTimeout(readyTimer);
         controller.attach(widget);
         onWidgetReady(widget);
+        try {
+          controller.ensureVolumeStudy();
+        } catch {
+          /* ignore */
+        }
+        // Drawing flyout patches on every pane (each widget has its own iframe).
+        unmountDealingRange?.();
+        unmountDealingRange = mountDealingRangeFlyoutInjector(container, () => {
+          if (widget) void activateDealingRange(widget);
+        });
+        unmountPositionIcons?.();
+        unmountPositionIcons = mountPositionToolIconPatcher(container);
         if (isPrimary) {
           widget.subscribe("onAutoSaveNeeded", () => widget?.save((state) => storage.set(autosaveKey, state)));
-          unmountDealingRange?.();
-          unmountDealingRange = mountDealingRangeFlyoutInjector(container, () => {
-            if (widget) void activateDealingRange(widget);
-          });
-          unmountPositionIcons?.();
-          unmountPositionIcons = mountPositionToolIconPatcher(container);
         }
         try {
           widget
@@ -209,6 +215,14 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
               } catch {
                 /* ignore */
               }
+              // Re-attach Volume after symbol switches (saved layouts may omit it).
+              window.setTimeout(() => {
+                try {
+                  controller.ensureVolumeStudy();
+                } catch {
+                  /* ignore */
+                }
+              }, 400);
             });
         } catch {
           /* chart API unavailable */

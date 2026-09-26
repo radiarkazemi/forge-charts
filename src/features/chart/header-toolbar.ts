@@ -1,6 +1,6 @@
 import type { ChartLayoutId, LayoutSyncSettings, UserProfile } from "@/application";
 import { activeProfile, type Settings } from "@/application";
-import type { IChartingLibraryWidget, IDropdownApi } from "@/infrastructure/tradingview";
+import type { IChartingLibraryWidget } from "@/infrastructure/tradingview";
 import { CHART_LAYOUT_CHOICES } from "./chart-layouts";
 import { activateDealingRange } from "./dealing-range";
 
@@ -10,8 +10,12 @@ function avatarIcon(profile: UserProfile): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28"><circle cx="14" cy="14" r="14" fill="${color}"/><text x="14" y="18.5" text-anchor="middle" fill="#fff" font-size="12" font-weight="700" font-family="Arial,sans-serif">${initial}</text></svg>`;
 }
 
-const LAYOUT_ICON =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28"><rect x="4" y="4" width="9" height="9" rx="1" fill="currentColor"/><rect x="15" y="4" width="9" height="9" rx="1" fill="currentColor"/><rect x="4" y="15" width="9" height="9" rx="1" fill="currentColor"/><rect x="15" y="15" width="9" height="9" rx="1" fill="currentColor"/></svg>';
+/**
+ * TradingView "Select layout" glyph — hollow dashed frame (pane outline).
+ * Never the filled 2×2 squares used for indicator templates.
+ */
+const LAYOUT_GRID_ICON =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28" fill="none"><rect x="5" y="5" width="18" height="18" rx="1" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 2.5" stroke-linecap="round"/><path d="M14 6.2v15.6M6.2 14h15.6" stroke="currentColor" stroke-width="1.15" stroke-linecap="square" opacity="0.75"/></svg>';
 
 type SyncKey = keyof LayoutSyncSettings;
 
@@ -53,7 +57,7 @@ function buildLayoutMenuItems(handlers: HeaderToolbarHandlers) {
   const sync = handlers.getLayoutSync?.() ?? {
     symbol: false,
     interval: false,
-    crosshair: true,
+    crosshair: false,
     time: false,
     dateRange: false,
   };
@@ -65,7 +69,7 @@ function buildLayoutMenuItems(handlers: HeaderToolbarHandlers) {
       onSelect: () => handlers.onSetChartLayout(choice.id),
     })),
     {
-      title: "── SYNC IN LAYOUT ──",
+      title: "── Sync in layout ──",
       onSelect: () => {
         /* section header */
       },
@@ -79,24 +83,13 @@ function buildLayoutMenuItems(handlers: HeaderToolbarHandlers) {
   ];
 }
 
-function profileMenuItems(handlers: HeaderToolbarHandlers, profile: UserProfile) {
-  return [
-    {
-      title: `${profile.displayName}  (@${profile.username})`,
-      onSelect: () => handlers.onOpenProfile(),
-    },
-    { title: "Profile & accounts…", onSelect: () => handlers.onOpenProfile() },
-    { title: `Theme: ${handlers.themeLabel}`, onSelect: () => handlers.onToggleTheme() },
-    { title: "Alerts panel", onSelect: () => handlers.onOpenAlertsPanel() },
-    { title: "Watchlist", onSelect: () => handlers.onOpenWatchlist() },
-    { title: "Object tree (layers)", onSelect: () => handlers.onOpenObjectTree() },
-    { title: "Create alert", onSelect: () => handlers.onCreateAlert() },
-  ];
-}
-
 /**
  * Adds TradingView-style custom header controls on top of the library toolbar.
  * Profile avatar sits on the far-right corner (TradingView account menu).
+ *
+ * Layout placement (matches TV):
+ * 1) Named layout dropdown (Save / Autosave / …) — text next to account area
+ * 2) Dashed-square "Select Layout" — multi-pane grid (NOT templates 2×2)
  */
 export function mountHeaderToolbar(
   widget: IChartingLibraryWidget,
@@ -138,17 +131,6 @@ export function mountHeaderToolbar(
       window.setTimeout(refreshLayoutMenu, 0);
     },
   };
-  void widget
-    .createDropdown({
-      title: "Select Layout",
-      tooltip: "Change chart layout without reloading charts · SYNC IN LAYOUT",
-      align: "left",
-      icon: LAYOUT_ICON,
-      items: buildLayoutMenuItems(wrapped),
-    })
-    .then((api) => {
-      layoutDropdown = api as DropdownApi;
-    });
 
   void widget.createDropdown({
     title: "Trade",
@@ -180,7 +162,6 @@ export function mountHeaderToolbar(
     },
   });
 
-  // Tools — Dealing Range (ICT premium / discount) via Fib template.
   void widget.createDropdown({
     title: "Tools",
     tooltip: "Drawing helpers",
@@ -195,30 +176,126 @@ export function mountHeaderToolbar(
     ],
   });
 
-  // Profile — outermost right corner, TradingView-style.
-  let accountDropdown: IDropdownApi | null = null;
-  const profile = handlers.getProfile();
+  // Named layout menu (TradingView: layout name immediately left of Select Layout / profile).
+  const layoutName = handlers.getProfile().displayName || "Layout";
+  void widget.createDropdown({
+    title: layoutName,
+    tooltip: "Save and manage chart layouts",
+    align: "right",
+    items: [
+      {
+        title: "Save layout    Ctrl + S",
+        onSelect: () => {
+          try {
+            widget.save(() => {
+              /* persisted via save_load_adapter */
+            });
+          } catch {
+            /* ignore */
+          }
+        },
+      },
+      {
+        title: "Autosave  ● ON",
+        onSelect: () => {
+          /* always on via auto_save_delay */
+        },
+      },
+      {
+        title: "Make a copy…",
+        onSelect: () => {
+          try {
+            widget.save(() => {
+              /* copy via autosave snapshot */
+            });
+          } catch {
+            /* ignore */
+          }
+        },
+      },
+      {
+        title: "Rename…",
+        onSelect: () => handlers.onOpenProfile(),
+      },
+      {
+        title: "Create new layout…",
+        onSelect: () => {
+          try {
+            widget.activeChart().resetData();
+          } catch {
+            /* ignore */
+          }
+        },
+      },
+      {
+        title: `Recently used · ${layoutName}`,
+        onSelect: () => {
+          /* current layout */
+        },
+      },
+      {
+        title: "Open layout…",
+        onSelect: () => {
+          try {
+            (widget as unknown as { showLoadChartDialog?: () => void }).showLoadChartDialog?.();
+          } catch {
+            /* ignore */
+          }
+        },
+      },
+    ],
+  });
+
+  // Multi-pane Select Layout — icon-only dashed square (never templates 2×2).
   void widget
     .createDropdown({
-      title: profile.avatarInitial,
-      tooltip: `${profile.displayName} (@${profile.username})`,
+      title: " ",
+      tooltip: "Select layout",
       align: "right",
-      icon: avatarIcon(profile),
-      items: profileMenuItems(handlers, profile),
+      icon: LAYOUT_GRID_ICON,
+      items: buildLayoutMenuItems(wrapped),
     })
     .then((api) => {
-      accountDropdown = api;
+      layoutDropdown = api as DropdownApi;
     });
+
+  // Profile avatar → React ProfileMenu (far-right, TradingView account button).
+  const profile = handlers.getProfile();
+  const profileBtn = widget.createButton({
+    align: "right",
+    useTradingViewStyle: false,
+  });
+  profileBtn.setAttribute("title", `${profile.displayName} (@${profile.username})`);
+  profileBtn.setAttribute("aria-label", "Account menu");
+  Object.assign(profileBtn.style, {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "36px",
+    height: "36px",
+    minWidth: "36px",
+    padding: "0",
+    margin: "0 4px",
+    cursor: "pointer",
+    borderRadius: "50%",
+    overflow: "hidden",
+    background: "transparent",
+    border: "0",
+  });
+  profileBtn.innerHTML = avatarIcon(profile);
+  const openProfileMenu = (e: Event) => {
+    e.preventDefault();
+    e.stopPropagation();
+    window.dispatchEvent(new CustomEvent("forge:open-profile-menu"));
+  };
+  profileBtn.addEventListener("click", openProfileMenu);
+  profileBtn.addEventListener("pointerdown", openProfileMenu);
 
   return {
     updateProfile: (next) => {
       try {
-        accountDropdown?.applyOptions({
-          title: next.avatarInitial,
-          tooltip: `${next.displayName} (@${next.username})`,
-          icon: avatarIcon(next),
-          items: profileMenuItems(handlers, next),
-        });
+        profileBtn.innerHTML = avatarIcon(next);
+        profileBtn.setAttribute("title", `${next.displayName} (@${next.username})`);
       } catch {
         /* ignore */
       }

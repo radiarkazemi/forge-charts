@@ -7,37 +7,67 @@ import { AlertToaster } from "@/features/alerts/AlertToaster";
 import { CreateAlertDialog } from "@/features/alerts/CreateAlertDialog";
 import { ChartWorkspace } from "@/features/chart/ChartWorkspace";
 import { ProfileDialog } from "@/features/profile/ProfileDialog";
+import { ProfileMenu } from "@/features/profile/ProfileMenu";
+import { activeProfile } from "@/application";
 import { useStore } from "@/shared/hooks/useStore";
 import { SidePanel } from "./SidePanel";
 import { SideRail } from "./SideRail";
 
 /**
- * Chart shell: TradingView toolbar is the primary chrome.
- * On mobile the right panel overlays the chart so the canvas stays usable.
+ * Chart shell matching TradingView Supercharts:
+ * - Right widget rail (Watchlist / Alerts / Object tree / Pine / …)
+ * - Pine Editor docks to the right of the chart (like TV “Pine” button)
+ * - Other panels also open from the rail
  */
 export function AppShell() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
-  const { settings, chart } = useServices();
+  const { settings, chart, alerts } = useServices();
   const sidePanel = useStore(settings.settings, (s) => s.sidePanel);
+  const appTheme = useStore(settings.settings, (s) => s.theme);
+  const settingsSnap = useStore(settings.settings, (s) => s);
+  const profile = activeProfile(settingsSnap);
   const symbol = useStore(chart.state, (s) => s.symbol);
+  const alertCount = useStore(alerts.alerts, (list) => list.filter((a) => a.status === "active").length);
   const [alertDialogOpen, setAlertDialogOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [profileMenuAnchor, setProfileMenuAnchor] = useState<HTMLElement | null>(null);
+  const profileAnchorRef = useState(() => {
+    if (typeof document === "undefined") return null;
+    const el = document.createElement("div");
+    el.style.cssText = "position:fixed;top:6px;right:56px;width:1px;height:28px;pointer-events:none;z-index:40;";
+    document.body.appendChild(el);
+    return el;
+  })[0];
+
+  useEffect(() => {
+    return () => {
+      profileAnchorRef?.remove();
+    };
+  }, [profileAnchorRef]);
 
   useEffect(() => {
     document.title = `${symbol} — Forge Charts`;
   }, [symbol]);
 
-  // Give the chart full width on phones; watchlist stays one tap away via the rail.
   useEffect(() => {
-    if (isMobile && settings.settings.get().sidePanel) {
+    if (isMobile && settings.settings.get().sidePanel && settings.settings.get().sidePanel !== "pine") {
       settings.setSidePanel(null);
     }
-    // Only when crossing into mobile — not on every panel toggle.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: mobile breakpoint only
   }, [isMobile]);
 
+  useEffect(() => {
+    const onOpen = () => setProfileMenuAnchor(profileAnchorRef);
+    window.addEventListener("forge:open-profile-menu", onOpen);
+    return () => window.removeEventListener("forge:open-profile-menu", onOpen);
+  }, [profileAnchorRef]);
+
   const openAlertDialog = () => setAlertDialogOpen(true);
+  const openProfileMenu = () => setProfileMenuAnchor(profileAnchorRef);
+
+  const pineOpen = sidePanel === "pine";
+  const sideDock = sidePanel && sidePanel !== "pine" ? sidePanel : null;
 
   return (
     <Box
@@ -51,38 +81,79 @@ export function AppShell() {
       }}
     >
       <Box component="main" sx={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
-        <ChartWorkspace onCreateAlert={openAlertDialog} onOpenProfile={() => setProfileOpen(true)} />
-        {sidePanel ? (
-          <>
-            {isMobile ? (
-              <Box
-                onClick={() => settings.setSidePanel(null)}
-                sx={{
-                  position: "absolute",
-                  inset: 0,
-                  right: 44,
-                  bgcolor: "rgba(0,0,0,0.45)",
-                  zIndex: 19,
-                }}
+        <Box sx={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0, position: "relative" }}>
+          <ChartWorkspace onCreateAlert={openAlertDialog} onOpenProfile={openProfileMenu} />
+          {sideDock ? (
+            <>
+              {isMobile ? (
+                <Box
+                  onClick={() => settings.setSidePanel(null)}
+                  sx={{
+                    position: "absolute",
+                    inset: 0,
+                    right: 52,
+                    bgcolor: "rgba(0,0,0,0.45)",
+                    zIndex: 19,
+                  }}
+                />
+              ) : null}
+              <SidePanel
+                panel={sideDock}
+                onClose={() => settings.setSidePanel(null)}
+                onCreateAlert={openAlertDialog}
+                onOpenObjectTree={() => chart.openObjectTree()}
+                onRunPine={(code) => chart.runPineDraft(code)}
+                overlay={isMobile}
               />
-            ) : null}
+            </>
+          ) : null}
+        </Box>
+
+        {/* Pine docks to the RIGHT of the chart (TradingView default when opening from rail). */}
+        {pineOpen ? (
+          <Box
+            sx={{
+              width: { xs: "min(100%, 420px)", md: "min(48vw, 640px)" },
+              flexShrink: 0,
+              minHeight: 0,
+              display: "flex",
+              flexDirection: "column",
+              zIndex: 18,
+            }}
+          >
             <SidePanel
-              panel={sidePanel}
+              panel="pine"
               onClose={() => settings.setSidePanel(null)}
               onCreateAlert={openAlertDialog}
-              overlay={isMobile}
+              onOpenObjectTree={() => chart.openObjectTree()}
+              onRunPine={(code) => chart.runPineDraft(code)}
             />
-          </>
+          </Box>
         ) : null}
+
         <SideRail
           active={sidePanel}
           onToggle={(id) => settings.toggleSidePanel(id)}
           onOpenObjectTree={() => chart.openObjectTree()}
+          onOpenPine={() => settings.toggleSidePanel("pine")}
           compact={isMobile}
         />
       </Box>
       <CreateAlertDialog open={alertDialogOpen} onClose={() => setAlertDialogOpen(false)} />
       <ProfileDialog open={profileOpen} onClose={() => setProfileOpen(false)} />
+      <ProfileMenu
+        anchorEl={profileMenuAnchor}
+        open={Boolean(profileMenuAnchor)}
+        onClose={() => setProfileMenuAnchor(null)}
+        profile={profile}
+        darkTheme={appTheme === "dark"}
+        onToggleTheme={() => settings.toggleTheme()}
+        onOpenProfile={() => {
+          setProfileMenuAnchor(null);
+          setProfileOpen(true);
+        }}
+        alertCount={alertCount}
+      />
       <AlertToaster />
     </Box>
   );

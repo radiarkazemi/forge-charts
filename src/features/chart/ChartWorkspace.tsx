@@ -25,7 +25,9 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   const grid = getChartLayoutGrid(chartLayout ?? "s");
 
   useEffect(() => {
-    layoutSyncBus.setFlags(layoutSync ?? { symbol: false, interval: false, crosshair: true, time: false, dateRange: false });
+    layoutSyncBus.setFlags(
+      layoutSync ?? { symbol: false, interval: false, crosshair: false, time: false, dateRange: false },
+    );
   }, [layoutSync]);
 
   useEffect(() => {

@@ -12,7 +12,7 @@ export interface LayoutSyncFlags {
 export const DEFAULT_LAYOUT_SYNC: LayoutSyncFlags = {
   symbol: false,
   interval: false,
-  crosshair: true,
+  crosshair: false,
   time: false,
   dateRange: false,
 };
@@ -93,19 +93,10 @@ class LayoutSyncBus {
 
   notifyCrosshair(sourceIndex: number, time: number): void {
     if (!this.flags.crosshair || this.locked) return;
-    if (!Number.isFinite(time) || time <= 0) return;
-    // Advanced Charts has no public setCrossHair(time); keep other panes on the
-    // same moment by recentering their visible range around the crosshair time.
-    this.withLock(() => {
-      for (const { index, controller } of this.panes.values()) {
-        if (index === sourceIndex || index >= this.activeCount) continue;
-        const range = controller.getVisibleRange();
-        if (!range) continue;
-        const span = Math.max(60, range.to - range.from);
-        const half = span / 2;
-        void controller.setVisibleRange(time - half, time + half);
-      }
-    });
+    // Charting Library has no public setCrossHair(time). Mutating visible range
+    // to "follow" the cursor causes zoom/pan fighting across panes — skip it.
+    void sourceIndex;
+    void time;
   }
 
   private withLock(fn: () => void): void {

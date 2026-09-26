@@ -4,7 +4,8 @@ import { createPersistentStore, type Store } from "../store";
 
 export type ThemeMode = "dark" | "light";
 
-export type SidePanelId = "watchlist" | "alerts" | "data";
+export type SidePanelId = "watchlist" | "alerts" | "data" | "pine";
+
 
 /** Multi-chart page layout (1 / 2 / 3 / 4 panes). */
 export type ChartLayoutId = "s" | "2h" | "2v" | "3s" | "3h" | "3v" | "2-1" | "1-2" | "4";
@@ -57,7 +58,8 @@ export const DEFAULT_WATCHLIST: readonly string[] = [
 export const DEFAULT_LAYOUT_SYNC: LayoutSyncSettings = {
   symbol: false,
   interval: false,
-  crosshair: true,
+  // Do not recenter other panes on mouse move (looks like zoom/scale fighting).
+  crosshair: false,
   time: false,
   dateRange: false,
 };
@@ -102,7 +104,7 @@ function sanitizeStringList(value: unknown, fallback: readonly string[]): readon
 }
 
 function sanitizeSidePanel(value: unknown): SidePanelId | null {
-  return value === "watchlist" || value === "alerts" || value === "data" ? value : null;
+  return value === "watchlist" || value === "alerts" || value === "data" || value === "pine" ? value : null;
 }
 
 function sanitizeLayoutSync(value: unknown): LayoutSyncSettings {
@@ -215,7 +217,13 @@ export class SettingsService {
   }
 
   setChartLayout(chartLayout: ChartLayoutId): void {
-    this.patch({ chartLayout: sanitizeLayout(chartLayout) });
+    const next = sanitizeLayout(chartLayout);
+    const primary = this.settings.get().lastSymbol || "XAUUSD";
+    const panes = [...sanitizeStringList(this.settings.get().paneSymbols, [primary])];
+    // Fill missing secondary panes with the primary symbol (don't invent AAPL/etc.).
+    while (panes.length < 4) panes.push(panes[0] ?? primary);
+    if (!panes[0]) panes[0] = primary;
+    this.patch({ chartLayout: next, paneSymbols: panes });
   }
 
   setLayoutSync(partial: Partial<LayoutSyncSettings>): void {

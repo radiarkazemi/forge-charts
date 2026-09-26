@@ -1,37 +1,37 @@
 /**
- * TradingView Long / Short position icons — horizontal line with end nodes + L/S.
- * Charting Library ships mirrored dashed-line icons that look nearly identical;
- * we patch the CL icon bundle and also swap DOM SVGs when the flyout opens.
+ * TradingView Long / Short — three parallel lines, hollow nodes on outer left ends,
+ * L in the upper gap / S in the lower gap.
  */
 
-/** TV-style Long position (line + nodes + L). */
-export const LONG_POSITION_ICON =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28" fill="none"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M5.5 8a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM3 9.5A2.5 2.5 0 0 1 7.95 9h12.1a2.5 2.5 0 1 1 0 1H7.95A2.5 2.5 0 0 1 3 9.5zM22.5 8a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/><text x="8.5" y="22" fill="currentColor" font-size="10" font-family="Trebuchet MS,Arial,sans-serif" font-weight="600">L</text></svg>';
+const OUTER_LINE = (y: number) =>
+  `M6 ${y}h17.5M4.75 ${y}a1.75 1.75 0 1 1 3.5 0a1.75 1.75 0 0 1-3.5 0`;
 
-/** TV-style Short position (line + nodes + S). */
-export const SHORT_POSITION_ICON =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28" fill="none"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M5.5 8a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM3 9.5A2.5 2.5 0 0 1 7.95 9h12.1a2.5 2.5 0 1 1 0 1H7.95A2.5 2.5 0 0 1 3 9.5zM22.5 8a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/><text x="8.5" y="22" fill="currentColor" font-size="10" font-family="Trebuchet MS,Arial,sans-serif" font-weight="600">S</text></svg>';
+const MID_LINE = "M5 14h18.5";
+
+/** TV-style Long position (L between top and mid). */
+export const LONG_POSITION_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28" fill="none"><g stroke="currentColor" stroke-width="1.35" fill="none"><path d="${OUTER_LINE(7.5)}"/><path d="${MID_LINE}"/><path d="${OUTER_LINE(20.5)}"/></g><text x="11.5" y="12.6" fill="currentColor" font-size="7.5" font-family="Trebuchet MS,Arial,sans-serif" font-weight="700">L</text></svg>`;
+
+/** TV-style Short position (S between mid and bottom). */
+export const SHORT_POSITION_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28" fill="none"><g stroke="currentColor" stroke-width="1.35" fill="none"><path d="${OUTER_LINE(7.5)}"/><path d="${MID_LINE}"/><path d="${OUTER_LINE(20.5)}"/></g><text x="11.5" y="21.4" fill="currentColor" font-size="7.5" font-family="Trebuchet MS,Arial,sans-serif" font-weight="700">S</text></svg>`;
 
 const ICON_BY_TOOL: Record<string, string> = {
   LineToolRiskRewardLong: LONG_POSITION_ICON,
   LineToolRiskRewardShort: SHORT_POSITION_ICON,
 };
 
+const PATCH_VERSION = "4";
+
 function patchIconHost(host: Element, svgHtml: string): void {
-  if (host.getAttribute("data-forge-pos-icon") === "1") return;
+  if (host.getAttribute("data-forge-pos-icon") === PATCH_VERSION) return;
   const svg = host.querySelector("svg");
-  if (svg) {
-    svg.outerHTML = svgHtml;
-  } else {
-    host.insertAdjacentHTML("afterbegin", svgHtml);
-  }
-  host.setAttribute("data-forge-pos-icon", "1");
+  if (svg) svg.outerHTML = svgHtml;
+  else host.insertAdjacentHTML("afterbegin", svgHtml);
+  host.setAttribute("data-forge-pos-icon", PATCH_VERSION);
 }
 
 function patchDoc(doc: Document): void {
   for (const [name, svg] of Object.entries(ICON_BY_TOOL)) {
-    const rows = doc.querySelectorAll(`[data-name="${name}"]`);
-    rows.forEach((row) => {
+    doc.querySelectorAll(`[data-name="${name}"]`).forEach((row) => {
       const iconHost =
         row.querySelector(".icon-jFqVJoPk, [class*='icon-']") ?? row.querySelector("svg")?.parentElement ?? row;
       if (iconHost) patchIconHost(iconHost, svg);
@@ -39,9 +39,6 @@ function patchDoc(doc: Document): void {
   }
 }
 
-/**
- * Keep Long/Short flyout (+ toolbar group) icons on the TradingView L/S artwork.
- */
 export function mountPositionToolIconPatcher(container: HTMLElement): () => void {
   let observer: MutationObserver | null = null;
   let iframeObserver: MutationObserver | null = null;
