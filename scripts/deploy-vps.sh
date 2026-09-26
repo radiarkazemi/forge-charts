@@ -31,11 +31,6 @@ tar -C dist/assets -cf - . | "${SSH[@]}" "${USER}@${HOST}" \
 
 echo "Uploading /charts/index.html (+ brand icons / manifest + static docs if present)"
 "${SCP[@]}" dist/index.html "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/index.html"
-if [[ -f dist/tv-header.css ]]; then
-  "${SCP[@]}" dist/tv-header.css "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/tv-header.css"
-elif [[ -f public/tv-header.css ]]; then
-  "${SCP[@]}" public/tv-header.css "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/tv-header.css"
-fi
 if [[ -d dist/brand ]]; then
   tar -C dist -cf - brand | "${SSH[@]}" "${USER}@${HOST}" \
     "rm -rf '${REMOTE_ANIL_CHARTS}/brand' && tar -C '${REMOTE_ANIL_CHARTS}' -xf -"
@@ -60,8 +55,8 @@ if [[ -f SUPERCHART-PARITY.md ]]; then
 fi
 "${SSH[@]}" "${USER}@${HOST}" "chown -R www-data:www-data '${REMOTE_ANIL_CHARTS}'"
 
-echo "Mirroring full dist → ${REMOTE_APP}"
-tar -C dist -cf - . | "${SSH[@]}" "${USER}@${HOST}" \
+echo "Mirroring slim dist → ${REMOTE_APP} (excludes charting_library)"
+tar -C dist --exclude=charting_library --exclude=charts -cf - . | "${SSH[@]}" "${USER}@${HOST}" \
   "tar -C '${REMOTE_APP}' -xf - && chown -R www-data:www-data '${REMOTE_APP}'"
 
 
@@ -73,7 +68,8 @@ ANIL_DIST='/var/www/anil/frontend/dist'
 REMOTE_FORGE_WEB='${REMOTE_FORGE_WEB}'
 mkdir -p "\${REMOTE_FORGE_WEB}/charts" "\${REMOTE_FORGE_WEB}/assets/forge"
 if [[ -d "\${ANIL_DIST}/charts" && -d "\${ANIL_DIST}/assets/forge" ]]; then
-  rsync -a --delete "\${ANIL_DIST}/charts/" "\${REMOTE_FORGE_WEB}/charts/"
+  # Keep the large Charting Library tree already on forge-web; sync app files only.
+  rsync -a --delete --exclude charting_library "\${ANIL_DIST}/charts/" "\${REMOTE_FORGE_WEB}/charts/"
   rsync -a --delete "\${ANIL_DIST}/assets/forge/" "\${REMOTE_FORGE_WEB}/assets/forge/"
   if [[ -d "\${ANIL_DIST}/charts/brand" ]]; then
     rsync -a "\${ANIL_DIST}/charts/brand/" "\${REMOTE_FORGE_WEB}/charts/brand/"
