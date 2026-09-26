@@ -49,19 +49,21 @@ function syncLabel(key: SyncKey, on: boolean): string {
     crosshair: "Crosshair",
     time: "Time",
     dateRange: "Date range",
+    drawings: "Drawings",
   };
   return `${names[key]}  ${on ? "● ON" : "○ OFF"}`;
 }
 
 function buildLayoutMenuItems(handlers: HeaderToolbarHandlers) {
   const sync = handlers.getLayoutSync?.() ?? {
-    symbol: false,
+    symbol: true,
     interval: false,
     crosshair: false,
     time: false,
     dateRange: false,
+    drawings: true,
   };
-  const syncKeys: SyncKey[] = ["symbol", "interval", "crosshair", "time", "dateRange"];
+  const syncKeys: SyncKey[] = ["symbol", "interval", "crosshair", "time", "dateRange", "drawings"];
   return [
     ...CHART_LAYOUT_CHOICES.map((choice) => ({
       title: choice.title,

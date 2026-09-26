@@ -38,12 +38,17 @@ function runBootRecovery(): void {
         if (typeof settings.chartLayout !== "string") settings.chartLayout = "s";
         if (!settings.layoutSync || typeof settings.layoutSync !== "object") {
           settings.layoutSync = {
-            symbol: false,
+            symbol: true,
             interval: false,
-            crosshair: true,
+            crosshair: false,
             time: false,
             dateRange: false,
+            drawings: true,
           };
+        } else {
+          const ls = settings.layoutSync as Record<string, unknown>;
+          if (typeof ls.drawings !== "boolean") ls.drawings = true;
+          if (typeof ls.symbol !== "boolean") ls.symbol = true;
         }
         localStorage.setItem("forge.settings.v1", JSON.stringify(settings));
       } catch {

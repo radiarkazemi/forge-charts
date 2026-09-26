@@ -16,6 +16,8 @@ export interface LayoutSyncSettings {
   readonly crosshair: boolean;
   readonly time: boolean;
   readonly dateRange: boolean;
+  /** Mirror drawings across panes by absolute time/price (cross-TF). */
+  readonly drawings: boolean;
 }
 
 /** Per-person local profile (TradingView-style account identity). */
@@ -56,12 +58,16 @@ export const DEFAULT_WATCHLIST: readonly string[] = [
 ];
 
 export const DEFAULT_LAYOUT_SYNC: LayoutSyncSettings = {
-  symbol: false,
+  // Same ticker on every pane (TV linked multi-chart).
+  symbol: true,
+  // Independent intervals (15m next to 4H).
   interval: false,
   // Do not recenter other panes on mouse move (looks like zoom/scale fighting).
   crosshair: false,
   time: false,
   dateRange: false,
+  // Drawings share time/price across panes (TV sample behavior).
+  drawings: true,
 };
 
 export const AVATAR_COLORS = ["#9c27b0", "#2962ff", "#089981", "#f57c00", "#e91e63", "#00bcd4"] as const;
@@ -110,11 +116,13 @@ function sanitizeSidePanel(value: unknown): SidePanelId | null {
 function sanitizeLayoutSync(value: unknown): LayoutSyncSettings {
   const raw = value && typeof value === "object" ? (value as Partial<LayoutSyncSettings>) : {};
   return {
-    symbol: Boolean(raw.symbol),
+    // Defaults match TradingView linked multi-chart (same symbol, synced drawings, free interval).
+    symbol: raw.symbol !== false,
     interval: Boolean(raw.interval),
-    crosshair: raw.crosshair !== false,
+    crosshair: Boolean(raw.crosshair),
     time: Boolean(raw.time),
     dateRange: Boolean(raw.dateRange),
+    drawings: raw.drawings !== false,
   };
 }
 

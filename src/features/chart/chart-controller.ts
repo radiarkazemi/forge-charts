@@ -67,6 +67,9 @@ export class ChartController {
   private desiredTheme: ThemeMode | null = null;
   private crosshairFrame = 0;
   private syncHooks: ChartSyncHooks = {};
+  private orcaEntityIds: EntityId[] = [];
+  private readonly drawingHandlers = new Set<(entityId: EntityId, eventType: string) => void>();
+  private drawingBridge: ((entityId: EntityId, eventType: string) => void) | null = null;
 
   constructor(symbol: string, interval: Interval) {
     this.state = createStore<ChartState>({ symbol, interval, ready: false, error: null });
@@ -130,10 +133,47 @@ export class ChartController {
     window.setTimeout(forceCountdown, 3_000);
 
     if (this.desiredTheme && this.desiredTheme !== widget.getTheme()) void this.applyTheme(this.desiredTheme);
+
+    // Bind drawing_event bridge (handlers may have registered before attach).
+    this.bindDrawingBridge(widget);
+  }
+
+  private bindDrawingBridge(widget: IChartingLibraryWidget): void {
+    if (this.drawingBridge) {
+      try {
+        widget.unsubscribe("drawing_event", this.drawingBridge);
+      } catch {
+        /* ignore */
+      }
+      this.drawingBridge = null;
+    }
+    const bridge = (entityId: EntityId, eventType: string) => {
+      for (const handler of this.drawingHandlers) {
+        try {
+          handler(entityId, eventType);
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+    try {
+      widget.subscribe("drawing_event", bridge);
+      this.drawingBridge = bridge;
+    } catch {
+      this.drawingBridge = null;
+    }
   }
 
   detach(): void {
     cancelAnimationFrame(this.crosshairFrame);
+    if (this.widget && this.drawingBridge) {
+      try {
+        this.widget.unsubscribe("drawing_event", this.drawingBridge);
+      } catch {
+        /* ignore */
+      }
+    }
+    this.drawingBridge = null;
     this.widget = null;
     this.patch({ ready: false });
   }
@@ -296,8 +336,6 @@ export class ChartController {
     }
   }
 
-  private orcaEntityIds: EntityId[] = [];
-
   private async runOrcaDraft(code: string, label: string): Promise<{ ok: boolean; message: string }> {
     const chart = this.activeChart();
     if (!chart) {
@@ -367,6 +405,17 @@ export class ChartController {
     } catch {
       return () => undefined;
     }
+  }
+
+  /** Subscribe to drawing create / move / remove / property changes. */
+  onDrawingEvent(handler: (entityId: EntityId, eventType: string) => void): () => void {
+    this.drawingHandlers.add(handler);
+    if (this.widget && !this.drawingBridge) {
+      this.bindDrawingBridge(this.widget);
+    }
+    return () => {
+      this.drawingHandlers.delete(handler);
+    };
   }
 
   /** Open the library Object Tree (layers) for drawings / studies. */
