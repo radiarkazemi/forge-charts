@@ -59,15 +59,22 @@ function toTvBar(bar: Bar) {
   if (!Number.isFinite(timeSec) || timeSec <= 0) {
     throw new Error(`Invalid bar time: ${String(bar.time)}`);
   }
-  const volume = Number(bar.volume);
+  const rawVol = Number(bar.volume);
+  let volume = Number.isFinite(rawVol) && rawVol > 0 ? rawVol : 0;
+  // FX / some CFDs omit volume — synthesize tick volume so the Volume pane is usable.
+  if (volume <= 0) {
+    const range = Math.abs(bar.high - bar.low);
+    const body = Math.abs(bar.close - bar.open);
+    const proxy = Math.round((range * 4 + body * 2) * 1e4);
+    volume = Math.max(1, proxy);
+  }
   return {
     time: timeSec * 1000,
     open: bar.open,
     high: bar.high,
     low: bar.low,
     close: bar.close,
-    // Always include volume so the Volume study can render (0 when feed has none).
-    volume: Number.isFinite(volume) && volume >= 0 ? volume : 0,
+    volume,
   };
 }
 

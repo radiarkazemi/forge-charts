@@ -11,11 +11,11 @@ function avatarIcon(profile: UserProfile): string {
 }
 
 /**
- * TradingView "Select layout" glyph — hollow/dashed frame with pane cross.
- * NOT the filled 2×2 (that is indicator templates).
+ * TradingView "Select layout" glyph — hollow dashed frame (pane outline).
+ * Never the filled 2×2 squares used for indicator templates.
  */
 const LAYOUT_GRID_ICON =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28" fill="none"><rect x="4.5" y="4.5" width="19" height="19" rx="1.5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2"/><path d="M14 5v18M5 14h18" stroke="currentColor" stroke-width="1.2" opacity="0.9"/></svg>';
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28" fill="none"><rect x="5" y="5" width="18" height="18" rx="1" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 2.5" stroke-linecap="round"/><path d="M14 6.2v15.6M6.2 14h15.6" stroke="currentColor" stroke-width="1.15" stroke-linecap="square" opacity="0.75"/></svg>';
 
 type SyncKey = keyof LayoutSyncSettings;
 
@@ -132,7 +132,51 @@ export function mountHeaderToolbar(
     },
   };
 
-  // Named layout menu (TradingView: layout name near profile) — Save / Autosave / …
+  void widget.createDropdown({
+    title: "Trade",
+    tooltip: "Paper trade markers",
+    align: "right",
+    items: [
+      { title: "Buy (mark entry)", onSelect: () => void placeTradeMarker(widget, handlers, "buy") },
+      { title: "Sell (mark entry)", onSelect: () => void placeTradeMarker(widget, handlers, "sell") },
+      {
+        title: "Clear trade markers",
+        onSelect: () => {
+          try {
+            widget.activeChart().executeActionById("paneRemoveAllStudiesDrawingTools");
+          } catch {
+            /* ignore */
+          }
+        },
+      },
+    ],
+  });
+
+  widget.createButton({
+    align: "right",
+    useTradingViewStyle: true,
+    text: "Publish",
+    title: "Download a chart snapshot",
+    onClick: () => {
+      void publishSnapshot(widget);
+    },
+  });
+
+  void widget.createDropdown({
+    title: "Tools",
+    tooltip: "Drawing helpers",
+    align: "right",
+    items: [
+      {
+        title: "Dealing Range (Premium / Discount)",
+        onSelect: () => {
+          void activateDealingRange(widget);
+        },
+      },
+    ],
+  });
+
+  // Named layout menu (TradingView: layout name immediately left of Select Layout / profile).
   const layoutName = handlers.getProfile().displayName || "Layout";
   void widget.createDropdown({
     title: layoutName,
@@ -202,11 +246,11 @@ export function mountHeaderToolbar(
     ],
   });
 
-  // Multi-pane Select Layout — dashed square (never the templates 2×2).
+  // Multi-pane Select Layout — icon-only dashed square (never templates 2×2).
   void widget
     .createDropdown({
-      title: "Select Layout",
-      tooltip: "Multi-chart layout · Sync in layout",
+      title: " ",
+      tooltip: "Select layout",
       align: "right",
       icon: LAYOUT_GRID_ICON,
       items: buildLayoutMenuItems(wrapped),
@@ -215,51 +259,7 @@ export function mountHeaderToolbar(
       layoutDropdown = api as DropdownApi;
     });
 
-  void widget.createDropdown({
-    title: "Trade",
-    tooltip: "Paper trade markers",
-    align: "right",
-    items: [
-      { title: "Buy (mark entry)", onSelect: () => void placeTradeMarker(widget, handlers, "buy") },
-      { title: "Sell (mark entry)", onSelect: () => void placeTradeMarker(widget, handlers, "sell") },
-      {
-        title: "Clear trade markers",
-        onSelect: () => {
-          try {
-            widget.activeChart().executeActionById("paneRemoveAllStudiesDrawingTools");
-          } catch {
-            /* ignore */
-          }
-        },
-      },
-    ],
-  });
-
-  widget.createButton({
-    align: "right",
-    useTradingViewStyle: true,
-    text: "Publish",
-    title: "Download a chart snapshot",
-    onClick: () => {
-      void publishSnapshot(widget);
-    },
-  });
-
-  void widget.createDropdown({
-    title: "Tools",
-    tooltip: "Drawing helpers",
-    align: "right",
-    items: [
-      {
-        title: "Dealing Range (Premium / Discount)",
-        onSelect: () => {
-          void activateDealingRange(widget);
-        },
-      },
-    ],
-  });
-
-  // Profile avatar → React ProfileMenu (HTML button so we can inject the avatar SVG).
+  // Profile avatar → React ProfileMenu (far-right, TradingView account button).
   const profile = handlers.getProfile();
   const profileBtn = widget.createButton({
     align: "right",
@@ -267,17 +267,29 @@ export function mountHeaderToolbar(
   });
   profileBtn.setAttribute("title", `${profile.displayName} (@${profile.username})`);
   profileBtn.setAttribute("aria-label", "Account menu");
-  profileBtn.style.display = "inline-flex";
-  profileBtn.style.alignItems = "center";
-  profileBtn.style.justifyContent = "center";
-  profileBtn.style.padding = "0 4px";
-  profileBtn.style.cursor = "pointer";
+  Object.assign(profileBtn.style, {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "36px",
+    height: "36px",
+    minWidth: "36px",
+    padding: "0",
+    margin: "0 4px",
+    cursor: "pointer",
+    borderRadius: "50%",
+    overflow: "hidden",
+    background: "transparent",
+    border: "0",
+  });
   profileBtn.innerHTML = avatarIcon(profile);
-  profileBtn.addEventListener("click", (e) => {
+  const openProfileMenu = (e: Event) => {
     e.preventDefault();
     e.stopPropagation();
     window.dispatchEvent(new CustomEvent("forge:open-profile-menu"));
-  });
+  };
+  profileBtn.addEventListener("click", openProfileMenu);
+  profileBtn.addEventListener("pointerdown", openProfileMenu);
 
   return {
     updateProfile: (next) => {
