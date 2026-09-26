@@ -139,6 +139,11 @@ export class ChartController {
     return this.widget !== null && this.state.get().ready;
   }
 
+  /** Raw widget for features that need APIs not wrapped here (e.g. Bar Replay). */
+  getWidget(): IChartingLibraryWidget | null {
+    return this.widget;
+  }
+
   setSymbol(ticker: string): void {
     const chart = this.activeChart();
     if (!chart) return;

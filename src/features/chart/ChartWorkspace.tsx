@@ -8,6 +8,7 @@ import { TradingViewChart } from "./TradingViewChart";
 
 interface ChartWorkspaceProps {
   readonly onCreateAlert: () => void;
+  readonly onOpenProfile: () => void;
 }
 
 /**
@@ -15,7 +16,7 @@ interface ChartWorkspaceProps {
  * Panes stay mounted (stable keys) so changing layout only updates the CSS grid —
  * widgets are not closed / re-created.
  */
-export function ChartWorkspace({ onCreateAlert }: ChartWorkspaceProps) {
+export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceProps) {
   const { settings } = useServices();
   const chartLayout = useStore(settings.settings, (s) => s.chartLayout ?? "s");
   const paneSymbols = useStore(settings.settings, (s) => (Array.isArray(s.paneSymbols) ? s.paneSymbols : []));
@@ -66,7 +67,12 @@ export function ChartWorkspace({ onCreateAlert }: ChartWorkspaceProps) {
               position: "relative",
             }}
           >
-            <TradingViewChart onCreateAlert={onCreateAlert} paneIndex={index} initialSymbol={symbol} />
+            <TradingViewChart
+              onCreateAlert={onCreateAlert}
+              onOpenProfile={onOpenProfile}
+              paneIndex={index}
+              initialSymbol={symbol}
+            />
           </Box>
         );
       })}

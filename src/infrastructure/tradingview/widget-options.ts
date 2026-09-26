@@ -206,6 +206,23 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
     // Desktop primary: full labels; mobile / secondary panes: compact.
     header_widget_buttons_mode: mobile || secondary ? "adaptive" : "fullsize",
     custom_css_url: "/charts/tv-header.css",
+    // Match TradingView.com flyout wording (Forecasting / Measurers / Sector…).
+    custom_translate_function: (originalText) => {
+      const map: Record<string, string> = {
+        Projection: "Sector",
+        Forecast: "Position forecast",
+        Measurer: "Measurers",
+        "Long Position": "Long position",
+        "Short Position": "Short position",
+        "Bars Pattern": "Bars pattern",
+        "Ghost Feed": "Ghost feed",
+        "Fixed Range Volume Profile": "Fixed range volume profile",
+        "Price Range": "Price range",
+        "Date Range": "Date range",
+        "Date and Price Range": "Date and price range",
+      };
+      return map[originalText] ?? null;
+    },
     enabled_features: secondary
       ? ENABLED_FEATURES.filter((f) => f !== "left_toolbar" && f !== "show_object_tree" && f !== "object_tree_legend_mode")
       : ENABLED_FEATURES,

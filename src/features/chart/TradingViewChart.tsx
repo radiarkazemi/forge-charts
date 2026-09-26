@@ -1,27 +1,41 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Tooltip from "@mui/material/Tooltip";
 import { useServices } from "@/app/use-services";
+import { activeProfile } from "@/application";
 import { ChartController } from "@/features/chart/chart-controller";
 import { useStore } from "@/shared/hooks/useStore";
+import { BarReplayToolbar } from "./bar-replay/BarReplayToolbar";
+import type { HeaderToolbarApi } from "./header-toolbar";
 import { layoutSyncBus } from "./layout-sync";
 import { useChartAlertLines } from "./useChartAlertLines";
 import { useTradingViewWidget } from "./useTradingViewWidget";
 
 interface TradingViewChartProps {
   readonly onCreateAlert: () => void;
+  readonly onOpenProfile: () => void;
   /** 0 = primary (alerts, Forge header, shared controller). */
   readonly paneIndex?: number;
   readonly initialSymbol?: string;
 }
 
-export function TradingViewChart({ onCreateAlert, paneIndex = 0, initialSymbol }: TradingViewChartProps) {
-  const { chart, datafeed, saveLoadAdapter, storage, settings, alerts, quotes, config } = useServices();
+export function TradingViewChart({
+  onCreateAlert,
+  onOpenProfile,
+  paneIndex = 0,
+  initialSymbol,
+}: TradingViewChartProps) {
+  const { chart, barReplay, datafeed, saveLoadAdapter, storage, settings, alerts, quotes, config } =
+    useServices();
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const headerApiRef = useRef<HeaderToolbarApi | null>(null);
   const theme = useStore(settings.settings, (s) => s.theme);
+  const profile = useStore(settings.settings, (s) => activeProfile(s));
+  const replayActive = useStore(barReplay.state, (s) => s.active);
+  const [forceReplayUi, setForceReplayUi] = useState(false);
   const isPrimary = paneIndex === 0;
 
   const localController = useMemo(
@@ -74,6 +88,22 @@ export function TradingViewChart({ onCreateAlert, paneIndex = 0, initialSymbol }
     }
   }, [controller, ready, symbolForPane]);
 
+  // Keep corner avatar in sync when the active profile changes.
+  useEffect(() => {
+    headerApiRef.current?.updateProfile(profile);
+  }, [profile]);
+
+  useEffect(() => {
+    if (!replayActive) setForceReplayUi(false);
+  }, [replayActive]);
+
+  useEffect(() => {
+    if (!isPrimary) return;
+    return () => {
+      barReplay.pause();
+    };
+  }, [isPrimary, barReplay]);
+
   useTradingViewWidget(containerRef, {
     controller,
     datafeed,
@@ -87,6 +117,14 @@ export function TradingViewChart({ onCreateAlert, paneIndex = 0, initialSymbol }
     isPrimary,
     paneIndex,
     onCreateAlert,
+    onOpenProfile,
+    getProfile: () => activeProfile(settings.settings.get()),
+    onEnterBarReplay: () => {
+      setForceReplayUi(true);
+      const w = chart.getWidget();
+      if (w) barReplay.attach(w, datafeed);
+      void barReplay.enter();
+    },
     onToggleTheme: () => settings.toggleTheme(),
     onOpenAlertsPanel: () => settings.setSidePanel("alerts"),
     onOpenWatchlist: () => settings.setSidePanel("watchlist"),
@@ -96,9 +134,18 @@ export function TradingViewChart({ onCreateAlert, paneIndex = 0, initialSymbol }
     getLayoutSync: () => settings.settings.get().layoutSync,
     onSymbolChanged: (index, ticker) => settings.setPaneSymbol(index, ticker),
     getLastPrice: () => quote?.price ?? null,
+    onHeaderReady: (api) => {
+      headerApiRef.current = api;
+      api.updateProfile(activeProfile(settings.settings.get()));
+    },
+    onWidgetReady: (widget) => {
+      if (isPrimary) barReplay.attach(widget, datafeed);
+    },
   });
 
   useChartAlertLines(isPrimary ? controller : null, alerts);
+
+  const showReplayToolbar = isPrimary && (replayActive || forceReplayUi);
 
   return (
     <Box
@@ -113,22 +160,33 @@ export function TradingViewChart({ onCreateAlert, paneIndex = 0, initialSymbol }
         borderRight: isPrimary ? 0 : 1,
         borderBottom: 1,
         borderColor: "divider",
+        overflow: "hidden",
       }}
     >
       <Box ref={containerRef} sx={{ position: "absolute", inset: 0 }} />
 
+      {showReplayToolbar ? <BarReplayToolbar controller={barReplay} forceVisible={forceReplayUi} /> : null}
+
       {!ready && !error ? (
-        <Box sx={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" }}>
-          <CircularProgress size={28} />
+        <Box
+          sx={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            bgcolor: "background.default",
+            zIndex: 2,
+          }}
+        >
+          <CircularProgress size={36} />
         </Box>
       ) : null}
 
       {error ? (
-        <Box sx={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", p: 3 }}>
-          <Alert severity="error" variant="outlined" sx={{ maxWidth: 520 }}>
-            {error}. Make sure the TradingView Charting Library is available at <code>{config.tvLibraryPath}</code>.
-          </Alert>
-        </Box>
+        <Alert severity="error" sx={{ position: "absolute", top: 8, left: 8, right: 8, zIndex: 3 }}>
+          {error}
+        </Alert>
       ) : null}
 
       {ready && isPrimary && source?.isSynthetic ? (

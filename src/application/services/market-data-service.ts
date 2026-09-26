@@ -47,9 +47,19 @@ export class MarketDataService {
 
   async fetchHistory(symbol: SymbolInfo, interval: Interval, range: BarRange): Promise<HistoryResult> {
     let lastError: unknown = null;
+    let sawRealProvider = false;
 
     for (const provider of this.providers) {
       if (!provider.supports(symbol, interval)) continue;
+      // Never invent demo OHLC for symbols that a real feed owns (e.g. XAUUSD).
+      if (provider.isSynthetic && sawRealProvider) {
+        this.logger.warn(
+          `[market-data] skipping synthetic for ${symbol.ticker} @ ${interval} (real provider failed)`,
+          lastError,
+        );
+        break;
+      }
+      if (!provider.isSynthetic) sawRealProvider = true;
       try {
         const bars = normalizeBars(await provider.fetchBars(symbol, interval, range));
         return { bars, providerId: provider.id, isSynthetic: provider.isSynthetic };

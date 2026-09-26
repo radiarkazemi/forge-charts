@@ -24,6 +24,7 @@ import {
   type IExternalSaveLoadAdapter,
 } from "@/infrastructure";
 import { ChartController } from "@/features/chart/chart-controller";
+import { BarReplayController } from "@/features/chart/bar-replay/bar-replay-controller";
 import { readConfig, type AppConfig } from "./config";
 
 /** Everything the UI layer may depend on, wired once at startup. */
@@ -37,6 +38,7 @@ export interface Services {
   readonly alerts: AlertService;
   readonly settings: SettingsService;
   readonly chart: ChartController;
+  readonly barReplay: BarReplayController;
   readonly datafeed: TradingViewDatafeed;
   readonly saveLoadAdapter: IExternalSaveLoadAdapter;
   /** Tear down timers and subscriptions (tests / HMR). */
@@ -70,6 +72,7 @@ export function createServices(config: AppConfig = readConfig()): Services {
 
   const { lastSymbol, lastInterval } = settings.settings.get();
   const chart = new ChartController(lastSymbol, lastInterval);
+  const barReplay = new BarReplayController();
   const datafeed = new TradingViewDatafeed(marketData, symbols);
   const saveLoadAdapter = new LocalSaveLoadAdapter(storage);
 
@@ -114,11 +117,14 @@ export function createServices(config: AppConfig = readConfig()): Services {
     alerts,
     settings,
     chart,
+    barReplay,
     datafeed,
     saveLoadAdapter,
     dispose: () => {
       quotes.stop();
       datafeed.dispose();
+      void barReplay.exit();
+      barReplay.detach();
       for (const dispose of disposers) dispose();
     },
   };

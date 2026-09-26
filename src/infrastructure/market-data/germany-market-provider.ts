@@ -695,9 +695,14 @@ export class GermanyMarketProvider implements MarketDataProvider {
         if (last) {
           const wallBucket = alignTime(Math.floor(Date.now() / 1000), step);
           const t = alignTime(last.time, step);
-          // If history ended on a prior period, open the current wall-clock forming bar
-          // so countdown works immediately (has_empty_bars: false otherwise hides it).
-          if (t < wallBucket) {
+          const sessionOpen = isMarketSessionOpen(symbol);
+          // Weekend / closed session: freeze on the last real bar (no invented
+          // wall-clock candles that look like demo data).
+          if (!sessionOpen) {
+            emit({ ...last, time: t });
+          } else if (t < wallBucket) {
+            // Session open but history ended on a prior period — open forming bar
+            // so countdown works (has_empty_bars: false otherwise hides it).
             emit({
               time: wallBucket,
               open: last.close,

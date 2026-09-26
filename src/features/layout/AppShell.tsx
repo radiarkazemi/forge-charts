@@ -6,6 +6,7 @@ import { useServices } from "@/app/use-services";
 import { AlertToaster } from "@/features/alerts/AlertToaster";
 import { CreateAlertDialog } from "@/features/alerts/CreateAlertDialog";
 import { ChartWorkspace } from "@/features/chart/ChartWorkspace";
+import { ProfileDialog } from "@/features/profile/ProfileDialog";
 import { useStore } from "@/shared/hooks/useStore";
 import { SidePanel } from "./SidePanel";
 import { SideRail } from "./SideRail";
@@ -21,6 +22,7 @@ export function AppShell() {
   const sidePanel = useStore(settings.settings, (s) => s.sidePanel);
   const symbol = useStore(chart.state, (s) => s.symbol);
   const [alertDialogOpen, setAlertDialogOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   useEffect(() => {
     document.title = `${symbol} — Forge Charts`;
@@ -49,7 +51,7 @@ export function AppShell() {
       }}
     >
       <Box component="main" sx={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
-        <ChartWorkspace onCreateAlert={openAlertDialog} />
+        <ChartWorkspace onCreateAlert={openAlertDialog} onOpenProfile={() => setProfileOpen(true)} />
         {sidePanel ? (
           <>
             {isMobile ? (
@@ -80,6 +82,7 @@ export function AppShell() {
         />
       </Box>
       <CreateAlertDialog open={alertDialogOpen} onClose={() => setAlertDialogOpen(false)} />
+      <ProfileDialog open={profileOpen} onClose={() => setProfileOpen(false)} />
       <AlertToaster />
     </Box>
   );
