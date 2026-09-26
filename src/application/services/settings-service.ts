@@ -231,7 +231,12 @@ export class SettingsService {
     // Fill missing secondary panes with the primary symbol (don't invent AAPL/etc.).
     while (panes.length < 4) panes.push(panes[0] ?? primary);
     if (!panes[0]) panes[0] = primary;
-    this.patch({ chartLayout: next, paneSymbols: panes });
+    // Multi-pane: keep drawings sync on (TV linked layout behavior).
+    const layoutSync =
+      next === "s"
+        ? this.settings.get().layoutSync
+        : sanitizeLayoutSync({ ...this.settings.get().layoutSync, drawings: true, symbol: true });
+    this.patch({ chartLayout: next, paneSymbols: panes, layoutSync });
   }
 
   setLayoutSync(partial: Partial<LayoutSyncSettings>): void {
