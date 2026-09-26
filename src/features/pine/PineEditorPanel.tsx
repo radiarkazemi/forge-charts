@@ -488,7 +488,15 @@ export function PineEditorPanel({ onClose, onOpenObjectTree, onRun }: PineEditor
         </IconButton>
         <Typography
           variant="caption"
-          sx={{ flex: 1, color: status.startsWith("Added") || status.startsWith("Script saved") ? "#26a69a" : "#787b86" }}
+          sx={{
+            flex: 1,
+            color:
+              status.startsWith("Added") || status.startsWith("Script saved")
+                ? "#26a69a"
+                : /compile error|failed|not a pine|not enough|could not/i.test(status)
+                  ? "#ef5350"
+                  : "#787b86",
+          }}
         >
           {status}
         </Typography>

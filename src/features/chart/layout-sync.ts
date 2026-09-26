@@ -25,12 +25,19 @@ interface PaneEntry {
 /**
  * Coordinates multi-pane Advanced Charts widgets so layout switches keep
  * widgets alive and SYNC IN LAYOUT behaves like TradingView (best-effort on CL).
+ *
+ * Drawing tools: only the primary pane shows the left toolbar. Selecting a tool
+ * there stores it; focusing any visible pane applies that tool so you can draw
+ * on chart 2+ without a second toolbar.
  */
 class LayoutSyncBus {
   private readonly panes = new Map<number, PaneEntry>();
   private flags: LayoutSyncFlags = { ...DEFAULT_LAYOUT_SYNC };
   private locked = false;
   private activeCount = 1;
+  private activePane = 0;
+  private sharedTool: string | null = null;
+  private applyingTool = false;
 
   setFlags(flags: LayoutSyncFlags): void {
     this.flags = { ...flags };
@@ -42,6 +49,14 @@ class LayoutSyncBus {
 
   setActiveCount(count: number): void {
     this.activeCount = Math.max(1, count);
+  }
+
+  getActivePane(): number {
+    return this.activePane;
+  }
+
+  getSharedTool(): string | null {
+    return this.sharedTool;
   }
 
   register(index: number, controller: ChartController): () => void {
@@ -57,6 +72,43 @@ class LayoutSyncBus {
     for (const { index, controller } of this.panes.values()) {
       if (index >= this.activeCount) continue;
       controller.requestResize();
+    }
+  }
+
+  /**
+   * Primary toolbar selected a tool — remember it and push onto the focused pane
+   * when that pane is not the primary (so secondary charts draw immediately).
+   */
+  notifyToolSelected(sourceIndex: number, tool: string | null): void {
+    if (this.applyingTool) return;
+    if (sourceIndex !== 0) return;
+    this.sharedTool = tool;
+    if (this.activePane > 0 && tool) {
+      void this.applyToolToPane(this.activePane, tool);
+    }
+  }
+
+  /**
+   * User focused a chart pane (pointer down). Make it the drawing target and
+   * apply the shared tool from the primary toolbar.
+   */
+  focusPane(paneIndex: number): void {
+    if (paneIndex < 0 || paneIndex >= this.activeCount) return;
+    this.activePane = paneIndex;
+    const tool = this.sharedTool;
+    if (tool && paneIndex > 0) {
+      void this.applyToolToPane(paneIndex, tool);
+    }
+  }
+
+  private async applyToolToPane(paneIndex: number, tool: string): Promise<void> {
+    const entry = this.panes.get(paneIndex);
+    if (!entry?.controller.isReady) return;
+    this.applyingTool = true;
+    try {
+      await entry.controller.selectLineTool(tool);
+    } finally {
+      this.applyingTool = false;
     }
   }
 
@@ -93,8 +145,6 @@ class LayoutSyncBus {
 
   notifyCrosshair(sourceIndex: number, time: number): void {
     if (!this.flags.crosshair || this.locked) return;
-    // Charting Library has no public setCrossHair(time). Mutating visible range
-    // to "follow" the cursor causes zoom/pan fighting across panes — skip it.
     void sourceIndex;
     void time;
   }

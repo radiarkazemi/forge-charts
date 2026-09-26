@@ -76,6 +76,25 @@ export function TradingViewChart({
     };
   }, [controller, paneIndex, settings]);
 
+  // Primary left toolbar → shared tool for all panes in the layout.
+  useEffect(() => {
+    if (!ready || !isPrimary) return;
+    const sync = () => {
+      layoutSyncBus.notifyToolSelected(paneIndex, controller.selectedLineTool());
+    };
+    sync();
+    return controller.onSelectedLineToolChanged(sync);
+  }, [controller, isPrimary, paneIndex, ready]);
+
+  // Click / touch on any pane focuses it and applies the shared drawing tool.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || !ready) return;
+    const onPointer = () => layoutSyncBus.focusPane(paneIndex);
+    el.addEventListener("pointerdown", onPointer, true);
+    return () => el.removeEventListener("pointerdown", onPointer, true);
+  }, [paneIndex, ready]);
+
   // Apply symbol without remounting the widget (TradingView in-place behavior).
   useEffect(() => {
     if (!ready || !symbolForPane) return;

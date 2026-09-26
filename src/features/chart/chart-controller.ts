@@ -8,6 +8,12 @@ import {
   type IChartWidgetApi,
   type ResolutionString,
 } from "@/infrastructure/tradingview";
+import {
+  barsFromChartExport,
+  computeOrcaDraws,
+  paintOrcaOnChart,
+  parseOrcaInputs,
+} from "@/features/pine/orca-runtime";
 import { resolvePineStudy } from "@/features/pine/pine-runner";
 
 export interface ChartState {
@@ -252,11 +258,20 @@ export class ChartController {
   }
 
   /**
-   * Run a Pine draft by mapping it onto a built-in Charting Library study
-   * (SMA / EMA / RSI / MACD). Inputs must be a Record (CL API), not an array.
+   * Run a Pine draft:
+   * - Orca → JS structure/DR engine + chart drawings
+   * - SMA/EMA/RSI/MACD → Charting Library studies
+   * - else → compile-style error (never silent SMA)
    */
   async runPineDraft(code: string): Promise<{ ok: boolean; message: string }> {
-    const req = resolvePineStudy(code);
+    const resolved = resolvePineStudy(code);
+    if (!resolved.ok) {
+      return { ok: false, message: resolved.message };
+    }
+    if (resolved.kind === "orca") {
+      return this.runOrcaDraft(code, resolved.label);
+    }
+    const req = resolved.study;
     try {
       const chart = this.activeChart();
       if (!chart) {
@@ -278,6 +293,79 @@ export class ChartController {
         ok: false,
         message: error instanceof Error ? error.message : "Failed to add study",
       };
+    }
+  }
+
+  private orcaEntityIds: EntityId[] = [];
+
+  private async runOrcaDraft(code: string, label: string): Promise<{ ok: boolean; message: string }> {
+    const chart = this.activeChart();
+    if (!chart) {
+      return { ok: false, message: "Chart not ready — wait for candles, then Add to chart again" };
+    }
+    try {
+      const exported = await chart.exportData({
+        includeTime: true,
+        includeSeries: true,
+        includedStudies: [],
+      });
+      const bars = barsFromChartExport(exported);
+      if (bars.length < 20) {
+        return { ok: false, message: "Not enough bars to run Orca — scroll/load more history" };
+      }
+      const inputs = parseOrcaInputs(code);
+      const cmds = computeOrcaDraws(bars, inputs);
+      for (const id of this.orcaEntityIds) {
+        this.removeEntity(id);
+      }
+      this.orcaEntityIds = [];
+      const ids = await paintOrcaOnChart(chart, cmds);
+      this.orcaEntityIds = ids;
+      return {
+        ok: true,
+        message: `Added ${label} — ${ids.length} drawings (${bars.length} bars)`,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : "Orca runtime failed",
+      };
+    }
+  }
+
+  /** Currently selected drawing tool / cursor on this widget. */
+  selectedLineTool(): string | null {
+    try {
+      return this.widget?.selectedLineTool() ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Select a drawing tool (same as left toolbar click). */
+  async selectLineTool(tool: string): Promise<void> {
+    try {
+      await this.widget?.selectLineTool(tool as never);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Subscribe to left-toolbar tool changes. */
+  onSelectedLineToolChanged(handler: () => void): () => void {
+    const w = this.widget;
+    if (!w) return () => undefined;
+    try {
+      w.subscribe("onSelectedLineToolChanged", handler);
+      return () => {
+        try {
+          w.unsubscribe("onSelectedLineToolChanged", handler);
+        } catch {
+          /* ignore */
+        }
+      };
+    } catch {
+      return () => undefined;
     }
   }
 
