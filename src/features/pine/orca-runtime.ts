@@ -164,7 +164,7 @@ interface CircleEvent {
   bar: number;
 }
 
-interface DrawCmd {
+export interface DrawCmd {
   kind: "line" | "rect" | "dot" | "label";
   t1: number;
   p1: number;
@@ -615,10 +615,11 @@ export async function paintOrcaOnChart(
   cmds: readonly DrawCmd[],
 ): Promise<EntityId[]> {
   const ids: EntityId[] = [];
-  // Cap drawing volume for CL performance
-  const limited = cmds.length > 400 ? cmds.slice(cmds.length - 400) : cmds;
+  // Cap drawing volume for CL performance (rangesOnly ≈ 4 cmds each).
+  const limited = cmds.length > 80 ? cmds.slice(cmds.length - 80) : cmds;
 
-  for (const cmd of limited) {
+  for (let i = 0; i < limited.length; i += 1) {
+    const cmd = limited[i]!;
     try {
       if (cmd.kind === "line" && cmd.t2 != null && cmd.p2 != null) {
         const id = await chart.createMultipointShape(
@@ -687,6 +688,12 @@ export async function paintOrcaOnChart(
       }
     } catch {
       /* skip bad draw */
+    }
+    // Yield so CL can paint candles / handle clicks between shapes.
+    if (i > 0 && i % 4 === 0) {
+      await new Promise<void>((r) => {
+        window.setTimeout(r, 0);
+      });
     }
   }
   return ids;
