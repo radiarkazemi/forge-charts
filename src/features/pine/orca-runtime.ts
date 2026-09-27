@@ -38,6 +38,17 @@ export interface OrcaInputs {
   readonly detectBearishCont: boolean;
   readonly detectBullishCont: boolean;
   readonly detectBullishRev_HL: boolean;
+  /**
+   * How many completed dealing ranges to keep (newest first).
+   * `1` matches classic Orca (latest only). Indicator uses higher values.
+   */
+  readonly maxDealingRanges: number;
+  /** Inclusive unix-sec start for ranges to keep (`null` = no lower bound). */
+  readonly fromTimeSec: number | null;
+  /** Inclusive unix-sec end for ranges to keep (`null` = no upper bound). */
+  readonly toTimeSec: number | null;
+  /** When true, skip BOS/MSS lines and setup dots — ranges only. */
+  readonly rangesOnly: boolean;
 }
 
 const DEFAULTS: OrcaInputs = {
@@ -64,6 +75,10 @@ const DEFAULTS: OrcaInputs = {
   detectBearishCont: true,
   detectBullishCont: true,
   detectBullishRev_HL: true,
+  maxDealingRanges: 1,
+  fromTimeSec: null,
+  toTimeSec: null,
+  rangesOnly: false,
 };
 
 /** Detect the published Orca script (or a close fork). */
@@ -136,6 +151,10 @@ export function parseOrcaInputs(code: string): OrcaInputs {
     detectBearishCont: boolIn("detectBearishCont", DEFAULTS.detectBearishCont),
     detectBullishCont: boolIn("detectBullishCont", DEFAULTS.detectBullishCont),
     detectBullishRev_HL: boolIn("detectBullishRev_HL", DEFAULTS.detectBullishRev_HL),
+    maxDealingRanges: Math.max(1, intIn("maxDealingRanges", DEFAULTS.maxDealingRanges)),
+    fromTimeSec: null,
+    toTimeSec: null,
+    rangesOnly: false,
   };
 }
 
@@ -227,8 +246,9 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
   let prevCircPrice: number | null = null;
   let prevCircBar: number | null = null;
 
-  // Latest dealing-range draws (cleared/replaced like Pine)
-  let drCmds: DrawCmd[] = [];
+  // Dealing-range batches — one per completed setup (Orca overwrite within a setup).
+  const drBatches: DrawCmd[][] = [];
+  let setupDr: DrawCmd[] | null = null;
 
   const pushCircle = (dir: number, price: number, bar: number) => {
     cr.push({ dir, price, bar });
@@ -300,7 +320,8 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
         },
       );
     }
-    drCmds = cmds;
+    // Later call within the same setup replaces earlier (classic Orca).
+    setupDr = cmds;
   };
 
   const drawSetup = (
@@ -326,14 +347,17 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
     const botBar = botP === p0 ? b0 : botP === p1 ? b1 : botP === p2 ? b2 : b3;
     const side = labelUp ? 1 : -1;
 
-    out.push({ kind: "dot", t1: bars[botBar]!.time, p1: botP, color: circColor });
-    out.push({ kind: "dot", t1: bars[topBar]!.time, p1: topP, color: circColor });
+    if (!inputs.rangesOnly) {
+      out.push({ kind: "dot", t1: bars[botBar]!.time, p1: botP, color: circColor });
+      out.push({ kind: "dot", t1: bars[topBar]!.time, p1: topP, color: circColor });
+    }
 
     const c1Bar = botBar <= topBar ? botBar : topBar;
     const c1Price = botBar <= topBar ? botP : topP;
     const c2Bar = botBar <= topBar ? topBar : botBar;
     const c2Price = botBar <= topBar ? topP : botP;
 
+    setupDr = null;
     if (
       inputs.showDealingRange &&
       prevCircSide !== 0 &&
@@ -356,6 +380,7 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
       const loBar2 = c1Price < c2Price ? c1Bar : c2Bar;
       if (hi2 > lo2) paintDr(hi2, lo2, hiBar2, loBar2, circColor, name, labelUp);
     }
+    if (setupDr) drBatches.push(setupDr);
 
     prevCircSide = side;
     prevCircPrice = c2Price;
@@ -456,17 +481,19 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
 
     if (bullBOS && lastSH != null && lastSHBar != null) {
       const isMss = mssPlusNow;
-      out.push({
-        kind: "line",
-        t1: bars[lastSHBar]!.time,
-        p1: lastSH,
-        t2: bar.time,
-        p2: lastSH,
-        color: isMss ? inputs.mssColor : inputs.bosColor,
-        width: inputs.bosWidth,
-        style: isMss ? "dashed" : "dotted",
-        text: isMss ? "MSS +" : "BOS +",
-      });
+      if (!inputs.rangesOnly) {
+        out.push({
+          kind: "line",
+          t1: bars[lastSHBar]!.time,
+          p1: lastSH,
+          t2: bar.time,
+          p2: lastSH,
+          color: isMss ? inputs.mssColor : inputs.bosColor,
+          width: inputs.bosWidth,
+          style: isMss ? "dashed" : "dotted",
+          text: isMss ? "MSS +" : "BOS +",
+        });
+      }
       brokenSHBar = lastSHBar;
       structureDir = 1;
       lastBOSDir = 1;
@@ -476,17 +503,19 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
 
     if (bearBOS && lastSL != null && lastSLBar != null) {
       const isMss = mssMinusNow;
-      out.push({
-        kind: "line",
-        t1: bars[lastSLBar]!.time,
-        p1: lastSL,
-        t2: bar.time,
-        p2: lastSL,
-        color: isMss ? inputs.mssColor : inputs.bosColor,
-        width: inputs.bosWidth,
-        style: isMss ? "dashed" : "dotted",
-        text: isMss ? "MSS -" : "BOS -",
-      });
+      if (!inputs.rangesOnly) {
+        out.push({
+          kind: "line",
+          t1: bars[lastSLBar]!.time,
+          p1: lastSL,
+          t2: bar.time,
+          p2: lastSL,
+          color: isMss ? inputs.mssColor : inputs.bosColor,
+          width: inputs.bosWidth,
+          style: isMss ? "dashed" : "dotted",
+          text: isMss ? "MSS -" : "BOS -",
+        });
+      }
       brokenSLBar = lastSLBar;
       structureDir = -1;
       lastBOSDir = -1;
@@ -495,10 +524,80 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
     }
   }
 
-  return [...out, ...drCmds];
+  const filtered = drBatches.filter((batch) => {
+    const t = batch[0]?.t1;
+    if (t == null) return false;
+    if (inputs.fromTimeSec != null && t < inputs.fromTimeSec) return false;
+    if (inputs.toTimeSec != null && t > inputs.toTimeSec) return false;
+    return true;
+  });
+  const maxN = Math.max(1, Math.floor(inputs.maxDealingRanges));
+  const kept = filtered.slice(-maxN);
+  return [...out, ...kept.flat()];
 }
 
 const linestyleMap = { solid: 0, dotted: 1, dashed: 2 } as const;
+
+export interface DealingRangesOptions {
+  /** Max completed dealing ranges to draw (newest). */
+  readonly maxRanges: number;
+  /** Lookback window in calendar days (used when from/to empty). */
+  readonly lookbackDays: number;
+  /** Inclusive YYYY-MM-DD start (UTC). Empty = use lookbackDays. */
+  readonly fromDate: string;
+  /** Inclusive YYYY-MM-DD end (UTC). Empty = now. */
+  readonly toDate: string;
+  readonly showFibs: boolean;
+  readonly pivotLeft: number;
+  readonly pivotRight: number;
+  readonly extendBars: number;
+  readonly breakOnWick: boolean;
+}
+
+/** Build Orca inputs for the Indicators “Dealing Ranges” study. */
+export function dealingRangesInputs(opts: DealingRangesOptions, nowSec = Math.floor(Date.now() / 1000)): OrcaInputs {
+  const toSec = parseDateEndSec(opts.toDate) ?? nowSec;
+  const fromSec =
+    parseDateStartSec(opts.fromDate) ??
+    toSec - Math.max(1, opts.lookbackDays) * 86_400;
+  return {
+    ...DEFAULTS,
+    left: Math.max(1, opts.pivotLeft),
+    right: Math.max(1, opts.pivotRight),
+    breakOnWick: opts.breakOnWick,
+    showDealingRange: true,
+    showDrFibs: opts.showFibs,
+    drAhead: Math.max(1, opts.extendBars),
+    maxDealingRanges: Math.max(1, opts.maxRanges),
+    fromTimeSec: fromSec,
+    toTimeSec: toSec,
+    rangesOnly: true,
+    onlySetupCircles: true,
+    showOrangeCircles: false,
+  };
+}
+
+function parseDateStartSec(iso: string): number | null {
+  const t = iso.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
+  const ms = Date.parse(`${t}T00:00:00Z`);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+}
+
+function parseDateEndSec(iso: string): number | null {
+  const t = iso.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
+  const ms = Date.parse(`${t}T23:59:59Z`);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+}
+
+/**
+ * Detect dealing ranges with Orca’s MSS/setup-circle model and keep up to
+ * `maxRanges` inside the requested date window. Structure lines are omitted.
+ */
+export function computeDealingRanges(bars: readonly OrcaBar[], opts: DealingRangesOptions): DrawCmd[] {
+  return computeOrcaDraws(bars, dealingRangesInputs(opts));
+}
 
 /** Draw computed commands onto a Charting Library chart; returns entity ids. */
 export async function paintOrcaOnChart(

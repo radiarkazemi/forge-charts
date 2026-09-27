@@ -12,6 +12,7 @@ export type {
   ChartTemplate,
   ChartTemplateContent,
   CrossHairMovedEventParams,
+  CustomIndicator,
   DatafeedConfiguration,
   DatafeedErrorCallback,
   DrawingToolIdentifier,

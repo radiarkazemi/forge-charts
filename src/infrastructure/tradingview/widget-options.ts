@@ -4,12 +4,14 @@ import { FONT_FAMILY, TOKENS } from "@/shared/theme/tokens";
 import type {
   ChartingLibraryFeatureset,
   ChartingLibraryWidgetOptions,
+  CustomIndicator,
   DrawingToolIdentifier,
   IBasicDataFeed,
   IExternalSaveLoadAdapter,
   ResolutionString,
   TimeFrameItem,
 } from "./types";
+import { createDealingRangesIndicator } from "@/features/chart/dealing-ranges-indicator";
 
 export interface WidgetOptionsInput {
   readonly container: HTMLElement;
@@ -249,5 +251,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
     charts_storage_api_version: "1.1",
     client_id: "forge-charts",
     user_id: secondary ? `local-pane-${input.symbol}` : "local",
+    custom_indicators_getter: (PineJS) =>
+      Promise.resolve([createDealingRangesIndicator(PineJS) as CustomIndicator]),
   };
 }

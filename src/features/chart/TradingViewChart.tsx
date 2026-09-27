@@ -12,6 +12,7 @@ import { BarReplayToolbar } from "./bar-replay/BarReplayToolbar";
 import type { HeaderToolbarApi } from "./header-toolbar";
 import { layoutSyncBus } from "./layout-sync";
 import { useChartAlertLines } from "./useChartAlertLines";
+import { useDealingRangesStudy } from "./useDealingRangesStudy";
 import { useTradingViewWidget } from "./useTradingViewWidget";
 import {
   QuickTradeOverlay,
@@ -179,6 +180,7 @@ export function TradingViewChart({
 
   useChartAlertLines(isPrimary ? controller : null, alerts);
   useDemoChartLines(isPrimary);
+  useDealingRangesStudy(isPrimary);
 
   const showReplayToolbar = isPrimary && (replayActive || forceReplayUi);
 
