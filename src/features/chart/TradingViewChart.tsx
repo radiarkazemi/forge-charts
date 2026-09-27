@@ -13,7 +13,12 @@ import type { HeaderToolbarApi } from "./header-toolbar";
 import { layoutSyncBus } from "./layout-sync";
 import { useChartAlertLines } from "./useChartAlertLines";
 import { useTradingViewWidget } from "./useTradingViewWidget";
-import { QuickTradeOverlay, CandleCountdownOverlay, useDemoChartLines } from "@/features/demo-trading";
+import {
+  QuickTradeOverlay,
+  TradeLinesOverlay,
+  CandleCountdownOverlay,
+  useDemoChartLines,
+} from "@/features/demo-trading";
 
 interface TradingViewChartProps {
   readonly onCreateAlert: () => void;
@@ -196,6 +201,7 @@ export function TradingViewChart({
       <Box ref={containerRef} sx={{ position: "absolute", inset: 0 }} />
 
       {isPrimary ? <QuickTradeOverlay containerRef={containerRef} /> : null}
+      {isPrimary ? <TradeLinesOverlay containerRef={containerRef} /> : null}
       {isPrimary ? <CandleCountdownOverlay /> : null}
 
       {showReplayToolbar ? <BarReplayToolbar controller={barReplay} forceVisible={forceReplayUi} /> : null}

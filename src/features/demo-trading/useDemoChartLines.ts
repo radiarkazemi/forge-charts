@@ -1,19 +1,35 @@
 import { useEffect, useRef } from "react";
 import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
-import type { IPositionLineAdapter, IOrderLineAdapter } from "@/infrastructure/tradingview";
+import type { EntityId, IPositionLineAdapter, IOrderLineAdapter } from "@/infrastructure/tradingview";
 import { formatUsd, unrealizedPnl } from "./types";
 
-type LineBundle = {
+type NativeBundle = {
+  mode: "native";
   pos?: IPositionLineAdapter;
   tp?: IOrderLineAdapter;
   sl?: IOrderLineAdapter;
 };
 
+type ShapeBundle = {
+  mode: "shape";
+  pos?: EntityId;
+  tp?: EntityId;
+  sl?: EntityId;
+  /** Last painted label text (avoid thrashing recreates). */
+  posText?: string;
+  tpText?: string;
+  slText?: string;
+};
+
+type LineBundle = NativeBundle | ShapeBundle;
+
 /**
  * TradingView-style on-chart position / TP / SL / pending-order lines.
- * Create/destroy only when the position set changes; P/L text updates on a timer
- * so live ticks do not thrash createPositionLine().
+ *
+ * Prefers Charting Library Trading Platform APIs (`createPositionLine` /
+ * `createOrderLine`). On Advanced Charts builds where those are unavailable
+ * (v29+), falls back to locked horizontal_line shapes with P/L labels.
  */
 export function useDemoChartLines(enabled = true): void {
   const { demoTrading, chart, quotes } = useServices();
@@ -23,11 +39,12 @@ export function useDemoChartLines(enabled = true): void {
   const quote = useStore(quotes.quotes, (q) => q[symbol]);
 
   const linesRef = useRef<Map<string, LineBundle>>(new Map());
-  const orderLinesRef = useRef<Map<string, IOrderLineAdapter>>(new Map());
+  const orderLinesRef = useRef<Map<string, IOrderLineAdapter | EntityId>>(new Map());
+  const orderModeRef = useRef<"native" | "shape" | null>(null);
+  const nativeOkRef = useRef<boolean | null>(null);
   const midRef = useRef<number | null>(null);
   midRef.current = snap.space.lastPrice ?? quote?.price ?? null;
 
-  // Feed live quotes into the broker when not in demo space.
   useEffect(() => {
     if (!enabled) return;
     if (snap.space.active) return;
@@ -35,7 +52,6 @@ export function useDemoChartLines(enabled = true): void {
     demoTrading.onMarkPrice(symbol, quote.price);
   }, [demoTrading, enabled, quote?.price, snap.space.active, symbol]);
 
-  // Create / remove position + TP/SL lines when the open set changes.
   useEffect(() => {
     if (!enabled || !ready) return;
     const widget = chart.getWidget();
@@ -44,122 +60,221 @@ export function useDemoChartLines(enabled = true): void {
 
     let cancelled = false;
 
-    const sync = async () => {
-      const open = demoTrading.openPositionsForSymbol(symbol);
-      const keep = new Set(open.map((p) => p.id));
-
-      for (const [id, bundle] of [...linesRef.current.entries()]) {
-        if (keep.has(id)) continue;
-        try {
+    const removeBundle = (bundle: LineBundle) => {
+      try {
+        if (bundle.mode === "native") {
           bundle.pos?.remove();
           bundle.tp?.remove();
           bundle.sl?.remove();
-        } catch {
-          /* ignore */
+        } else {
+          if (bundle.pos) chart.removeEntity(bundle.pos);
+          if (bundle.tp) chart.removeEntity(bundle.tp);
+          if (bundle.sl) chart.removeEntity(bundle.sl);
         }
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const ensureNativeCapable = async (): Promise<boolean> => {
+      if (nativeOkRef.current != null) return nativeOkRef.current;
+      try {
+        const probe = await api.createPositionLine();
+        probe.remove();
+        nativeOkRef.current = true;
+      } catch {
+        nativeOkRef.current = false;
+      }
+      return nativeOkRef.current;
+    };
+
+    const sync = async () => {
+      const open = demoTrading.openPositionsForSymbol(symbol);
+      const keep = new Set(open.map((p) => p.id));
+      const useNative = await ensureNativeCapable();
+      if (cancelled) return;
+
+      for (const [id, bundle] of [...linesRef.current.entries()]) {
+        if (keep.has(id)) continue;
+        removeBundle(bundle);
         linesRef.current.delete(id);
       }
 
       for (const pos of open) {
         if (cancelled) return;
+        const color = pos.side === "buy" ? "#2962ff" : "#f23645";
         let bundle = linesRef.current.get(pos.id);
-        if (!bundle) {
-          bundle = {};
-          try {
-            const color = pos.side === "buy" ? "#2962ff" : "#f23645";
-            bundle.pos = await api.createPositionLine();
+
+        if (useNative) {
+          if (!bundle || bundle.mode !== "native") {
+            if (bundle) removeBundle(bundle);
+            bundle = { mode: "native" };
+            try {
+              bundle.pos = await api.createPositionLine();
+              if (cancelled) {
+                bundle.pos.remove();
+                return;
+              }
+              bundle.pos
+                .setText(`${pos.side === "buy" ? "L" : "S"}`)
+                .setQuantity(String(pos.qty))
+                .setPrice(pos.entryPrice)
+                .setExtendLeft(false)
+                .setLineStyle(2)
+                .setLineLength(80)
+                .setBodyBackgroundColor(color)
+                .setBodyTextColor("#ffffff")
+                .setQuantityBackgroundColor(color)
+                .setQuantityTextColor("#ffffff")
+                .setLineColor(color)
+                .onClose(() => {
+                  const m = midRef.current;
+                  if (m != null) demoTrading.closePosition(pos.id, m);
+                })
+                .onReverse(() => {
+                  const m = midRef.current;
+                  if (m != null) demoTrading.reversePosition(pos.id, m);
+                });
+              linesRef.current.set(pos.id, bundle);
+            } catch {
+              nativeOkRef.current = false;
+              continue;
+            }
+          }
+
+          // TP / SL native order lines
+          if (pos.takeProfit != null) {
+            if (!bundle.tp) {
+              try {
+                bundle.tp = await api.createOrderLine();
+                if (cancelled) {
+                  bundle.tp.remove();
+                  return;
+                }
+                bundle.tp
+                  .setText("TP")
+                  .setLineColor("#089981")
+                  .setBodyBackgroundColor("#089981")
+                  .setBodyTextColor("#fff")
+                  .setQuantityBackgroundColor("#089981")
+                  .setQuantityTextColor("#fff")
+                  .setLineStyle(2)
+                  .setLineLength(80)
+                  .onCancel(() => demoTrading.updatePositionExits(pos.id, null, pos.stopLoss));
+              } catch {
+                /* ignore */
+              }
+            }
+          } else if (bundle.tp) {
+            try {
+              bundle.tp.remove();
+            } catch {
+              /* ignore */
+            }
+            bundle.tp = undefined;
+          }
+
+          if (pos.stopLoss != null) {
+            if (!bundle.sl) {
+              try {
+                bundle.sl = await api.createOrderLine();
+                if (cancelled) {
+                  bundle.sl.remove();
+                  return;
+                }
+                bundle.sl
+                  .setText("SL")
+                  .setLineColor("#ff9800")
+                  .setBodyBackgroundColor("#ff9800")
+                  .setBodyTextColor("#fff")
+                  .setQuantityBackgroundColor("#ff9800")
+                  .setQuantityTextColor("#fff")
+                  .setLineStyle(2)
+                  .setLineLength(80)
+                  .onCancel(() => demoTrading.updatePositionExits(pos.id, pos.takeProfit, null));
+              } catch {
+                /* ignore */
+              }
+            }
+          } else if (bundle.sl) {
+            try {
+              bundle.sl.remove();
+            } catch {
+              /* ignore */
+            }
+            bundle.sl = undefined;
+          }
+        } else {
+          // Shape fallback (Advanced Charts)
+          if (!bundle || bundle.mode !== "shape") {
+            if (bundle) removeBundle(bundle);
+            bundle = { mode: "shape" };
+            linesRef.current.set(pos.id, bundle);
+          }
+          const mid = midRef.current ?? pos.entryPrice;
+          const contract = demoTrading.state.get().instrument.contractSize;
+          const pnl = unrealizedPnl(pos.side, pos.qty, pos.entryPrice, mid, contract);
+          const posLabel = `${pos.side === "buy" ? "L" : "S"} ${pos.qty} · ${formatUsd(pnl)}`;
+          if (bundle.posText !== posLabel || !bundle.pos) {
+            if (bundle.pos) chart.removeEntity(bundle.pos);
+            const id = await chart.addHorizontalLine({
+              price: pos.entryPrice,
+              text: posLabel,
+              color,
+            });
             if (cancelled) {
-              bundle.pos.remove();
+              if (id) chart.removeEntity(id);
               return;
             }
-            bundle.pos
-              .setText(`${pos.side === "buy" ? "L" : "S"}`)
-              .setQuantity(String(pos.qty))
-              .setPrice(pos.entryPrice)
-              .setExtendLeft(false)
-              .setLineStyle(2)
-              .setLineLength(80)
-              .setBodyBackgroundColor(color)
-              .setBodyTextColor("#ffffff")
-              .setQuantityBackgroundColor(color)
-              .setQuantityTextColor("#ffffff")
-              .setLineColor(color)
-              .onClose(() => {
-                const m = midRef.current;
-                if (m != null) demoTrading.closePosition(pos.id, m);
-              })
-              .onReverse(() => {
-                const m = midRef.current;
-                if (m != null) demoTrading.reversePosition(pos.id, m);
+            bundle.pos = id ?? undefined;
+            bundle.posText = posLabel;
+          }
+
+          if (pos.takeProfit != null) {
+            const tpPnl = unrealizedPnl(pos.side, pos.qty, pos.entryPrice, pos.takeProfit, contract);
+            const tpLabel = `TP ${pos.qty} · ${formatUsd(tpPnl)}`;
+            if (bundle.tpText !== tpLabel || !bundle.tp) {
+              if (bundle.tp) chart.removeEntity(bundle.tp);
+              const id = await chart.addHorizontalLine({
+                price: pos.takeProfit,
+                text: tpLabel,
+                color: "#089981",
               });
-          } catch {
-            continue;
-          }
-          linesRef.current.set(pos.id, bundle);
-        }
-
-        // TP
-        if (pos.takeProfit != null) {
-          if (!bundle.tp) {
-            try {
-              bundle.tp = await api.createOrderLine();
               if (cancelled) {
-                bundle.tp.remove();
+                if (id) chart.removeEntity(id);
                 return;
               }
-              bundle.tp
-                .setText("TP")
-                .setLineColor("#089981")
-                .setBodyBackgroundColor("#089981")
-                .setBodyTextColor("#fff")
-                .setQuantityBackgroundColor("#089981")
-                .setQuantityTextColor("#fff")
-                .setLineStyle(2)
-                .setLineLength(80)
-                .onCancel(() => demoTrading.updatePositionExits(pos.id, null, pos.stopLoss));
-            } catch {
-              /* ignore */
+              bundle.tp = id ?? undefined;
+              bundle.tpText = tpLabel;
             }
+          } else if (bundle.tp) {
+            chart.removeEntity(bundle.tp);
+            bundle.tp = undefined;
+            bundle.tpText = undefined;
           }
-        } else if (bundle.tp) {
-          try {
-            bundle.tp.remove();
-          } catch {
-            /* ignore */
-          }
-          bundle.tp = undefined;
-        }
 
-        // SL
-        if (pos.stopLoss != null) {
-          if (!bundle.sl) {
-            try {
-              bundle.sl = await api.createOrderLine();
+          if (pos.stopLoss != null) {
+            const slPnl = unrealizedPnl(pos.side, pos.qty, pos.entryPrice, pos.stopLoss, contract);
+            const slLabel = `SL ${pos.qty} · ${formatUsd(slPnl)}`;
+            if (bundle.slText !== slLabel || !bundle.sl) {
+              if (bundle.sl) chart.removeEntity(bundle.sl);
+              const id = await chart.addHorizontalLine({
+                price: pos.stopLoss,
+                text: slLabel,
+                color: "#ff9800",
+              });
               if (cancelled) {
-                bundle.sl.remove();
+                if (id) chart.removeEntity(id);
                 return;
               }
-              bundle.sl
-                .setText("SL")
-                .setLineColor("#ff9800")
-                .setBodyBackgroundColor("#ff9800")
-                .setBodyTextColor("#fff")
-                .setQuantityBackgroundColor("#ff9800")
-                .setQuantityTextColor("#fff")
-                .setLineStyle(2)
-                .setLineLength(80)
-                .onCancel(() => demoTrading.updatePositionExits(pos.id, pos.takeProfit, null));
-            } catch {
-              /* ignore */
+              bundle.sl = id ?? undefined;
+              bundle.slText = slLabel;
             }
+          } else if (bundle.sl) {
+            chart.removeEntity(bundle.sl);
+            bundle.sl = undefined;
+            bundle.slText = undefined;
           }
-        } else if (bundle.sl) {
-          try {
-            bundle.sl.remove();
-          } catch {
-            /* ignore */
-          }
-          bundle.sl = undefined;
         }
       }
 
@@ -174,39 +289,62 @@ export function useDemoChartLines(enabled = true): void {
         if (!bundle) continue;
         const mark = mid ?? pos.entryPrice;
         const pnl = unrealizedPnl(pos.side, pos.qty, pos.entryPrice, mark, contract);
-        try {
-          bundle.pos
-            ?.setPrice(pos.entryPrice)
-            .setQuantity(String(pos.qty))
-            .setText(formatUsd(pnl));
-        } catch {
-          /* ignore */
-        }
-        if (pos.takeProfit != null && bundle.tp) {
-          const tpPnl = unrealizedPnl(pos.side, pos.qty, pos.entryPrice, pos.takeProfit, contract);
+        if (bundle.mode === "native") {
           try {
-            bundle.tp.setPrice(pos.takeProfit).setQuantity(String(pos.qty)).setText(formatUsd(tpPnl));
+            bundle.pos?.setPrice(pos.entryPrice).setQuantity(String(pos.qty)).setText(formatUsd(pnl));
           } catch {
             /* ignore */
           }
-        }
-        if (pos.stopLoss != null && bundle.sl) {
-          const slPnl = unrealizedPnl(pos.side, pos.qty, pos.entryPrice, pos.stopLoss, contract);
-          try {
-            bundle.sl.setPrice(pos.stopLoss).setQuantity(String(pos.qty)).setText(formatUsd(slPnl));
-          } catch {
-            /* ignore */
+          if (pos.takeProfit != null && bundle.tp) {
+            const tpPnl = unrealizedPnl(pos.side, pos.qty, pos.entryPrice, pos.takeProfit, contract);
+            try {
+              bundle.tp.setPrice(pos.takeProfit).setQuantity(String(pos.qty)).setText(formatUsd(tpPnl));
+            } catch {
+              /* ignore */
+            }
+          }
+          if (pos.stopLoss != null && bundle.sl) {
+            const slPnl = unrealizedPnl(pos.side, pos.qty, pos.entryPrice, pos.stopLoss, contract);
+            try {
+              bundle.sl.setPrice(pos.stopLoss).setQuantity(String(pos.qty)).setText(formatUsd(slPnl));
+            } catch {
+              /* ignore */
+            }
+          }
+        } else {
+          // Shape labels update on the next sync interval (recreate when text changes).
+          const posLabel = `${pos.side === "buy" ? "L" : "S"} ${pos.qty} · ${formatUsd(pnl)}`;
+          if (bundle.posText !== posLabel) {
+            void (async () => {
+              const color = pos.side === "buy" ? "#2962ff" : "#f23645";
+              if (bundle.pos) chart.removeEntity(bundle.pos);
+              const id = await chart.addHorizontalLine({
+                price: pos.entryPrice,
+                text: posLabel,
+                color,
+              });
+              bundle.pos = id ?? undefined;
+              bundle.posText = posLabel;
+            })();
           }
         }
       }
     };
 
     void sync();
-    const tick = window.setInterval(paintPl, 400);
+    const tick = window.setInterval(() => {
+      paintPl();
+      // Re-sync shapes when positions/exits change infrequently is handled by deps;
+      // also refresh shape labels every few seconds for live P/L.
+    }, 400);
+    const resync = window.setInterval(() => {
+      void sync();
+    }, 2000);
 
     return () => {
       cancelled = true;
       window.clearInterval(tick);
+      window.clearInterval(resync);
     };
   }, [chart, demoTrading, enabled, ready, snap.positions, symbol]);
 
@@ -231,44 +369,70 @@ export function useDemoChartLines(enabled = true): void {
       for (const [id, line] of [...orderLinesRef.current.entries()]) {
         if (keep.has(id)) continue;
         try {
-          line.remove();
+          if (typeof line === "object" && line && "remove" in line) {
+            (line as IOrderLineAdapter).remove();
+          } else {
+            chart.removeEntity(line as EntityId);
+          }
         } catch {
           /* ignore */
         }
         orderLinesRef.current.delete(id);
       }
+
+      const preferNative = nativeOkRef.current !== false;
+
       for (const order of working) {
         if (cancelled || order.price == null) continue;
         let line = orderLinesRef.current.get(order.id);
         if (!line) {
-          try {
-            line = await api.createOrderLine();
-            if (cancelled) {
-              line.remove();
-              return;
+          const color = order.side === "buy" ? "#2962ff" : "#f23645";
+          const label = `${order.type.toUpperCase()} ${order.qty}`;
+          if (preferNative) {
+            try {
+              const native = await api.createOrderLine();
+              if (cancelled) {
+                native.remove();
+                return;
+              }
+              native
+                .setText(order.type.toUpperCase())
+                .setQuantity(String(order.qty))
+                .setPrice(order.price)
+                .setLineColor(color)
+                .setBodyBackgroundColor(color)
+                .setBodyTextColor("#fff")
+                .setQuantityBackgroundColor(color)
+                .setQuantityTextColor("#fff")
+                .setLineStyle(2)
+                .setLineLength(70)
+                .onCancel(() => demoTrading.cancelOrder(order.id));
+              orderLinesRef.current.set(order.id, native);
+              orderModeRef.current = "native";
+              continue;
+            } catch {
+              nativeOkRef.current = false;
             }
-            const color = order.side === "buy" ? "#2962ff" : "#f23645";
-            line
-              .setText(order.type.toUpperCase())
-              .setQuantity(String(order.qty))
-              .setPrice(order.price)
-              .setLineColor(color)
-              .setBodyBackgroundColor(color)
-              .setBodyTextColor("#fff")
-              .setQuantityBackgroundColor(color)
-              .setQuantityTextColor("#fff")
-              .setLineStyle(2)
-              .setLineLength(70)
-              .onCancel(() => demoTrading.cancelOrder(order.id));
-            orderLinesRef.current.set(order.id, line);
-          } catch {
-            continue;
           }
-        }
-        try {
-          line.setPrice(order.price).setQuantity(String(order.qty));
-        } catch {
-          /* ignore */
+          const id = await chart.addHorizontalLine({
+            price: order.price,
+            text: label,
+            color,
+          });
+          if (cancelled) {
+            if (id) chart.removeEntity(id);
+            return;
+          }
+          if (id) {
+            orderLinesRef.current.set(order.id, id);
+            orderModeRef.current = "shape";
+          }
+        } else if (typeof line === "object" && line && "setPrice" in line) {
+          try {
+            (line as IOrderLineAdapter).setPrice(order.price).setQuantity(String(order.qty));
+          } catch {
+            /* ignore */
+          }
         }
       }
     };
@@ -279,15 +443,20 @@ export function useDemoChartLines(enabled = true): void {
     };
   }, [chart, demoTrading, enabled, ready, snap.orders, symbol]);
 
-  // Cleanup on unmount / disable.
   useEffect(() => {
     return () => {
       if (!enabled) return;
       for (const bundle of linesRef.current.values()) {
         try {
-          bundle.pos?.remove();
-          bundle.tp?.remove();
-          bundle.sl?.remove();
+          if (bundle.mode === "native") {
+            bundle.pos?.remove();
+            bundle.tp?.remove();
+            bundle.sl?.remove();
+          } else {
+            if (bundle.pos) chart.removeEntity(bundle.pos);
+            if (bundle.tp) chart.removeEntity(bundle.tp);
+            if (bundle.sl) chart.removeEntity(bundle.sl);
+          }
         } catch {
           /* ignore */
         }
@@ -295,12 +464,16 @@ export function useDemoChartLines(enabled = true): void {
       linesRef.current.clear();
       for (const line of orderLinesRef.current.values()) {
         try {
-          line.remove();
+          if (typeof line === "object" && line && "remove" in line) {
+            (line as IOrderLineAdapter).remove();
+          } else {
+            chart.removeEntity(line as EntityId);
+          }
         } catch {
           /* ignore */
         }
       }
       orderLinesRef.current.clear();
     };
-  }, [enabled]);
+  }, [chart, enabled]);
 }

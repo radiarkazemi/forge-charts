@@ -248,6 +248,32 @@ export class ChartController {
     }
   }
 
+  /** Visible price scale range for the main series (for on-chart trade chips). */
+  getVisiblePriceRange(): { from: number; to: number } | null {
+    try {
+      const chart = this.activeChart() as
+        | (IChartWidgetApi & {
+            getPanes?: () => Array<{
+              getMainSourcePriceScale?: () => { getVisiblePriceRange?: () => { from: number; to: number } | null } | null;
+            }>;
+            getPriceScaleById?: (id: string) => { getVisiblePriceRange?: () => { from: number; to: number } | null } | null;
+          })
+        | null;
+      if (!chart) return null;
+      const fromPane = chart.getPanes?.()?.[0]?.getMainSourcePriceScale?.()?.getVisiblePriceRange?.();
+      if (fromPane && Number.isFinite(fromPane.from) && Number.isFinite(fromPane.to) && fromPane.to !== fromPane.from) {
+        return { from: fromPane.from, to: fromPane.to };
+      }
+      const right = chart.getPriceScaleById?.("right")?.getVisiblePriceRange?.();
+      if (right && Number.isFinite(right.from) && Number.isFinite(right.to) && right.to !== right.from) {
+        return { from: right.from, to: right.to };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
   async setVisibleRange(from: number, to: number): Promise<void> {
     const chart = this.activeChart();
     if (!chart) return;
