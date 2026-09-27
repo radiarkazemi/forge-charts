@@ -195,7 +195,7 @@ export function TradingViewChart({
     >
       <Box ref={containerRef} sx={{ position: "absolute", inset: 0 }} />
 
-      {isPrimary ? <QuickTradeOverlay /> : null}
+      {isPrimary ? <QuickTradeOverlay containerRef={containerRef} /> : null}
       {isPrimary ? <CandleCountdownOverlay /> : null}
 
       {showReplayToolbar ? <BarReplayToolbar controller={barReplay} forceVisible={forceReplayUi} /> : null}
