@@ -23,13 +23,12 @@ import { DEALING_RANGES_DEFAULTS } from "./dealing-ranges-indicator";
 /** Cap bars fed into Orca so 1m/seconds charts stay responsive. */
 const MAX_BARS = 5_000;
 /** Debounce study add/remove/input changes before expensive export+paint. */
-const STUDY_DEBOUNCE_MS = 350;
+const STUDY_DEBOUNCE_MS = 400;
 /** Cheap presence check only (no export) while a study is active. */
-const PRESENCE_POLL_MS = 5_000;
+const PRESENCE_POLL_MS = 6_000;
 
 function fingerprintCmds(cmds: readonly DrawCmd[]): string {
-  if (cmds.length === 0) return "";
-  // Sample ends + length — enough to skip identical repaints without huge strings.
+  if (cmds.length === 0) return "empty";
   const head = cmds.slice(0, 6);
   const tail = cmds.length > 6 ? cmds.slice(-6) : [];
   const part = (c: DrawCmd) =>
@@ -143,7 +142,6 @@ export function useDealingRangesStudy(enabled = true): void {
 
       const studyIds = findStudyIds();
       if (studyIds.length === 0) {
-        // Invalidate any in-flight paint via generation bump.
         genRef.current += 1;
         clearDrawings();
         lastKeyRef.current = "";
@@ -151,7 +149,8 @@ export function useDealingRangesStudy(enabled = true): void {
         return;
       }
 
-      const opts = readOptions(studyIds[0]!) ?? defaultOpts();
+      const ownerStudyId = studyIds[0]!;
+      const opts = readOptions(ownerStudyId) ?? defaultOpts();
       const key = JSON.stringify({ symbol, interval, opts, studies: studyIds });
       if (!force && key === lastKeyRef.current && entityIdsRef.current.length > 0) {
         return;
@@ -163,7 +162,6 @@ export function useDealingRangesStudy(enabled = true): void {
         const api = widget.activeChart();
         if (!api) return;
 
-        // Single export of currently loaded series — avoid double exportData.
         const exported = await api.exportData({
           includeTime: true,
           includeSeries: true,
@@ -177,22 +175,22 @@ export function useDealingRangesStudy(enabled = true): void {
         }
         if (bars.length < 20) {
           if (entityIdsRef.current.length === 0) {
-            // Keep waiting — history may still be loading; don't thrash.
             lastKeyRef.current = "";
           }
           return;
         }
 
         const cmds = computeDealingRanges(bars, opts);
-        const fp = fingerprintCmds(cmds) || "empty";
+        const fp = fingerprintCmds(cmds);
         if (!force && fp === lastFpRef.current && lastKeyRef.current === key) {
           return;
         }
         if (cancelled || myGen !== genRef.current) return;
 
-        // Paint new shapes first, then remove old — avoids blank flash.
         const ids =
-          cmds.length === 0 ? ([] as EntityId[]) : await paintOrcaOnChart(api, cmds);
+          cmds.length === 0
+            ? ([] as EntityId[])
+            : await paintOrcaOnChart(api, cmds, { ownerStudyId });
         if (cancelled || myGen !== genRef.current) {
           for (const id of ids) {
             try {
@@ -215,9 +213,7 @@ export function useDealingRangesStudy(enabled = true): void {
             /* ignore */
           }
         }
-        if (ids.length > 0) {
-          console.info(`[forge-dr] painted ${ids.length} shapes from ${bars.length} bars`);
-        }
+        console.info(`[forge-dr] painted ${ids.length} shapes from ${bars.length} bars (cmds=${cmds.length})`);
       } catch (err) {
         console.warn("[forge-dr] paint failed", err);
       } finally {
@@ -225,7 +221,7 @@ export function useDealingRangesStudy(enabled = true): void {
         if (!cancelled && pendingRef.current) {
           pendingRef.current = false;
           window.setTimeout(() => {
-            void repaint(true);
+            void repaint(false);
           }, 0);
         }
       }
@@ -234,14 +230,39 @@ export function useDealingRangesStudy(enabled = true): void {
     const scheduleRepaint = () => {
       window.clearTimeout(studyTimer);
       studyTimer = window.setTimeout(() => {
-        lastKeyRef.current = "";
         void repaint(true);
       }, STUDY_DEBOUNCE_MS);
     };
 
+    /** Only react to create/remove/property edits — ignore noise that would loop. */
+    const onStudyEvent = (...args: unknown[]) => {
+      const eventType = String(args[1] ?? args[0] ?? "");
+      // TV passes (entityId, eventType). eventType: create | remove | ...
+      if (/remove/i.test(eventType)) {
+        // Study gone — clear immediately (ownerStudyId may already drop shapes).
+        window.clearTimeout(studyTimer);
+        const still = findStudyIds();
+        if (still.length === 0) {
+          genRef.current += 1;
+          clearDrawings();
+          lastKeyRef.current = "";
+          lastFpRef.current = "";
+          return;
+        }
+      }
+      if (/create|remove|price_scale|properties/i.test(eventType) || eventType === "") {
+        scheduleRepaint();
+      }
+    };
+
+    const onStudyProperties = (...args: unknown[]) => {
+      const id = String(args[0] ?? "");
+      const ours = findStudyIds().some((s) => String(s) === id);
+      if (ours || !id) scheduleRepaint();
+    };
+
     void repaint(true);
 
-    // Cheap presence poll: clear if study gone; paint once if study present but empty.
     const poll = window.setInterval(() => {
       if (cancelled || busyRef.current) return;
       const ids = findStudyIds();
@@ -254,15 +275,14 @@ export function useDealingRangesStudy(enabled = true): void {
         }
         return;
       }
-      if (entityIdsRef.current.length === 0 && lastKeyRef.current === "") {
+      if (lastKeyRef.current === "") {
         void repaint(false);
       }
     }, PRESENCE_POLL_MS);
 
     try {
-      widget.subscribe("study_event", scheduleRepaint);
-      widget.subscribe("study_properties_changed", scheduleRepaint);
-      // Intentionally NOT subscribed to onAutoSaveNeeded — shape create ↔ autosave loops.
+      widget.subscribe("study_event", onStudyEvent as never);
+      widget.subscribe("study_properties_changed", onStudyProperties as never);
     } catch {
       /* ignore */
     }
@@ -273,8 +293,8 @@ export function useDealingRangesStudy(enabled = true): void {
       window.clearTimeout(studyTimer);
       window.clearInterval(poll);
       try {
-        widget.unsubscribe("study_event", scheduleRepaint);
-        widget.unsubscribe("study_properties_changed", scheduleRepaint);
+        widget.unsubscribe("study_event", onStudyEvent as never);
+        widget.unsubscribe("study_properties_changed", onStudyProperties as never);
       } catch {
         /* ignore */
       }

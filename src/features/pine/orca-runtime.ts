@@ -632,34 +632,38 @@ function clColor(color: string, fallback = "#787B86"): string {
 export async function paintOrcaOnChart(
   chart: IChartWidgetApi,
   cmds: readonly DrawCmd[],
+  options?: { readonly ownerStudyId?: EntityId },
 ): Promise<EntityId[]> {
   const ids: EntityId[] = [];
   // Cap drawing volume for CL performance (rangesOnly ≈ 4 cmds each).
   const limited = cmds.length > 80 ? cmds.slice(cmds.length - 80) : cmds;
+  const ownerStudyId = options?.ownerStudyId;
 
   for (let i = 0; i < limited.length; i += 1) {
     const cmd = limited[i]!;
     const stroke = clColor(cmd.color);
+    const common = {
+      disableSelection: true,
+      disableSave: true,
+      disableUndo: true,
+      showInObjectsTree: false,
+      ...(ownerStudyId ? { ownerStudyId } : {}),
+    } as const;
     try {
       if (cmd.kind === "line" && cmd.t2 != null && cmd.p2 != null) {
         const id = await chart.createMultipointShape(
           [
-            { time: cmd.t1, price: cmd.p1 },
-            { time: cmd.t2, price: cmd.p2 },
+            { time: cmd.t1 as never, price: cmd.p1 },
+            { time: cmd.t2 as never, price: cmd.p2 },
           ],
           {
+            ...common,
             shape: "trend_line",
-            disableSelection: true,
-            disableSave: true,
-            disableUndo: true,
-            showInObjectsTree: false,
             overrides: {
               linecolor: stroke,
               linewidth: cmd.width ?? 1,
               linestyle: linestyleMap[cmd.style ?? "solid"],
-              showLabel: Boolean(cmd.text),
-              textcolor: stroke,
-              text: cmd.text ?? "",
+              showLabel: false,
             },
           },
         );
@@ -668,35 +672,31 @@ export async function paintOrcaOnChart(
         const fill = clColor(cmd.fill ?? cmd.color, stroke);
         const id = await chart.createMultipointShape(
           [
-            { time: cmd.t1, price: cmd.p1 },
-            { time: cmd.t2, price: cmd.p2 },
+            { time: cmd.t1 as never, price: cmd.p1 },
+            { time: cmd.t2 as never, price: cmd.p2 },
           ],
           {
+            ...common,
             shape: "rectangle",
-            disableSelection: true,
-            disableSave: true,
-            disableUndo: true,
-            showInObjectsTree: false,
             overrides: {
               color: stroke,
               backgroundColor: fill,
               fillBackground: true,
               linewidth: 1,
-              transparency: 70,
+              transparency: 60,
+              extendLeft: false,
+              extendRight: false,
             },
           },
         );
         if (id) ids.push(id);
       } else if (cmd.kind === "dot") {
         const id = await chart.createShape(
-          { time: cmd.t1, price: cmd.p1 },
+          { time: cmd.t1 as never, price: cmd.p1 },
           {
+            ...common,
             shape: "text",
             text: "●",
-            disableSelection: true,
-            disableSave: true,
-            disableUndo: true,
-            showInObjectsTree: false,
             overrides: {
               color: stroke,
               fontsize: 14,
