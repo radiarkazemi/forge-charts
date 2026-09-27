@@ -83,10 +83,15 @@ export interface DemoTradingSnapshot {
   readonly qty: number;
   readonly orderType: DemoOrderType;
   readonly side: DemoSide;
+  /** Limit / stop entry price (ignored for market). */
+  readonly entryPrice: number | null;
   readonly takeProfitEnabled: boolean;
   readonly stopLossEnabled: boolean;
   readonly takeProfitPrice: number | null;
   readonly stopLossPrice: number | null;
+  /** TP distance in ticks when editing via ticks field. */
+  readonly takeProfitTicks: number | null;
+  readonly stopLossTicks: number | null;
   readonly ticketOpen: boolean;
   readonly dockOpen: boolean;
   readonly space: DemoSpaceState;

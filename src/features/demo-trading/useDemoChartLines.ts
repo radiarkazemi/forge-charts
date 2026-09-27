@@ -185,7 +185,79 @@ export function useDemoChartLines(enabled = true): void {
     return () => {
       cancelled = true;
     };
-  }, [chart, demoTrading, enabled, mid, ready, snap.instrument.contractSize, snap.positions, symbol, quote?.price]);
+  }, [chart, demoTrading, enabled, mid, ready, snap.instrument.contractSize, snap.positions, snap.orders, symbol, quote?.price]);
+
+  // Working Limit / Stop order lines on chart (TV pending orders).
+  useEffect(() => {
+    if (!enabled || !ready) return;
+    const widget = chart.getWidget();
+    const api = widget?.activeChart();
+    if (!api) return;
+
+    const orderLines = new Map<string, IOrderLineAdapter>();
+    let cancelled = false;
+
+    const syncOrders = async () => {
+      const bare = symbol.includes(":") ? symbol.slice(symbol.lastIndexOf(":") + 1) : symbol;
+      const working = snap.orders.filter(
+        (o) =>
+          o.status === "working" &&
+          (o.symbol === symbol || o.symbol === bare || o.symbol.endsWith(bare)) &&
+          o.price != null,
+      );
+      const keep = new Set(working.map((o) => o.id));
+      for (const [id, line] of [...orderLines.entries()]) {
+        if (keep.has(id)) continue;
+        try {
+          line.remove();
+        } catch {
+          /* ignore */
+        }
+        orderLines.delete(id);
+      }
+      for (const order of working) {
+        if (cancelled || order.price == null) continue;
+        let line = orderLines.get(order.id);
+        if (!line) {
+          try {
+            line = await api.createOrderLine();
+            const color = order.side === "buy" ? "#2962ff" : "#f23645";
+            line
+              .setText(`${order.type.toUpperCase()}`)
+              .setQuantity(String(order.qty))
+              .setPrice(order.price)
+              .setLineColor(color)
+              .setBodyBackgroundColor(color)
+              .setBodyTextColor("#fff")
+              .setQuantityBackgroundColor(color)
+              .setQuantityTextColor("#fff")
+              .onCancel(() => demoTrading.cancelOrder(order.id));
+            orderLines.set(order.id, line);
+          } catch {
+            continue;
+          }
+        }
+        try {
+          line.setPrice(order.price).setQuantity(String(order.qty));
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+
+    void syncOrders();
+    return () => {
+      cancelled = true;
+      for (const line of orderLines.values()) {
+        try {
+          line.remove();
+        } catch {
+          /* ignore */
+        }
+      }
+      orderLines.clear();
+    };
+  }, [chart, demoTrading, enabled, ready, snap.orders, symbol]);
 
   // Cleanup all lines on unmount
   useEffect(() => {

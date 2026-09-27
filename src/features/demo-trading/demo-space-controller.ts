@@ -52,10 +52,10 @@ function resolutionToSec(res: string): number {
 
 /** Intra-bar tick interval — denser on short TFs so 1m candles visibly move. */
 function tickIntervalMs(stepMs: number): number {
-  if (stepMs <= 60_000) return 250;
-  if (stepMs <= 5 * 60_000) return 500;
-  if (stepMs <= 15 * 60_000) return 1_000;
-  return 2_000;
+  if (stepMs <= 60_000) return 120;
+  if (stepMs <= 5 * 60_000) return 250;
+  if (stepMs <= 15 * 60_000) return 500;
+  return 1_000;
 }
 
 /**
@@ -177,12 +177,11 @@ export class DemoSpaceController {
 
     await this.fitVisibleHistory(closed.time, barSec, index);
     this.reloadSeries();
-    await sleep(200);
+    await sleep(300);
     await this.fitVisibleHistory(closed.time, barSec, index);
     await sleep(500);
     await this.fitVisibleHistory(closed.time, barSec, index);
 
-    // Force countdown visible on the price scale.
     try {
       widget.applyOverrides({ "mainSeriesProperties.showCountdown": true });
     } catch {
@@ -190,6 +189,11 @@ export class DemoSpaceController {
     }
 
     this.beginForming(index + 1, stepMs);
+    // After subscribeBars reconnects, re-seed the forming bar + frame it.
+    await sleep(400);
+    this.reseedForming();
+    const forming = this.formingTarget;
+    if (forming) await this.fitVisibleHistory(forming.time, barSec, index);
   }
 
   async deactivate(): Promise<void> {
@@ -228,18 +232,24 @@ export class DemoSpaceController {
     this.formingTarget = target;
     this.formStartedAtMs = Date.now();
     this.patch({ formProgress: 0 });
-
-    // Seed forming candle at open so countdown attaches to this period.
-    const seed = formingBarFromOhlc(target, 0);
-    datafeed.setReplayClock(target.time);
-    datafeed.pushReplayBar(seed);
-    this.demo?.updateSpaceCursor(target.time, seed.close);
+    this.reseedForming();
 
     this.stopTimer();
     const interval = tickIntervalMs(stepMs);
     this.tickTimer = window.setInterval(() => {
       this.onFormTick(stepMs);
     }, interval);
+  }
+
+  /** Push open of the forming candle (safe to call after resetData reconnect). */
+  private reseedForming(): void {
+    const target = this.formingTarget;
+    const datafeed = this.datafeed;
+    if (!target || !datafeed) return;
+    const seed = formingBarFromOhlc(target, Math.min(0.02, this.state.get().formProgress || 0));
+    datafeed.setReplayClock(target.time + 1);
+    datafeed.pushReplayBar(seed);
+    this.demo?.updateSpaceCursor(target.time, seed.close);
   }
 
   private onFormTick(stepMs: number): void {
