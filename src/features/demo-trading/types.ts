@@ -155,6 +155,16 @@ export function unrealizedPnl(
   return diff * qty * contractSize;
 }
 
+/** Close/mark price: long @ bid, short @ ask (TradingView FxPro). */
+export function markPriceForSide(
+  side: DemoSide,
+  mid: number,
+  instrument: DemoInstrument,
+): number {
+  const q = bidAskFromMid(mid, instrument);
+  return side === "buy" ? q.bid : q.ask;
+}
+
 export function formatUsd(n: number, digits = 2): string {
   const sign = n > 0 ? "+" : "";
   return `${sign}${n.toFixed(digits)} USD`;

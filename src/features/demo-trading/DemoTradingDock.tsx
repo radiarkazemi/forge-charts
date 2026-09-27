@@ -13,7 +13,7 @@ import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import { useMemo, useState } from "react";
 import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
-import { formatUsd, unrealizedPnl, type DemoOrder, type DemoPosition } from "./types";
+import { formatUsd, markPriceForSide, unrealizedPnl, type DemoInstrument, type DemoOrder, type DemoPosition } from "./types";
 import { ActivateDemoSpaceDialog, CreateDemoAccountDialog } from "./ActivateDemoSpaceDialog";
 
 type DockTab = "positions" | "orders" | "account";
@@ -53,16 +53,16 @@ export function DemoTradingDock() {
 
   const mid = snap.space.lastPrice ?? quote?.price ?? null;
   const acct = demoTrading.activeAccount();
-  const openPositions = snap.positions.filter((p) => p.status === "open");
-  const workingOrders = snap.orders.filter((o) => o.status === "working");
+  const openPositions = snap.positions.filter((p) => p.status === "open" && p.accountId === acct.id);
+  const workingOrders = snap.orders.filter((o) => o.status === "working" && o.accountId === acct.id);
 
   const unrealized = useMemo(() => {
     if (mid == null) return 0;
-    return openPositions.reduce(
-      (sum, p) => sum + unrealizedPnl(p.side, p.qty, p.entryPrice, mid, snap.instrument.contractSize),
-      0,
-    );
-  }, [openPositions, mid, snap.instrument.contractSize]);
+    return openPositions.reduce((sum, p) => {
+      const mark = markPriceForSide(p.side, mid, snap.instrument);
+      return sum + unrealizedPnl(p.side, p.qty, p.entryPrice, mark, snap.instrument.contractSize);
+    }, 0);
+  }, [openPositions, mid, snap.instrument]);
 
   const usedMargin = openPositions.reduce((sum, p) => {
     // Approx: margin per position ≈ notional / leverage at entry
@@ -233,7 +233,7 @@ export function DemoTradingDock() {
           <PositionsTable
             positions={openPositions}
             mid={mid}
-            contractSize={snap.instrument.contractSize}
+            instrument={snap.instrument}
             onClose={(id) => mid != null && demoTrading.closePosition(id, mid)}
             onReverse={(id) => mid != null && demoTrading.reversePosition(id, mid)}
           />
@@ -264,13 +264,13 @@ export function DemoTradingDock() {
 function PositionsTable({
   positions,
   mid,
-  contractSize,
+  instrument,
   onClose,
   onReverse,
 }: {
   positions: readonly DemoPosition[];
   mid: number | null;
-  contractSize: number;
+  instrument: DemoInstrument;
   onClose: (id: string) => void;
   onReverse: (id: string) => void;
 }) {
@@ -304,7 +304,8 @@ function PositionsTable({
       </thead>
       <tbody>
         {positions.map((p) => {
-          const pnl = mid == null ? 0 : unrealizedPnl(p.side, p.qty, p.entryPrice, mid, contractSize);
+          const mark = mid == null ? p.entryPrice : markPriceForSide(p.side, mid, instrument);
+          const pnl = mid == null ? 0 : unrealizedPnl(p.side, p.qty, p.entryPrice, mark, instrument.contractSize);
           return (
             <tr key={p.id}>
               <td>{p.symbol}</td>

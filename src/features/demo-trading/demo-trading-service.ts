@@ -2,6 +2,7 @@ import { createStore, type KeyValueStorage, type Store } from "@/application";
 import {
   bidAskFromMid,
   DEFAULT_XAU_INSTRUMENT,
+  markPriceForSide,
   requiredMargin,
   roundToTick,
   tradeValue,
@@ -17,6 +18,7 @@ import {
 } from "./types";
 
 const STORAGE_KEY = "forge.demoTrading.v1";
+const DEFAULT_EXIT_TICKS = 200;
 
 function uid(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -54,7 +56,7 @@ function initialSnapshot(account: DemoAccount): DemoTradingSnapshot {
     history: [],
     qty: 0.02,
     orderType: "market",
-    side: "sell",
+    side: "buy",
     entryPrice: null,
     takeProfitEnabled: false,
     stopLossEnabled: false,
@@ -70,7 +72,12 @@ function initialSnapshot(account: DemoAccount): DemoTradingSnapshot {
 }
 
 /**
- * Simulated broker for Forge Demo Trading (TradingView paper-trading parity on Advanced Charts).
+ * Simulated broker for Forge Demo Trading (TradingView FxPro paper parity).
+ *
+ * Market: buy @ ask / sell @ bid.
+ * Limit: buy ≤ ask, sell ≥ bid; fill when price crosses.
+ * Stop: buy ≥ ask, sell ≤ bid; fill when price crosses.
+ * Brackets: TP/SL vs fill (or pending entry); long TP>entry>SL, sell inverse.
  */
 export class DemoTradingService {
   readonly state: Store<DemoTradingSnapshot>;
@@ -95,29 +102,31 @@ export class DemoTradingService {
   }
 
   setQty(qty: number): void {
-    const { instrument } = this.state.get();
-    const stepped = Math.max(instrument.minLot, Math.min(instrument.maxLot, roundToTick(qty, instrument.lotStep)));
-    this.patch({ qty: stepped });
+    this.patch({ qty: this.clampQty(qty) });
   }
 
   setOrderType(orderType: DemoOrderType): void {
     const s = this.state.get();
     const mid = s.space.lastPrice;
-    // Prefill limit/stop price near market when switching type.
     let entryPrice = s.entryPrice;
     if (orderType !== "market" && mid != null && (entryPrice == null || s.orderType === "market")) {
       entryPrice = roundToTick(mid, s.instrument.tickSize);
     }
     if (orderType === "market") entryPrice = null;
     this.patch({ orderType, entryPrice });
+    this.rebuildExitsFromTicks();
   }
 
   setSide(side: DemoSide): void {
     this.patch({ side });
+    this.rebuildExitsFromTicks();
   }
 
   setEntryPrice(price: number | null): void {
-    this.patch({ entryPrice: price });
+    const s = this.state.get();
+    const snapped = price == null ? null : roundToTick(price, s.instrument.tickSize);
+    this.patch({ entryPrice: snapped });
+    this.rebuildExitsFromTicks();
   }
 
   setTakeProfitEnabled(on: boolean): void {
@@ -126,15 +135,17 @@ export class DemoTradingService {
       this.patch({ takeProfitEnabled: false });
       return;
     }
-    const mid = s.space.lastPrice ?? s.entryPrice;
-    const entry = s.orderType === "market" ? mid : (s.entryPrice ?? mid);
+    const entry = this.referenceEntry(s);
+    const ticks = s.takeProfitTicks ?? DEFAULT_EXIT_TICKS;
     let tp = s.takeProfitPrice;
     if (tp == null && entry != null) {
-      const ticks = 200;
-      const delta = ticks * s.instrument.tickSize;
-      tp = roundToTick(s.side === "buy" ? entry + delta : entry - delta, s.instrument.tickSize);
+      tp = this.priceFromTicks("tp", s.side, entry, ticks, s.instrument.tickSize);
     }
-    this.patch({ takeProfitEnabled: true, takeProfitPrice: tp, takeProfitTicks: 200 });
+    const nextTicks =
+      tp != null && entry != null
+        ? Math.round(Math.abs(tp - entry) / s.instrument.tickSize)
+        : ticks;
+    this.patch({ takeProfitEnabled: true, takeProfitPrice: tp, takeProfitTicks: nextTicks });
   }
 
   setStopLossEnabled(on: boolean): void {
@@ -143,58 +154,60 @@ export class DemoTradingService {
       this.patch({ stopLossEnabled: false });
       return;
     }
-    const mid = s.space.lastPrice ?? s.entryPrice;
-    const entry = s.orderType === "market" ? mid : (s.entryPrice ?? mid);
+    const entry = this.referenceEntry(s);
+    const ticks = s.stopLossTicks ?? DEFAULT_EXIT_TICKS;
     let sl = s.stopLossPrice;
     if (sl == null && entry != null) {
-      const ticks = 200;
-      const delta = ticks * s.instrument.tickSize;
-      sl = roundToTick(s.side === "buy" ? entry - delta : entry + delta, s.instrument.tickSize);
+      sl = this.priceFromTicks("sl", s.side, entry, ticks, s.instrument.tickSize);
     }
-    this.patch({ stopLossEnabled: true, stopLossPrice: sl, stopLossTicks: 200 });
+    const nextTicks =
+      sl != null && entry != null
+        ? Math.round(Math.abs(sl - entry) / s.instrument.tickSize)
+        : ticks;
+    this.patch({ stopLossEnabled: true, stopLossPrice: sl, stopLossTicks: nextTicks });
   }
 
   setTakeProfitPrice(price: number | null): void {
     const s = this.state.get();
-    const entry = s.entryPrice ?? s.space.lastPrice;
+    const entry = this.referenceEntry(s);
+    const snapped = price == null ? null : roundToTick(price, s.instrument.tickSize);
     let ticks = s.takeProfitTicks;
-    if (price != null && entry != null) {
-      ticks = Math.round(Math.abs(price - entry) / s.instrument.tickSize);
+    if (snapped != null && entry != null) {
+      ticks = Math.round(Math.abs(snapped - entry) / s.instrument.tickSize);
     }
-    this.patch({ takeProfitPrice: price, takeProfitTicks: ticks });
+    this.patch({ takeProfitPrice: snapped, takeProfitTicks: ticks, takeProfitEnabled: snapped != null });
   }
 
   setStopLossPrice(price: number | null): void {
     const s = this.state.get();
-    const entry = s.entryPrice ?? s.space.lastPrice;
+    const entry = this.referenceEntry(s);
+    const snapped = price == null ? null : roundToTick(price, s.instrument.tickSize);
     let ticks = s.stopLossTicks;
-    if (price != null && entry != null) {
-      ticks = Math.round(Math.abs(price - entry) / s.instrument.tickSize);
+    if (snapped != null && entry != null) {
+      ticks = Math.round(Math.abs(snapped - entry) / s.instrument.tickSize);
     }
-    this.patch({ stopLossPrice: price, stopLossTicks: ticks });
+    this.patch({ stopLossPrice: snapped, stopLossTicks: ticks, stopLossEnabled: snapped != null });
   }
 
   setTakeProfitTicks(ticks: number | null): void {
     const s = this.state.get();
-    const entry = s.entryPrice ?? s.space.lastPrice;
+    const entry = this.referenceEntry(s);
     if (ticks == null || entry == null) {
       this.patch({ takeProfitTicks: ticks });
       return;
     }
-    const delta = ticks * s.instrument.tickSize;
-    const price = roundToTick(s.side === "buy" ? entry + delta : entry - delta, s.instrument.tickSize);
+    const price = this.priceFromTicks("tp", s.side, entry, ticks, s.instrument.tickSize);
     this.patch({ takeProfitTicks: ticks, takeProfitPrice: price, takeProfitEnabled: true });
   }
 
   setStopLossTicks(ticks: number | null): void {
     const s = this.state.get();
-    const entry = s.entryPrice ?? s.space.lastPrice;
+    const entry = this.referenceEntry(s);
     if (ticks == null || entry == null) {
       this.patch({ stopLossTicks: ticks });
       return;
     }
-    const delta = ticks * s.instrument.tickSize;
-    const price = roundToTick(s.side === "buy" ? entry - delta : entry + delta, s.instrument.tickSize);
+    const price = this.priceFromTicks("sl", s.side, entry, ticks, s.instrument.tickSize);
     this.patch({ stopLossTicks: ticks, stopLossPrice: price, stopLossEnabled: true });
   }
 
@@ -259,7 +272,6 @@ export class DemoTradingService {
     const accounts = s.accounts.map((a) =>
       a.id === s.activeAccountId ? { ...a, balance, equity: balance } : a,
     );
-    // Close all open positions on this account when resetting.
     const closed = s.positions
       .filter((p) => p.accountId === s.activeAccountId && p.status === "open")
       .map((p) => ({
@@ -277,7 +289,7 @@ export class DemoTradingService {
     });
   }
 
-  /** Update mark price (live quote or demo-space bar close). Evaluates TP/SL. */
+  /** Update mark price (live quote or demo-space bar close). Evaluates TP/SL + working orders. */
   onMarkPrice(symbol: string, mid: number): void {
     const s = this.state.get();
     if (s.space.active && s.space.symbol && s.space.symbol !== symbol) return;
@@ -306,7 +318,13 @@ export class DemoTradingService {
     if (mid == null || !Number.isFinite(mid)) return null;
     const s = this.state.get();
     const q = bidAskFromMid(mid, s.instrument);
-    const px = s.side === "buy" ? q.ask : q.bid;
+    // Pending ticket uses limit/stop price; market uses ask/bid.
+    const px =
+      s.orderType !== "market" && s.entryPrice != null
+        ? s.entryPrice
+        : s.side === "buy"
+          ? q.ask
+          : q.bid;
     return {
       tradeValue: tradeValue(px, s.qty, s.instrument.contractSize),
       margin: requiredMargin(px, s.qty, s.instrument.contractSize, s.instrument.leverage),
@@ -329,7 +347,7 @@ export class DemoTradingService {
   }): { ok: boolean; message: string; positionId?: string; orderId?: string } {
     const s = this.state.get();
     const type = opts.type ?? s.orderType;
-    const qty = opts.qty ?? s.qty;
+    const qty = this.clampQty(opts.qty ?? s.qty);
     const instrument = this.instrumentFor(opts.symbol, s.instrument);
     const q = bidAskFromMid(opts.mid, { ...instrument, spreadPoints: s.instrument.spreadPoints });
     const fillPx = opts.side === "buy" ? q.ask : q.bid;
@@ -337,7 +355,9 @@ export class DemoTradingService {
     const sl = opts.stopLoss ?? (s.stopLossEnabled ? s.stopLossPrice : null);
 
     if (type === "market") {
-      return this.openPosition({
+      const brackets = this.validateBrackets(opts.side, fillPx, tp, sl);
+      if (!brackets.ok) return brackets;
+      const opened = this.openPosition({
         side: opts.side,
         qty,
         price: fillPx,
@@ -345,11 +365,69 @@ export class DemoTradingService {
         takeProfit: tp,
         stopLoss: sl,
       });
+      if (opened.ok) {
+        this.recordFilledMarketOrder({
+          side: opts.side,
+          qty,
+          symbol: opts.symbol,
+          fillPrice: fillPx,
+          takeProfit: tp,
+          stopLoss: sl,
+          positionId: opened.positionId ?? null,
+        });
+        this.evaluateExits(opts.symbol, opts.mid);
+      }
+      return opened;
     }
 
-    const entry = opts.limitPrice ?? s.entryPrice ?? fillPx;
-    if (entry == null || !Number.isFinite(entry)) {
+    const rawEntry = opts.limitPrice ?? s.entryPrice ?? fillPx;
+    if (rawEntry == null || !Number.isFinite(rawEntry)) {
       return { ok: false, message: "Enter a limit/stop price" };
+    }
+    const entry = roundToTick(rawEntry, instrument.tickSize);
+
+    const sideCheck = this.validatePendingSide(type, opts.side, entry, q.bid, q.ask);
+    if (!sideCheck.ok) return sideCheck;
+
+    const brackets = this.validateBrackets(opts.side, entry, tp, sl);
+    if (!brackets.ok) return brackets;
+
+    // Already marketable → fill immediately like TV.
+    const marketable =
+      type === "limit"
+        ? opts.side === "buy"
+          ? q.ask <= entry
+          : q.bid >= entry
+        : opts.side === "buy"
+          ? q.ask >= entry
+          : q.bid <= entry;
+    if (marketable) {
+      const opened = this.openPosition({
+        side: opts.side,
+        qty,
+        price: fillPx,
+        symbol: opts.symbol,
+        takeProfit: tp,
+        stopLoss: sl,
+      });
+      if (!opened.ok) return opened;
+      this.recordFilledMarketOrder({
+        side: opts.side,
+        qty,
+        symbol: opts.symbol,
+        fillPrice: fillPx,
+        takeProfit: tp,
+        stopLoss: sl,
+        positionId: opened.positionId ?? null,
+        type,
+        requestedPrice: entry,
+      });
+      this.evaluateExits(opts.symbol, opts.mid);
+      return {
+        ok: true,
+        message: `${type.toUpperCase()} filled immediately @ ${fillPx}`,
+        positionId: opened.positionId,
+      };
     }
 
     const order: DemoOrder = {
@@ -383,8 +461,9 @@ export class DemoTradingService {
     const s = this.state.get();
     const acct = this.activeAccount();
     const margin = requiredMargin(opts.price, opts.qty, s.instrument.contractSize, s.instrument.leverage);
-    if (acct.equity < margin) {
-      return { ok: false, message: "Insufficient margin" };
+    const free = this.freeMargin(acct, s);
+    if (free < margin) {
+      return { ok: false, message: "Insufficient free margin" };
     }
     const pos: DemoPosition = {
       id: uid("pos"),
@@ -408,16 +487,18 @@ export class DemoTradingService {
       side: opts.side,
     });
     this.recalcEquity(opts.price);
-    return { ok: true, message: `${opts.side === "buy" ? "Buy" : "Sell"} ${opts.qty} filled @ ${opts.price}`, positionId: pos.id };
+    return {
+      ok: true,
+      message: `${opts.side === "buy" ? "Buy" : "Sell"} ${opts.qty} filled @ ${opts.price}`,
+      positionId: pos.id,
+    };
   }
 
   closePosition(positionId: string, mark: number): { ok: boolean; message: string } {
     const s = this.state.get();
     const pos = s.positions.find((p) => p.id === positionId && p.status === "open");
     if (!pos) return { ok: false, message: "Position not found" };
-    const q = bidAskFromMid(mark, s.instrument);
-    // Close long at bid, close short at ask (standard).
-    const closePx = pos.side === "buy" ? q.bid : q.ask;
+    const closePx = markPriceForSide(pos.side, mark, s.instrument);
     const pnl = unrealizedPnl(pos.side, pos.qty, pos.entryPrice, closePx, s.instrument.contractSize);
     const closed: DemoPosition = {
       ...pos,
@@ -435,7 +516,10 @@ export class DemoTradingService {
       history: [closed, ...s.history].slice(0, 200),
     });
     this.recalcEquity(mark);
-    return { ok: true, message: `Closed ${pos.side} ${pos.qty} @ ${closePx} (${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} USD)` };
+    return {
+      ok: true,
+      message: `Closed ${pos.side} ${pos.qty} @ ${closePx} (${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} USD)`,
+    };
   }
 
   reversePosition(positionId: string, mark: number): { ok: boolean; message: string } {
@@ -465,13 +549,17 @@ export class DemoTradingService {
   updatePositionExits(positionId: string, takeProfit: number | null, stopLoss: number | null): void {
     const s = this.state.get();
     this.patch({
-      positions: s.positions.map((p) =>
-        p.id === positionId ? { ...p, takeProfit, stopLoss } : p,
-      ),
+      positions: s.positions.map((p) => (p.id === positionId ? { ...p, takeProfit, stopLoss } : p)),
     });
   }
 
-  /** Enter historical demo space (caller drives bar playback). */
+  updateOrderExits(orderId: string, takeProfit: number | null, stopLoss: number | null): void {
+    const s = this.state.get();
+    this.patch({
+      orders: s.orders.map((o) => (o.id === orderId ? { ...o, takeProfit, stopLoss } : o)),
+    });
+  }
+
   activateSpace(symbol: string, startTimeSec: number, mid: number | null): void {
     this.patch({
       space: {
@@ -502,19 +590,32 @@ export class DemoTradingService {
 
   openPositionsForSymbol(symbol: string): DemoPosition[] {
     const bare = symbol.includes(":") ? symbol.slice(symbol.lastIndexOf(":") + 1) : symbol;
+    const acctId = this.state.get().activeAccountId;
     return this.state.get().positions.filter(
-      (p) => p.status === "open" && (p.symbol === symbol || p.symbol === bare || p.symbol.endsWith(bare)),
+      (p) =>
+        p.status === "open" &&
+        p.accountId === acctId &&
+        (p.symbol === symbol || p.symbol === bare || p.symbol.endsWith(bare)),
+    );
+  }
+
+  workingOrdersForSymbol(symbol: string): DemoOrder[] {
+    const bare = symbol.includes(":") ? symbol.slice(symbol.lastIndexOf(":") + 1) : symbol;
+    const acctId = this.state.get().activeAccountId;
+    return this.state.get().orders.filter(
+      (o) =>
+        o.status === "working" &&
+        o.accountId === acctId &&
+        (o.symbol === symbol || o.symbol === bare || o.symbol.endsWith(bare)),
     );
   }
 
   private evaluateExits(symbol: string, mid: number): void {
     const open = this.openPositionsForSymbol(symbol);
     for (const pos of open) {
-      const q = bidAskFromMid(mid, this.state.get().instrument);
-      const mark = pos.side === "buy" ? q.bid : q.ask;
+      const mark = markPriceForSide(pos.side, mid, this.state.get().instrument);
       if (pos.takeProfit != null) {
-        const hit =
-          pos.side === "buy" ? mark >= pos.takeProfit : mark <= pos.takeProfit;
+        const hit = pos.side === "buy" ? mark >= pos.takeProfit : mark <= pos.takeProfit;
         if (hit) {
           this.closePosition(pos.id, mid);
           continue;
@@ -530,12 +631,8 @@ export class DemoTradingService {
   private evaluateWorkingOrders(symbol: string, mid: number): void {
     const s = this.state.get();
     const q = bidAskFromMid(mid, s.instrument);
-    for (const order of s.orders.filter((o) => o.status === "working")) {
-      const bare = order.symbol.includes(":")
-        ? order.symbol.slice(order.symbol.lastIndexOf(":") + 1)
-        : order.symbol;
-      const symBare = symbol.includes(":") ? symbol.slice(symbol.lastIndexOf(":") + 1) : symbol;
-      if (bare !== symBare) continue;
+    const working = this.workingOrdersForSymbol(symbol);
+    for (const order of working) {
       const px = order.price;
       if (px == null) continue;
       let fill = false;
@@ -546,14 +643,8 @@ export class DemoTradingService {
       }
       if (!fill) continue;
       const fillPx = order.side === "buy" ? q.ask : q.bid;
-      this.patch({
-        orders: this.state.get().orders.map((o) =>
-          o.id === order.id
-            ? { ...o, status: "filled" as const, filledAt: Date.now(), fillPrice: fillPx }
-            : o,
-        ),
-      });
-      this.openPosition({
+      // Atomic: open first, then mark filled (TV does not leave orphan filled orders).
+      const opened = this.openPosition({
         side: order.side,
         qty: order.qty,
         price: fillPx,
@@ -561,7 +652,162 @@ export class DemoTradingService {
         takeProfit: order.takeProfit,
         stopLoss: order.stopLoss,
       });
+      if (!opened.ok) {
+        this.patch({
+          orders: this.state.get().orders.map((o) =>
+            o.id === order.id ? { ...o, status: "rejected" as const } : o,
+          ),
+        });
+        continue;
+      }
+      this.patch({
+        orders: this.state.get().orders.map((o) =>
+          o.id === order.id
+            ? {
+                ...o,
+                status: "filled" as const,
+                filledAt: Date.now(),
+                fillPrice: fillPx,
+                positionId: opened.positionId ?? null,
+              }
+            : o,
+        ),
+      });
+      this.evaluateExits(order.symbol, mid);
     }
+  }
+
+  private recordFilledMarketOrder(opts: {
+    side: DemoSide;
+    qty: number;
+    symbol: string;
+    fillPrice: number;
+    takeProfit: number | null;
+    stopLoss: number | null;
+    positionId: string | null;
+    type?: DemoOrderType;
+    requestedPrice?: number;
+  }): void {
+    const s = this.state.get();
+    const order: DemoOrder = {
+      id: uid("ord"),
+      accountId: s.activeAccountId,
+      symbol: opts.symbol,
+      side: opts.side,
+      type: opts.type ?? "market",
+      qty: opts.qty,
+      price: opts.requestedPrice ?? opts.fillPrice,
+      status: "filled",
+      createdAt: Date.now(),
+      filledAt: Date.now(),
+      fillPrice: opts.fillPrice,
+      takeProfit: opts.takeProfit,
+      stopLoss: opts.stopLoss,
+      positionId: opts.positionId,
+    };
+    this.patch({ orders: [order, ...s.orders].slice(0, 100) });
+  }
+
+  private validatePendingSide(
+    type: DemoOrderType,
+    side: DemoSide,
+    entry: number,
+    bid: number,
+    ask: number,
+  ): { ok: boolean; message: string } {
+    if (type === "limit") {
+      if (side === "buy" && entry > ask) {
+        return { ok: false, message: `Buy Limit must be ≤ ask (${ask})` };
+      }
+      if (side === "sell" && entry < bid) {
+        return { ok: false, message: `Sell Limit must be ≥ bid (${bid})` };
+      }
+    }
+    if (type === "stop") {
+      if (side === "buy" && entry < ask) {
+        return { ok: false, message: `Buy Stop must be ≥ ask (${ask})` };
+      }
+      if (side === "sell" && entry > bid) {
+        return { ok: false, message: `Sell Stop must be ≤ bid (${bid})` };
+      }
+    }
+    return { ok: true, message: "" };
+  }
+
+  private validateBrackets(
+    side: DemoSide,
+    entry: number,
+    tp: number | null | undefined,
+    sl: number | null | undefined,
+  ): { ok: boolean; message: string } {
+    if (tp != null) {
+      const ok = side === "buy" ? tp > entry : tp < entry;
+      if (!ok) {
+        return {
+          ok: false,
+          message: side === "buy" ? "Take profit must be above entry" : "Take profit must be below entry",
+        };
+      }
+    }
+    if (sl != null) {
+      const ok = side === "buy" ? sl < entry : sl > entry;
+      if (!ok) {
+        return {
+          ok: false,
+          message: side === "buy" ? "Stop loss must be below entry" : "Stop loss must be above entry",
+        };
+      }
+    }
+    return { ok: true, message: "" };
+  }
+
+  private referenceEntry(s: DemoTradingSnapshot): number | null {
+    if (s.orderType !== "market" && s.entryPrice != null) return s.entryPrice;
+    const mid = s.space.lastPrice;
+    if (mid == null) return s.entryPrice;
+    const q = bidAskFromMid(mid, s.instrument);
+    return s.side === "buy" ? q.ask : q.bid;
+  }
+
+  private rebuildExitsFromTicks(): void {
+    const s = this.state.get();
+    const entry = this.referenceEntry(s);
+    if (entry == null) return;
+    const patch: Partial<DemoTradingSnapshot> = {};
+    if (s.takeProfitEnabled && s.takeProfitTicks != null) {
+      patch.takeProfitPrice = this.priceFromTicks("tp", s.side, entry, s.takeProfitTicks, s.instrument.tickSize);
+    }
+    if (s.stopLossEnabled && s.stopLossTicks != null) {
+      patch.stopLossPrice = this.priceFromTicks("sl", s.side, entry, s.stopLossTicks, s.instrument.tickSize);
+    }
+    if (Object.keys(patch).length) this.patch(patch);
+  }
+
+  private priceFromTicks(
+    kind: "tp" | "sl",
+    side: DemoSide,
+    entry: number,
+    ticks: number,
+    tickSize: number,
+  ): number {
+    const delta = ticks * tickSize;
+    if (kind === "tp") {
+      return roundToTick(side === "buy" ? entry + delta : entry - delta, tickSize);
+    }
+    return roundToTick(side === "buy" ? entry - delta : entry + delta, tickSize);
+  }
+
+  private clampQty(qty: number): number {
+    const { instrument } = this.state.get();
+    return Math.max(instrument.minLot, Math.min(instrument.maxLot, roundToTick(qty, instrument.lotStep)));
+  }
+
+  private freeMargin(acct: DemoAccount, s: DemoTradingSnapshot): number {
+    let used = 0;
+    for (const p of s.positions.filter((x) => x.accountId === acct.id && x.status === "open")) {
+      used += requiredMargin(p.entryPrice, p.qty, s.instrument.contractSize, s.instrument.leverage);
+    }
+    return acct.equity - used;
   }
 
   private recalcEquity(mid: number | null): void {
@@ -570,8 +816,7 @@ export class DemoTradingService {
     let unrealized = 0;
     if (mid != null) {
       for (const p of s.positions.filter((x) => x.accountId === acct.id && x.status === "open")) {
-        const q = bidAskFromMid(mid, s.instrument);
-        const mark = p.side === "buy" ? q.bid : q.ask;
+        const mark = markPriceForSide(p.side, mid, s.instrument);
         unrealized += unrealizedPnl(p.side, p.qty, p.entryPrice, mark, s.instrument.contractSize);
       }
     }
@@ -593,7 +838,6 @@ export class DemoTradingService {
   private persist(): void {
     try {
       const s = this.state.get();
-      // Don't persist ephemeral space playback cursor deeply — keep start flag off after reload.
       const toSave: DemoTradingSnapshot = {
         ...s,
         space: IDLE_SPACE,

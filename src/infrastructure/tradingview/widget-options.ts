@@ -68,6 +68,8 @@ const DISABLED_FEATURES: ChartingLibraryFeatureset[] = [
   "symbol_info_price_source",
   // Keep the drawing toolbar visible on first visit (matches TradingView).
   "hide_left_toolbar_by_default",
+  // Do not auto-create a Volume pane — user adds it via Indicators if wanted.
+  "create_volume_indicator_by_default",
   // Runtime featureset (not always in public d.ts): hides bottom-left TradingView logo.
   "widget_logo" as ChartingLibraryFeatureset,
 ];

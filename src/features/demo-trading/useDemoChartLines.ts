@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
 import type { EntityId, IPositionLineAdapter, IOrderLineAdapter } from "@/infrastructure/tradingview";
-import { formatUsd, unrealizedPnl } from "./types";
+import { formatUsd, markPriceForSide, unrealizedPnl } from "./types";
 
 type NativeBundle = {
   mode: "native";
@@ -280,10 +280,11 @@ export function useDemoChartLines(enabled = true): void {
     const paintPl = () => {
       const mid = midRef.current;
       const contract = demoTrading.state.get().instrument.contractSize;
+      const instrument = demoTrading.state.get().instrument;
       for (const pos of demoTrading.openPositionsForSymbol(symbol)) {
         const bundle = linesRef.current.get(pos.id);
         if (!bundle) continue;
-        const mark = mid ?? pos.entryPrice;
+        const mark = mid == null ? pos.entryPrice : markPriceForSide(pos.side, mid, instrument);
         const pnl = unrealizedPnl(pos.side, pos.qty, pos.entryPrice, mark, contract);
         if (bundle.mode === "native") {
           try {
@@ -329,7 +330,7 @@ export function useDemoChartLines(enabled = true): void {
     };
   }, [chart, demoTrading, enabled, ready, snap.positions, symbol]);
 
-  // Working Limit / Stop order lines.
+  // Working Limit / Stop order lines (+ attached TP/SL).
   useEffect(() => {
     if (!enabled || !ready) return;
     const widget = chart.getWidget();
@@ -339,16 +340,12 @@ export function useDemoChartLines(enabled = true): void {
     let cancelled = false;
 
     const syncOrders = async () => {
-      const bare = symbol.includes(":") ? symbol.slice(symbol.lastIndexOf(":") + 1) : symbol;
-      const working = snap.orders.filter(
-        (o) =>
-          o.status === "working" &&
-          (o.symbol === symbol || o.symbol === bare || o.symbol.endsWith(bare)) &&
-          o.price != null,
-      );
+      const working = demoTrading.workingOrdersForSymbol(symbol);
       const keep = new Set(working.map((o) => o.id));
+      // Also track synthetic keys for order TP/SL shapes
       for (const [id, line] of [...orderLinesRef.current.entries()]) {
-        if (keep.has(id)) continue;
+        const baseId = id.replace(/^otp-/, "").replace(/^osl-/, "");
+        if (keep.has(id) || keep.has(baseId)) continue;
         try {
           if (typeof line === "object" && line && "remove" in line) {
             (line as IOrderLineAdapter).remove();
@@ -390,23 +387,24 @@ export function useDemoChartLines(enabled = true): void {
                 .onCancel(() => demoTrading.cancelOrder(order.id));
               orderLinesRef.current.set(order.id, native);
               orderModeRef.current = "native";
-              continue;
             } catch {
               nativeOkRef.current = false;
             }
           }
-          const id = await chart.addHorizontalLine({
-            price: order.price,
-            text: label,
-            color,
-          });
-          if (cancelled) {
-            if (id) chart.removeEntity(id);
-            return;
-          }
-          if (id) {
-            orderLinesRef.current.set(order.id, id);
-            orderModeRef.current = "shape";
+          if (!orderLinesRef.current.has(order.id)) {
+            const id = await chart.addHorizontalLine({
+              price: order.price,
+              text: "",
+              color,
+            });
+            if (cancelled) {
+              if (id) chart.removeEntity(id);
+              return;
+            }
+            if (id) {
+              orderLinesRef.current.set(order.id, id);
+              orderModeRef.current = "shape";
+            }
           }
         } else if (typeof line === "object" && line && "setPrice" in line) {
           try {
@@ -414,6 +412,36 @@ export function useDemoChartLines(enabled = true): void {
           } catch {
             /* ignore */
           }
+        }
+
+        // Pending order TP/SL guides (shape fallback — chips handle labels).
+        for (const [key, price, color] of [
+          [`otp-${order.id}`, order.takeProfit, "#089981"],
+          [`osl-${order.id}`, order.stopLoss, "#ff9800"],
+        ] as const) {
+          if (price == null) {
+            const existing = orderLinesRef.current.get(key);
+            if (existing) {
+              try {
+                if (typeof existing === "object" && existing && "remove" in existing) {
+                  (existing as IOrderLineAdapter).remove();
+                } else {
+                  chart.removeEntity(existing as EntityId);
+                }
+              } catch {
+                /* ignore */
+              }
+              orderLinesRef.current.delete(key);
+            }
+            continue;
+          }
+          if (orderLinesRef.current.has(key)) continue;
+          const id = await chart.addHorizontalLine({ price, text: "", color });
+          if (cancelled) {
+            if (id) chart.removeEntity(id);
+            return;
+          }
+          if (id) orderLinesRef.current.set(key, id);
         }
       }
     };

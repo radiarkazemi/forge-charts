@@ -2,7 +2,7 @@ import Box from "@mui/material/Box";
 import { useEffect, useState, type RefObject } from "react";
 import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
-import { formatUsd, unrealizedPnl, type DemoPosition } from "./types";
+import { formatUsd, markPriceForSide, unrealizedPnl, type DemoPosition } from "./types";
 
 interface ChipLayout {
   readonly id: string;
@@ -64,7 +64,8 @@ export function TradeLinesOverlay({
       };
 
       for (const pos of open) {
-        const pnl = mark == null ? 0 : unrealizedPnl(pos.side, pos.qty, pos.entryPrice, mark, contract);
+        const px = mid == null ? pos.entryPrice : markPriceForSide(pos.side, mid, snap.instrument);
+        const pnl = unrealizedPnl(pos.side, pos.qty, pos.entryPrice, px, contract);
         const y = yFor(pos.entryPrice);
         if (y != null) {
           next.push({
@@ -104,20 +105,46 @@ export function TradeLinesOverlay({
         }
       }
 
-      const bare = symbol.includes(":") ? symbol.slice(symbol.lastIndexOf(":") + 1) : symbol;
-      for (const order of snap.orders) {
-        if (order.status !== "working" || order.price == null) continue;
-        if (!(order.symbol === symbol || order.symbol === bare || order.symbol.endsWith(bare))) continue;
+      const working = demoTrading.workingOrdersForSymbol(symbol);
+      for (const order of working) {
+        if (order.price == null) continue;
         const y = yFor(order.price);
-        if (y == null) continue;
-        next.push({
-          id: `ord-${order.id}`,
-          kind: "order",
-          color: order.side === "buy" ? "#2962ff" : "#f23645",
-          qty: String(order.qty),
-          text: order.type.toUpperCase(),
-          top: y,
-        });
+        if (y != null) {
+          next.push({
+            id: `ord-${order.id}`,
+            kind: "order",
+            color: order.side === "buy" ? "#2962ff" : "#f23645",
+            qty: String(order.qty),
+            text: order.type.toUpperCase(),
+            top: y,
+          });
+        }
+        if (order.takeProfit != null) {
+          const tpY = yFor(order.takeProfit);
+          if (tpY != null) {
+            next.push({
+              id: `otp-${order.id}`,
+              kind: "tp",
+              color: "#089981",
+              qty: String(order.qty),
+              text: "TP",
+              top: tpY,
+            });
+          }
+        }
+        if (order.stopLoss != null) {
+          const slY = yFor(order.stopLoss);
+          if (slY != null) {
+            next.push({
+              id: `osl-${order.id}`,
+              kind: "sl",
+              color: "#ff9800",
+              qty: String(order.qty),
+              text: "SL",
+              top: slY,
+            });
+          }
+        }
       }
 
       setChips(next);
@@ -155,11 +182,23 @@ export function TradeLinesOverlay({
     }
     if (chip.kind === "tp") {
       const posId = chip.id.replace(/^tp-/, "");
+      if (chip.id.startsWith("otp-")) {
+        const orderId = chip.id.replace(/^otp-/, "");
+        const order = snap.orders.find((o) => o.id === orderId);
+        if (order) demoTrading.updateOrderExits(orderId, null, order.stopLoss);
+        return;
+      }
       const pos = findPos(snap.positions, posId);
       if (pos) demoTrading.updatePositionExits(posId, null, pos.stopLoss);
       return;
     }
     if (chip.kind === "sl") {
+      if (chip.id.startsWith("osl-")) {
+        const orderId = chip.id.replace(/^osl-/, "");
+        const order = snap.orders.find((o) => o.id === orderId);
+        if (order) demoTrading.updateOrderExits(orderId, order.takeProfit, null);
+        return;
+      }
       const posId = chip.id.replace(/^sl-/, "");
       const pos = findPos(snap.positions, posId);
       if (pos) demoTrading.updatePositionExits(posId, pos.takeProfit, null);

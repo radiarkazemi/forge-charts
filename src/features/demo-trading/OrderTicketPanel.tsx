@@ -26,7 +26,14 @@ export function OrderTicketPanel() {
   const bare = symbol.includes(":") ? symbol.slice(symbol.lastIndexOf(":") + 1) : symbol;
   const sellActive = snap.side === "sell";
   const isPending = snap.orderType !== "market";
-  const entryRef = isPending ? snap.entryPrice : mid;
+  const entryRef =
+    isPending
+      ? snap.entryPrice
+      : q
+        ? sellActive
+          ? q.bid
+          : q.ask
+        : mid;
 
   const submit = () => {
     if (mid == null) return;

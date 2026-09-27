@@ -60,8 +60,14 @@ export interface TradingViewWidgetDeps {
 }
 
 /** Bump when autosave recovery needs a clean slate for all browsers. */
-const AUTOSAVE_KEY = "forge.tv.autosave.v2";
-const LEGACY_AUTOSAVE_KEYS = ["forge.tv.autosave", "forge.tv.autosave.pane.1", "forge.tv.autosave.pane.2", "forge.tv.autosave.pane.3"] as const;
+const AUTOSAVE_KEY = "forge.tv.autosave.v3";
+const LEGACY_AUTOSAVE_KEYS = [
+  "forge.tv.autosave.v2",
+  "forge.tv.autosave",
+  "forge.tv.autosave.pane.1",
+  "forge.tv.autosave.pane.2",
+  "forge.tv.autosave.pane.3",
+] as const;
 const READY_TIMEOUT_MS = 12_000;
 
 function purgeLegacyAutosaves(storage: KeyValueStorage): void {
@@ -193,17 +199,35 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         window.clearTimeout(readyTimer);
         controller.attach(widget);
         onWidgetReady(widget);
-        // Do not auto-load Volume — strip any default/autosaved Volume pane.
-        const stripVolume = () => {
-          try {
-            controller.removeVolumeStudy();
-          } catch {
-            /* ignore */
+        // Volume is disabled by featureset; also strip any leftover Volume from
+        // layouts that migrated from older autosave keys once.
+        try {
+          const clearedKey = "forge.charts.volumeDefaultCleared.v2";
+          if (typeof localStorage !== "undefined" && localStorage.getItem(clearedKey) !== "1") {
+            const stripAndSave = () => {
+              try {
+                controller.removeVolumeStudy();
+                if (isPrimary) {
+                  widget.save((state) => storage.set(autosaveKey, state));
+                }
+              } catch {
+                /* ignore */
+              }
+            };
+            stripAndSave();
+            window.setTimeout(stripAndSave, 1000);
+            window.setTimeout(() => {
+              stripAndSave();
+              try {
+                localStorage.setItem(clearedKey, "1");
+              } catch {
+                /* ignore */
+              }
+            }, 3000);
           }
-        };
-        stripVolume();
-        window.setTimeout(stripVolume, 600);
-        window.setTimeout(stripVolume, 2000);
+        } catch {
+          /* ignore */
+        }
         // Drawing flyout patches on every pane (each widget has its own iframe).
         unmountDealingRange?.();
         unmountDealingRange = mountDealingRangeFlyoutInjector(container, () => {
@@ -226,8 +250,6 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
               } catch {
                 /* ignore */
               }
-              // Don't re-add Volume after symbol changes.
-              window.setTimeout(stripVolume, 500);
             });
         } catch {
           /* chart API unavailable */
