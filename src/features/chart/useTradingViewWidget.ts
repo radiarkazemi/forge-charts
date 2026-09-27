@@ -257,28 +257,31 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         }
       });
 
-      // Primary: full Forge header. Secondary: layout + sync menu (both sides).
-      void widget.headerReady().then(() => {
-        if (cancelled || !widget) return;
-        const api = mountHeaderToolbar(widget, {
-          onCreateAlert,
-          onToggleTheme,
-          onOpenAlertsPanel,
-          onOpenWatchlist,
-          onOpenObjectTree,
-          onOpenProfile,
-          onEnterBarReplay,
-          onSetChartLayout,
-          onToggleLayoutSync,
-          getLayoutSync,
-          getLastPrice,
-          getProfile,
-          themeLabel: initial.theme === "dark" ? "Dark" : "Light",
-          alertCount: initial.alertCount,
-          compact: !isPrimary,
+      // Primary only: Forge header chrome. Secondary panes have no header_widget
+      // so the multi-layout shows a single shared top nav.
+      if (isPrimary) {
+        void widget.headerReady().then(() => {
+          if (cancelled || !widget) return;
+          const api = mountHeaderToolbar(widget, {
+            onCreateAlert,
+            onToggleTheme,
+            onOpenAlertsPanel,
+            onOpenWatchlist,
+            onOpenObjectTree,
+            onOpenProfile,
+            onEnterBarReplay,
+            onSetChartLayout,
+            onToggleLayoutSync,
+            getLayoutSync,
+            getLastPrice,
+            getProfile,
+            themeLabel: initial.theme === "dark" ? "Dark" : "Light",
+            alertCount: initial.alertCount,
+            compact: false,
+          });
+          onHeaderReady(api);
         });
-        if (isPrimary) onHeaderReady(api);
-      });
+      }
     };
 
     loadChartingLibrary(libraryPath)

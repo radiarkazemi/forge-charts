@@ -68,11 +68,24 @@ export function TradingViewChart({
     controller.setSyncHooks({
       onSymbolChanged: (ticker) => {
         settings.setPaneSymbol(paneIndex, ticker);
-        layoutSyncBus.notifySymbol(paneIndex, ticker);
+        if (paneIndex === 0) {
+          layoutSyncBus.handlePrimarySymbolChanged(ticker);
+        } else {
+          layoutSyncBus.recordPaneSymbol(paneIndex, ticker);
+          layoutSyncBus.notifySymbol(paneIndex, ticker);
+        }
       },
       onIntervalChanged: (interval) => {
-        if (paneIndex === 0) settings.rememberChart(settings.settings.get().lastSymbol, interval);
-        layoutSyncBus.notifyInterval(paneIndex, interval);
+        if (paneIndex === 0) {
+          // Remember only when primary is the active editing target.
+          if (layoutSyncBus.getActivePane() === 0) {
+            settings.rememberChart(settings.settings.get().lastSymbol, interval);
+          }
+          layoutSyncBus.handlePrimaryIntervalChanged(interval);
+        } else {
+          layoutSyncBus.recordPaneInterval(paneIndex, interval);
+          layoutSyncBus.notifyInterval(paneIndex, interval);
+        }
       },
       onVisibleRangeChanged: (from, to) => layoutSyncBus.notifyVisibleRange(paneIndex, from, to),
       onCrosshairMoved: (time) => layoutSyncBus.notifyCrosshair(paneIndex, time),

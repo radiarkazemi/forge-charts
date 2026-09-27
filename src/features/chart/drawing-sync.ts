@@ -1,6 +1,7 @@
 /**
  * Cross-pane drawing sync (TradingView multi-chart): drawings share absolute
  * time + price, so a trend line on 4H appears on the matching 15m candles.
+ * Supports all Charting Library drawing tools (not just trend lines).
  */
 
 import type { EntityId, IChartWidgetApi } from "@/infrastructure/tradingview";
@@ -32,6 +33,8 @@ const SINGLE_POINT_SHAPES = new Set([
   "price_note",
   "long_position",
   "short_position",
+  "signpost",
+  "comment",
 ]);
 
 /** Map Charting Library entity / LineTool names → createMultipointShape ids. */
@@ -43,66 +46,165 @@ const SHAPE_ALIASES: Record<string, string> = {
   linetoolray: "ray",
   info_line: "info_line",
   infoline: "info_line",
+  linetoolinfoline: "info_line",
   trend_angle: "trend_angle",
+  trendangle: "trend_angle",
+  linetooltrendangle: "trend_angle",
   arrow: "arrow",
+  linetoolarrow: "arrow",
   extended: "extended",
+  linetoolextended: "extended",
   horizontal_line: "horizontal_line",
   horz_line: "horizontal_line",
+  horzline: "horizontal_line",
   linetoolhorzline: "horizontal_line",
   horizontal_ray: "horizontal_ray",
   horz_ray: "horizontal_ray",
+  horzray: "horizontal_ray",
   linetoolhorzray: "horizontal_ray",
   vertical_line: "vertical_line",
   vert_line: "vertical_line",
+  vertline: "vertical_line",
   linetoolvertline: "vertical_line",
   cross_line: "cross_line",
+  crossline: "cross_line",
+  linetoolcrossline: "cross_line",
   parallel_channel: "parallel_channel",
+  parallelchannel: "parallel_channel",
+  linetoolparallelchannel: "parallel_channel",
   flat_bottom: "flat_bottom",
+  flattopbottom: "flat_bottom",
+  linetoolflatbottom: "flat_bottom",
   disjoint_angle: "disjoint_angle",
+  disjointangle: "disjoint_angle",
+  linetooldisjointangle: "disjoint_angle",
+  regression_trend: "regression_trend",
+  regressiontrend: "regression_trend",
+  linetoolregressiontrend: "regression_trend",
   rectangle: "rectangle",
   linetoolrectangle: "rectangle",
   rotated_rectangle: "rotated_rectangle",
+  rotatedrectangle: "rotated_rectangle",
+  linetoolrotatedrectangle: "rotated_rectangle",
   ellipse: "ellipse",
+  linetoolellipse: "ellipse",
   circle: "circle",
+  linetoolcircle: "circle",
   triangle: "triangle",
+  linetooltriangle: "triangle",
   polyline: "polyline",
+  linetoolpolyline: "polyline",
   path: "path",
+  linetoolpath: "path",
+  arc: "arc",
+  linetoolarc: "arc",
   fib_retracement: "fib_retracement",
   fibretracement: "fib_retracement",
   linetoolfibretracement: "fib_retracement",
   fib_trend_ext: "fib_trend_ext",
   fib_extension: "fib_trend_ext",
+  fibtrendext: "fib_trend_ext",
+  linetoolfibtrendext: "fib_trend_ext",
   fib_channel: "fib_channel",
+  fibchannel: "fib_channel",
+  linetoolfibchannel: "fib_channel",
   fib_timezone: "fib_timezone",
+  fibtimezone: "fib_timezone",
+  linetoolfibtimezone: "fib_timezone",
   fib_speed_resist_fan: "fib_speed_resist_fan",
+  fibspeedresistfan: "fib_speed_resist_fan",
+  linetoolfibspeedresistfan: "fib_speed_resist_fan",
+  fib_speed_res_fan: "fib_speed_resist_fan",
   fib_circles: "fib_circles",
+  fibcircles: "fib_circles",
+  linetoolfibcircles: "fib_circles",
+  fib_spiral: "fib_spiral",
+  fibspiral: "fib_spiral",
+  pitchfan: "pitchfan",
+  linetoolpitchfan: "pitchfan",
+  pitchfork: "pitchfork",
+  linetoolpitchfork: "pitchfork",
+  schiffpitchfork: "schiff_pitchfork",
+  schiff_pitchfork: "schiff_pitchfork",
+  linetoolschiffpitchfork: "schiff_pitchfork",
   gannbox: "gannbox",
+  linetoolgannbox: "gannbox",
   gannbox_square: "gannbox_square",
+  gannboxsquare: "gannbox_square",
   gannbox_fixed: "gannbox_fixed",
+  gannboxfixed: "gannbox_fixed",
+  gannfan: "gann_fan",
+  gann_fan: "gann_fan",
+  linetoolgannfan: "gann_fan",
+  gannsquare: "gannbox_square",
   long_position: "long_position",
+  longposition: "long_position",
+  linetoollongposition: "long_position",
   short_position: "short_position",
+  shortposition: "short_position",
+  linetoolshortposition: "short_position",
+  forecast: "forecast",
+  linetoolforecast: "forecast",
   price_range: "price_range",
+  pricerange: "price_range",
+  linetoolpricerange: "price_range",
   date_range: "date_range",
+  daterange: "date_range",
+  linetooldaterange: "date_range",
   date_and_price_range: "date_and_price_range",
+  dateandpricerange: "date_and_price_range",
   brush: "brush",
+  linetoolbrush: "brush",
   highlighter: "highlighter",
+  linetoolhighlighter: "highlighter",
   text: "text",
+  linetooltext: "text",
   anchored_text: "anchored_text",
+  anchoredtext: "anchored_text",
   note: "note",
+  linetoolnote: "note",
   callout: "callout",
+  linetoolcallout: "callout",
   balloon: "balloon",
   price_label: "price_label",
+  pricelabel: "price_label",
   price_note: "price_note",
+  pricenote: "price_note",
   arrow_mark_up: "arrow_up",
+  arrowmarkup: "arrow_up",
   arrow_mark_down: "arrow_down",
+  arrowmarkdown: "arrow_down",
   arrow_up: "arrow_up",
   arrow_down: "arrow_down",
   flag: "flag",
+  linetoolflag: "flag",
   xabcd_pattern: "xabcd_pattern",
+  xabcdpattern: "xabcd_pattern",
+  linetoolxabcdpattern: "xabcd_pattern",
   abcd_pattern: "abcd_pattern",
+  abcdpattern: "abcd_pattern",
   head_and_shoulders: "head_and_shoulders",
+  headandshoulders: "head_and_shoulders",
   triangle_pattern: "triangle_pattern",
+  trianglepattern: "triangle_pattern",
   cypher_pattern: "cypher_pattern",
+  cypherpattern: "cypher_pattern",
+  elliott_impulse_wave: "elliott_impulse_wave",
+  elliottimpulsewave: "elliott_impulse_wave",
+  elliott_triangle_wave: "elliott_triangle_wave",
+  elliotttrianglewave: "elliott_triangle_wave",
+  elliott_triple_combo: "elliott_triple_combo",
+  elliotttriplecombo: "elliott_triple_combo",
+  elliott_correction: "elliott_correction",
+  elliottcorrection: "elliott_correction",
+  elliott_double_combo: "elliott_double_combo",
+  elliottdoublecombo: "elliott_double_combo",
+  cyclic_lines: "cyclic_lines",
+  cycliclines: "cyclic_lines",
+  time_cycles: "time_cycles",
+  timecycles: "time_cycles",
+  sine_line: "sine_line",
+  sineline: "sine_line",
 };
 
 export function normalizeShapeName(raw: string | null | undefined): string | null {
@@ -115,7 +217,9 @@ export function normalizeShapeName(raw: string | null | undefined): string | nul
   if (SHAPE_ALIASES[key]) return SHAPE_ALIASES[key]!;
   const stripped = key.replace(/^linetool/, "");
   if (SHAPE_ALIASES[stripped]) return SHAPE_ALIASES[stripped]!;
-  if (/^[a-z0-9_]+$/.test(key) && key.length > 2) return key;
+  // Keep underscore form for CL createMultipointShape when unknown but plausible.
+  if (/^[a-z][a-z0-9_]*$/.test(stripped) && stripped.length > 2) return stripped;
+  if (/^[a-z][a-z0-9_]*$/.test(key) && key.length > 2) return key;
   return null;
 }
 
@@ -144,13 +248,18 @@ function sanitizePoints(
   return out;
 }
 
+/** Drop nested / volatile props that break createMultipointShape on the peer pane. */
 function sanitizeOverrides(props: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(props)) {
     if (v == null) continue;
     if (typeof v === "object" && !Array.isArray(v)) continue;
     if (typeof v === "function") continue;
-    if (/^(symbol|interval|state|points)/i.test(k)) continue;
+    if (/^(symbol|interval|state|points|intervalsVisibilities|ownerSource|currencyId|unitId|symbolSource)/i.test(k)) {
+      continue;
+    }
+    // Skip huge numeric arrays (fib levels etc. often re-default correctly).
+    if (Array.isArray(v) && v.length > 40) continue;
     out[k] = v;
   }
   return out;
@@ -185,7 +294,15 @@ export function readShapeSnapshot(
       normalizeShapeName(info?.name) ??
       normalizeShapeName(typeof props.toolName === "string" ? props.toolName : null) ??
       normalizeShapeName(typeof props.name === "string" ? props.name : null) ??
-      (points.length >= 2 ? "trend_line" : "horizontal_line");
+      normalizeShapeName(typeof props.statName === "string" ? props.statName : null) ??
+      // Prefer ray/hline over trend_line when geometry suggests it.
+      (points.length === 1
+        ? "horizontal_line"
+        : points.length === 2 && Math.abs(points[0]!.price - points[1]!.price) < 1e-12
+          ? "horizontal_line"
+          : points.length === 2 && points[0]!.time === points[1]!.time
+            ? "vertical_line"
+            : "trend_line");
     const text = typeof props.text === "string" ? props.text : undefined;
     return {
       shape,
@@ -212,13 +329,14 @@ export function readAllShapeSnapshots(chart: IChartWidgetApi): Array<{ id: Entit
   return out;
 }
 
-export async function createShapeFromSnapshot(
+async function tryCreate(
   chart: IChartWidgetApi,
   snap: ShapeSnapshot,
+  withOverrides: boolean,
 ): Promise<EntityId | null> {
-  const overrides = snap.overrides as never;
+  const overrides = withOverrides ? (snap.overrides as never) : ({} as never);
   const useSingle =
-    SINGLE_POINT_SHAPES.has(snap.shape) || (snap.points.length === 1 && snap.shape === "horizontal_line");
+    SINGLE_POINT_SHAPES.has(snap.shape) || (snap.points.length === 1 && !snap.shape.includes("fib"));
 
   if (useSingle) {
     const p = snap.points[0]!;
@@ -234,7 +352,7 @@ export async function createShapeFromSnapshot(
       );
       if (id) return id;
     } catch {
-      /* fall through */
+      /* fall through to multipoint */
     }
   }
 
@@ -247,20 +365,38 @@ export async function createShapeFromSnapshot(
     });
     return id ?? null;
   } catch {
-    try {
-      const p = snap.points[0]!;
-      const id = await chart.createShape(
-        { time: p.time, price: p.price },
-        {
-          shape: "horizontal_line",
-          disableUndo: true,
-          overrides,
-        },
-      );
+    return null;
+  }
+}
+
+export async function createShapeFromSnapshot(
+  chart: IChartWidgetApi,
+  snap: ShapeSnapshot,
+): Promise<EntityId | null> {
+  // First attempt with style overrides; retry bare if CL rejects them.
+  const withStyle = await tryCreate(chart, snap, true);
+  if (withStyle) return withStyle;
+  if (Object.keys(snap.overrides).length > 0) {
+    const bare = await tryCreate(chart, snap, false);
+    if (bare) return bare;
+  }
+  // Last resort: preserve geometry as a trend/horizontal so the peer pane still shows something.
+  try {
+    if (snap.points.length >= 2) {
+      const id = await chart.createMultipointShape([...snap.points], {
+        shape: "trend_line",
+        disableUndo: true,
+      });
       return id ?? null;
-    } catch {
-      return null;
     }
+    const p = snap.points[0]!;
+    const id = await chart.createShape(
+      { time: p.time, price: p.price },
+      { shape: "horizontal_line", disableUndo: true },
+    );
+    return id ?? null;
+  } catch {
+    return null;
   }
 }
 
@@ -269,7 +405,11 @@ export function applyShapeSnapshot(chart: IChartWidgetApi, entityId: EntityId, s
     const shapeApi = chart.getShapeById(entityId);
     shapeApi.setPoints([...snap.points]);
     if (Object.keys(snap.overrides).length > 0) {
-      shapeApi.setProperties(snap.overrides);
+      try {
+        shapeApi.setProperties(snap.overrides);
+      } catch {
+        /* style mismatch — points still updated */
+      }
     }
   } catch {
     /* gone */
@@ -281,8 +421,8 @@ export async function readShapeSnapshotRetry(
   chart: IChartWidgetApi,
   entityId: EntityId,
   preferredShape?: string | null,
-  attempts = 8,
-  delayMs = 60,
+  attempts = 12,
+  delayMs = 50,
 ): Promise<ShapeSnapshot | null> {
   for (let i = 0; i < attempts; i += 1) {
     const snap = readShapeSnapshot(chart, entityId, preferredShape);

@@ -70,7 +70,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
         const isActive = visible && grid.count > 1 && activePane === index;
         return (
           <Box
-            key={`forge-pane-${index}`}
+            key={`forge-pane-${index}-nav1`}
             onPointerDownCapture={() => {
               if (visible) layoutSyncBus.focusPane(index);
             }}
@@ -90,7 +90,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
             {isActive ? (
               <Box
                 aria-hidden
-                title="Active chart"
+                title="Active chart — top toolbar applies here"
                 sx={{
                   position: "absolute",
                   left: 10,
@@ -106,6 +106,30 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
                   <path d="M12 2.5l2.9 6.1 6.7.9-4.9 4.6 1.3 6.6L12 17.8 5.9 20.7l1.3-6.6L2.4 9.5l6.7-.9L12 2.5z" />
                 </svg>
+              </Box>
+            ) : null}
+            {isActive && index > 0 ? (
+              <Box
+                sx={{
+                  position: "absolute",
+                  top: 8,
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  zIndex: 6,
+                  pointerEvents: "none",
+                  bgcolor: "rgba(41, 98, 255, 0.92)",
+                  color: "#fff",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  px: 1.25,
+                  py: 0.35,
+                  borderRadius: "4px",
+                  letterSpacing: 0.2,
+                  boxShadow: "0 1px 4px rgba(0,0,0,0.35)",
+                  fontFamily: '"Trebuchet MS", "Segoe UI", sans-serif',
+                }}
+              >
+                Selected — use top bar for symbol / timeframe
               </Box>
             ) : null}
             <TradingViewChart

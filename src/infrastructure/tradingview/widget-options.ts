@@ -25,8 +25,9 @@ export interface WidgetOptionsInput {
   /** Narrow viewports get adaptive header labels and mobile chart features. */
   readonly isMobile?: boolean;
   /**
-   * Secondary panes in a Forge multi-chart grid: compact header, no left
-   * drawing toolbar (one shared toolbar on the primary pane).
+   * Secondary panes: compact header, no left drawing toolbar (one shared
+   * toolbar on the primary pane). Header chrome is disabled entirely so
+   * multi-layout shows a single top nav.
    */
   readonly secondaryPane?: boolean;
 }
@@ -78,14 +79,44 @@ const DISABLED_FEATURES: ChartingLibraryFeatureset[] = [
 
 const SECONDARY_DISABLED: ChartingLibraryFeatureset[] = [
   ...DISABLED_FEATURES,
+  // Multi-layout: one shared top nav on the primary pane only.
+  "header_widget",
+  "header_symbol_search",
+  "header_resolutions",
+  "header_chart_type",
+  "header_indicators",
+  "header_compare",
+  "header_undo_redo",
+  "header_quick_search",
+  "header_screenshot",
+  "header_settings",
+  "header_fullscreen_button",
+  "header_saveload",
+  "header_in_fullscreen_mode",
+  "timeframes_toolbar",
   // One drawing toolbar on pane 0 only — tool is forwarded on focus.
   "left_toolbar",
-  "header_saveload",
-  "header_fullscreen_button",
-  "header_screenshot",
-  "header_compare",
   "side_toolbar_in_fullscreen_mode",
 ];
+
+/** Header features kept only on the primary pane (shared nav for the layout). */
+const SECONDARY_ENABLED_EXCLUDE = new Set<ChartingLibraryFeatureset>([
+  "header_widget",
+  "header_symbol_search",
+  "header_resolutions",
+  "header_chart_type",
+  "header_indicators",
+  "header_compare",
+  "header_undo_redo",
+  "header_quick_search",
+  "header_screenshot",
+  "header_settings",
+  "header_fullscreen_button",
+  "header_saveload",
+  "header_in_fullscreen_mode",
+  "left_toolbar",
+  "side_toolbar_in_fullscreen_mode",
+]);
 
 /** Match TradingView's common top-bar favorites: 1m 5m 15m 30m 1h 4h D W M 3M */
 const FAVORITE_INTERVALS = ["1", "5", "15", "30", "60", "240", "1D", "1W", "1M", "3M"] as ResolutionString[];
@@ -209,7 +240,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
     custom_font_family: FONT_FAMILY,
     // Desktop primary: full labels; mobile / secondary panes: compact.
     header_widget_buttons_mode: mobile || secondary ? "adaptive" : "fullsize",
-    custom_css_url: "/charts/tv-header.css",
+    custom_css_url: secondary ? "/charts/tv-header-secondary.css" : "/charts/tv-header.css",
     // Match TradingView.com flyout wording (Forecasting / Measurers / Sector…).
     custom_translate_function: (originalText) => {
       const map: Record<string, string> = {
@@ -228,7 +259,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
       return map[originalText] ?? null;
     },
     enabled_features: secondary
-      ? ENABLED_FEATURES.filter((f) => f !== "left_toolbar")
+      ? ENABLED_FEATURES.filter((f) => !SECONDARY_ENABLED_EXCLUDE.has(f))
       : ENABLED_FEATURES,
     disabled_features: secondary ? SECONDARY_DISABLED : DISABLED_FEATURES,
     favorites: {

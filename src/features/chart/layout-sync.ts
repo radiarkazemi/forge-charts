@@ -61,6 +61,9 @@ class LayoutSyncBus {
   private readonly activeListeners = new Set<(paneIndex: number) => void>();
   private drawTargetPane = 0;
   private seedTimer = 0;
+  /** Last intentionally-applied interval per pane (for header routing). */
+  private readonly paneIntervals = new Map<number, Interval>();
+  private readonly paneSymbols = new Map<number, string>();
 
   setFlags(flags: LayoutSyncFlags): void {
     // Always keep drawings ON unless the user explicitly turns them off.
@@ -75,6 +78,10 @@ class LayoutSyncBus {
     return this.flags;
   }
 
+  getActiveCount(): number {
+    return this.activeCount;
+  }
+
   setActiveCount(count: number): void {
     const prev = this.activeCount;
     this.activeCount = Math.max(1, count);
@@ -82,6 +89,8 @@ class LayoutSyncBus {
       this.focusPane(0);
     }
     if (this.activeCount > prev) {
+      // New panes join the layout — clone primary symbol + drawings.
+      this.clonePrimarySymbolToNewPanes(prev);
       this.scheduleSeedFromPrimary();
     }
   }
@@ -129,9 +138,25 @@ class LayoutSyncBus {
 
   /** Call when a pane's widget becomes ready so we can seed drawings. */
   notifyPaneReady(paneIndex: number): void {
-    void paneIndex;
+    const entry = this.panes.get(paneIndex);
+    if (entry) {
+      const st = entry.controller.state.get();
+      this.paneIntervals.set(paneIndex, st.interval);
+      this.paneSymbols.set(paneIndex, st.symbol);
+    }
     if (this.activeCount > 1 && this.flags.drawings) {
       this.scheduleSeedFromPrimary();
+    }
+    // Secondary panes that just became ready: match primary symbol immediately.
+    if (paneIndex > 0 && this.activeCount > 1 && this.flags.symbol) {
+      const primary = this.panes.get(0);
+      const ticker = primary?.controller.state.get().symbol;
+      if (ticker && entry) {
+        const bare = this.normalizeSymbol(entry.controller.state.get().symbol);
+        if (bare !== this.normalizeSymbol(ticker)) {
+          this.withLock(() => entry.controller.setSymbol(ticker));
+        }
+      }
     }
   }
 
@@ -190,22 +215,79 @@ class LayoutSyncBus {
     }
   }
 
+  /**
+   * Primary header interval click → apply to the *selected* pane.
+   * When a secondary pane is active, restore the primary chart afterward so
+   * only the selected pane’s timeframe changes.
+   */
+  handlePrimaryIntervalChanged(interval: Interval): void {
+    if (this.locked) return;
+    const active = this.activePane;
+    if (this.activeCount < 2 || active === 0) {
+      this.paneIntervals.set(0, interval);
+      this.notifyInterval(0, interval);
+      return;
+    }
+    const primaryPrev = this.paneIntervals.get(0);
+    this.withLock(() => {
+      this.panes.get(active)?.controller.setInterval(interval);
+      this.paneIntervals.set(active, interval);
+      if (primaryPrev && primaryPrev !== interval) {
+        this.panes.get(0)?.controller.setInterval(primaryPrev);
+      }
+    });
+  }
+
+  /**
+   * Primary header symbol change → apply to the *selected* pane.
+   * Same restore pattern as interval routing.
+   */
+  handlePrimarySymbolChanged(ticker: string): void {
+    if (this.locked) return;
+    const active = this.activePane;
+    if (this.activeCount < 2 || active === 0) {
+      this.paneSymbols.set(0, ticker);
+      this.notifySymbol(0, ticker);
+      return;
+    }
+    const primaryPrev = this.paneSymbols.get(0);
+    this.withLock(() => {
+      this.panes.get(active)?.controller.setSymbol(ticker);
+      this.paneSymbols.set(active, ticker);
+      if (primaryPrev && this.normalizeSymbol(primaryPrev) !== this.normalizeSymbol(ticker)) {
+        this.panes.get(0)?.controller.setSymbol(primaryPrev);
+      }
+    });
+  }
+
+  recordPaneInterval(paneIndex: number, interval: Interval): void {
+    this.paneIntervals.set(paneIndex, interval);
+  }
+
+  recordPaneSymbol(paneIndex: number, ticker: string): void {
+    this.paneSymbols.set(paneIndex, ticker);
+  }
+
   notifySymbol(sourceIndex: number, ticker: string): void {
+    this.paneSymbols.set(sourceIndex, ticker);
     if (!this.flags.symbol || this.locked) return;
     this.withLock(() => {
       for (const { index, controller } of this.panes.values()) {
         if (index === sourceIndex || index >= this.activeCount) continue;
         controller.setSymbol(ticker);
+        this.paneSymbols.set(index, ticker);
       }
     });
   }
 
   notifyInterval(sourceIndex: number, interval: Interval): void {
+    this.paneIntervals.set(sourceIndex, interval);
     if (!this.flags.interval || this.locked) return;
     this.withLock(() => {
       for (const { index, controller } of this.panes.values()) {
         if (index === sourceIndex || index >= this.activeCount) continue;
         controller.setInterval(interval);
+        this.paneIntervals.set(index, interval);
       }
     });
   }
@@ -225,6 +307,20 @@ class LayoutSyncBus {
     if (!this.flags.crosshair || this.locked) return;
     void sourceIndex;
     void time;
+  }
+
+  private clonePrimarySymbolToNewPanes(fromIndex: number): void {
+    if (!this.flags.symbol) return;
+    const primary = this.panes.get(0);
+    const ticker = primary?.controller.state.get().symbol;
+    if (!ticker) return;
+    this.withLock(() => {
+      for (const { index, controller } of this.panes.values()) {
+        if (index <= fromIndex || index >= this.activeCount) continue;
+        controller.setSymbol(ticker);
+        this.paneSymbols.set(index, ticker);
+      }
+    });
   }
 
   private scheduleSeedFromPrimary(): void {
