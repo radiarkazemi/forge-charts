@@ -533,6 +533,16 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
   });
   const maxN = Math.max(1, Math.floor(inputs.maxDealingRanges));
   const kept = filtered.slice(-maxN);
+  // Stretch the newest range to the last loaded bar so it stays visible on the live edge.
+  if (kept.length > 0 && bars.length > 0) {
+    const lastT = bars[bars.length - 1]!.time;
+    const newest = kept[kept.length - 1]!;
+    for (const cmd of newest) {
+      if (cmd.t2 != null && cmd.t2 < lastT) {
+        (cmd as { t2: number }).t2 = lastT;
+      }
+    }
+  }
   return [...out, ...kept.flat()];
 }
 

@@ -120,11 +120,11 @@ export function createDealingRangesIndicator(_PineJS: unknown): CustomIndicator 
         },
       ],
     } as never,
-    constructor: function (this: { main: (ctx: unknown, input: (i: number) => unknown) => number[] }) {
-      this.main = function (_ctx, _input) {
+    constructor: function (this: { main?: (ctx: unknown, input: (i: number) => unknown) => unknown }) {
+      this.main = function () {
         // Invisible stub — real drawings come from useDealingRangesStudy.
         return [NaN];
       };
-    },
+    } as never,
   };
 }
