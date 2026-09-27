@@ -1,11 +1,12 @@
 import Box from "@mui/material/Box";
 import MenuItem from "@mui/material/MenuItem";
 import Select from "@mui/material/Select";
+import type { CSSProperties } from "react";
 import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
 
 /**
- * TradingView-scale quick Buy/Sell overlay (compact — matches broker widget).
+ * TradingView broker Buy/Sell overlay — exact compact scale.
  */
 export function QuickTradeOverlay() {
   const { demoTrading, chart, quotes } = useServices();
@@ -27,58 +28,58 @@ export function QuickTradeOverlay() {
     if (!result.ok) window.alert(result.message);
   };
 
-  const btn = {
+  const btn: CSSProperties = {
     border: 0,
     cursor: "pointer",
-    width: 84,
-    height: 40,
-    borderRadius: "4px",
+    width: 78,
+    height: 36,
+    borderRadius: 2,
     color: "#fff",
-    textAlign: "center" as const,
-    fontFamily: "inherit",
-    padding: "3px 4px",
-    lineHeight: 1.1,
+    textAlign: "center",
+    fontFamily: "Trebuchet MS, Segoe UI, sans-serif",
+    padding: "2px 4px",
+    lineHeight: 1.05,
   };
 
   return (
     <Box
       sx={{
         position: "absolute",
-        top: 40,
-        left: 48,
+        top: 36,
+        left: 46,
         zIndex: 6,
         display: "flex",
         flexDirection: "column",
-        gap: "3px",
+        gap: "2px",
         pointerEvents: "auto",
       }}
     >
-      <Box sx={{ display: "flex", alignItems: "stretch", gap: "2px" }}>
+      <Box sx={{ display: "flex", alignItems: "stretch", gap: "1px" }}>
         <button type="button" onClick={() => trade("sell")} style={{ ...btn, background: "#f23645" }}>
-          <div style={{ fontWeight: 700, fontSize: 13 }}>{q?.bid.toFixed(2) ?? "—"}</div>
-          <div style={{ fontWeight: 600, fontSize: 9, letterSpacing: 0.2 }}>SELL</div>
+          <div style={{ fontWeight: 700, fontSize: 12 }}>{q?.bid.toFixed(2) ?? "—"}</div>
+          <div style={{ fontWeight: 600, fontSize: 9, opacity: 0.95 }}>SELL</div>
         </button>
         <Box
           sx={{
             alignSelf: "center",
-            px: "4px",
-            py: "2px",
+            minWidth: 24,
+            px: "3px",
+            py: "1px",
             bgcolor: "#131722",
-            color: "#d1d4dc",
-            borderRadius: "2px",
+            color: "#b2b5be",
             fontSize: 10,
             fontWeight: 700,
             border: "1px solid #2a2e39",
             lineHeight: 1.2,
-            minWidth: 26,
             textAlign: "center",
+            fontFamily: "Trebuchet MS, Segoe UI, sans-serif",
           }}
         >
           {(q?.spreadPoints ?? snap.instrument.spreadPoints).toFixed(1)}
         </Box>
         <button type="button" onClick={() => trade("buy")} style={{ ...btn, background: "#2962ff" }}>
-          <div style={{ fontWeight: 700, fontSize: 13 }}>{q?.ask.toFixed(2) ?? "—"}</div>
-          <div style={{ fontWeight: 600, fontSize: 9, letterSpacing: 0.2 }}>BUY</div>
+          <div style={{ fontWeight: 700, fontSize: 12 }}>{q?.ask.toFixed(2) ?? "—"}</div>
+          <div style={{ fontWeight: 600, fontSize: 9, opacity: 0.95 }}>BUY</div>
         </button>
       </Box>
       <Select
@@ -87,19 +88,20 @@ export function QuickTradeOverlay() {
         onChange={(e) => demoTrading.setQty(Number(e.target.value))}
         sx={{
           alignSelf: "flex-start",
-          minWidth: 52,
-          height: 20,
+          minWidth: 48,
+          height: 18,
           bgcolor: "#fff",
           color: "#131722",
           fontSize: 11,
           fontWeight: 600,
           borderRadius: "2px",
           ".MuiOutlinedInput-notchedOutline": { border: 0 },
-          ".MuiSelect-select": { py: "1px", px: "5px" },
+          ".MuiSelect-select": { py: 0, px: "4px", pr: "18px !important" },
+          ".MuiSelect-icon": { right: 0, fontSize: 16 },
         }}
       >
         {[0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10].map((n) => (
-          <MenuItem key={n} value={n} sx={{ fontSize: 11 }}>
+          <MenuItem key={n} value={n} sx={{ fontSize: 11, minHeight: 28 }}>
             {n}
           </MenuItem>
         ))}

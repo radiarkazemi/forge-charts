@@ -1,5 +1,5 @@
 import { createStore, type Store } from "@/application";
-import type { Bar } from "@/domain";
+import { formingBarFromOhlc, type Bar } from "@/domain";
 import type { TradingViewDatafeed } from "@/infrastructure/tradingview/datafeed";
 import type { IChartingLibraryWidget } from "@/infrastructure/tradingview";
 import type { DemoTradingService } from "./demo-trading-service";
@@ -13,8 +13,10 @@ export interface DemoSpaceControllerState {
   readonly bufferLength: number;
   readonly symbol: string;
   readonly resolution: string;
-  /** Milliseconds between closed bars (matches chart timeframe). */
+  /** Milliseconds for one full candle (matches chart timeframe). */
   readonly stepMs: number;
+  /** 0–1 progress through the forming candle. */
+  readonly formProgress: number;
 }
 
 const INITIAL: DemoSpaceControllerState = {
@@ -27,6 +29,7 @@ const INITIAL: DemoSpaceControllerState = {
   symbol: "",
   resolution: "5",
   stepMs: 5 * 60_000,
+  formProgress: 0,
 };
 
 /** Chart resolution → real duration of one candle in ms (demo space = live pace). */
@@ -47,10 +50,19 @@ function resolutionToSec(res: string): number {
   return Math.max(1, Math.floor(resolutionToStepMs(res) / 1000));
 }
 
+/** Intra-bar tick interval — denser on short TFs so 1m candles visibly move. */
+function tickIntervalMs(stepMs: number): number {
+  if (stepMs <= 60_000) return 250;
+  if (stepMs <= 5 * 60_000) return 500;
+  if (stepMs <= 15 * 60_000) return 1_000;
+  return 2_000;
+}
+
 /**
- * Historical “demo trading space”: cut the chart at a chosen date, keep all
- * prior candles visible, then advance one closed bar per real timeframe
- * duration (5m → every 5 minutes). No pause — deactivate to exit.
+ * Historical “demo trading space”: cut the chart at a chosen date, keep prior
+ * candles visible, then form each next bar live from its OHLC path
+ * (O→L→H→C / O→H→L→C) over the real timeframe duration. Countdown advances
+ * with a synthetic replay clock. No pause — deactivate to exit.
  */
 export class DemoSpaceController {
   readonly state: Store<DemoSpaceControllerState> = createStore(INITIAL);
@@ -59,7 +71,9 @@ export class DemoSpaceController {
   private datafeed: TradingViewDatafeed | null = null;
   private demo: DemoTradingService | null = null;
   private buffer: Bar[] = [];
-  private timer = 0;
+  private tickTimer = 0;
+  private formStartedAtMs = 0;
+  private formingTarget: Bar | null = null;
 
   attach(
     widget: IChartingLibraryWidget,
@@ -88,7 +102,7 @@ export class DemoSpaceController {
     }
 
     this.stopTimer();
-    this.patch({ loading: true, error: null, active: true, startTimeSec });
+    this.patch({ loading: true, error: null, active: true, startTimeSec, formProgress: 0 });
 
     try {
       datafeed.endReplay();
@@ -110,7 +124,6 @@ export class DemoSpaceController {
     const barSec = resolutionToSec(resolution);
 
     datafeed.beginReplay();
-    // Prefetch deep history so bars BEFORE the start date are available.
     let buffer = await datafeed.fetchReplayBuffer(bare, resolution, 12_000);
     if (buffer.length === 0) {
       try {
@@ -137,42 +150,51 @@ export class DemoSpaceController {
 
     let index = nearestBarIndex(buffer, startTimeSec);
     if (index < 0) index = 0;
+    // Need at least one bar ahead to form.
     if (index >= buffer.length - 2) index = Math.max(0, buffer.length - 50);
 
-    // Need prior history on screen — if start is near buffer head, still OK.
     this.buffer = [...buffer];
-    const bar = buffer[index]!;
+    const closed = buffer[index]!;
     datafeed.setReplayBuffer(buffer);
-    datafeed.setReplayCutoff(bar.time);
+    // History only through the last *closed* bar; forming bar comes via ticks.
+    datafeed.setReplayCutoff(closed.time);
+    datafeed.setReplayClock(closed.time);
 
     this.patch({
       active: true,
       loading: false,
       error: null,
-      startTimeSec: bar.time,
+      startTimeSec: closed.time,
       cursorIndex: index,
       bufferLength: buffer.length,
       symbol: bare,
       resolution,
       stepMs,
+      formProgress: 0,
     });
 
-    demo.activateSpace(bare, bar.time, bar.close);
+    demo.activateSpace(bare, closed.time, closed.close);
 
-    // Frame historical window, reload, then re-frame after series settles.
-    // getServerTime returns cutoff during replay so CL won't pad empty future.
-    await this.fitVisibleHistory(bar.time, barSec, index);
+    await this.fitVisibleHistory(closed.time, barSec, index);
     this.reloadSeries();
     await sleep(200);
-    await this.fitVisibleHistory(bar.time, barSec, index);
-    await sleep(600);
-    await this.fitVisibleHistory(bar.time, barSec, index);
+    await this.fitVisibleHistory(closed.time, barSec, index);
+    await sleep(500);
+    await this.fitVisibleHistory(closed.time, barSec, index);
 
-    this.startTimer(stepMs);
+    // Force countdown visible on the price scale.
+    try {
+      widget.applyOverrides({ "mainSeriesProperties.showCountdown": true });
+    } catch {
+      /* ignore */
+    }
+
+    this.beginForming(index + 1, stepMs);
   }
 
   async deactivate(): Promise<void> {
     this.stopTimer();
+    this.formingTarget = null;
     const datafeed = this.datafeed;
     const widget = this.widget;
     this.demo?.deactivateSpace();
@@ -195,12 +217,91 @@ export class DemoSpaceController {
     this.state.set(INITIAL);
   }
 
+  private beginForming(nextIndex: number, stepMs: number): void {
+    const target = this.buffer[nextIndex];
+    const datafeed = this.datafeed;
+    if (!target || !datafeed) {
+      this.stopTimer();
+      this.patch({ error: "End of historical data — deactivate to return to live chart" });
+      return;
+    }
+    this.formingTarget = target;
+    this.formStartedAtMs = Date.now();
+    this.patch({ formProgress: 0 });
+
+    // Seed forming candle at open so countdown attaches to this period.
+    const seed = formingBarFromOhlc(target, 0);
+    datafeed.setReplayClock(target.time);
+    datafeed.pushReplayBar(seed);
+    this.demo?.updateSpaceCursor(target.time, seed.close);
+
+    this.stopTimer();
+    const interval = tickIntervalMs(stepMs);
+    this.tickTimer = window.setInterval(() => {
+      this.onFormTick(stepMs);
+    }, interval);
+  }
+
+  private onFormTick(stepMs: number): void {
+    const { active, cursorIndex, bufferLength, resolution } = this.state.get();
+    if (!active) return;
+    const target = this.formingTarget;
+    const datafeed = this.datafeed;
+    if (!target || !datafeed) return;
+
+    const elapsed = Date.now() - this.formStartedAtMs;
+    const progress = Math.min(1, elapsed / stepMs);
+    const barSec = resolutionToSec(resolution);
+
+    // Advance replay clock within [open, open+barSec) for TV countdown.
+    const clockSec = target.time + Math.min(barSec - 1, Math.floor(progress * barSec));
+    datafeed.setReplayClock(clockSec);
+
+    if (progress >= 1) {
+      // Close the candle fully, then start the next.
+      datafeed.setReplayCutoff(target.time);
+      datafeed.setReplayClock(target.time + barSec);
+      datafeed.pushReplayBar({ ...target });
+      this.demo?.updateSpaceCursor(target.time, target.close);
+      const nextClosed = cursorIndex + 1;
+      this.patch({ cursorIndex: nextClosed, formProgress: 1 });
+      void this.scrollFollow(target.time, barSec);
+
+      if (nextClosed >= bufferLength - 1) {
+        this.stopTimer();
+        this.formingTarget = null;
+        this.patch({ error: "End of historical data — deactivate to return to live chart" });
+        return;
+      }
+      this.beginForming(nextClosed + 1, stepMs);
+      return;
+    }
+
+    const forming = formingBarFromOhlc(target, progress);
+    datafeed.pushReplayBar(forming);
+    this.demo?.updateSpaceCursor(target.time, forming.close);
+    this.patch({ formProgress: progress });
+  }
+
+  private async scrollFollow(barTime: number, barSec: number): Promise<void> {
+    try {
+      const chart = this.widget?.activeChart();
+      if (!chart) return;
+      const range = chart.getVisibleRange();
+      if (range && Number.isFinite(range.from) && Number.isFinite(range.to)) {
+        const span = range.to - range.from;
+        await chart.setVisibleRange({ from: barTime - span + barSec * 2, to: barTime + barSec * 2 });
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   private async fitVisibleHistory(endTimeSec: number, barSec: number, cursorIndex: number): Promise<void> {
     const widget = this.widget;
     if (!widget) return;
     try {
       const chart = widget.activeChart();
-      // Prefer real buffer timestamps so weekend gaps don't invent empty range.
       const fromBar = this.buffer[Math.max(0, cursorIndex - 100)];
       const from = fromBar ? Number(fromBar.time) : endTimeSec - 100 * barSec;
       const to = endTimeSec + barSec * 2;
@@ -210,51 +311,10 @@ export class DemoSpaceController {
     }
   }
 
-  private startTimer(stepMs: number): void {
-    this.stopTimer();
-    this.timer = window.setInterval(() => {
-      void this.advanceOne();
-    }, stepMs);
-  }
-
   private stopTimer(): void {
-    if (this.timer) {
-      window.clearInterval(this.timer);
-      this.timer = 0;
-    }
-  }
-
-  private async advanceOne(): Promise<void> {
-    const { cursorIndex, bufferLength, active, resolution } = this.state.get();
-    if (!active) return;
-    if (cursorIndex < 0 || cursorIndex >= bufferLength - 1) {
-      this.stopTimer();
-      this.patch({ error: "End of historical data — deactivate to return to live chart" });
-      return;
-    }
-    const next = cursorIndex + 1;
-    const bar = this.buffer[next];
-    const datafeed = this.datafeed;
-    if (!bar || !datafeed) return;
-
-    datafeed.setReplayCutoff(bar.time);
-    datafeed.pushReplayBar(bar);
-    this.patch({ cursorIndex: next });
-    this.demo?.updateSpaceCursor(bar.time, bar.close);
-
-    // Keep the latest bar near the right edge as time advances.
-    try {
-      const chart = this.widget?.activeChart();
-      if (chart) {
-        const barSec = resolutionToSec(resolution);
-        const range = chart.getVisibleRange();
-        if (range && Number.isFinite(range.from) && Number.isFinite(range.to)) {
-          const span = range.to - range.from;
-          await chart.setVisibleRange({ from: bar.time - span + barSec * 2, to: bar.time + barSec * 2 });
-        }
-      }
-    } catch {
-      /* ignore */
+    if (this.tickTimer) {
+      window.clearInterval(this.tickTimer);
+      this.tickTimer = 0;
     }
   }
 

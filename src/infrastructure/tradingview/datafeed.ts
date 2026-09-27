@@ -101,6 +101,8 @@ export class TradingViewDatafeed implements IBasicDataFeed {
 
   /** When set, history past this unix-second is hidden and live ticks are muted. */
   private replayCutoffSec: number | null = null;
+  /** Advancing clock for candle countdown during demo/replay (unix sec). */
+  private replayClockSec: number | null = null;
   private replayActive = false;
   private replayOnTick: SubscribeBarsCallback | null = null;
   /** Prefetched bars for replay/demo — served from memory so past cutoffs don't re-fetch live-only OHLC. */
@@ -115,12 +117,24 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   beginReplay(): void {
     this.replayActive = true;
     this.replayCutoffSec = null;
+    this.replayClockSec = null;
     this.replayBuffer = null;
   }
 
-  /** Hide bars with time (unix sec) strictly after cutoff. Also drives getServerTime. */
+  /** Hide bars with time (unix sec) strictly after cutoff. Also drives getServerTime fallback. */
   setReplayCutoff(cutoffSec: number | null): void {
     this.replayCutoffSec = cutoffSec;
+    if (cutoffSec != null && this.replayClockSec == null) {
+      this.replayClockSec = cutoffSec;
+    }
+  }
+
+  /**
+   * Wall-clock for countdown during demo/replay. Should advance within the
+   * forming bar’s period (open … open+barSec) so TV countdown ticks down.
+   */
+  setReplayClock(clockSec: number | null): void {
+    this.replayClockSec = clockSec;
   }
 
   /** Attach the prefetched stepping buffer so getBars can serve history at any past cutoff. */
@@ -149,6 +163,7 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   endReplay(): void {
     this.replayActive = false;
     this.replayCutoffSec = null;
+    this.replayClockSec = null;
     this.replayBuffer = null;
   }
 
@@ -329,12 +344,13 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   }
 
   getServerTime(callback: ServerTimeCallback): void {
-    // During demo space / bar replay, report the cutoff as “now” so the
-    // library does not pad a huge empty future from last bar → wall clock.
-    const cutoff = this.replayCutoffSec;
-    if (this.replayActive && cutoff != null && Number.isFinite(cutoff)) {
-      callback(Math.floor(cutoff));
-      return;
+    // Demo/replay: use the advancing replay clock so candle countdown works.
+    if (this.replayActive) {
+      const clock = this.replayClockSec ?? this.replayCutoffSec;
+      if (clock != null && Number.isFinite(clock)) {
+        callback(Math.floor(clock));
+        return;
+      }
     }
     callback(Math.floor(Date.now() / 1000));
   }
@@ -387,8 +403,9 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       supported_resolutions: SUPPORTED_RESOLUTIONS,
       volume_precision: symbol.type === "crypto" ? 3 : 0,
       visible_plots_set: "ohlcv",
-      // endofday freezes countdown + market-status like TradingView when closed.
-      data_status: sessionOpen ? "streaming" : "endofday",
+      // Demo/replay must stay "streaming" so candle countdown runs; otherwise
+      // endofday freezes the timer when the real FX session is closed.
+      data_status: this.replayActive || sessionOpen ? "streaming" : "endofday",
     };
   }
 }

@@ -1,4 +1,4 @@
-import { intervalSeconds, parseInterval, isMarketSessionOpen, type Bar, type BarRange, type Interval, type Quote, type SymbolInfo } from "@/domain";
+import { intervalSeconds, parseInterval, isMarketSessionOpen, priceAlongOhlcPath, type Bar, type BarRange, type Interval, type Quote, type SymbolInfo } from "@/domain";
 import type { MarketDataProvider, Unsubscribe } from "@/application";
 import { buildUrl, fetchJson } from "../http/fetch-json";
 import { startPolling } from "./polling";
@@ -745,6 +745,43 @@ export class GermanyMarketProvider implements MarketDataProvider {
         }
       }, Math.min(250, Math.max(50, (step * 1000) / 4)));
       disposers.push(() => clearInterval(clock));
+    }
+
+    // Minute charts: when ticks are quiet, animate the forming bar along the
+    // last closed candle’s OHLC path so 1m (etc.) visibly moves.
+    if (parseInterval(interval).unit === "minutes" && typeof window !== "undefined") {
+      let pathTemplate: Bar | null = null;
+      let pathBucket = -1;
+      let pathStartedMs = 0;
+      const synth = window.setInterval(() => {
+        if (lastTickMs > 0 && Date.now() - lastTickMs < 1_200) return;
+        if (!current || !Number.isFinite(current.close)) return;
+        const wall = alignTime(Math.floor(Date.now() / 1000), step);
+        if (pathBucket !== wall) {
+          pathTemplate = { ...current };
+          pathBucket = wall;
+          pathStartedMs = Date.now();
+          if (current.time < wall) {
+            emit({
+              time: wall,
+              open: current.close,
+              high: current.close,
+              low: current.close,
+              close: current.close,
+              volume: 0,
+            });
+          }
+        }
+        if (!pathTemplate) return;
+        const progress = Math.min(0.92, (Date.now() - pathStartedMs) / (step * 1000));
+        const span = Math.max(pathTemplate.high - pathTemplate.low, Math.abs(pathTemplate.close) * 1e-5);
+        const mid = (pathTemplate.open + pathTemplate.close) / 2;
+        const raw = priceAlongOhlcPath(pathTemplate, progress);
+        const base = current.time === wall ? current.open : current.close;
+        const px = base + ((raw - mid) / span) * span * 0.45;
+        emit(applyTick(current, px, Math.floor(Date.now() / 1000), step, 0));
+      }, step <= 60 ? 250 : 500);
+      disposers.push(() => clearInterval(synth));
     }
 
     // Binance tick stream (crypto + PAXG proxy for gold/FXPRO/FOREXCOM XAU).

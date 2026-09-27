@@ -205,8 +205,9 @@ export function DemoTradingDock() {
       {snap.space.active ? (
         <Typography sx={{ px: 1, py: 0.3, color: "#f9a825", bgcolor: "#1e222d", fontSize: 11 }}>
           Demo space from {snap.space.startTimeSec ? new Date(snap.space.startTimeSec * 1000).toUTCString() : "—"} —{" "}
-          {spaceCtrl.resolution} candles close in real time ({formatStep(spaceCtrl.stepMs)} / bar, no pause).
-          Deactivate to return to live.
+          {spaceCtrl.resolution} candles form live from OHLC ({formatStep(spaceCtrl.stepMs)} / bar
+          {spaceCtrl.formProgress > 0 ? `, ${Math.round(spaceCtrl.formProgress * 100)}%` : ""}). Deactivate to return
+          to live.
         </Typography>
       ) : null}
 
