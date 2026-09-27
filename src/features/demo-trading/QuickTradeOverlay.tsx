@@ -1,12 +1,11 @@
 import Box from "@mui/material/Box";
 import MenuItem from "@mui/material/MenuItem";
 import Select from "@mui/material/Select";
-import Typography from "@mui/material/Typography";
 import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
 
 /**
- * Floating quick Buy/Sell (TradingView broker overlay) — top-left of chart.
+ * TradingView-scale quick Buy/Sell overlay (compact — matches broker widget).
  */
 export function QuickTradeOverlay() {
   const { demoTrading, chart, quotes } = useServices();
@@ -16,7 +15,6 @@ export function QuickTradeOverlay() {
   const mid = snap.space.lastPrice ?? quote?.price ?? null;
   const q = demoTrading.quotes(mid);
 
-  // Show whenever dock is open or ticket/space is active (demo trading engaged).
   if (!snap.dockOpen && !snap.ticketOpen && !snap.space.active) return null;
 
   const bare = symbol.includes(":") ? symbol.slice(symbol.lastIndexOf(":") + 1) : symbol;
@@ -29,81 +27,59 @@ export function QuickTradeOverlay() {
     if (!result.ok) window.alert(result.message);
   };
 
+  const btn = {
+    border: 0,
+    cursor: "pointer",
+    width: 84,
+    height: 40,
+    borderRadius: "4px",
+    color: "#fff",
+    textAlign: "center" as const,
+    fontFamily: "inherit",
+    padding: "3px 4px",
+    lineHeight: 1.1,
+  };
+
   return (
     <Box
       sx={{
         position: "absolute",
-        top: 48,
-        left: 56,
+        top: 40,
+        left: 48,
         zIndex: 6,
         display: "flex",
         flexDirection: "column",
-        gap: 0.5,
+        gap: "3px",
         pointerEvents: "auto",
       }}
     >
-      <Box sx={{ display: "flex", alignItems: "stretch", gap: 0.5 }}>
-        <Box
-          component="button"
-          type="button"
-          onClick={() => trade("sell")}
-          sx={{
-            border: 0,
-            cursor: "pointer",
-            minWidth: 110,
-            px: 1.5,
-            py: 0.75,
-            borderRadius: 1,
-            bgcolor: "#ef5350",
-            color: "#fff",
-            textAlign: "center",
-            font: "inherit",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
-          }}
-        >
-          <Typography sx={{ fontWeight: 800, fontSize: 16, lineHeight: 1.1 }}>
-            {q?.bid.toFixed(2) ?? "—"}
-          </Typography>
-          <Typography sx={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4 }}>SELL</Typography>
-        </Box>
+      <Box sx={{ display: "flex", alignItems: "stretch", gap: "2px" }}>
+        <button type="button" onClick={() => trade("sell")} style={{ ...btn, background: "#f23645" }}>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>{q?.bid.toFixed(2) ?? "—"}</div>
+          <div style={{ fontWeight: 600, fontSize: 9, letterSpacing: 0.2 }}>SELL</div>
+        </button>
         <Box
           sx={{
             alignSelf: "center",
-            px: 0.75,
-            py: 0.25,
+            px: "4px",
+            py: "2px",
             bgcolor: "#131722",
             color: "#d1d4dc",
-            borderRadius: 0.5,
-            fontSize: 11,
+            borderRadius: "2px",
+            fontSize: 10,
             fontWeight: 700,
             border: "1px solid #2a2e39",
+            lineHeight: 1.2,
+            minWidth: 26,
+            textAlign: "center",
           }}
         >
           {(q?.spreadPoints ?? snap.instrument.spreadPoints).toFixed(1)}
         </Box>
-        <Box
-          component="button"
-          type="button"
-          onClick={() => trade("buy")}
-          sx={{
-            border: 0,
-            cursor: "pointer",
-            minWidth: 110,
-            px: 1.5,
-            py: 0.75,
-            borderRadius: 1,
-            bgcolor: "#2962ff",
-            color: "#fff",
-            textAlign: "center",
-            font: "inherit",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
-          }}
-        >
-          <Typography sx={{ fontWeight: 800, fontSize: 16, lineHeight: 1.1 }}>
-            {q?.ask.toFixed(2) ?? "—"}
-          </Typography>
-          <Typography sx={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4 }}>BUY</Typography>
-        </Box>
+        <button type="button" onClick={() => trade("buy")} style={{ ...btn, background: "#2962ff" }}>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>{q?.ask.toFixed(2) ?? "—"}</div>
+          <div style={{ fontWeight: 600, fontSize: 9, letterSpacing: 0.2 }}>BUY</div>
+        </button>
       </Box>
       <Select
         size="small"
@@ -111,17 +87,19 @@ export function QuickTradeOverlay() {
         onChange={(e) => demoTrading.setQty(Number(e.target.value))}
         sx={{
           alignSelf: "flex-start",
-          minWidth: 72,
-          height: 28,
+          minWidth: 52,
+          height: 20,
           bgcolor: "#fff",
           color: "#131722",
-          fontSize: 13,
+          fontSize: 11,
           fontWeight: 600,
+          borderRadius: "2px",
           ".MuiOutlinedInput-notchedOutline": { border: 0 },
+          ".MuiSelect-select": { py: "1px", px: "5px" },
         }}
       >
-        {[0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 11].map((n) => (
-          <MenuItem key={n} value={n}>
+        {[0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10].map((n) => (
+          <MenuItem key={n} value={n} sx={{ fontSize: 11 }}>
             {n}
           </MenuItem>
         ))}

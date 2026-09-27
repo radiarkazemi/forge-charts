@@ -40,7 +40,7 @@ export function OrderTicketPanel() {
   return (
     <Box
       sx={{
-        width: 320,
+        width: 260,
         flexShrink: 0,
         height: "100%",
         display: "flex",
@@ -48,85 +48,103 @@ export function OrderTicketPanel() {
         bgcolor: "#131722",
         borderLeft: "1px solid #2a2e39",
         color: "#d1d4dc",
+        fontSize: 11,
         minHeight: 0,
       }}
     >
-      <Box sx={{ display: "flex", alignItems: "center", px: 1.25, py: 1, borderBottom: "1px solid #2a2e39" }}>
+      <Box sx={{ display: "flex", alignItems: "center", px: 1, py: 0.75, borderBottom: "1px solid #2a2e39", minHeight: 36 }}>
         <Box
           sx={{
-            width: 22,
-            height: 22,
-            borderRadius: 0.5,
-            bgcolor: "#ef5350",
+            width: 18,
+            height: 18,
+            borderRadius: "3px",
+            bgcolor: "#f23645",
             color: "#fff",
-            fontWeight: 800,
-            fontSize: 12,
+            fontWeight: 700,
+            fontSize: 11,
             display: "grid",
             placeItems: "center",
-            mr: 1,
+            mr: 0.75,
           }}
         >
           F
         </Box>
-        <Typography sx={{ fontWeight: 700, flex: 1 }}>{bare}</Typography>
-        <IconButton size="small" onClick={() => demoTrading.setTicketOpen(false)} sx={{ color: "#787b86" }}>
-          <CloseIcon fontSize="small" />
+        <Typography sx={{ fontWeight: 700, flex: 1, fontSize: 13 }}>{bare}</Typography>
+        <IconButton size="small" onClick={() => demoTrading.setTicketOpen(false)} sx={{ color: "#787b86", p: 0.25 }}>
+          <CloseIcon sx={{ fontSize: 16 }} />
         </IconButton>
       </Box>
 
-      <Box sx={{ display: "flex", gap: 0.5, p: 1 }}>
+      <Box sx={{ display: "flex", gap: 0.5, px: 0.75, py: 0.5 }}>
         <ChipTab active label="Order" />
         <ChipTab label="DOM" disabled />
       </Box>
 
-      {/* Sell / Buy quote box */}
-      <Box sx={{ display: "flex", mx: 1, mb: 1, borderRadius: 1, overflow: "hidden", border: "1px solid #2a2e39" }}>
+      {/* Sell / Buy quote box — TV scale */}
+      <Box sx={{ display: "flex", mx: 0.75, mb: 0.75, borderRadius: "4px", overflow: "hidden", border: "1px solid #2a2e39" }}>
         <Box
           onClick={() => demoTrading.setSide("sell")}
           sx={{
             flex: 1,
-            p: 1,
+            py: 0.75,
+            px: 0.5,
             cursor: "pointer",
-            bgcolor: sellActive ? "rgba(239,83,80,0.25)" : "#1e222d",
+            bgcolor: sellActive ? "#f23645" : "#1e222d",
             textAlign: "center",
           }}
         >
-          <Typography variant="caption" sx={{ color: "#ef5350", fontWeight: 700 }}>
+          <Typography sx={{ color: sellActive ? "#fff" : "#f23645", fontWeight: 600, fontSize: 10, lineHeight: 1.2 }}>
             Sell
           </Typography>
-          <Typography sx={{ fontWeight: 700, fontSize: 18 }}>{q?.bid.toFixed(2) ?? "—"}</Typography>
+          <Typography sx={{ fontWeight: 700, fontSize: 15, color: sellActive ? "#fff" : "#d1d4dc", lineHeight: 1.25 }}>
+            {q?.bid.toFixed(2) ?? "—"}
+          </Typography>
         </Box>
-        <Box sx={{ display: "grid", placeItems: "center", px: 0.75, bgcolor: "#0c0e15", fontSize: 11, fontWeight: 700 }}>
+        <Box
+          sx={{
+            display: "grid",
+            placeItems: "center",
+            px: 0.5,
+            minWidth: 28,
+            bgcolor: "#0c0e15",
+            fontSize: 10,
+            fontWeight: 700,
+            color: "#d1d4dc",
+          }}
+        >
           {(q?.spreadPoints ?? snap.instrument.spreadPoints).toFixed(1)}
         </Box>
         <Box
           onClick={() => demoTrading.setSide("buy")}
           sx={{
             flex: 1,
-            p: 1,
+            py: 0.75,
+            px: 0.5,
             cursor: "pointer",
-            bgcolor: !sellActive ? "rgba(41,98,255,0.25)" : "#1e222d",
+            bgcolor: !sellActive ? "#2962ff" : "#1e222d",
             textAlign: "center",
           }}
         >
-          <Typography variant="caption" sx={{ color: "#2962ff", fontWeight: 700 }}>
+          <Typography sx={{ color: !sellActive ? "#fff" : "#2962ff", fontWeight: 600, fontSize: 10, lineHeight: 1.2 }}>
             Buy
           </Typography>
-          <Typography sx={{ fontWeight: 700, fontSize: 18 }}>{q?.ask.toFixed(2) ?? "—"}</Typography>
+          <Typography sx={{ fontWeight: 700, fontSize: 15, color: !sellActive ? "#fff" : "#d1d4dc", lineHeight: 1.25 }}>
+            {q?.ask.toFixed(2) ?? "—"}
+          </Typography>
         </Box>
       </Box>
 
       {/* Market / Limit / Stop */}
-      <Box sx={{ display: "flex", gap: 2, px: 1.5, mb: 1.5, borderBottom: "1px solid #2a2e39" }}>
+      <Box sx={{ display: "flex", gap: 1.5, px: 1.25, mb: 1, borderBottom: "1px solid #2a2e39" }}>
         {(["market", "limit", "stop"] as const).map((t) => (
           <Box
             key={t}
             onClick={() => demoTrading.setOrderType(t)}
             sx={{
-              pb: 0.75,
+              pb: 0.5,
               cursor: "pointer",
               textTransform: "capitalize",
-              fontSize: 13,
+              fontSize: 12,
               fontWeight: 600,
               color: snap.orderType === t ? "#d1d4dc" : "#787b86",
               borderBottom: snap.orderType === t ? "2px solid #fff" : "2px solid transparent",
@@ -137,8 +155,8 @@ export function OrderTicketPanel() {
         ))}
       </Box>
 
-      <Box sx={{ px: 1.5, mb: 1 }}>
-        <Typography variant="caption" sx={{ color: "#787b86" }}>
+      <Box sx={{ px: 1.25, mb: 0.75 }}>
+        <Typography sx={{ color: "#787b86", fontSize: 10 }}>
           Lots (size {snap.instrument.contractSize})
         </Typography>
         <TextField
@@ -146,19 +164,21 @@ export function OrderTicketPanel() {
           fullWidth
           value={snap.qty}
           onChange={(e) => demoTrading.setQty(Number(e.target.value))}
-          sx={{ mt: 0.5, input: { color: "#d1d4dc" } }}
+          sx={{
+            mt: 0.35,
+            "& .MuiInputBase-root": { height: 28, fontSize: 12 },
+            input: { color: "#d1d4dc", py: 0 },
+          }}
         />
       </Box>
 
-      <Box sx={{ mx: 1.5, mb: 1.5, p: 1, bgcolor: "#1e222d", borderRadius: 1, fontSize: 12 }}>
+      <Box sx={{ mx: 1.25, mb: 1, px: 0.75, py: 0.5, bgcolor: "#1e222d", borderRadius: "4px", fontSize: 11 }}>
         <Row label={`Trade value (${snap.instrument.leverage}:1)`} value={metrics ? `${metrics.tradeValue.toFixed(2)} USD` : "—"} />
         <Row label="Tick value" value={metrics ? `${metrics.tickValue.toFixed(2)} USD` : "—"} />
       </Box>
 
-      <Box sx={{ px: 1.5, mb: 1 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>
-          Exits
-        </Typography>
+      <Box sx={{ px: 1.25, mb: 0.75 }}>
+        <Typography sx={{ fontWeight: 700, mb: 0.35, fontSize: 12 }}>Exits</Typography>
         <ExitRow
           label="Take profit, price"
           enabled={snap.takeProfitEnabled}
@@ -175,16 +195,14 @@ export function OrderTicketPanel() {
         />
       </Box>
 
-      <Box sx={{ px: 1.5, mb: 1, fontSize: 12 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>
-          Broker provided data
-        </Typography>
+      <Box sx={{ px: 1.25, mb: 0.75, fontSize: 11 }}>
+        <Typography sx={{ fontWeight: 700, mb: 0.35, fontSize: 12 }}>Broker provided data</Typography>
         <Row label="Required Margin" value={metrics ? `${metrics.margin.toFixed(8)} USD` : "—"} />
       </Box>
 
       <Box sx={{ flex: 1 }} />
 
-      <Box sx={{ p: 1.5 }}>
+      <Box sx={{ p: 1 }}>
         <Button
           fullWidth
           variant="contained"
@@ -192,19 +210,18 @@ export function OrderTicketPanel() {
           disabled={mid == null}
           sx={{
             textTransform: "none",
-            py: 1.25,
-            bgcolor: sellActive ? "#ef5350" : "#2962ff",
+            py: 1,
+            minHeight: 44,
+            borderRadius: "4px",
+            bgcolor: sellActive ? "#f23645" : "#2962ff",
             "&:hover": { bgcolor: sellActive ? "#e53935" : "#1e88e5" },
             display: "flex",
             flexDirection: "column",
-            lineHeight: 1.2,
+            lineHeight: 1.15,
           }}
         >
-          <Box component="span" sx={{ fontWeight: 800, fontSize: 16 }}>
-            {sellActive ? "Sell" : "Buy"}
-          </Box>
-          <Box component="span" sx={{ fontSize: 11, opacity: 0.9 }}>
-            {snap.qty} {bare} {snap.orderType.toUpperCase()}
+          <Box component="span" sx={{ fontWeight: 700, fontSize: 14 }}>
+            {sellActive ? "Sell" : "Buy"} {snap.qty} {bare} {snap.orderType.toUpperCase()}
           </Box>
         </Button>
       </Box>
@@ -218,12 +235,12 @@ function ChipTab({ label, active, disabled }: { label: string; active?: boolean;
       sx={{
         flex: 1,
         textAlign: "center",
-        py: 0.75,
-        borderRadius: 1,
+        py: 0.5,
+        borderRadius: "4px",
         bgcolor: active ? "#2a2e39" : "transparent",
         color: disabled ? "#434651" : "#d1d4dc",
         fontWeight: 600,
-        fontSize: 13,
+        fontSize: 12,
         cursor: disabled ? "default" : "pointer",
       }}
     >
@@ -234,11 +251,11 @@ function ChipTab({ label, active, disabled }: { label: string; active?: boolean;
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <Box sx={{ display: "flex", justifyContent: "space-between", py: 0.35 }}>
-      <Box component="span" sx={{ color: "#787b86" }}>
+    <Box sx={{ display: "flex", justifyContent: "space-between", py: 0.2 }}>
+      <Box component="span" sx={{ color: "#787b86", fontSize: 11 }}>
         {label}
       </Box>
-      <Box component="span" sx={{ fontWeight: 600 }}>
+      <Box component="span" sx={{ fontWeight: 600, fontSize: 11 }}>
         {value}
       </Box>
     </Box>
@@ -259,12 +276,12 @@ function ExitRow({
   onPrice: (v: number | null) => void;
 }) {
   return (
-    <Box sx={{ mb: 1 }}>
-      <Box sx={{ display: "flex", alignItems: "center" }}>
-        <Typography variant="caption" sx={{ flex: 1, color: "#787b86" }}>
+    <Box sx={{ mb: 0.75 }}>
+      <Box sx={{ display: "flex", alignItems: "center", minHeight: 24 }}>
+        <Typography sx={{ flex: 1, color: "#787b86", fontSize: 11 }}>
           {label}
         </Typography>
-        <Switch size="small" checked={enabled} onChange={(_, v) => onToggle(v)} />
+        <Switch size="small" checked={enabled} onChange={(_, v) => onToggle(v)} sx={{ transform: "scale(0.85)" }} />
       </Box>
       <TextField
         size="small"
@@ -272,7 +289,10 @@ function ExitRow({
         disabled={!enabled}
         value={price ?? ""}
         onChange={(e) => onPrice(e.target.value === "" ? null : Number(e.target.value))}
-        sx={{ input: { color: "#d1d4dc" } }}
+        sx={{
+          "& .MuiInputBase-root": { height: 28, fontSize: 12 },
+          input: { color: "#d1d4dc", py: 0 },
+        }}
       />
     </Box>
   );

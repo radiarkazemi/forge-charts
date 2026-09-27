@@ -18,6 +18,26 @@ import { ActivateDemoSpaceDialog, CreateDemoAccountDialog } from "./ActivateDemo
 
 type DockTab = "positions" | "orders" | "account";
 
+function Metric({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <Box sx={{ display: "flex", alignItems: "baseline", gap: 0.5, mr: 1.25, whiteSpace: "nowrap" }}>
+      <Box component="span" sx={{ color: "#787b86", fontSize: 10 }}>
+        {label}
+      </Box>
+      <Box component="span" sx={{ color: color ?? "#d1d4dc", fontSize: 11, fontWeight: 600 }}>
+        {value}
+      </Box>
+    </Box>
+  );
+}
+
+function formatStep(ms: number): string {
+  if (ms >= 86_400_000) return `${Math.round(ms / 86_400_000)}d`;
+  if (ms >= 3_600_000) return `${Math.round(ms / 3_600_000)}h`;
+  if (ms >= 60_000) return `${Math.round(ms / 60_000)}m`;
+  return `${Math.round(ms / 1000)}s`;
+}
+
 /**
  * TradingView-style bottom trading dock (demo / paper account strip).
  */
@@ -35,6 +55,7 @@ export function DemoTradingDock() {
   const acct = demoTrading.activeAccount();
   const openPositions = snap.positions.filter((p) => p.status === "open");
   const workingOrders = snap.orders.filter((o) => o.status === "working");
+  const metrics = demoTrading.ticketMetrics(mid);
 
   const unrealized = useMemo(() => {
     if (mid == null) return 0;
@@ -43,6 +64,17 @@ export function DemoTradingDock() {
       0,
     );
   }, [openPositions, mid, snap.instrument.contractSize]);
+
+  const usedMargin = openPositions.reduce((sum, p) => {
+    if (mid == null) return sum;
+    const m = demoTrading.ticketMetrics(mid);
+    // Approx: margin per position ≈ tradeValue/leverage at entry
+    return sum + (p.entryPrice * p.qty * snap.instrument.contractSize) / snap.instrument.leverage;
+  }, 0);
+  const freeMargin = acct.equity - usedMargin;
+  const marginLevel = usedMargin > 0 ? (acct.equity / usedMargin) * 100 : 0;
+
+  void metrics;
 
   if (!snap.dockOpen) {
     return (
@@ -85,7 +117,7 @@ export function DemoTradingDock() {
   return (
     <Box
       sx={{
-        height: 220,
+        height: 200,
         flexShrink: 0,
         display: "flex",
         flexDirection: "column",
@@ -93,58 +125,67 @@ export function DemoTradingDock() {
         borderTop: "1px solid #2a2e39",
         color: "#d1d4dc",
         minHeight: 0,
+        fontSize: 12,
       }}
     >
       <Box
         sx={{
           display: "flex",
           alignItems: "center",
-          gap: 1,
-          px: 1.25,
-          py: 0.5,
+          gap: 0.75,
+          px: 1,
+          py: 0.35,
           bgcolor: "#1e222d",
           borderBottom: "1px solid #2a2e39",
+          minHeight: 32,
         }}
       >
-        <Typography variant="subtitle2" sx={{ fontWeight: 700, mr: 1 }}>
-          Demo Trading
-        </Typography>
+        <Typography sx={{ fontWeight: 700, fontSize: 12, mr: 0.5 }}>Demo Trading</Typography>
         <Select
           size="small"
           value={snap.activeAccountId}
           onChange={(e) => demoTrading.selectAccount(String(e.target.value))}
           sx={{
-            minWidth: 160,
-            height: 28,
+            minWidth: 120,
+            height: 24,
             color: "#d1d4dc",
-            fontSize: 12,
+            fontSize: 11,
             ".MuiOutlinedInput-notchedOutline": { borderColor: "#363a45" },
+            ".MuiSelect-select": { py: "2px" },
           }}
         >
           {snap.accounts.map((a) => (
-            <MenuItem key={a.id} value={a.id}>
+            <MenuItem key={a.id} value={a.id} sx={{ fontSize: 12 }}>
               {a.name}
             </MenuItem>
           ))}
         </Select>
-        <Button size="small" onClick={() => setCreateOpen(true)} sx={{ textTransform: "none", color: "#2962ff" }}>
+        <Button
+          size="small"
+          onClick={() => setCreateOpen(true)}
+          sx={{ textTransform: "none", color: "#2962ff", fontSize: 11, minWidth: 0, px: 0.75 }}
+        >
           + New demo account
         </Button>
         <Box sx={{ flex: 1 }} />
-        <Typography variant="caption" sx={{ color: "#787b86" }}>
-          Balance {acct.balance.toFixed(2)} · Equity{" "}
-          <Box component="span" sx={{ color: unrealized >= 0 ? "#26a69a" : "#ef5350", fontWeight: 600 }}>
-            {acct.equity.toFixed(2)}
-          </Box>{" "}
-          {acct.currency}
-        </Typography>
+        {/* TradingView account metrics strip */}
+        <Metric label="Balance" value={acct.balance.toFixed(2)} />
+        <Metric label="Margin" value={usedMargin.toFixed(2)} />
+        <Metric label="Free margin" value={freeMargin.toFixed(2)} />
+        <Metric label="Margin level" value={usedMargin > 0 ? `${marginLevel.toFixed(2)}%` : "—"} />
+        <Metric label="Equity" value={acct.equity.toFixed(2)} />
+        <Metric
+          label="Unrealized P/L"
+          value={`${unrealized >= 0 ? "+" : ""}${unrealized.toFixed(2)}`}
+          color={unrealized >= 0 ? "#26a69a" : "#ef5350"}
+        />
         {snap.space.active ? (
           <Button
             size="small"
             variant="outlined"
             color="error"
             onClick={() => void demoSpace.deactivate()}
-            sx={{ textTransform: "none", ml: 1 }}
+            sx={{ textTransform: "none", ml: 0.5, fontSize: 11, py: 0.25, height: 24 }}
           >
             Deactivate space
           </Button>
@@ -153,25 +194,24 @@ export function DemoTradingDock() {
             size="small"
             variant="contained"
             onClick={() => setActivateOpen(true)}
-            sx={{ textTransform: "none", ml: 1, bgcolor: "#2962ff" }}
+            sx={{ textTransform: "none", ml: 0.5, bgcolor: "#2962ff", fontSize: 11, py: 0.25, height: 24 }}
           >
             Activate demo space
           </Button>
         )}
-        <IconButton size="small" onClick={() => demoTrading.setDockOpen(false)} sx={{ color: "#787b86" }}>
-          <KeyboardArrowDownIcon fontSize="small" />
+        <IconButton size="small" onClick={() => demoTrading.setDockOpen(false)} sx={{ color: "#787b86", p: 0.25 }}>
+          <KeyboardArrowDownIcon sx={{ fontSize: 16 }} />
         </IconButton>
       </Box>
 
       {spaceCtrl.error ? (
-        <Typography variant="caption" sx={{ px: 1.5, py: 0.5, color: "#ef5350" }}>
-          {spaceCtrl.error}
-        </Typography>
+        <Typography sx={{ px: 1, py: 0.35, color: "#ef5350", fontSize: 11 }}>{spaceCtrl.error}</Typography>
       ) : null}
       {snap.space.active ? (
-        <Typography variant="caption" sx={{ px: 1.5, py: 0.35, color: "#f9a825", bgcolor: "#1e222d" }}>
-          Demo space from {snap.space.startTimeSec ? new Date(snap.space.startTimeSec * 1000).toUTCString() : "—"} —
-          candles advance live (no pause). Deactivate to return to the real-time chart.
+        <Typography sx={{ px: 1, py: 0.3, color: "#f9a825", bgcolor: "#1e222d", fontSize: 11 }}>
+          Demo space from {snap.space.startTimeSec ? new Date(snap.space.startTimeSec * 1000).toUTCString() : "—"} —{" "}
+          {spaceCtrl.resolution} candles close in real time ({formatStep(spaceCtrl.stepMs)} / bar, no pause).
+          Deactivate to return to live.
         </Typography>
       ) : null}
 
@@ -179,17 +219,17 @@ export function DemoTradingDock() {
         value={tab}
         onChange={(_, v) => setTab(v as DockTab)}
         sx={{
-          minHeight: 32,
-          px: 1,
+          minHeight: 28,
+          px: 0.75,
           borderBottom: "1px solid #2a2e39",
-          "& .MuiTab-root": { minHeight: 32, textTransform: "none", fontSize: 12, color: "#787b86" },
+          "& .MuiTab-root": { minHeight: 28, textTransform: "none", fontSize: 11, color: "#787b86", px: 1 },
           "& .Mui-selected": { color: "#d1d4dc !important" },
-          "& .MuiTabs-indicator": { bgcolor: "#2962ff" },
+          "& .MuiTabs-indicator": { bgcolor: "#2962ff", height: 2 },
         }}
       >
         <Tab value="positions" label={`Positions (${openPositions.length})`} />
         <Tab value="orders" label={`Orders (${workingOrders.length})`} />
-        <Tab value="account" label="Account" />
+        <Tab value="account" label="Account summary" />
       </Tabs>
 
       <Box sx={{ flex: 1, minHeight: 0, overflow: "auto", fontSize: 12 }}>

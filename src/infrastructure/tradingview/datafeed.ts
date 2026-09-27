@@ -214,25 +214,40 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   ): Promise<void> {
     const symbol = this.requireSymbol(symbolInfo);
     try {
+      const cutoff = this.replayCutoffSec;
+      const cutoffOn = cutoff != null && Number.isFinite(cutoff);
+
+      /*
+       * Demo space / Bar Replay: the chart often still asks for the live “now”
+       * window after cutoff is set. That range filters to empty and leaves a
+       * blank left side. Clamp `to` to cutoff, and when the whole request is
+       * after the cut, pull countBack bars ending at the cutoff instead.
+       */
+      let from = periodParams.from;
+      let to = periodParams.to;
+      let countBack = periodParams.countBack;
+      if (cutoffOn) {
+        if (from > cutoff!) {
+          to = cutoff!;
+          from = 0;
+          countBack = Math.max(countBack || 300, 500);
+        } else {
+          to = Math.min(to, cutoff!);
+        }
+      }
+
       const { bars, providerId, isSynthetic } = await this.marketData.fetchHistory(symbol, resolution, {
-        from: periodParams.from,
-        to: periodParams.to,
-        countBack: periodParams.countBack,
+        from,
+        to,
+        countBack,
       });
 
       if (periodParams.firstDataRequest) {
         this.source.set({ ticker: symbol.ticker, providerId, isSynthetic });
       }
 
-      if (bars.length === 0) {
-        onResult([], { noData: true });
-        return;
-      }
-      const cutoff = this.replayCutoffSec;
       const filtered =
-        cutoff != null && Number.isFinite(cutoff)
-          ? bars.filter((b) => Number(b.time) <= cutoff)
-          : bars;
+        cutoffOn ? bars.filter((b) => Number(b.time) <= cutoff!) : bars;
       if (filtered.length === 0) {
         onResult([], { noData: true });
         return;
