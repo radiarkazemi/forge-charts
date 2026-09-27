@@ -158,11 +158,13 @@ export class DemoSpaceController {
 
     demo.activateSpace(bare, bar.time, bar.close);
 
-    // Frame the historical window BEFORE resetData so the first getBars
-    // request hits bars at/before the cutoff (not the live “now” range).
+    // Frame historical window, reload, then re-frame after series settles.
+    // getServerTime returns cutoff during replay so CL won't pad empty future.
     await this.fitVisibleHistory(bar.time, barSec, index);
     this.reloadSeries();
-    await sleep(400);
+    await sleep(200);
+    await this.fitVisibleHistory(bar.time, barSec, index);
+    await sleep(600);
     await this.fitVisibleHistory(bar.time, barSec, index);
 
     this.startTimer(stepMs);
@@ -197,11 +199,10 @@ export class DemoSpaceController {
     if (!widget) return;
     try {
       const chart = widget.activeChart();
-      // Fill the viewport with prior candles ending at the demo cursor (no left gap).
       const available = Math.max(1, cursorIndex + 1);
-      const barsOnScreen = Math.min(150, Math.max(80, Math.min(available, 150)));
+      const barsOnScreen = Math.min(120, Math.max(60, Math.min(available, 120)));
       const from = endTimeSec - barsOnScreen * barSec;
-      const to = endTimeSec + barSec * 3;
+      const to = endTimeSec + barSec * 2;
       await chart.setVisibleRange({ from, to });
     } catch {
       /* ignore */

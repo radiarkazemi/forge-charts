@@ -115,7 +115,7 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     this.replayCutoffSec = null;
   }
 
-  /** Hide bars with time (unix sec) strictly after cutoff. */
+  /** Hide bars with time (unix sec) strictly after cutoff. Also drives getServerTime. */
   setReplayCutoff(cutoffSec: number | null): void {
     this.replayCutoffSec = cutoffSec;
   }
@@ -290,6 +290,13 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   }
 
   getServerTime(callback: ServerTimeCallback): void {
+    // During demo space / bar replay, report the cutoff as “now” so the
+    // library does not pad a huge empty future from last bar → wall clock.
+    const cutoff = this.replayCutoffSec;
+    if (this.replayActive && cutoff != null && Number.isFinite(cutoff)) {
+      callback(Math.floor(cutoff));
+      return;
+    }
     callback(Math.floor(Date.now() / 1000));
   }
 
