@@ -193,11 +193,17 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         window.clearTimeout(readyTimer);
         controller.attach(widget);
         onWidgetReady(widget);
-        try {
-          controller.ensureVolumeStudy();
-        } catch {
-          /* ignore */
-        }
+        // Do not auto-load Volume — strip any default/autosaved Volume pane.
+        const stripVolume = () => {
+          try {
+            controller.removeVolumeStudy();
+          } catch {
+            /* ignore */
+          }
+        };
+        stripVolume();
+        window.setTimeout(stripVolume, 600);
+        window.setTimeout(stripVolume, 2000);
         // Drawing flyout patches on every pane (each widget has its own iframe).
         unmountDealingRange?.();
         unmountDealingRange = mountDealingRangeFlyoutInjector(container, () => {
@@ -220,14 +226,8 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
               } catch {
                 /* ignore */
               }
-              // Re-attach Volume after symbol switches (saved layouts may omit it).
-              window.setTimeout(() => {
-                try {
-                  controller.ensureVolumeStudy();
-                } catch {
-                  /* ignore */
-                }
-              }, 400);
+              // Don't re-add Volume after symbol changes.
+              window.setTimeout(stripVolume, 500);
             });
         } catch {
           /* chart API unavailable */

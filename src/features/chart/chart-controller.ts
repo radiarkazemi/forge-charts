@@ -313,7 +313,16 @@ export class ChartController {
           disableSave: true,
           disableUndo: true,
           showInObjectsTree: false,
-          overrides: { linecolor: color, textcolor: color, linestyle: 2, linewidth: 1, showLabel: true },
+          overrides: {
+            linecolor: color,
+            textcolor: color,
+            linestyle: 2,
+            linewidth: 1,
+            showLabel: true,
+            showPrice: true,
+            horzLabelsAlign: "right",
+            vertLabelsAlign: "middle",
+          },
         },
       );
     } catch {
@@ -333,7 +342,7 @@ export class ChartController {
     this.widget?.save(onSaved);
   }
 
-  /** Ensure a Volume study exists (TradingView default bottom pane). */
+  /** Ensure a Volume study exists (opt-in only — not used at startup). */
   ensureVolumeStudy(): void {
     try {
       const chart = this.activeChart() as
@@ -353,8 +362,27 @@ export class ChartController {
         (s) => /volume/i.test(s.name ?? "") || /volume/i.test(String(s.id ?? "")),
       );
       if (hasVolume) return;
-      // forceOverlay=false → dedicated pane under price (TV default).
       void chart.createStudy("Volume", false, false);
+    } catch {
+      /* study API unavailable */
+    }
+  }
+
+  /** Remove the default Volume pane so it does not load at startup. */
+  removeVolumeStudy(): void {
+    try {
+      const chart = this.activeChart() as
+        | (IChartWidgetApi & {
+            getAllStudies?: () => Array<{ name?: string; id?: EntityId | string }>;
+          })
+        | null;
+      if (!chart?.getAllStudies) return;
+      for (const study of chart.getAllStudies()) {
+        const name = (study.name ?? "").trim();
+        // Only the plain Volume study — leave Volume Profile / VRVP alone.
+        if (!/^volume$/i.test(name) || study.id == null) continue;
+        this.removeEntity(study.id as EntityId);
+      }
     } catch {
       /* study API unavailable */
     }
