@@ -280,7 +280,7 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
         t2,
         p2: botP,
         color: circColor,
-        fill: "rgba(0,0,0,0.08)",
+        fill: circColor,
       },
       {
         kind: "line",
@@ -609,6 +609,25 @@ export function computeDealingRanges(bars: readonly OrcaBar[], opts: DealingRang
   return computeOrcaDraws(bars, dealingRangesInputs(opts));
 }
 
+/** Charting Library color parser rejects rgba / 8-digit hex — normalize to #RRGGBB. */
+function clColor(color: string, fallback = "#787B86"): string {
+  const c = (color || "").trim();
+  if (/^#([0-9a-fA-F]{6})$/.test(c)) return c;
+  if (/^#([0-9a-fA-F]{8})$/.test(c)) return c.slice(0, 7);
+  if (/^#([0-9a-fA-F]{3})$/.test(c)) {
+    const r = c[1]!;
+    const g = c[2]!;
+    const b = c[3]!;
+    return `#${r}${r}${g}${g}${b}${b}`;
+  }
+  const m = c.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (m) {
+    const hex = (n: string) => Number(n).toString(16).padStart(2, "0");
+    return `#${hex(m[1]!)}${hex(m[2]!)}${hex(m[3]!)}`;
+  }
+  return fallback;
+}
+
 /** Draw computed commands onto a Charting Library chart; returns entity ids. */
 export async function paintOrcaOnChart(
   chart: IChartWidgetApi,
@@ -620,6 +639,7 @@ export async function paintOrcaOnChart(
 
   for (let i = 0; i < limited.length; i += 1) {
     const cmd = limited[i]!;
+    const stroke = clColor(cmd.color);
     try {
       if (cmd.kind === "line" && cmd.t2 != null && cmd.p2 != null) {
         const id = await chart.createMultipointShape(
@@ -634,17 +654,18 @@ export async function paintOrcaOnChart(
             disableUndo: true,
             showInObjectsTree: false,
             overrides: {
-              linecolor: cmd.color,
+              linecolor: stroke,
               linewidth: cmd.width ?? 1,
               linestyle: linestyleMap[cmd.style ?? "solid"],
               showLabel: Boolean(cmd.text),
-              textcolor: cmd.color,
+              textcolor: stroke,
               text: cmd.text ?? "",
             },
           },
         );
         if (id) ids.push(id);
       } else if (cmd.kind === "rect" && cmd.t2 != null && cmd.p2 != null) {
+        const fill = clColor(cmd.fill ?? cmd.color, stroke);
         const id = await chart.createMultipointShape(
           [
             { time: cmd.t1, price: cmd.p1 },
@@ -657,8 +678,8 @@ export async function paintOrcaOnChart(
             disableUndo: true,
             showInObjectsTree: false,
             overrides: {
-              color: cmd.color,
-              backgroundColor: cmd.fill ?? "rgba(128,128,128,0.12)",
+              color: stroke,
+              backgroundColor: fill,
               fillBackground: true,
               linewidth: 1,
               transparency: 70,
@@ -677,7 +698,7 @@ export async function paintOrcaOnChart(
             disableUndo: true,
             showInObjectsTree: false,
             overrides: {
-              color: cmd.color,
+              color: stroke,
               fontsize: 14,
               fillBackground: false,
               drawBorder: false,

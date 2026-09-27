@@ -215,6 +215,9 @@ export function useDealingRangesStudy(enabled = true): void {
             /* ignore */
           }
         }
+        if (ids.length > 0) {
+          console.info(`[forge-dr] painted ${ids.length} shapes from ${bars.length} bars`);
+        }
       } catch (err) {
         console.warn("[forge-dr] paint failed", err);
       } finally {
