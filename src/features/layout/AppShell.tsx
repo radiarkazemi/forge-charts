@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
 import Box from "@mui/material/Box";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import { useTheme } from "@mui/material/styles";
+import { useEffect, useState } from "react";
 import { useServices } from "@/app/use-services";
 import { AlertToaster } from "@/features/alerts/AlertToaster";
 import { CreateAlertDialog } from "@/features/alerts/CreateAlertDialog";
 import { ChartWorkspace } from "@/features/chart/ChartWorkspace";
+import { DemoTradingDock, OrderTicketPanel } from "@/features/demo-trading";
 import { ProfileDialog } from "@/features/profile/ProfileDialog";
 import { ProfileMenu } from "@/features/profile/ProfileMenu";
 import { activeProfile } from "@/application";
@@ -15,17 +16,19 @@ import { SideRail } from "./SideRail";
 
 /**
  * Chart shell matching TradingView Supercharts:
- * - Right widget rail (Watchlist / Alerts / Object tree / Pine / …)
- * - Pine Editor docks to the right of the chart (like TV “Pine” button)
- * - Other panels also open from the rail
+ * - Right widget rail
+ * - Pine Editor docks to the right of the chart
+ * - Demo Trading dock at the bottom (paper account / positions)
+ * - Order ticket drawer when trading is active
  */
 export function AppShell() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
-  const { settings, chart, alerts } = useServices();
+  const { settings, chart, alerts, demoTrading } = useServices();
   const sidePanel = useStore(settings.settings, (s) => s.sidePanel);
   const appTheme = useStore(settings.settings, (s) => s.theme);
   const settingsSnap = useStore(settings.settings, (s) => s);
+  const ticketOpen = useStore(demoTrading.state, (s) => s.ticketOpen);
   const profile = activeProfile(settingsSnap);
   const symbol = useStore(chart.state, (s) => s.symbol);
   const alertCount = useStore(alerts.alerts, (list) => list.filter((a) => a.status === "active").length);
@@ -35,7 +38,8 @@ export function AppShell() {
   const profileAnchorRef = useState(() => {
     if (typeof document === "undefined") return null;
     const el = document.createElement("div");
-    el.style.cssText = "position:fixed;top:6px;right:56px;width:1px;height:28px;pointer-events:none;z-index:40;";
+    el.style.cssText =
+      "position:fixed;top:6px;right:56px;width:1px;height:28px;pointer-events:none;z-index:40;";
     document.body.appendChild(el);
     return el;
   })[0];
@@ -81,35 +85,38 @@ export function AppShell() {
       }}
     >
       <Box component="main" sx={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
-        <Box sx={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0, position: "relative" }}>
-          <ChartWorkspace onCreateAlert={openAlertDialog} onOpenProfile={openProfileMenu} />
-          {sideDock ? (
-            <>
-              {isMobile ? (
-                <Box
-                  onClick={() => settings.setSidePanel(null)}
-                  sx={{
-                    position: "absolute",
-                    inset: 0,
-                    right: 52,
-                    bgcolor: "rgba(0,0,0,0.45)",
-                    zIndex: 19,
-                  }}
+        <Box sx={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
+          <Box sx={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0, position: "relative" }}>
+            <ChartWorkspace onCreateAlert={openAlertDialog} onOpenProfile={openProfileMenu} />
+            {sideDock ? (
+              <>
+                {isMobile ? (
+                  <Box
+                    onClick={() => settings.setSidePanel(null)}
+                    sx={{
+                      position: "absolute",
+                      inset: 0,
+                      right: 52,
+                      bgcolor: "rgba(0,0,0,0.45)",
+                      zIndex: 19,
+                    }}
+                  />
+                ) : null}
+                <SidePanel
+                  panel={sideDock}
+                  onClose={() => settings.setSidePanel(null)}
+                  onCreateAlert={openAlertDialog}
+                  onOpenObjectTree={() => chart.openObjectTree()}
+                  onRunPine={(code) => chart.runPineDraft(code)}
+                  overlay={isMobile}
                 />
-              ) : null}
-              <SidePanel
-                panel={sideDock}
-                onClose={() => settings.setSidePanel(null)}
-                onCreateAlert={openAlertDialog}
-                onOpenObjectTree={() => chart.openObjectTree()}
-                onRunPine={(code) => chart.runPineDraft(code)}
-                overlay={isMobile}
-              />
-            </>
-          ) : null}
+              </>
+            ) : null}
+            {ticketOpen ? <OrderTicketPanel /> : null}
+          </Box>
+          <DemoTradingDock />
         </Box>
 
-        {/* Pine docks to the RIGHT of the chart (TradingView default when opening from rail). */}
         {pineOpen ? (
           <Box
             sx={{

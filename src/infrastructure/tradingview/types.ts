@@ -22,6 +22,8 @@ export type {
   IChartWidgetApi,
   IDropdownApi,
   IExternalSaveLoadAdapter,
+  IOrderLineAdapter,
+  IPositionLineAdapter,
   LayoutType,
   LibrarySymbolInfo,
   LineToolsAndGroupsLoadRequestContext,

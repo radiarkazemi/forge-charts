@@ -13,6 +13,7 @@ import type { HeaderToolbarApi } from "./header-toolbar";
 import { layoutSyncBus } from "./layout-sync";
 import { useChartAlertLines } from "./useChartAlertLines";
 import { useTradingViewWidget } from "./useTradingViewWidget";
+import { QuickTradeOverlay, useDemoChartLines } from "@/features/demo-trading";
 
 interface TradingViewChartProps {
   readonly onCreateAlert: () => void;
@@ -28,7 +29,7 @@ export function TradingViewChart({
   paneIndex = 0,
   initialSymbol,
 }: TradingViewChartProps) {
-  const { chart, barReplay, datafeed, saveLoadAdapter, storage, settings, alerts, quotes, config } =
+  const { chart, barReplay, datafeed, saveLoadAdapter, storage, settings, alerts, quotes, config, demoTrading, demoSpace } =
     useServices();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const headerApiRef = useRef<HeaderToolbarApi | null>(null);
@@ -164,11 +165,15 @@ export function TradingViewChart({
       api.updateProfile(activeProfile(settings.settings.get()));
     },
     onWidgetReady: (widget) => {
-      if (isPrimary) barReplay.attach(widget, datafeed);
+      if (isPrimary) {
+        barReplay.attach(widget, datafeed);
+        demoSpace.attach(widget, datafeed, demoTrading);
+      }
     },
   });
 
   useChartAlertLines(isPrimary ? controller : null, alerts);
+  useDemoChartLines(isPrimary);
 
   const showReplayToolbar = isPrimary && (replayActive || forceReplayUi);
 
@@ -189,6 +194,8 @@ export function TradingViewChart({
       }}
     >
       <Box ref={containerRef} sx={{ position: "absolute", inset: 0 }} />
+
+      {isPrimary ? <QuickTradeOverlay /> : null}
 
       {showReplayToolbar ? <BarReplayToolbar controller={barReplay} forceVisible={forceReplayUi} /> : null}
 
