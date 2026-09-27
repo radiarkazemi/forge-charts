@@ -16,7 +16,6 @@ import {
 } from "@/features/pine/orca-runtime";
 import {
   DEALING_RANGES_DEFAULTS,
-  DEALING_RANGES_STUDY_NAME,
 } from "./dealing-ranges-indicator";
 
 export function useDealingRangesStudy(enabled = true): void {
