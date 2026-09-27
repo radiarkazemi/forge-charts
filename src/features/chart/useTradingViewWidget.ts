@@ -203,12 +203,13 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         // layouts that migrated from older autosave keys once.
         try {
           const clearedKey = "forge.charts.volumeDefaultCleared.v2";
+          const readyWidget = widget;
           if (typeof localStorage !== "undefined" && localStorage.getItem(clearedKey) !== "1") {
             const stripAndSave = () => {
               try {
                 controller.removeVolumeStudy();
-                if (isPrimary) {
-                  widget.save((state) => storage.set(autosaveKey, state));
+                if (isPrimary && readyWidget) {
+                  readyWidget.save((state) => storage.set(autosaveKey, state));
                 }
               } catch {
                 /* ignore */

@@ -50,7 +50,6 @@ export function TradeLinesOverlay({
       }
 
       const contract = snap.instrument.contractSize;
-      const mark = mid ?? quote?.price ?? null;
       const next: ChipLayout[] = [];
       const open = demoTrading.openPositionsForSymbol(symbol);
       const span = range.to - range.from;

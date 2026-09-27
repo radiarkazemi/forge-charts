@@ -365,7 +365,6 @@ export function useDemoChartLines(enabled = true): void {
         let line = orderLinesRef.current.get(order.id);
         if (!line) {
           const color = order.side === "buy" ? "#2962ff" : "#f23645";
-          const label = `${order.type.toUpperCase()} ${order.qty}`;
           if (preferNative) {
             try {
               const native = await api.createOrderLine();

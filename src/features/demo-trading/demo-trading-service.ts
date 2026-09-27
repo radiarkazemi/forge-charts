@@ -773,7 +773,10 @@ export class DemoTradingService {
     const s = this.state.get();
     const entry = this.referenceEntry(s);
     if (entry == null) return;
-    const patch: Partial<DemoTradingSnapshot> = {};
+    const patch: {
+      takeProfitPrice?: number;
+      stopLossPrice?: number;
+    } = {};
     if (s.takeProfitEnabled && s.takeProfitTicks != null) {
       patch.takeProfitPrice = this.priceFromTicks("tp", s.side, entry, s.takeProfitTicks, s.instrument.tickSize);
     }
