@@ -122,13 +122,26 @@ export function useDealingRangesStudy(enabled = true): void {
       try {
         const api = widget.activeChart();
         if (!api) return;
+        const nowSec = Math.floor(Date.now() / 1000);
+        const fromSec = nowSec - Math.max(opts.lookbackDays, 7) * 86_400;
         const exported = await api.exportData({
           includeTime: true,
           includeSeries: true,
           includedStudies: [],
+          from: fromSec,
+          to: nowSec + 86_400,
         });
         if (cancelled) return;
-        const bars = barsFromChartExport(exported);
+        let bars = barsFromChartExport(exported);
+        // Fallback: export whatever is loaded if ranged export is empty.
+        if (bars.length < 20) {
+          const all = await api.exportData({
+            includeTime: true,
+            includeSeries: true,
+            includedStudies: [],
+          });
+          bars = barsFromChartExport(all);
+        }
         if (bars.length < 20) {
           clearDrawings();
           return;
