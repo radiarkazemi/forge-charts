@@ -148,14 +148,6 @@ export function useDealingRangesStudy(enabled = true): void {
         }
         const cmds = computeDealingRanges(bars, opts);
         clearDrawings();
-        console.info(
-          "[forge-dr]",
-          `bars=${bars.length}`,
-          `cmds=${cmds.length}`,
-          `rects=${cmds.filter((c) => c.kind === "rect").length}`,
-          `opts`,
-          opts,
-        );
         if (cmds.length === 0) {
           lastKeyRef.current = key;
           return;

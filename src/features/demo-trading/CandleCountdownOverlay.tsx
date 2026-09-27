@@ -1,6 +1,7 @@
 import Box from "@mui/material/Box";
 import { useEffect, useState } from "react";
 import { useServices } from "@/app/use-services";
+import { isMarketSessionOpen } from "@/domain";
 import { useStore } from "@/shared/hooks/useStore";
 import { resolutionToStepMs } from "./demo-space-controller";
 
@@ -16,15 +17,25 @@ function formatRemain(ms: number): string {
 /**
  * TradingView-style candle close countdown (price-scale companion).
  * Uses demo-space form progress when active; otherwise wall-clock vs resolution.
+ * Hidden when the real market session is closed (unless demo-space is running).
  */
 export function CandleCountdownOverlay() {
-  const { demoSpace, chart } = useServices();
+  const { demoSpace, chart, symbols } = useServices();
   const space = useStore(demoSpace.state);
   const interval = useStore(chart.state, (s) => s.interval);
+  const ticker = useStore(chart.state, (s) => s.symbol);
   const [label, setLabel] = useState("0:00");
+  const [sessionOpen, setSessionOpen] = useState(true);
 
   useEffect(() => {
     const tick = () => {
+      const info = symbols.findByTicker(ticker);
+      const open = space.active || !info || isMarketSessionOpen(info);
+      setSessionOpen(open);
+      if (!open) {
+        setLabel("0:00");
+        return;
+      }
       if (space.active && space.stepMs > 0) {
         const remain = space.stepMs * (1 - space.formProgress);
         setLabel(formatRemain(remain));
@@ -38,11 +49,13 @@ export function CandleCountdownOverlay() {
     tick();
     const id = window.setInterval(tick, 250);
     return () => window.clearInterval(id);
-  }, [space.active, space.stepMs, space.formProgress, interval]);
+  }, [space.active, space.stepMs, space.formProgress, interval, ticker, symbols]);
 
   // Hide on daily+ (TV has no intraday countdown there).
   const stepMs = space.active ? space.stepMs : resolutionToStepMs(String(interval));
   if (stepMs >= 24 * 60 * 60_000) return null;
+  // Market closed → no countdown (matches TradingView endofday freeze).
+  if (!sessionOpen) return null;
 
   return (
     <Box

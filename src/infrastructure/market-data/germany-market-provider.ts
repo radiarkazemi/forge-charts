@@ -749,11 +749,13 @@ export class GermanyMarketProvider implements MarketDataProvider {
 
     // Minute charts: when ticks are quiet, animate the forming bar along the
     // last closed candle’s OHLC path so 1m (etc.) visibly moves.
+    // Never invent motion when the market session is closed.
     if (parseInterval(interval).unit === "minutes" && typeof window !== "undefined") {
       let pathTemplate: Bar | null = null;
       let pathBucket = -1;
       let pathStartedMs = 0;
       const synth = window.setInterval(() => {
+        if (!isMarketSessionOpen(symbol)) return;
         if (lastTickMs > 0 && Date.now() - lastTickMs < 1_200) return;
         if (!current || !Number.isFinite(current.close)) return;
         const wall = alignTime(Math.floor(Date.now() / 1000), step);

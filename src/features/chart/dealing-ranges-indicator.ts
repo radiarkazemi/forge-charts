@@ -22,7 +22,9 @@ export const DEALING_RANGES_DEFAULTS = {
   breakOnWick: false,
 } as const;
 
-export function createDealingRangesIndicator(_PineJS: unknown): CustomIndicator {
+// Charting Library passes PineJS into custom_indicators_getter; we only need Std.close.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) => number } }): CustomIndicator {
   return {
     name: DEALING_RANGES_STUDY_NAME,
     metainfo: {
@@ -120,10 +122,16 @@ export function createDealingRangesIndicator(_PineJS: unknown): CustomIndicator 
         },
       ],
     } as never,
-    constructor: function (this: { main?: (ctx: unknown, input: (i: number) => unknown) => unknown }) {
-      this.main = function () {
-        // Invisible stub — real drawings come from useDealingRangesStudy.
-        return [NaN];
+    constructor: function (this: {
+      main?: (ctx: unknown, input: (i: number) => unknown) => unknown;
+      _context?: unknown;
+    }) {
+      this.main = function (ctx: unknown) {
+        this._context = ctx;
+        // Must return a finite price — NaN on a linked price study collapses
+        // the scale and makes the main series candles vanish.
+        // Invisible (transparency 100); real drawings come from useDealingRangesStudy.
+        return [PineJS.Std.close(this._context)];
       };
     } as never,
   };
