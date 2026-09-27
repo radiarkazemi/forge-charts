@@ -103,6 +103,8 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   private replayCutoffSec: number | null = null;
   private replayActive = false;
   private replayOnTick: SubscribeBarsCallback | null = null;
+  /** Prefetched bars for replay/demo — served from memory so past cutoffs don't re-fetch live-only OHLC. */
+  private replayBuffer: Bar[] | null = null;
 
   constructor(
     private readonly marketData: MarketDataService,
@@ -113,11 +115,17 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   beginReplay(): void {
     this.replayActive = true;
     this.replayCutoffSec = null;
+    this.replayBuffer = null;
   }
 
   /** Hide bars with time (unix sec) strictly after cutoff. Also drives getServerTime. */
   setReplayCutoff(cutoffSec: number | null): void {
     this.replayCutoffSec = cutoffSec;
+  }
+
+  /** Attach the prefetched stepping buffer so getBars can serve history at any past cutoff. */
+  setReplayBuffer(bars: readonly Bar[]): void {
+    this.replayBuffer = bars.length > 0 ? [...bars] : null;
   }
 
   getReplayCutoff(): number | null {
@@ -141,6 +149,7 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   endReplay(): void {
     this.replayActive = false;
     this.replayCutoffSec = null;
+    this.replayBuffer = null;
   }
 
   /** Prefetch a deep history buffer for stepping (before cutoff is applied). */
@@ -217,22 +226,53 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       const cutoff = this.replayCutoffSec;
       const cutoffOn = cutoff != null && Number.isFinite(cutoff);
 
-      /*
-       * Demo space / Bar Replay: the chart often still asks for the live “now”
-       * window after cutoff is set. That range filters to empty and leaves a
-       * blank left side. Clamp `to` to cutoff, and when the whole request is
-       * after the cut, pull countBack bars ending at the cutoff instead.
-       */
+      // Prefer the prefetched replay buffer — providers often only return the
+      // latest window, so re-fetching with to=pastCutoff yields empty history.
+      if (this.replayActive && this.replayBuffer && this.replayBuffer.length > 0) {
+        const end = cutoffOn ? cutoff! : Number.POSITIVE_INFINITY;
+        const countBack = Math.max(periodParams.countBack || 300, 1);
+        const upToCutoff = this.replayBuffer.filter((b) => Number(b.time) <= end);
+
+        let slice: Bar[];
+        if (periodParams.firstDataRequest || periodParams.from > end) {
+          // First paint or live-window request: fill chart with bars ending at cutoff.
+          slice = upToCutoff.slice(-countBack);
+        } else {
+          const right = Math.min(periodParams.to, end);
+          slice = upToCutoff.filter(
+            (b) => Number(b.time) >= periodParams.from && Number(b.time) <= right,
+          );
+          if (slice.length === 0) {
+            const older = upToCutoff.filter((b) => Number(b.time) < periodParams.from);
+            if (older.length === 0) {
+              onResult([], { noData: true });
+              return;
+            }
+            slice = older.slice(-countBack);
+          }
+        }
+
+        if (periodParams.firstDataRequest) {
+          this.source.set({ ticker: symbol.ticker, providerId: "replay-buffer", isSynthetic: false });
+        }
+        if (slice.length === 0) {
+          onResult([], { noData: true });
+          return;
+        }
+        onResult(slice.map(toTvBar), { noData: false });
+        return;
+      }
+
       let from = periodParams.from;
       let to = periodParams.to;
       let countBack = periodParams.countBack;
       if (cutoffOn) {
         if (from > cutoff!) {
-          to = cutoff!;
+          to = cutoff! + 1;
           from = 0;
           countBack = Math.max(countBack || 300, 500);
         } else {
-          to = Math.min(to, cutoff!);
+          to = Math.min(to, cutoff! + 1);
         }
       }
 
@@ -246,8 +286,7 @@ export class TradingViewDatafeed implements IBasicDataFeed {
         this.source.set({ ticker: symbol.ticker, providerId, isSynthetic });
       }
 
-      const filtered =
-        cutoffOn ? bars.filter((b) => Number(b.time) <= cutoff!) : bars;
+      const filtered = cutoffOn ? bars.filter((b) => Number(b.time) <= cutoff!) : bars;
       if (filtered.length === 0) {
         onResult([], { noData: true });
         return;

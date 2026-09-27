@@ -142,6 +142,7 @@ export class DemoSpaceController {
     // Need prior history on screen — if start is near buffer head, still OK.
     this.buffer = [...buffer];
     const bar = buffer[index]!;
+    datafeed.setReplayBuffer(buffer);
     datafeed.setReplayCutoff(bar.time);
 
     this.patch({
@@ -199,9 +200,9 @@ export class DemoSpaceController {
     if (!widget) return;
     try {
       const chart = widget.activeChart();
-      const available = Math.max(1, cursorIndex + 1);
-      const barsOnScreen = Math.min(120, Math.max(60, Math.min(available, 120)));
-      const from = endTimeSec - barsOnScreen * barSec;
+      // Prefer real buffer timestamps so weekend gaps don't invent empty range.
+      const fromBar = this.buffer[Math.max(0, cursorIndex - 100)];
+      const from = fromBar ? Number(fromBar.time) : endTimeSec - 100 * barSec;
       const to = endTimeSec + barSec * 2;
       await chart.setVisibleRange({ from, to });
     } catch {

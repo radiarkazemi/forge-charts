@@ -282,6 +282,7 @@ export class BarReplayController {
       selecting: false,
     });
 
+    datafeed.setReplayBuffer(buffer);
     datafeed.setReplayCutoff(buffer[index]!.time);
     await this.removeMarker();
     await this.drawMarker(buffer[index]!.time);
