@@ -149,8 +149,8 @@ export function useDealingRangesStudy(enabled = true): void {
         return;
       }
 
-      const ownerStudyId = studyIds[0]!;
-      const opts = readOptions(ownerStudyId) ?? defaultOpts();
+      const studyId = studyIds[0]!;
+      const opts = readOptions(studyId) ?? defaultOpts();
       const key = JSON.stringify({ symbol, interval, opts, studies: studyIds });
       if (!force && key === lastKeyRef.current && entityIdsRef.current.length > 0) {
         return;
@@ -190,7 +190,7 @@ export function useDealingRangesStudy(enabled = true): void {
         const ids =
           cmds.length === 0
             ? ([] as EntityId[])
-            : await paintOrcaOnChart(api, cmds, { ownerStudyId });
+            : await paintOrcaOnChart(api, cmds);
         if (cancelled || myGen !== genRef.current) {
           for (const id of ids) {
             try {
@@ -213,7 +213,13 @@ export function useDealingRangesStudy(enabled = true): void {
             /* ignore */
           }
         }
-        console.info(`[forge-dr] painted ${ids.length} shapes from ${bars.length} bars (cmds=${cmds.length})`);
+        console.info(
+          `[forge-dr] painted ${ids.length} shapes from ${bars.length} bars (cmds=${cmds.length})`,
+          cmds[0]
+            ? `first=${cmds[0].kind}@${cmds[0].t1}/${cmds[0].p1}->${cmds[0].t2}/${cmds[0].p2}`
+            : "none",
+          `bars=${bars[0]?.time}..${bars[bars.length - 1]?.time}`,
+        );
       } catch (err) {
         console.warn("[forge-dr] paint failed", err);
       } finally {

@@ -47,7 +47,7 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
             trackPrice: false,
             transparency: 100,
             visible: false,
-            color: "#00000000",
+            color: "#000000",
           },
         },
         inputs: { ...DEALING_RANGES_DEFAULTS },

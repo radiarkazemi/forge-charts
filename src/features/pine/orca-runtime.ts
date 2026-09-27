@@ -669,7 +669,11 @@ export async function paintOrcaOnChart(
         );
         if (id) ids.push(id);
       } else if (cmd.kind === "rect" && cmd.t2 != null && cmd.p2 != null) {
-        const fill = clColor(cmd.fill ?? cmd.color, stroke);
+        // Prefer rgba with spaces — CL docs use this form for rectangle fills.
+        const fillHex = clColor(cmd.fill ?? cmd.color, stroke);
+        const r = Number.parseInt(fillHex.slice(1, 3), 16);
+        const g = Number.parseInt(fillHex.slice(3, 5), 16);
+        const b = Number.parseInt(fillHex.slice(5, 7), 16);
         const id = await chart.createMultipointShape(
           [
             { time: cmd.t1 as never, price: cmd.p1 },
@@ -680,12 +684,10 @@ export async function paintOrcaOnChart(
             shape: "rectangle",
             overrides: {
               color: stroke,
-              backgroundColor: fill,
+              backgroundColor: `rgba(${r}, ${g}, ${b}, 0.2)`,
               fillBackground: true,
-              linewidth: 1,
-              transparency: 60,
-              extendLeft: false,
-              extendRight: false,
+              linewidth: 2,
+              transparency: 50,
             },
           },
         );
