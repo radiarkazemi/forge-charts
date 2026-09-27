@@ -335,25 +335,34 @@ async function tryCreate(
   withOverrides: boolean,
 ): Promise<EntityId | null> {
   const overrides = withOverrides ? (snap.overrides as never) : ({} as never);
+  const isLongShort = snap.shape === "long_position" || snap.shape === "short_position";
   const useSingle =
-    SINGLE_POINT_SHAPES.has(snap.shape) || (snap.points.length === 1 && !snap.shape.includes("fib"));
+    SINGLE_POINT_SHAPES.has(snap.shape) ||
+    (snap.points.length === 1 && !snap.shape.includes("fib")) ||
+    (isLongShort && snap.points.length === 1);
 
-  if (useSingle) {
+  if (useSingle || isLongShort) {
     const p = snap.points[0]!;
     try {
+      // Long/Short position: prefer createShape with a single anchor; heavy overrides lock CL.
       const id = await chart.createShape(
         { time: p.time, price: p.price },
         {
           shape: snap.shape as never,
           text: snap.text,
           disableUndo: true,
-          overrides,
+          overrides: isLongShort ? ({} as never) : overrides,
         },
       );
       if (id) return id;
     } catch {
       /* fall through to multipoint */
     }
+  }
+
+  if (isLongShort) {
+    // Avoid multipoint fallback for positions — it often freezes the chart.
+    return null;
   }
 
   try {
@@ -379,6 +388,10 @@ export async function createShapeFromSnapshot(
   if (Object.keys(snap.overrides).length > 0) {
     const bare = await tryCreate(chart, snap, false);
     if (bare) return bare;
+  }
+  // Long/short: never fall back to trend_line (causes lock / wrong tool).
+  if (snap.shape === "long_position" || snap.shape === "short_position") {
+    return null;
   }
   // Last resort: preserve geometry as a trend/horizontal so the peer pane still shows something.
   try {

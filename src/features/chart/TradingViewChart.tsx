@@ -27,6 +27,8 @@ interface TradingViewChartProps {
   /** 0 = primary (alerts, Forge header, shared controller). */
   readonly paneIndex?: number;
   readonly initialSymbol?: string;
+  /** Multi-layout: hide Charting Library header (shared LayoutTopBar above). */
+  readonly hideHeader?: boolean;
 }
 
 export function TradingViewChart({
@@ -34,6 +36,7 @@ export function TradingViewChart({
   onOpenProfile,
   paneIndex = 0,
   initialSymbol,
+  hideHeader = false,
 }: TradingViewChartProps) {
   const { chart, barReplay, datafeed, saveLoadAdapter, storage, settings, alerts, quotes, config, demoTrading, demoSpace } =
     useServices();
@@ -68,24 +71,17 @@ export function TradingViewChart({
     controller.setSyncHooks({
       onSymbolChanged: (ticker) => {
         settings.setPaneSymbol(paneIndex, ticker);
-        if (paneIndex === 0) {
-          layoutSyncBus.handlePrimarySymbolChanged(ticker);
-        } else {
-          layoutSyncBus.recordPaneSymbol(paneIndex, ticker);
-          layoutSyncBus.notifySymbol(paneIndex, ticker);
-        }
+        layoutSyncBus.recordPaneSymbol(paneIndex, ticker);
+        // Broadcast only when Symbol sync is ON (notifySymbol checks the flag).
+        layoutSyncBus.notifySymbol(paneIndex, ticker);
       },
       onIntervalChanged: (interval) => {
+        layoutSyncBus.recordPaneInterval(paneIndex, interval);
         if (paneIndex === 0) {
-          // Remember only when primary is the active editing target.
-          if (layoutSyncBus.getActivePane() === 0) {
-            settings.rememberChart(settings.settings.get().lastSymbol, interval);
-          }
-          layoutSyncBus.handlePrimaryIntervalChanged(interval);
-        } else {
-          layoutSyncBus.recordPaneInterval(paneIndex, interval);
-          layoutSyncBus.notifyInterval(paneIndex, interval);
+          settings.rememberChart(settings.settings.get().lastSymbol, interval);
         }
+        // Broadcast only when Interval sync is ON — default OFF so panes stay independent.
+        layoutSyncBus.notifyInterval(paneIndex, interval);
       },
       onVisibleRangeChanged: (from, to) => layoutSyncBus.notifyVisibleRange(paneIndex, from, to),
       onCrosshairMoved: (time) => layoutSyncBus.notifyCrosshair(paneIndex, time),
@@ -161,6 +157,7 @@ export function TradingViewChart({
     alertCount,
     isPrimary,
     paneIndex,
+    hideHeader,
     onCreateAlert,
     onOpenProfile,
     getProfile: () => activeProfile(settings.settings.get()),

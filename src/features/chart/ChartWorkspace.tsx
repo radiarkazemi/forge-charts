@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
 import { chartPaneArea, getChartLayoutGrid, MAX_CHART_PANES } from "./chart-layouts";
+import { LayoutTopBar } from "./LayoutTopBar";
 import { layoutSyncBus } from "./layout-sync";
 import { TradingViewChart } from "./TradingViewChart";
 
@@ -13,7 +14,8 @@ interface ChartWorkspaceProps {
 
 /**
  * TradingView-style multi-chart workspace.
- * Active pane: blue ring + star badge. Drawings sync by absolute time/price.
+ * Multi-pane: full-width LayoutTopBar above the grid; each pane is headerless.
+ * Active pane: blue ring + star. Drawings sync by absolute time/price.
  */
 export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceProps) {
   const { settings } = useServices();
@@ -22,6 +24,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   const lastSymbol = useStore(settings.settings, (s) => s.lastSymbol || "XAUUSD");
   const layoutSync = useStore(settings.settings, (s) => s.layoutSync);
   const grid = getChartLayoutGrid(chartLayout ?? "s");
+  const multi = grid.count > 1;
   const [activePane, setActivePane] = useState(0);
 
   useEffect(() => {
@@ -55,92 +58,81 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
         flex: 1,
         minWidth: 0,
         minHeight: 0,
-        display: "grid",
-        gridTemplateColumns: grid.columns,
-        gridTemplateRows: grid.rows,
-        gridTemplateAreas: grid.areas,
-        gap: "2px",
+        display: "flex",
+        flexDirection: "column",
         bgcolor: "#2a2e39",
-        p: "2px",
       }}
     >
-      {Array.from({ length: MAX_CHART_PANES }, (_, index) => {
-        const visible = index < grid.count;
-        const symbol = paneSymbols[index] ?? lastSymbol;
-        const isActive = visible && grid.count > 1 && activePane === index;
-        return (
-          <Box
-            key={`forge-pane-${index}-nav1`}
-            onPointerDownCapture={() => {
-              if (visible) layoutSyncBus.focusPane(index);
-            }}
-            sx={{
-              gridArea: visible ? chartPaneArea(index) : undefined,
-              minWidth: 0,
-              minHeight: 0,
-              display: visible ? "flex" : "none",
-              position: "relative",
-              outline: isActive ? "2px solid #2962FF" : "2px solid transparent",
-              outlineOffset: "-2px",
-              zIndex: isActive ? 2 : 1,
-              transition: "outline-color 120ms ease",
-              bgcolor: "background.default",
-            }}
-          >
-            {isActive ? (
-              <Box
-                aria-hidden
-                title="Active chart — top toolbar applies here"
-                sx={{
-                  position: "absolute",
-                  left: 10,
-                  bottom: 36,
-                  zIndex: 5,
-                  width: 18,
-                  height: 18,
-                  pointerEvents: "none",
-                  color: "#2962FF",
-                  filter: "drop-shadow(0 0 2px rgba(0,0,0,0.6))",
-                }}
-              >
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-                  <path d="M12 2.5l2.9 6.1 6.7.9-4.9 4.6 1.3 6.6L12 17.8 5.9 20.7l1.3-6.6L2.4 9.5l6.7-.9L12 2.5z" />
-                </svg>
-              </Box>
-            ) : null}
-            {isActive && index > 0 ? (
-              <Box
-                sx={{
-                  position: "absolute",
-                  top: 8,
-                  left: "50%",
-                  transform: "translateX(-50%)",
-                  zIndex: 6,
-                  pointerEvents: "none",
-                  bgcolor: "rgba(41, 98, 255, 0.92)",
-                  color: "#fff",
-                  fontSize: 11,
-                  fontWeight: 600,
-                  px: 1.25,
-                  py: 0.35,
-                  borderRadius: "4px",
-                  letterSpacing: 0.2,
-                  boxShadow: "0 1px 4px rgba(0,0,0,0.35)",
-                  fontFamily: '"Trebuchet MS", "Segoe UI", sans-serif',
-                }}
-              >
-                Selected — use top bar for symbol / timeframe
-              </Box>
-            ) : null}
-            <TradingViewChart
-              onCreateAlert={onCreateAlert}
-              onOpenProfile={onOpenProfile}
-              paneIndex={index}
-              initialSymbol={symbol}
-            />
-          </Box>
-        );
-      })}
+      {multi ? <LayoutTopBar /> : null}
+
+      <Box
+        sx={{
+          flex: 1,
+          minWidth: 0,
+          minHeight: 0,
+          display: "grid",
+          gridTemplateColumns: grid.columns,
+          gridTemplateRows: grid.rows,
+          gridTemplateAreas: grid.areas,
+          gap: "2px",
+          p: "2px",
+        }}
+      >
+        {Array.from({ length: MAX_CHART_PANES }, (_, index) => {
+          const visible = index < grid.count;
+          const symbol = paneSymbols[index] ?? lastSymbol;
+          const isActive = visible && multi && activePane === index;
+          return (
+            <Box
+              key={`forge-pane-${index}-nav2`}
+              onPointerDownCapture={() => {
+                if (visible) layoutSyncBus.focusPane(index);
+              }}
+              sx={{
+                gridArea: visible ? chartPaneArea(index) : undefined,
+                minWidth: 0,
+                minHeight: 0,
+                display: visible ? "flex" : "none",
+                position: "relative",
+                outline: isActive ? "2px solid #2962FF" : "2px solid transparent",
+                outlineOffset: "-2px",
+                zIndex: isActive ? 2 : 1,
+                transition: "outline-color 120ms ease",
+                bgcolor: "background.default",
+              }}
+            >
+              {isActive ? (
+                <Box
+                  aria-hidden
+                  title="Active chart"
+                  sx={{
+                    position: "absolute",
+                    left: 10,
+                    bottom: 36,
+                    zIndex: 5,
+                    width: 18,
+                    height: 18,
+                    pointerEvents: "none",
+                    color: "#2962FF",
+                    filter: "drop-shadow(0 0 2px rgba(0,0,0,0.6))",
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                    <path d="M12 2.5l2.9 6.1 6.7.9-4.9 4.6 1.3 6.6L12 17.8 5.9 20.7l1.3-6.6L2.4 9.5l6.7-.9L12 2.5z" />
+                  </svg>
+                </Box>
+              ) : null}
+              <TradingViewChart
+                onCreateAlert={onCreateAlert}
+                onOpenProfile={onOpenProfile}
+                paneIndex={index}
+                initialSymbol={symbol}
+                hideHeader={multi}
+              />
+            </Box>
+          );
+        })}
+      </Box>
     </Box>
   );
 }

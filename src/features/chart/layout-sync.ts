@@ -58,7 +58,10 @@ class LayoutSyncBus {
   private syncingDrawings = false;
   private readonly groups: DrawingGroup[] = [];
   private readonly entityToGroup = new Map<string, DrawingGroup>();
+  /** Entity ids created as mirrors — ignore their create events to avoid loops. */
+  private readonly mirrorIds = new Set<string>();
   private readonly activeListeners = new Set<(paneIndex: number) => void>();
+  private readonly paneStateListeners = new Set<(state: { pane: number; symbol: string; interval: Interval }) => void>();
   private drawTargetPane = 0;
   private seedTimer = 0;
   /** Last intentionally-applied interval per pane (for header routing). */
@@ -107,6 +110,73 @@ class LayoutSyncBus {
     this.activeListeners.add(listener);
     listener(this.activePane);
     return () => this.activeListeners.delete(listener);
+  }
+
+  subscribeActivePaneState(
+    listener: (state: { pane: number; symbol: string; interval: Interval }) => void,
+  ): () => void {
+    this.paneStateListeners.add(listener);
+    listener({
+      pane: this.activePane,
+      symbol: this.getPaneState(this.activePane).symbol,
+      interval: this.getPaneState(this.activePane).interval,
+    });
+    return () => this.paneStateListeners.delete(listener);
+  }
+
+  getPaneState(paneIndex: number): { symbol: string; interval: Interval } {
+    const entry = this.panes.get(paneIndex);
+    const st = entry?.controller.state.get();
+    return {
+      symbol: this.paneSymbols.get(paneIndex) ?? st?.symbol ?? "",
+      interval: this.paneIntervals.get(paneIndex) ?? st?.interval ?? "15",
+    };
+  }
+
+  /** Change only the selected pane’s interval (never broadcasts unless Interval sync is ON). */
+  setActivePaneInterval(interval: Interval): void {
+    const active = this.activePane;
+    const entry = this.panes.get(active);
+    if (!entry?.controller.isReady) return;
+    this.withLock(() => {
+      entry.controller.setInterval(interval);
+      this.paneIntervals.set(active, interval);
+    });
+    this.emitPaneState();
+    // Only mirror to other panes when the user explicitly enabled Interval sync.
+    if (this.flags.interval) {
+      this.notifyInterval(active, interval);
+    }
+  }
+
+  /** Change only the selected pane’s symbol (broadcast only when Symbol sync is ON). */
+  setActivePaneSymbol(ticker: string): void {
+    const active = this.activePane;
+    const entry = this.panes.get(active);
+    if (!entry?.controller.isReady) return;
+    this.withLock(() => {
+      entry.controller.setSymbol(ticker);
+      this.paneSymbols.set(active, ticker);
+    });
+    this.emitPaneState();
+    if (this.flags.symbol) {
+      this.notifySymbol(active, ticker);
+    }
+  }
+
+  openIndicatorsOnActive(): void {
+    this.panes.get(this.activePane)?.controller.openIndicators();
+  }
+
+  private emitPaneState(): void {
+    const st = this.getPaneState(this.activePane);
+    for (const listener of this.paneStateListeners) {
+      try {
+        listener({ pane: this.activePane, ...st });
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   register(index: number, controller: ChartController): () => void {
@@ -187,7 +257,10 @@ class LayoutSyncBus {
     const changed = this.activePane !== paneIndex;
     this.activePane = paneIndex;
     this.drawTargetPane = paneIndex;
-    if (changed) this.emitActive();
+    if (changed) {
+      this.emitActive();
+      this.emitPaneState();
+    }
     const tool = this.sharedTool;
     if (tool && paneIndex > 0) {
       void this.applyToolToPane(paneIndex, tool);
@@ -216,48 +289,27 @@ class LayoutSyncBus {
   }
 
   /**
-   * Primary header interval click → apply to the *selected* pane.
-   * When a secondary pane is active, restore the primary chart afterward so
-   * only the selected pane’s timeframe changes.
+   * Legacy primary-header interval hook — only updates the active pane.
+   * Prefer setActivePaneInterval from the shared LayoutTopBar.
    */
   handlePrimaryIntervalChanged(interval: Interval): void {
     if (this.locked) return;
-    const active = this.activePane;
-    if (this.activeCount < 2 || active === 0) {
+    if (this.activeCount < 2) {
       this.paneIntervals.set(0, interval);
-      this.notifyInterval(0, interval);
       return;
     }
-    const primaryPrev = this.paneIntervals.get(0);
-    this.withLock(() => {
-      this.panes.get(active)?.controller.setInterval(interval);
-      this.paneIntervals.set(active, interval);
-      if (primaryPrev && primaryPrev !== interval) {
-        this.panes.get(0)?.controller.setInterval(primaryPrev);
-      }
-    });
+    // Never broadcast from the embedded header; LayoutTopBar owns multi-pane TF.
+    this.setActivePaneInterval(interval);
   }
 
-  /**
-   * Primary header symbol change → apply to the *selected* pane.
-   * Same restore pattern as interval routing.
-   */
   handlePrimarySymbolChanged(ticker: string): void {
     if (this.locked) return;
-    const active = this.activePane;
-    if (this.activeCount < 2 || active === 0) {
+    if (this.activeCount < 2) {
       this.paneSymbols.set(0, ticker);
-      this.notifySymbol(0, ticker);
+      if (this.flags.symbol) this.notifySymbol(0, ticker);
       return;
     }
-    const primaryPrev = this.paneSymbols.get(0);
-    this.withLock(() => {
-      this.panes.get(active)?.controller.setSymbol(ticker);
-      this.paneSymbols.set(active, ticker);
-      if (primaryPrev && this.normalizeSymbol(primaryPrev) !== this.normalizeSymbol(ticker)) {
-        this.panes.get(0)?.controller.setSymbol(primaryPrev);
-      }
-    });
+    this.setActivePaneSymbol(ticker);
   }
 
   recordPaneInterval(paneIndex: number, interval: Interval): void {
@@ -368,6 +420,7 @@ class LayoutSyncBus {
           if (!destChart) continue;
           const created = await createShapeFromSnapshot(destChart, snap);
           if (created) {
+            this.mirrorIds.add(String(created));
             group.entities.set(index, created);
             this.entityToGroup.set(String(created), group);
           }
@@ -388,6 +441,11 @@ class LayoutSyncBus {
     if (this.activeCount < 2) return;
 
     const idKey = String(entityId);
+    // Ignore events from shapes we created as mirrors (prevents sync loops / UI lock).
+    if (this.mirrorIds.has(idKey)) {
+      if (eventType === "remove") this.mirrorIds.delete(idKey);
+      else return;
+    }
 
     if (eventType === "remove") {
       const group = this.entityToGroup.get(idKey);
@@ -396,6 +454,7 @@ class LayoutSyncBus {
       try {
         for (const [p, eid] of group.entities) {
           if (p === paneIndex) continue;
+          this.mirrorIds.add(String(eid));
           this.panes.get(p)?.controller.removeEntity(eid);
           this.entityToGroup.delete(String(eid));
         }
@@ -458,10 +517,12 @@ class LayoutSyncBus {
         if (!destChart) continue;
 
         if (existing) {
+          this.mirrorIds.add(String(existing));
           applyShapeSnapshot(destChart, existing, snap);
         } else {
           const created = await createShapeFromSnapshot(destChart, snap);
           if (created) {
+            this.mirrorIds.add(String(created));
             group.entities.set(index, created);
             this.entityToGroup.set(String(created), group);
           }

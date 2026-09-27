@@ -32,6 +32,8 @@ export interface TradingViewWidgetDeps {
   /** Primary pane mounts Forge header tools; secondary panes stay library-only. */
   readonly isPrimary?: boolean;
   readonly paneIndex?: number;
+  /** Multi-layout: hide CL header (shared LayoutTopBar sits above the grid). */
+  readonly hideHeader?: boolean;
   readonly onCreateAlert: () => void;
   readonly onToggleTheme: () => void;
   readonly onOpenAlertsPanel: () => void;
@@ -102,6 +104,7 @@ function readAutosave(storage: KeyValueStorage): object | undefined {
 export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | null>, deps: TradingViewWidgetDeps): void {
   const { controller, datafeed, saveLoadAdapter, storage, libraryPath, theme } = deps;
   const isPrimary = deps.isPrimary !== false;
+  const hideHeader = Boolean(deps.hideHeader);
   const paneIndex = deps.paneIndex ?? 0;
 
   const onCreateAlert = useEffectEvent(() => deps.onCreateAlert());
@@ -175,6 +178,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
           savedState: isPrimary ? savedState : undefined,
           isMobile,
           secondaryPane: !isPrimary,
+          hideHeader,
         }),
       );
 
@@ -257,9 +261,8 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         }
       });
 
-      // Primary only: Forge header chrome. Secondary panes have no header_widget
-      // so the multi-layout shows a single shared top nav.
-      if (isPrimary) {
+      // Single-chart primary keeps the CL/Forge header. Multi-layout uses LayoutTopBar.
+      if (isPrimary && !hideHeader) {
         void widget.headerReady().then(() => {
           if (cancelled || !widget) return;
           const api = mountHeaderToolbar(widget, {
@@ -314,7 +317,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
     };
     // Keep the widget alive across layout / symbol changes (TradingView in-place).
     // Symbol updates go through chart.setSymbol via TradingViewChart effect.
-  }, [containerRef, controller, datafeed, libraryPath, saveLoadAdapter, storage, isPrimary, paneIndex]);
+  }, [containerRef, controller, datafeed, libraryPath, saveLoadAdapter, storage, isPrimary, paneIndex, hideHeader]);
 
   useEffect(() => {
     void controller.changeTheme(theme);

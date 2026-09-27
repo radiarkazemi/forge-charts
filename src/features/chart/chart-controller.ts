@@ -529,6 +529,24 @@ export class ChartController {
     }
   }
 
+  /** Open the Indicators dialog on this chart. */
+  openIndicators(): void {
+    try {
+      this.activeChart()?.executeActionById("insertIndicator");
+    } catch {
+      /* chart not ready */
+    }
+  }
+
+  /** Open symbol search dialog. */
+  openSymbolSearch(): void {
+    try {
+      this.activeChart()?.executeActionById("symbolSearch");
+    } catch {
+      /* chart not ready */
+    }
+  }
+
   /* ── internals ─────────────────────────────────────────────────────── */
 
   private async applyTheme(mode: ThemeMode): Promise<void> {
