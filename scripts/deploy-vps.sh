@@ -31,6 +31,12 @@ tar -C dist/assets -cf - . | "${SSH[@]}" "${USER}@${HOST}" \
 
 echo "Uploading /charts/index.html (+ brand icons / manifest + static docs if present)"
 "${SCP[@]}" dist/index.html "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/index.html"
+if [[ -f dist/charts/tv-header.css ]]; then
+  "${SCP[@]}" dist/charts/tv-header.css "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/tv-header.css"
+fi
+if [[ -f dist/charts/tv-header-secondary.css ]]; then
+  "${SCP[@]}" dist/charts/tv-header-secondary.css "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/tv-header-secondary.css"
+fi
 if [[ -d dist/brand ]]; then
   tar -C dist -cf - brand | "${SSH[@]}" "${USER}@${HOST}" \
     "rm -rf '${REMOTE_ANIL_CHARTS}/brand' && tar -C '${REMOTE_ANIL_CHARTS}' -xf -"
