@@ -211,15 +211,13 @@ export function useDemoChartLines(enabled = true): void {
             bundle = { mode: "shape" };
             linesRef.current.set(pos.id, bundle);
           }
-          const mid = midRef.current ?? pos.entryPrice;
-          const contract = demoTrading.state.get().instrument.contractSize;
-          const pnl = unrealizedPnl(pos.side, pos.qty, pos.entryPrice, mid, contract);
-          const posLabel = `${pos.side === "buy" ? "L" : "S"} ${pos.qty} · ${formatUsd(pnl)}`;
-          if (bundle.posText !== posLabel || !bundle.pos) {
+          // Thin price guides only — interactive qty/P/L/× chips live in TradeLinesOverlay.
+          const posKey = `pos:${pos.entryPrice}`;
+          if (bundle.posText !== posKey || !bundle.pos) {
             if (bundle.pos) chart.removeEntity(bundle.pos);
             const id = await chart.addHorizontalLine({
               price: pos.entryPrice,
-              text: posLabel,
+              text: "",
               color,
             });
             if (cancelled) {
@@ -227,17 +225,16 @@ export function useDemoChartLines(enabled = true): void {
               return;
             }
             bundle.pos = id ?? undefined;
-            bundle.posText = posLabel;
+            bundle.posText = posKey;
           }
 
           if (pos.takeProfit != null) {
-            const tpPnl = unrealizedPnl(pos.side, pos.qty, pos.entryPrice, pos.takeProfit, contract);
-            const tpLabel = `TP ${pos.qty} · ${formatUsd(tpPnl)}`;
-            if (bundle.tpText !== tpLabel || !bundle.tp) {
+            const tpKey = `tp:${pos.takeProfit}`;
+            if (bundle.tpText !== tpKey || !bundle.tp) {
               if (bundle.tp) chart.removeEntity(bundle.tp);
               const id = await chart.addHorizontalLine({
                 price: pos.takeProfit,
-                text: tpLabel,
+                text: "",
                 color: "#089981",
               });
               if (cancelled) {
@@ -245,7 +242,7 @@ export function useDemoChartLines(enabled = true): void {
                 return;
               }
               bundle.tp = id ?? undefined;
-              bundle.tpText = tpLabel;
+              bundle.tpText = tpKey;
             }
           } else if (bundle.tp) {
             chart.removeEntity(bundle.tp);
@@ -254,13 +251,12 @@ export function useDemoChartLines(enabled = true): void {
           }
 
           if (pos.stopLoss != null) {
-            const slPnl = unrealizedPnl(pos.side, pos.qty, pos.entryPrice, pos.stopLoss, contract);
-            const slLabel = `SL ${pos.qty} · ${formatUsd(slPnl)}`;
-            if (bundle.slText !== slLabel || !bundle.sl) {
+            const slKey = `sl:${pos.stopLoss}`;
+            if (bundle.slText !== slKey || !bundle.sl) {
               if (bundle.sl) chart.removeEntity(bundle.sl);
               const id = await chart.addHorizontalLine({
                 price: pos.stopLoss,
-                text: slLabel,
+                text: "",
                 color: "#ff9800",
               });
               if (cancelled) {
@@ -268,7 +264,7 @@ export function useDemoChartLines(enabled = true): void {
                 return;
               }
               bundle.sl = id ?? undefined;
-              bundle.slText = slLabel;
+              bundle.slText = slKey;
             }
           } else if (bundle.sl) {
             chart.removeEntity(bundle.sl);
@@ -311,23 +307,8 @@ export function useDemoChartLines(enabled = true): void {
               /* ignore */
             }
           }
-        } else {
-          // Shape labels update on the next sync interval (recreate when text changes).
-          const posLabel = `${pos.side === "buy" ? "L" : "S"} ${pos.qty} · ${formatUsd(pnl)}`;
-          if (bundle.posText !== posLabel) {
-            void (async () => {
-              const color = pos.side === "buy" ? "#2962ff" : "#f23645";
-              if (bundle.pos) chart.removeEntity(bundle.pos);
-              const id = await chart.addHorizontalLine({
-                price: pos.entryPrice,
-                text: posLabel,
-                color,
-              });
-              bundle.pos = id ?? undefined;
-              bundle.posText = posLabel;
-            })();
-          }
         }
+        // Shape-mode P/L is shown by TradeLinesOverlay chips (no line recreate).
       }
     };
 

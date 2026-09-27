@@ -150,8 +150,8 @@ export function QuickTradeOverlay({
           height: 34,
           boxSizing: "border-box",
           px: "4px",
-          bgcolor: "#fff",
-          color: "#131722",
+          backgroundColor: "#ffffff !important",
+          color: "#131722 !important",
           fontSize: 13,
           fontWeight: 700,
           border: "1px solid #d1d4dc",
@@ -161,6 +161,7 @@ export function QuickTradeOverlay({
           fontFamily: '"Trebuchet MS","Segoe UI",sans-serif',
           boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
           outline: "none",
+          WebkitTextFillColor: "#131722",
           "&:focus": { borderColor: "#2962ff" },
         }}
       />
