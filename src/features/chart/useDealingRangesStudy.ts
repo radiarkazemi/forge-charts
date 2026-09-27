@@ -86,14 +86,17 @@ export function useDealingRangesStudy(enabled = true): void {
       try {
         const studies = widget.activeChart()?.getAllStudies() ?? [];
         return studies
-          .filter((s) => /dealing\s*ranges/i.test(s.name ?? ""))
+          .filter((s) => {
+            const name = `${s.name ?? ""} ${s.id ?? ""}`;
+            return /dealing\s*ranges/i.test(name) || /DealingRanges@/i.test(name);
+          })
           .map((s) => s.id as EntityId);
       } catch {
         return [];
       }
     };
 
-    const repaint = async () => {
+    const repaint = async (force = false) => {
       if (cancelled || busyRef.current) return;
       const studyIds = findStudyIds();
       if (studyIds.length === 0) {
@@ -101,11 +104,19 @@ export function useDealingRangesStudy(enabled = true): void {
         lastKeyRef.current = "";
         return;
       }
-      // Use the first Dealing Ranges study’s inputs (multi-instance rare).
-      const opts = readOptions(studyIds[0]!);
-      if (!opts) return;
+      const opts = readOptions(studyIds[0]!) ?? {
+        maxRanges: DEALING_RANGES_DEFAULTS.maxRanges,
+        lookbackDays: DEALING_RANGES_DEFAULTS.lookbackDays,
+        fromDate: DEALING_RANGES_DEFAULTS.fromDate,
+        toDate: DEALING_RANGES_DEFAULTS.toDate,
+        showFibs: DEALING_RANGES_DEFAULTS.showFibs,
+        pivotLeft: DEALING_RANGES_DEFAULTS.pivotLeft,
+        pivotRight: DEALING_RANGES_DEFAULTS.pivotRight,
+        extendBars: DEALING_RANGES_DEFAULTS.extendBars,
+        breakOnWick: DEALING_RANGES_DEFAULTS.breakOnWick,
+      };
       const key = JSON.stringify({ symbol, interval, opts, studies: studyIds });
-      if (key === lastKeyRef.current && entityIdsRef.current.length > 0) return;
+      if (!force && key === lastKeyRef.current && entityIdsRef.current.length > 0) return;
 
       busyRef.current = true;
       try {
@@ -124,6 +135,10 @@ export function useDealingRangesStudy(enabled = true): void {
         }
         const cmds = computeDealingRanges(bars, opts);
         clearDrawings();
+        if (cmds.length === 0) {
+          lastKeyRef.current = key;
+          return;
+        }
         const ids = await paintOrcaOnChart(api, cmds);
         if (cancelled) {
           for (const id of ids) chart.removeEntity(id);
@@ -131,25 +146,28 @@ export function useDealingRangesStudy(enabled = true): void {
         }
         entityIdsRef.current = ids;
         lastKeyRef.current = key;
-      } catch {
-        /* ignore transient export errors */
+      } catch (err) {
+        console.warn("[forge-dr] paint failed", err);
       } finally {
         busyRef.current = false;
       }
     };
 
-    void repaint();
+    void repaint(true);
     const poll = window.setInterval(() => {
-      void repaint();
-    }, 2500);
+      void repaint(false);
+    }, 1500);
 
     const onStudy = () => {
       lastKeyRef.current = "";
-      void repaint();
+      window.setTimeout(() => {
+        void repaint(true);
+      }, 200);
     };
     try {
       widget.subscribe("study_event", onStudy);
       widget.subscribe("study_properties_changed", onStudy);
+      widget.subscribe("onAutoSaveNeeded", onStudy);
     } catch {
       /* ignore */
     }
@@ -160,6 +178,7 @@ export function useDealingRangesStudy(enabled = true): void {
       try {
         widget.unsubscribe("study_event", onStudy);
         widget.unsubscribe("study_properties_changed", onStudy);
+        widget.unsubscribe("onAutoSaveNeeded", onStudy);
       } catch {
         /* ignore */
       }
