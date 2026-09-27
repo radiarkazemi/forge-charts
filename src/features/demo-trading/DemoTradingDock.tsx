@@ -55,7 +55,6 @@ export function DemoTradingDock() {
   const acct = demoTrading.activeAccount();
   const openPositions = snap.positions.filter((p) => p.status === "open");
   const workingOrders = snap.orders.filter((o) => o.status === "working");
-  const metrics = demoTrading.ticketMetrics(mid);
 
   const unrealized = useMemo(() => {
     if (mid == null) return 0;
@@ -66,15 +65,11 @@ export function DemoTradingDock() {
   }, [openPositions, mid, snap.instrument.contractSize]);
 
   const usedMargin = openPositions.reduce((sum, p) => {
-    if (mid == null) return sum;
-    const m = demoTrading.ticketMetrics(mid);
-    // Approx: margin per position ≈ tradeValue/leverage at entry
+    // Approx: margin per position ≈ notional / leverage at entry
     return sum + (p.entryPrice * p.qty * snap.instrument.contractSize) / snap.instrument.leverage;
   }, 0);
   const freeMargin = acct.equity - usedMargin;
   const marginLevel = usedMargin > 0 ? (acct.equity / usedMargin) * 100 : 0;
-
-  void metrics;
 
   if (!snap.dockOpen) {
     return (
