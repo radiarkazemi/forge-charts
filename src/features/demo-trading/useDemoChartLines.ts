@@ -4,9 +4,16 @@ import { useStore } from "@/shared/hooks/useStore";
 import type { IPositionLineAdapter, IOrderLineAdapter } from "@/infrastructure/tradingview";
 import { formatUsd, unrealizedPnl } from "./types";
 
+type LineBundle = {
+  pos?: IPositionLineAdapter;
+  tp?: IOrderLineAdapter;
+  sl?: IOrderLineAdapter;
+};
+
 /**
- * Draw TradingView-style position / TP / SL lines on the active chart.
- * No-ops when the primary chart widget is not ready.
+ * TradingView-style on-chart position / TP / SL / pending-order lines.
+ * Create/destroy only when the position set changes; P/L text updates on a timer
+ * so live ticks do not thrash createPositionLine().
  */
 export function useDemoChartLines(enabled = true): void {
   const { demoTrading, chart, quotes } = useServices();
@@ -14,11 +21,11 @@ export function useDemoChartLines(enabled = true): void {
   const ready = useStore(chart.state, (s) => s.ready);
   const symbol = useStore(chart.state, (s) => s.symbol);
   const quote = useStore(quotes.quotes, (q) => q[symbol]);
-  const mid = snap.space.lastPrice ?? quote?.price ?? null;
 
-  const linesRef = useRef<Map<string, { pos?: IPositionLineAdapter; tp?: IOrderLineAdapter; sl?: IOrderLineAdapter }>>(
-    new Map(),
-  );
+  const linesRef = useRef<Map<string, LineBundle>>(new Map());
+  const orderLinesRef = useRef<Map<string, IOrderLineAdapter>>(new Map());
+  const midRef = useRef<number | null>(null);
+  midRef.current = snap.space.lastPrice ?? quote?.price ?? null;
 
   // Feed live quotes into the broker when not in demo space.
   useEffect(() => {
@@ -28,6 +35,7 @@ export function useDemoChartLines(enabled = true): void {
     demoTrading.onMarkPrice(symbol, quote.price);
   }, [demoTrading, enabled, quote?.price, snap.space.active, symbol]);
 
+  // Create / remove position + TP/SL lines when the open set changes.
   useEffect(() => {
     if (!enabled || !ready) return;
     const widget = chart.getWidget();
@@ -40,7 +48,6 @@ export function useDemoChartLines(enabled = true): void {
       const open = demoTrading.openPositionsForSymbol(symbol);
       const keep = new Set(open.map((p) => p.id));
 
-      // Remove stale
       for (const [id, bundle] of [...linesRef.current.entries()]) {
         if (keep.has(id)) continue;
         try {
@@ -59,25 +66,30 @@ export function useDemoChartLines(enabled = true): void {
         if (!bundle) {
           bundle = {};
           try {
+            const color = pos.side === "buy" ? "#2962ff" : "#f23645";
             bundle.pos = await api.createPositionLine();
+            if (cancelled) {
+              bundle.pos.remove();
+              return;
+            }
             bundle.pos
-              .setText(`${pos.side === "buy" ? "+" : "-"}${pos.qty}`)
+              .setText(`${pos.side === "buy" ? "L" : "S"}`)
               .setQuantity(String(pos.qty))
               .setPrice(pos.entryPrice)
               .setExtendLeft(false)
-              .setLineStyle(0)
-              .setLineLength(60)
-              .setBodyBackgroundColor(pos.side === "buy" ? "#2962ff" : "#ef5350")
+              .setLineStyle(2)
+              .setLineLength(80)
+              .setBodyBackgroundColor(color)
               .setBodyTextColor("#ffffff")
-              .setQuantityBackgroundColor(pos.side === "buy" ? "#2962ff" : "#ef5350")
+              .setQuantityBackgroundColor(color)
               .setQuantityTextColor("#ffffff")
-              .setLineColor(pos.side === "buy" ? "#2962ff" : "#ef5350")
+              .setLineColor(color)
               .onClose(() => {
-                const m = demoTrading.state.get().space.lastPrice ?? quote?.price;
+                const m = midRef.current;
                 if (m != null) demoTrading.closePosition(pos.id, m);
               })
               .onReverse(() => {
-                const m = demoTrading.state.get().space.lastPrice ?? quote?.price;
+                const m = midRef.current;
                 if (m != null) demoTrading.reversePosition(pos.id, m);
               });
           } catch {
@@ -86,48 +98,28 @@ export function useDemoChartLines(enabled = true): void {
           linesRef.current.set(pos.id, bundle);
         }
 
-        const mark = mid ?? pos.entryPrice;
-        const pnl = unrealizedPnl(pos.side, pos.qty, pos.entryPrice, mark, snap.instrument.contractSize);
-        try {
-          bundle.pos
-            ?.setPrice(pos.entryPrice)
-            .setText(`${pos.side === "buy" ? "L" : "S"} ${formatUsd(pnl)}`)
-            .setQuantity(`${pos.side === "buy" ? "+" : "-"}${pos.qty}`);
-        } catch {
-          /* ignore */
-        }
-
-        // TP line
+        // TP
         if (pos.takeProfit != null) {
           if (!bundle.tp) {
             try {
               bundle.tp = await api.createOrderLine();
+              if (cancelled) {
+                bundle.tp.remove();
+                return;
+              }
               bundle.tp
                 .setText("TP")
-                .setLineColor("#26a69a")
-                .setBodyBackgroundColor("#26a69a")
+                .setLineColor("#089981")
+                .setBodyBackgroundColor("#089981")
                 .setBodyTextColor("#fff")
-                .setQuantityBackgroundColor("#26a69a")
+                .setQuantityBackgroundColor("#089981")
                 .setQuantityTextColor("#fff")
+                .setLineStyle(2)
+                .setLineLength(80)
                 .onCancel(() => demoTrading.updatePositionExits(pos.id, null, pos.stopLoss));
             } catch {
               /* ignore */
             }
-          }
-          const tpPnl = unrealizedPnl(
-            pos.side,
-            pos.qty,
-            pos.entryPrice,
-            pos.takeProfit,
-            snap.instrument.contractSize,
-          );
-          try {
-            bundle.tp
-              ?.setPrice(pos.takeProfit)
-              .setQuantity(String(pos.qty))
-              .setText(formatUsd(tpPnl));
-          } catch {
-            /* ignore */
           }
         } else if (bundle.tp) {
           try {
@@ -138,11 +130,15 @@ export function useDemoChartLines(enabled = true): void {
           bundle.tp = undefined;
         }
 
-        // SL line
+        // SL
         if (pos.stopLoss != null) {
           if (!bundle.sl) {
             try {
               bundle.sl = await api.createOrderLine();
+              if (cancelled) {
+                bundle.sl.remove();
+                return;
+              }
               bundle.sl
                 .setText("SL")
                 .setLineColor("#ff9800")
@@ -150,25 +146,12 @@ export function useDemoChartLines(enabled = true): void {
                 .setBodyTextColor("#fff")
                 .setQuantityBackgroundColor("#ff9800")
                 .setQuantityTextColor("#fff")
+                .setLineStyle(2)
+                .setLineLength(80)
                 .onCancel(() => demoTrading.updatePositionExits(pos.id, pos.takeProfit, null));
             } catch {
               /* ignore */
             }
-          }
-          const slPnl = unrealizedPnl(
-            pos.side,
-            pos.qty,
-            pos.entryPrice,
-            pos.stopLoss,
-            snap.instrument.contractSize,
-          );
-          try {
-            bundle.sl
-              ?.setPrice(pos.stopLoss)
-              .setQuantity(String(pos.qty))
-              .setText(formatUsd(slPnl));
-          } catch {
-            /* ignore */
           }
         } else if (bundle.sl) {
           try {
@@ -179,22 +162,61 @@ export function useDemoChartLines(enabled = true): void {
           bundle.sl = undefined;
         }
       }
+
+      paintPl();
+    };
+
+    const paintPl = () => {
+      const mid = midRef.current;
+      const contract = demoTrading.state.get().instrument.contractSize;
+      for (const pos of demoTrading.openPositionsForSymbol(symbol)) {
+        const bundle = linesRef.current.get(pos.id);
+        if (!bundle) continue;
+        const mark = mid ?? pos.entryPrice;
+        const pnl = unrealizedPnl(pos.side, pos.qty, pos.entryPrice, mark, contract);
+        try {
+          bundle.pos
+            ?.setPrice(pos.entryPrice)
+            .setQuantity(String(pos.qty))
+            .setText(formatUsd(pnl));
+        } catch {
+          /* ignore */
+        }
+        if (pos.takeProfit != null && bundle.tp) {
+          const tpPnl = unrealizedPnl(pos.side, pos.qty, pos.entryPrice, pos.takeProfit, contract);
+          try {
+            bundle.tp.setPrice(pos.takeProfit).setQuantity(String(pos.qty)).setText(formatUsd(tpPnl));
+          } catch {
+            /* ignore */
+          }
+        }
+        if (pos.stopLoss != null && bundle.sl) {
+          const slPnl = unrealizedPnl(pos.side, pos.qty, pos.entryPrice, pos.stopLoss, contract);
+          try {
+            bundle.sl.setPrice(pos.stopLoss).setQuantity(String(pos.qty)).setText(formatUsd(slPnl));
+          } catch {
+            /* ignore */
+          }
+        }
+      }
     };
 
     void sync();
+    const tick = window.setInterval(paintPl, 400);
+
     return () => {
       cancelled = true;
+      window.clearInterval(tick);
     };
-  }, [chart, demoTrading, enabled, mid, ready, snap.instrument.contractSize, snap.positions, snap.orders, symbol, quote?.price]);
+  }, [chart, demoTrading, enabled, ready, snap.positions, symbol]);
 
-  // Working Limit / Stop order lines on chart (TV pending orders).
+  // Working Limit / Stop order lines.
   useEffect(() => {
     if (!enabled || !ready) return;
     const widget = chart.getWidget();
     const api = widget?.activeChart();
     if (!api) return;
 
-    const orderLines = new Map<string, IOrderLineAdapter>();
     let cancelled = false;
 
     const syncOrders = async () => {
@@ -206,24 +228,28 @@ export function useDemoChartLines(enabled = true): void {
           o.price != null,
       );
       const keep = new Set(working.map((o) => o.id));
-      for (const [id, line] of [...orderLines.entries()]) {
+      for (const [id, line] of [...orderLinesRef.current.entries()]) {
         if (keep.has(id)) continue;
         try {
           line.remove();
         } catch {
           /* ignore */
         }
-        orderLines.delete(id);
+        orderLinesRef.current.delete(id);
       }
       for (const order of working) {
         if (cancelled || order.price == null) continue;
-        let line = orderLines.get(order.id);
+        let line = orderLinesRef.current.get(order.id);
         if (!line) {
           try {
             line = await api.createOrderLine();
+            if (cancelled) {
+              line.remove();
+              return;
+            }
             const color = order.side === "buy" ? "#2962ff" : "#f23645";
             line
-              .setText(`${order.type.toUpperCase()}`)
+              .setText(order.type.toUpperCase())
               .setQuantity(String(order.qty))
               .setPrice(order.price)
               .setLineColor(color)
@@ -231,8 +257,10 @@ export function useDemoChartLines(enabled = true): void {
               .setBodyTextColor("#fff")
               .setQuantityBackgroundColor(color)
               .setQuantityTextColor("#fff")
+              .setLineStyle(2)
+              .setLineLength(70)
               .onCancel(() => demoTrading.cancelOrder(order.id));
-            orderLines.set(order.id, line);
+            orderLinesRef.current.set(order.id, line);
           } catch {
             continue;
           }
@@ -248,18 +276,10 @@ export function useDemoChartLines(enabled = true): void {
     void syncOrders();
     return () => {
       cancelled = true;
-      for (const line of orderLines.values()) {
-        try {
-          line.remove();
-        } catch {
-          /* ignore */
-        }
-      }
-      orderLines.clear();
     };
   }, [chart, demoTrading, enabled, ready, snap.orders, symbol]);
 
-  // Cleanup all lines on unmount
+  // Cleanup on unmount / disable.
   useEffect(() => {
     return () => {
       if (!enabled) return;
@@ -273,6 +293,14 @@ export function useDemoChartLines(enabled = true): void {
         }
       }
       linesRef.current.clear();
+      for (const line of orderLinesRef.current.values()) {
+        try {
+          line.remove();
+        } catch {
+          /* ignore */
+        }
+      }
+      orderLinesRef.current.clear();
     };
   }, [enabled]);
 }

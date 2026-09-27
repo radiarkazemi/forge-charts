@@ -1,20 +1,25 @@
 import Box from "@mui/material/Box";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ChangeEvent } from "react";
 import { useEffect, useState, type RefObject } from "react";
 import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
 
 interface Anchor {
+  /** Top of Sell/Buy band (below symbol titles). */
   readonly top: number;
+  /** Left aligned with legend start. */
   readonly left: number;
-  readonly height: number;
 }
 
 /**
- * TradingView legend Buy/Sell — sits on the main-series legend row,
- * AFTER the symbol/exchange titles and BEFORE studies / “N” indicator menu.
- * Lots live only in the Order ticket (the white “11▾” control is TV’s
- * compressed studies menu — not our qty picker).
+ * TradingView on-chart Buy/Sell (always visible on the primary chart).
+ *
+ * Layout (matches TV FxPro sample):
+ *   [Symbol · TF · Exchange]          ← Charting Library legend
+ *   [SELL] [lots] [BUY]               ← this widget (under titles)
+ *   [studies / “N▾” indicator menu]   ← Charting Library (untouched)
+ *
+ * Limit / Stop / SL / TP stay in the Order ticket.
  */
 export function QuickTradeOverlay({
   containerRef,
@@ -24,12 +29,19 @@ export function QuickTradeOverlay({
   const { demoTrading, chart, quotes } = useServices();
   const snap = useStore(demoTrading.state);
   const symbol = useStore(chart.state, (s) => s.symbol);
+  const ready = useStore(chart.state, (s) => s.ready);
   const quote = useStore(quotes.quotes, (q) => q[symbol]);
   const mid = snap.space.lastPrice ?? quote?.price ?? null;
   const q = demoTrading.quotes(mid);
   const [anchor, setAnchor] = useState<Anchor | null>(null);
+  const [qtyDraft, setQtyDraft] = useState(String(snap.qty));
 
   useEffect(() => {
+    setQtyDraft(String(snap.qty));
+  }, [snap.qty]);
+
+  useEffect(() => {
+    if (!ready) return;
     let alive = true;
 
     const measure = () => {
@@ -38,29 +50,29 @@ export function QuickTradeOverlay({
       const hostRect = host.getBoundingClientRect();
       const titles = findMainSeriesTitlesRect();
       if (!titles) {
-        // Fallback: legend row under TV header, after left toolbar.
-        setAnchor({ top: 46, left: 200, height: 24 });
+        setAnchor({ top: 72, left: 56 });
         return;
       }
+      // Place the widget on the next legend band under the symbol titles
+      // (TV: Sell/Buy sit between the title row and the studies / “N▾” row).
       setAnchor({
-        top: Math.max(0, titles.top - hostRect.top),
-        left: Math.max(0, titles.right - hostRect.left + 6),
-        height: Math.max(20, titles.height),
+        top: Math.max(0, titles.bottom - hostRect.top + 2),
+        left: Math.max(48, titles.left - hostRect.left),
       });
     };
 
     measure();
-    const id = window.setInterval(measure, 400);
+    const id = window.setInterval(measure, 500);
     window.addEventListener("resize", measure);
     return () => {
       alive = false;
       window.clearInterval(id);
       window.removeEventListener("resize", measure);
     };
-  }, [containerRef, symbol, snap.dockOpen, snap.ticketOpen, snap.space.active]);
+  }, [containerRef, symbol, ready]);
 
-  if (!snap.dockOpen && !snap.ticketOpen && !snap.space.active) return null;
-  if (!anchor) return null;
+  // Always on chart once the widget is ready (TV broker buttons stay visible).
+  if (!ready || !anchor) return null;
 
   const openTicket = (side: "buy" | "sell") => {
     demoTrading.setSide(side);
@@ -68,16 +80,29 @@ export function QuickTradeOverlay({
       demoTrading.setEntryPrice(mid);
     }
     demoTrading.setTicketOpen(true);
+    if (!snap.dockOpen) demoTrading.setDockOpen(true);
   };
 
-  const h = Math.min(28, Math.max(22, anchor.height + 2));
+  const commitQty = () => {
+    const n = Number(qtyDraft);
+    if (!Number.isFinite(n)) {
+      setQtyDraft(String(snap.qty));
+      return;
+    }
+    demoTrading.setQty(n);
+  };
+
+  const onQtyChange = (e: ChangeEvent<HTMLInputElement>) => {
+    setQtyDraft(e.target.value);
+  };
+
   const btn: CSSProperties = {
     border: 0,
     cursor: "pointer",
-    height: h,
-    minWidth: 68,
-    padding: "1px 6px",
-    borderRadius: 2,
+    height: 34,
+    minWidth: 76,
+    padding: "2px 8px",
+    borderRadius: 3,
     color: "#fff",
     textAlign: "center",
     fontFamily: '"Trebuchet MS","Segoe UI",sans-serif',
@@ -85,6 +110,7 @@ export function QuickTradeOverlay({
     display: "flex",
     flexDirection: "column",
     justifyContent: "center",
+    boxShadow: "0 1px 2px rgba(0,0,0,0.35)",
   };
 
   return (
@@ -93,46 +119,65 @@ export function QuickTradeOverlay({
         position: "absolute",
         top: anchor.top,
         left: anchor.left,
-        zIndex: 6,
+        zIndex: 7,
         display: "flex",
         alignItems: "center",
-        gap: "2px",
-        height: h,
+        gap: "3px",
         pointerEvents: "auto",
-        // Keep a single legend-row band — never stack under studies.
-        maxWidth: "calc(100% - 120px)",
       }}
-      data-testid="forge-legend-trade"
+      data-testid="forge-chart-trade"
     >
       <button type="button" onClick={() => openTicket("sell")} style={{ ...btn, background: "#f23645" }}>
-        <span style={{ fontWeight: 700, fontSize: 11 }}>{q?.bid.toFixed(2) ?? "—"}</span>
-        <span style={{ fontWeight: 600, fontSize: 8, letterSpacing: 0.2 }}>SELL</span>
+        <span style={{ fontWeight: 700, fontSize: 12 }}>{formatPrice(q?.bid)}</span>
+        <span style={{ fontWeight: 600, fontSize: 9, letterSpacing: 0.3 }}>SELL</span>
       </button>
       <Box
-        sx={{
-          px: "4px",
-          py: "1px",
-          bgcolor: "#131722",
-          color: "#d1d4dc",
-          fontSize: 10,
-          fontWeight: 700,
-          border: "1px solid #2a2e39",
-          lineHeight: 1.2,
-          fontFamily: '"Trebuchet MS","Segoe UI",sans-serif',
+        component="input"
+        type="text"
+        inputMode="decimal"
+        value={qtyDraft}
+        onChange={onQtyChange}
+        onBlur={commitQty}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            commitQty();
+            (e.target as HTMLInputElement).blur();
+          }
         }}
-      >
-        {(q?.spreadPoints ?? snap.instrument.spreadPoints).toFixed(1)}
-      </Box>
+        title="Lots"
+        sx={{
+          width: 44,
+          height: 34,
+          boxSizing: "border-box",
+          px: "4px",
+          bgcolor: "#fff",
+          color: "#131722",
+          fontSize: 13,
+          fontWeight: 700,
+          border: "1px solid #d1d4dc",
+          borderRadius: "2px",
+          lineHeight: 1.2,
+          textAlign: "center",
+          fontFamily: '"Trebuchet MS","Segoe UI",sans-serif',
+          boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
+          outline: "none",
+          "&:focus": { borderColor: "#2962ff" },
+        }}
+      />
       <button type="button" onClick={() => openTicket("buy")} style={{ ...btn, background: "#2962ff" }}>
-        <span style={{ fontWeight: 700, fontSize: 11 }}>{q?.ask.toFixed(2) ?? "—"}</span>
-        <span style={{ fontWeight: 600, fontSize: 8, letterSpacing: 0.2 }}>BUY</span>
+        <span style={{ fontWeight: 700, fontSize: 12 }}>{formatPrice(q?.ask)}</span>
+        <span style={{ fontWeight: 600, fontSize: 9, letterSpacing: 0.3 }}>BUY</span>
       </button>
     </Box>
   );
 }
 
-/** Main-series titles chip (symbol · interval · exchange) inside Charting Library. */
-function findMainSeriesTitlesRect(): DOMRect | null {
+function formatPrice(n: number | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function findMainSeriesTitlesRect(): (DOMRect & { bottom: number; left: number }) | null {
   const docs: Document[] = [document];
   for (const iframe of document.querySelectorAll("iframe")) {
     try {
@@ -143,7 +188,6 @@ function findMainSeriesTitlesRect(): DOMRect | null {
   }
 
   for (const doc of docs) {
-    // Prefer the series titles wrapper that includes the exchange (main series).
     const wrappers = [...doc.querySelectorAll<HTMLElement>('[class*="titlesWrapper"]')];
     for (const el of wrappers) {
       const text = (el.textContent || "").trim();
@@ -151,14 +195,7 @@ function findMainSeriesTitlesRect(): DOMRect | null {
       if (!/[A-Za-z]{2,}/.test(text)) continue;
       const r = el.getBoundingClientRect();
       if (r.width < 40 || r.height < 10 || r.top > 160) continue;
-      // Main series is the topmost titles row.
       if (r.top < 120) return r;
-    }
-
-    const exchange = doc.querySelector<HTMLElement>('[data-name="legend-source-exchange"]');
-    if (exchange) {
-      const r = exchange.getBoundingClientRect();
-      if (r.width > 0 && r.top < 120) return r;
     }
   }
   return null;
