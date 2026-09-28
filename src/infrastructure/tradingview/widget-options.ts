@@ -213,29 +213,30 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
   const tokens = TOKENS[input.theme];
   const mobile = Boolean(input.isMobile);
   const secondary = Boolean(input.secondaryPane);
-  const hideHeader = Boolean(input.hideHeader) || secondary;
+  // Phones: TradingView-mobile shell — no desktop top toolbar (bottom bar owns chrome).
+  const hideHeader = Boolean(input.hideHeader) || secondary || (mobile && !secondary);
 
   const enabled = ENABLED_FEATURES.filter((f) => {
     if (hideHeader && HEADER_FEATURES.includes(f)) return false;
     if (secondary && (f === "left_toolbar" || f === "side_toolbar_in_fullscreen_mode")) return false;
-    // Phones: drop bulky header chrome — bottom bar covers search / interval / indicators.
-    if (
-      mobile &&
-      !secondary &&
-      !hideHeader &&
-      (f === "header_compare" || f === "header_saveload" || f === "header_fullscreen_button")
-    ) {
-      return false;
-    }
     return true;
   });
 
   const baseDisabled = secondary ? SECONDARY_DISABLED : hideHeader ? NO_HEADER_DISABLED : DISABLED_FEATURES;
-  // Mobile: allow hide_left_toolbar_by_default so candles go edge-to-edge until Draw is tapped.
+  // Mobile: toolbar starts collapsed (Draw expands it); drop bottom date-range strip for plot height.
   const disabled =
     mobile && !secondary
-      ? baseDisabled.filter((f) => f !== "hide_left_toolbar_by_default")
+      ? [
+          ...baseDisabled.filter((f) => f !== "hide_left_toolbar_by_default"),
+          "timeframes_toolbar" as ChartingLibraryFeatureset,
+        ]
       : baseDisabled;
+
+  const customCss = mobile && !secondary
+    ? "/charts/tv-header-mobile.css"
+    : hideHeader
+      ? "/charts/tv-header-secondary.css"
+      : "/charts/tv-header.css";
 
   return {
     container: input.container,
@@ -252,7 +253,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
     custom_font_family: FONT_FAMILY,
     // Desktop primary: full labels; mobile / secondary panes: compact.
     header_widget_buttons_mode: mobile || secondary || hideHeader ? "adaptive" : "fullsize",
-    custom_css_url: hideHeader ? "/charts/tv-header-secondary.css" : "/charts/tv-header.css",
+    custom_css_url: customCss,
     // Match TradingView.com flyout wording (Forecasting / Measurers / Sector…).
     custom_translate_function: (originalText) => {
       const map: Record<string, string> = {

@@ -37,6 +37,9 @@ fi
 if [[ -f dist/charts/tv-header-secondary.css ]]; then
   "${SCP[@]}" dist/charts/tv-header-secondary.css "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/tv-header-secondary.css"
 fi
+if [[ -f dist/charts/tv-header-mobile.css ]]; then
+  "${SCP[@]}" dist/charts/tv-header-mobile.css "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/tv-header-mobile.css"
+fi
 if [[ -d dist/brand ]]; then
   tar -C dist -cf - brand | "${SSH[@]}" "${USER}@${HOST}" \
     "rm -rf '${REMOTE_ANIL_CHARTS}/brand' && tar -C '${REMOTE_ANIL_CHARTS}' -xf -"

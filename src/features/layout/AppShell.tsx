@@ -12,13 +12,12 @@ import { ProfileMenu } from "@/features/profile/ProfileMenu";
 import { activeProfile } from "@/application";
 import { useStore } from "@/shared/hooks/useStore";
 import { MobileBottomBar } from "./MobileBottomBar";
-import { RAIL_WIDTH_COMPACT } from "./mobile-chrome";
 import { SidePanel } from "./SidePanel";
 import { SideRail } from "./SideRail";
 
 /**
  * Chart shell matching TradingView Supercharts.
- * Mobile: single pane, overlay side panels, bottom tool bar, compact rail.
+ * Mobile: TV-app shell — no desktop header, full-bleed chart, bottom tool + app bars.
  */
 export function AppShell() {
   const theme = useTheme();
@@ -76,7 +75,8 @@ export function AppShell() {
 
   useEffect(() => {
     if (profileAnchorRef) {
-      profileAnchorRef.style.right = isMobile ? `${RAIL_WIDTH_COMPACT + 4}px` : "56px";
+      // Mobile has no right rail — pin the invisible profile anchor to the corner.
+      profileAnchorRef.style.right = isMobile ? "12px" : "56px";
     }
   }, [isMobile, profileAnchorRef]);
 
@@ -119,7 +119,6 @@ export function AppShell() {
                   sx={{
                     position: "absolute",
                     inset: 0,
-                    right: RAIL_WIDTH_COMPACT,
                     bgcolor: "rgba(0,0,0,0.5)",
                     zIndex: 19,
                   }}
@@ -131,7 +130,7 @@ export function AppShell() {
                   onOpenObjectTree={() => chart.openObjectTree()}
                   onRunPine={(code) => chart.runPineDraft(code)}
                   overlay
-                  overlayRight={RAIL_WIDTH_COMPACT}
+                  overlayRight={0}
                 />
               </>
             ) : null}
@@ -141,6 +140,7 @@ export function AppShell() {
             <MobileBottomBar
               onCreateAlert={openAlertDialog}
               onOpenWatchlist={() => settings.toggleSidePanel("watchlist")}
+              onOpenAlerts={() => settings.toggleSidePanel("alerts")}
               onOpenTrade={() => {
                 demoTrading.setTicketOpen(true);
                 demoTrading.setDockOpen(true);
@@ -170,13 +170,15 @@ export function AppShell() {
           </Box>
         ) : null}
 
-        <SideRail
-          active={sidePanel}
-          onToggle={(id) => settings.toggleSidePanel(id)}
-          onOpenObjectTree={() => chart.openObjectTree()}
-          onOpenPine={() => settings.toggleSidePanel("pine")}
-          compact={isMobile}
-        />
+        {/* Desktop only — mobile uses the bottom app tab bar instead of a right rail. */}
+        {!isMobile ? (
+          <SideRail
+            active={sidePanel}
+            onToggle={(id) => settings.toggleSidePanel(id)}
+            onOpenObjectTree={() => chart.openObjectTree()}
+            onOpenPine={() => settings.toggleSidePanel("pine")}
+          />
+        ) : null}
       </Box>
       <CreateAlertDialog open={alertDialogOpen} onClose={() => setAlertDialogOpen(false)} />
       <ProfileDialog open={profileOpen} onClose={() => setProfileOpen(false)} />
