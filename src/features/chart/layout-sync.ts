@@ -970,7 +970,7 @@ class LayoutSyncBus {
     }, 2000);
 
     window.clearTimeout(this.restorePrimaryTimer);
-    const delays = [0, 30, 80, 160, 320, 640];
+    const delays = [0, 40, 120, 280, 500];
     let step = 0;
 
     const tick = () => {
