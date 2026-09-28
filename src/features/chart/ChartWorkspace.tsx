@@ -4,6 +4,7 @@ import { useServices } from "@/app/use-services";
 import type { ChartLayoutId } from "@/application";
 import { useStore } from "@/shared/hooks/useStore";
 import {
+  clearPrimaryLayoutClip,
   clipPathExcludingHole,
   mountPrimaryLayoutClip,
   paneRectInWorkspace,
@@ -91,9 +92,22 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   }, []);
 
   // Clip primary plot to pane 0; leave the original top navbar full width.
+  // Single-pane: always tear down any leftover multi clip so the chart fills.
   useEffect(() => {
     const host = primaryHostRef.current;
     if (!host) return;
+    if (!multi) {
+      clearPrimaryLayoutClip(host);
+      const t1 = window.setTimeout(() => {
+        clearPrimaryLayoutClip(host);
+        layoutSyncBus.reflowVisible();
+      }, 50);
+      const t2 = window.setTimeout(() => layoutSyncBus.reflowVisible(), 300);
+      return () => {
+        window.clearTimeout(t1);
+        window.clearTimeout(t2);
+      };
+    }
     return mountPrimaryLayoutClip(
       host,
       () => layoutRef.current,

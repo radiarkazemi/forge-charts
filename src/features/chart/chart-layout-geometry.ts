@@ -322,13 +322,18 @@ export function applyPrimaryLayoutClip(
 /** Remove only our clip stylesheet — leave TradingView inline layout alone. */
 export function clearPrimaryLayoutClip(container: HTMLElement): void {
   try {
-    const doc = container.querySelector("iframe")?.contentDocument;
+    const iframe = container.querySelector("iframe");
+    const doc = iframe?.contentDocument;
     clearPrimaryPriceAxisPins(doc);
-    const styleEl = doc?.getElementById(STYLE_ID);
-    if (!styleEl) return;
-    styleEl.remove();
+    doc?.getElementById(STYLE_ID)?.remove();
+    // Multi-pane forced the iframe transparent; restore for single-pane fill.
     try {
-      container.querySelector("iframe")?.contentWindow?.dispatchEvent(new Event("resize"));
+      iframe?.style.removeProperty("background");
+    } catch {
+      /* ignore */
+    }
+    try {
+      iframe?.contentWindow?.dispatchEvent(new Event("resize"));
     } catch {
       /* ignore */
     }
@@ -532,7 +537,6 @@ export function mountPrimaryLayoutClip(
   let pollTimer = 0;
   let pinTimer = 0;
   let debounce = 0;
-  let lastLayout: ChartLayoutId | null = null;
   let lastCss = "";
 
   const measureChromeOnly = () => {
@@ -544,11 +548,11 @@ export function mountPrimaryLayoutClip(
   const apply = () => {
     if (stopped) return;
     const layout = getLayout();
-    const layoutChanged = lastLayout !== null && lastLayout !== layout;
-    lastLayout = layout;
 
     if (layout === "s") {
-      if (layoutChanged) clearPrimaryLayoutClip(container);
+      // Always clear — effect remounts reset lastLayout to null, so a
+      // “layoutChanged” guard would leave the half-width clip stuck on.
+      clearPrimaryLayoutClip(container);
       measureChromeOnly();
       lastCss = "";
       return;
@@ -622,5 +626,8 @@ export function mountPrimaryLayoutClip(
     if (pinTimer) window.clearInterval(pinTimer);
     mo?.disconnect();
     ro?.disconnect();
+    // Tear-down while switching to single-pane must drop the clip immediately
+    // (the replacement mount may start with lastLayout=null and layout "s").
+    if (getLayout() === "s") clearPrimaryLayoutClip(container);
   };
 }
