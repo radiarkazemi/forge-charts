@@ -85,7 +85,14 @@ export function SideRail({ active, onToggle, onOpenObjectTree, onOpenPine, compa
       else if (item.href) window.open(item.href, "_blank", "noopener");
     };
     return (
-      <Tooltip key={item.label} title={item.label} placement="left">
+      <Tooltip
+        key={item.label}
+        title={item.label}
+        placement="left"
+        disableHoverListener={compact}
+        disableFocusListener={compact}
+        disableTouchListener
+      >
         <IconButton
           size="small"
           aria-label={item.label}
@@ -94,8 +101,8 @@ export function SideRail({ active, onToggle, onOpenObjectTree, onOpenPine, compa
           disableRipple
           sx={{
             position: "relative",
-            width: 40,
-            height: 40,
+            width: compact ? 36 : 40,
+            height: compact ? 36 : 40,
             color: pressed ? ICON_ACTIVE : ICON_IDLE,
             bgcolor: pressed ? ICON_ACTIVE_BG : "transparent",
             borderRadius: "4px",
@@ -118,7 +125,7 @@ export function SideRail({ active, onToggle, onOpenObjectTree, onOpenPine, compa
               : undefined,
           }}
         >
-          <Icon sx={{ fontSize: 22, color: "inherit" }} />
+          <Icon sx={{ fontSize: compact ? 20 : 22, color: "inherit" }} />
         </IconButton>
       </Tooltip>
     );
