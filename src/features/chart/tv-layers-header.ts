@@ -152,10 +152,8 @@ function syncHeaderChrome(doc: Document, symbol: string, interval: Interval): vo
 /** CL async restore often repaints header to pane 0 — re-assert active chrome. */
 function syncHeaderChromeRetry(doc: Document, symbol: string, interval: Interval): void {
   syncHeaderChrome(doc, symbol, interval);
-  window.setTimeout(() => syncHeaderChrome(doc, symbol, interval), 50);
-  window.setTimeout(() => syncHeaderChrome(doc, symbol, interval), 200);
-  window.setTimeout(() => syncHeaderChrome(doc, symbol, interval), 500);
-  window.setTimeout(() => syncHeaderChrome(doc, symbol, interval), 1000);
+  window.setTimeout(() => syncHeaderChrome(doc, symbol, interval), 120);
+  window.setTimeout(() => syncHeaderChrome(doc, symbol, interval), 400);
 }
 
 function stop(event: Event): void {
@@ -295,15 +293,25 @@ export function mountTvLayersHeader(container: HTMLElement): () => void {
   };
 
   attach();
+  // Only watch for iframe remounts — not every subtree mutation (perf).
   mo = new MutationObserver(() => {
-    attach();
+    const iframe = container.querySelector("iframe");
+    if (iframe?.contentDocument && iframe.contentDocument !== attachedDoc) attach();
   });
-  mo.observe(container, { childList: true, subtree: true });
-  poll = window.setInterval(() => attach(), 1500);
+  mo.observe(container, { childList: true });
+  // Short attach poll until the iframe document is ready, then stop.
+  let tries = 0;
+  poll = window.setInterval(() => {
+    tries += 1;
+    if (attach() || tries > 15) {
+      window.clearInterval(poll);
+      poll = 0;
+    }
+  }, 400);
 
   return () => {
     disposed = true;
-    window.clearInterval(poll);
+    if (poll) window.clearInterval(poll);
     mo?.disconnect();
     unsubPane?.();
     detach();

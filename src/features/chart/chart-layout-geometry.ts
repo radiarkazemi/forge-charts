@@ -11,6 +11,8 @@ export interface ContentSlot {
 export interface ChromeInsets {
   readonly headerHeight: number;
   readonly leftToolbarWidth: number;
+  /** Right price-axis gutter reserved so sibling layers don’t cover it. */
+  readonly priceAxisWidth: number;
 }
 
 export interface PaneRectPx {
@@ -64,40 +66,31 @@ const SLOTS: Record<ChartLayoutId, readonly ContentSlot[]> = {
   ],
 };
 
-const DEFAULT_CHROME: ChromeInsets = { headerHeight: 38, leftToolbarWidth: 52 };
+const DEFAULT_CHROME: ChromeInsets = { headerHeight: 38, leftToolbarWidth: 52, priceAxisWidth: 56 };
 const STYLE_ID = "forge-primary-layout-clip";
+/** Extra gap between pane plot edges (beyond the reserved price-axis gutter). */
+const PANE_GAP = 2;
 
 export function contentSlotsFor(layout: ChartLayoutId): readonly ContentSlot[] {
   return SLOTS[layout] ?? SLOTS.s;
 }
 
-/** Pixel rect of a pane inside the full workspace (primary widget bounds). */
-export function paneRectInWorkspace(
-  layout: ChartLayoutId,
-  paneIndex: number,
-  workspace: { width: number; height: number },
-  chrome: ChromeInsets = DEFAULT_CHROME,
-  gap = 2,
-): PaneRectPx | null {
-  const slots = contentSlotsFor(layout);
-  const slot = slots[paneIndex];
-  if (!slot || workspace.width <= 0 || workspace.height <= 0) return null;
-
-  const contentW = Math.max(0, workspace.width - chrome.leftToolbarWidth);
-  const contentH = Math.max(0, workspace.height - chrome.headerHeight);
-  // Wider seam so the left pane’s price scale isn’t covered by the next layer.
-  const seam = Math.max(gap, 6);
-  const left = chrome.leftToolbarWidth + slot.x * contentW + (slot.x > 0 ? seam / 2 : 0);
-  const top = chrome.headerHeight + slot.y * contentH + (slot.y > 0 ? seam / 2 : 0);
-  const width = slot.w * contentW - (slot.x > 0 ? seam / 2 : 0) - (slot.x + slot.w < 1 ? seam / 2 : 0);
-  const height = slot.h * contentH - (slot.y > 0 ? seam / 2 : 0) - (slot.y + slot.h < 1 ? seam / 2 : 0);
-
-  return {
-    left: Math.round(left),
-    top: Math.round(top),
-    width: Math.max(0, Math.round(width)),
-    height: Math.max(0, Math.round(height)),
-  };
+function readPriceAxisWidth(doc: Document, fallback: number): number {
+  const candidates = doc.querySelectorAll<HTMLElement>(
+    [
+      ".price-axis",
+      ".price-axis-container",
+      '[class*="priceAxis"]',
+      ".chart-markup-table tr td:last-child",
+    ].join(","),
+  );
+  let best = 0;
+  for (const el of candidates) {
+    const w = el.offsetWidth;
+    // Real TV price axes are roughly 40–90px; ignore tiny/huge false matches.
+    if (w >= 36 && w <= 120 && w > best) best = w;
+  }
+  return best || fallback;
 }
 
 function readChrome(doc: Document): ChromeInsets {
@@ -116,6 +109,48 @@ function readChrome(doc: Document): ChromeInsets {
   return {
     headerHeight: headerHeight || DEFAULT_CHROME.headerHeight,
     leftToolbarWidth: leftEl?.offsetWidth ?? 0,
+    priceAxisWidth: readPriceAxisWidth(doc, DEFAULT_CHROME.priceAxisWidth),
+  };
+}
+
+/**
+ * Pixel rect of a pane inside the full workspace.
+ *
+ * Left/top panes keep their full slot (price axis stays inside the pane).
+ * A neighbor to the right starts after that pane’s price-axis band so y-axis
+ * drag on the left chart is never covered by the next layer.
+ */
+export function paneRectInWorkspace(
+  layout: ChartLayoutId,
+  paneIndex: number,
+  workspace: { width: number; height: number },
+  chrome: ChromeInsets = DEFAULT_CHROME,
+): PaneRectPx | null {
+  const slots = contentSlotsFor(layout);
+  const slot = slots[paneIndex];
+  if (!slot || workspace.width <= 0 || workspace.height <= 0) return null;
+
+  const contentW = Math.max(0, workspace.width - chrome.leftToolbarWidth);
+  const contentH = Math.max(0, workspace.height - chrome.headerHeight);
+  const axis = Math.max(40, chrome.priceAxisWidth);
+
+  // If this pane starts to the right of another, clear the previous pane’s y-axis.
+  const leftPad = slot.x > 0 ? axis + PANE_GAP : 0;
+  const topPad = slot.y > 0 ? PANE_GAP : 0;
+  // If another pane sits to the right, this pane keeps its axis; neighbor is padded.
+  const rightTrim = 0;
+  const bottomTrim = slot.y + slot.h < 1 ? PANE_GAP : 0;
+
+  const left = chrome.leftToolbarWidth + slot.x * contentW + leftPad;
+  const top = chrome.headerHeight + slot.y * contentH + topPad;
+  const width = slot.w * contentW - leftPad - rightTrim;
+  const height = slot.h * contentH - topPad - bottomTrim;
+
+  return {
+    left: Math.round(left),
+    top: Math.round(top),
+    width: Math.max(0, Math.round(width)),
+    height: Math.max(0, Math.round(height)),
   };
 }
 
@@ -153,12 +188,12 @@ export function applyPrimaryLayoutClip(
 
   const contentW = Math.max(0, W - chrome.leftToolbarWidth);
   const contentH = Math.max(0, H - chrome.headerHeight);
-  const seam = 6;
   const left = chrome.leftToolbarWidth + slot.x * contentW;
   const top = chrome.headerHeight + slot.y * contentH;
-  // Leave a seam on the right/bottom edge so sibling layers don’t cover the price scale.
-  const width = slot.w * contentW - (slot.x + slot.w < 1 ? seam / 2 : 0);
-  const height = slot.h * contentH - (slot.y + slot.h < 1 ? seam / 2 : 0);
+  // Full slot width — price axis lives inside the primary plot. Secondary layers
+  // are positioned with a left pad (see paneRectInWorkspace) so they don’t cover it.
+  const width = slot.w * contentW;
+  const height = slot.h * contentH - (slot.y + slot.h < 1 ? PANE_GAP : 0);
   if (width < 16 || height < 16) return null;
 
   let styleEl = doc.getElementById(STYLE_ID) as HTMLStyleElement | null;
@@ -167,7 +202,12 @@ export function applyPrimaryLayoutClip(
     styleEl.id = STYLE_ID;
     doc.head.appendChild(styleEl);
   }
+  // Transparent shell so raising primary z-index for header menus does not
+  // paint over secondary layers (fixes “second chart disappears” flash).
   const next = `
+    html, body {
+      background: transparent !important;
+    }
     .layout__area--center {
       left: ${left}px !important;
       top: ${top}px !important;
@@ -175,6 +215,7 @@ export function applyPrimaryLayoutClip(
       height: ${height}px !important;
       right: auto !important;
       bottom: auto !important;
+      background-color: var(--tv-color-platform-background, #131722) !important;
     }
     .layout__area--bottom {
       left: ${left}px !important;
@@ -185,6 +226,10 @@ export function applyPrimaryLayoutClip(
       left: 0 !important;
       right: 0 !important;
       width: 100% !important;
+      background-color: var(--tv-color-platform-background, #131722) !important;
+    }
+    .layout__area--left {
+      background-color: var(--tv-color-platform-background, #131722) !important;
     }
   `;
   if (styleEl.textContent !== next) styleEl.textContent = next;
@@ -199,7 +244,6 @@ export function clearPrimaryLayoutClip(container: HTMLElement): void {
     const styleEl = doc?.getElementById(STYLE_ID);
     if (!styleEl) return;
     styleEl.remove();
-    // Ask CL to reflow now that our !important overrides are gone.
     try {
       container.querySelector("iframe")?.contentWindow?.dispatchEvent(new Event("resize"));
     } catch {
@@ -212,8 +256,8 @@ export function clearPrimaryLayoutClip(container: HTMLElement): void {
 }
 
 /**
- * Watch the primary CL iframe for open menus/dropdowns (layout picker, TF, etc.).
- * While open, secondary layers must not steal pointer events over the chart.
+ * Watch the primary CL iframe for open header menus (layout picker, etc.).
+ * Left-toolbar drawing flyouts are ignored — they must not hide secondary panes.
  */
 export function watchPrimaryMenusOpen(
   container: HTMLElement,
@@ -223,51 +267,93 @@ export function watchPrimaryMenusOpen(
   let mo: MutationObserver | null = null;
   let last = false;
   let poll = 0;
+  let debounce = 0;
+  let boundDoc: Document | null = null;
+
+  const isHeaderMenu = (el: Element): boolean => {
+    // Drawing toolbar flyouts live under the left area — never treat as “menusOpen”.
+    if (el.closest(".layout__area--left")) return false;
+    if (el.closest(".drawing-toolbar, [class*='drawingToolbar'], [class*='drawing-toolbar']")) {
+      return false;
+    }
+    // Favorites / floating tool strips near drawings.
+    if (el.closest("[class*='floating-toolbar'], [class*='floatingToolbar']")) return false;
+    return true;
+  };
 
   const check = () => {
     if (stopped) return;
     const doc = container.querySelector("iframe")?.contentDocument;
     if (!doc) return;
-    const open = Boolean(
-      doc.querySelector(
-        [
-          '[class*="menuWrap"]',
-          '[class*="menuBox"]',
-          '[data-name="menu-inner"]',
-          '[class*="popupMenu"]',
-          '[class*="dropdown-"][class*="open"]',
-          '.tv-dropdown__body',
-          '[role="menu"]',
-          '[class*="context-menu"]',
-        ].join(","),
-      ),
+
+    const nodes = doc.querySelectorAll(
+      [
+        '[class*="menuWrap"]',
+        '[class*="menuBox"]',
+        '[data-name="menu-inner"]',
+        '[class*="popupMenu"]',
+        '[role="menu"]',
+        '[data-name="layout-menu"]',
+        '[class*="context-menu"]',
+      ].join(","),
     );
+
+    let open = false;
+    for (const node of nodes) {
+      if (!isHeaderMenu(node)) continue;
+      const style = doc.defaultView?.getComputedStyle(node);
+      if (style && (style.display === "none" || style.visibility === "hidden")) continue;
+      open = true;
+      break;
+    }
+
+    // Dialogs from the top header (layout is usually a menu; keep dialogs too).
+    if (!open) {
+      const dialog = doc.querySelector(
+        '[data-name="indicators-dialog"], [data-name="symbol-search-items-dialog"], [role="dialog"]',
+      );
+      if (dialog && isHeaderMenu(dialog)) open = true;
+    }
+
     if (open !== last) {
       last = open;
       onChange(open);
     }
   };
 
+  const scheduleCheck = () => {
+    window.clearTimeout(debounce);
+    debounce = window.setTimeout(check, 48);
+  };
+
   const bind = () => {
-    mo?.disconnect();
     const doc = container.querySelector("iframe")?.contentDocument;
     if (!doc?.body) return false;
-    mo = new MutationObserver(check);
-    mo.observe(doc.body, { childList: true, subtree: true, attributes: true });
+    if (boundDoc === doc && mo) return true;
+    mo?.disconnect();
+    boundDoc = doc;
+    // childList only — attribute spam from CL was a major multi-pane lag source.
+    mo = new MutationObserver(scheduleCheck);
+    mo.observe(doc.body, { childList: true, subtree: true });
     check();
     return true;
   };
 
   bind();
+  // Light attach poll until the iframe document exists, then stop.
+  let tries = 0;
   poll = window.setInterval(() => {
-    if (bind()) {
-      /* keep observing — iframe may remount */
+    tries += 1;
+    if (bind() || tries > 20) {
+      window.clearInterval(poll);
+      poll = 0;
     }
-  }, 1000);
+  }, 500);
 
   return () => {
     stopped = true;
     window.clearInterval(poll);
+    window.clearTimeout(debounce);
     mo?.disconnect();
   };
 }
@@ -287,6 +373,7 @@ export function mountPrimaryLayoutClip(
   let pollTimer = 0;
   let debounce = 0;
   let lastLayout: ChartLayoutId | null = null;
+  let lastCss = "";
 
   const measureChromeOnly = () => {
     const doc = container.querySelector("iframe")?.contentDocument;
@@ -301,19 +388,21 @@ export function mountPrimaryLayoutClip(
     lastLayout = layout;
 
     if (layout === "s") {
-      // Only clear when leaving a multi layout — never strip TV styles on boot.
       if (layoutChanged) clearPrimaryLayoutClip(container);
       measureChromeOnly();
+      lastCss = "";
       return;
     }
 
     const chrome = applyPrimaryLayoutClip(container, layout);
     if (chrome) onChrome(chrome);
+    const doc = container.querySelector("iframe")?.contentDocument;
+    lastCss = doc?.getElementById(STYLE_ID)?.textContent ?? "";
   };
 
   const schedule = () => {
     window.clearTimeout(debounce);
-    debounce = window.setTimeout(apply, 32);
+    debounce = window.setTimeout(apply, 48);
   };
 
   const bindDocObservers = () => {
@@ -324,12 +413,16 @@ export function mountPrimaryLayoutClip(
     const doc = container.querySelector("iframe")?.contentDocument;
     if (!doc?.body) return false;
 
-    // Re-apply clip if TV rewrites layout area geometry; do not observe every style tick.
-    mo = new MutationObserver(schedule);
+    mo = new MutationObserver(() => {
+      // Only re-apply if TV wiped our stylesheet or restyled the center box.
+      const styleEl = doc.getElementById(STYLE_ID);
+      if (!styleEl || styleEl.textContent !== lastCss) schedule();
+    });
     const center = doc.querySelector(".layout__area--center");
     if (center) {
       mo.observe(center, { attributes: true, attributeFilter: ["style"] });
     }
+    mo.observe(doc.head, { childList: true });
 
     ro = new ResizeObserver(schedule);
     ro.observe(container);
@@ -343,16 +436,15 @@ export function mountPrimaryLayoutClip(
   pollTimer = window.setInterval(() => {
     tries += 1;
     apply();
-    bindDocObservers();
+    const ok = bindDocObservers();
     const layout = getLayout();
     const doc = container.querySelector("iframe")?.contentDocument;
-    const centerReady = Boolean(doc?.querySelector(".layout__area--center"));
     const clipReady = layout === "s" || Boolean(doc?.getElementById(STYLE_ID)?.textContent);
-    if ((centerReady && clipReady) || tries > 60) {
+    if ((ok && clipReady) || tries > 24) {
       window.clearInterval(pollTimer);
       pollTimer = 0;
     }
-  }, 250);
+  }, 400);
 
   return () => {
     stopped = true;

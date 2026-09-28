@@ -19,7 +19,7 @@ interface ChartWorkspaceProps {
   readonly onOpenProfile: () => void;
 }
 
-const DEFAULT_CHROME: ChromeInsets = { headerHeight: 38, leftToolbarWidth: 52 };
+const DEFAULT_CHROME: ChromeInsets = { headerHeight: 38, leftToolbarWidth: 52, priceAxisWidth: 56 };
 
 /**
  * Multi-chart workspace under the original Charting Library top navbar.
@@ -60,13 +60,12 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
 
   useEffect(() => {
     layoutSyncBus.setActiveCount(grid.count);
-    const t1 = window.setTimeout(() => layoutSyncBus.reflowVisible(), 50);
-    const t2 = window.setTimeout(() => layoutSyncBus.reflowVisible(), 250);
-    const t3 = window.setTimeout(() => layoutSyncBus.reflowVisible(), 800);
+    // One reflow after layout paint — avoid stacked resize storms (lag).
+    const t1 = window.setTimeout(() => layoutSyncBus.reflowVisible(), 80);
+    const t2 = window.setTimeout(() => layoutSyncBus.reflowVisible(), 400);
     return () => {
       window.clearTimeout(t1);
       window.clearTimeout(t2);
-      window.clearTimeout(t3);
     };
   }, [chartLayout, grid.count]);
 
@@ -93,7 +92,9 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
       () => layoutRef.current,
       (next) => {
         setChrome((prev) =>
-          prev.headerHeight === next.headerHeight && prev.leftToolbarWidth === next.leftToolbarWidth
+          prev.headerHeight === next.headerHeight &&
+          prev.leftToolbarWidth === next.leftToolbarWidth &&
+          prev.priceAxisWidth === next.priceAxisWidth
             ? prev
             : next,
         );
@@ -140,9 +141,10 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
         sx={{
           position: "absolute",
           inset: 0,
-          // Above layers while a CL menu is open so Select Layout / TF clicks work.
+          // Above layers only while a header menu is open so dropdowns receive clicks.
+          // Iframe shell is transparent outside header/plot — secondaries stay visible.
           zIndex: menusOpen ? 6 : 1,
-          bgcolor: "background.default",
+          bgcolor: multi ? "transparent" : "background.default",
         }}
       >
         <TradingViewChart
@@ -176,9 +178,10 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
               left: shown && rect ? rect.left : 0,
               width: shown && rect ? rect.width : 1,
               height: shown && rect ? rect.height : 1,
-              zIndex: isActive ? 3 : 2,
+              // Stay under header menus (z=6) but always above the idle primary shell.
+              zIndex: menusOpen ? 5 : isActive ? 3 : 2,
               display: shown ? "block" : "none",
-              // Pass clicks through to primary iframe menus (layout picker, etc.).
+              // Pass clicks through to primary header menus only — panes stay painted.
               pointerEvents: menusOpen ? "none" : "auto",
               outline: isActive ? "2px solid #2962FF" : "1px solid #2a2e39",
               outlineOffset: "-1px",
