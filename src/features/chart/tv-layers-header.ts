@@ -204,20 +204,10 @@ export function mountTvLayersHeader(container: HTMLElement): () => void {
     // Prefer last plot click (TV active chart), not a stolen header focus.
     const target = layoutSyncBus.getHeaderTargetPane();
 
-    if (isSymbolSearchButton(btn)) {
-      // Pane 0: let the native dialog run. Other panes: open on the active widget.
-      if (target === 0) return;
-      stop(event);
-      if (once(`sym:${target}`)) layoutSyncBus.openSymbolSearchOnActive();
-      return;
-    }
-
-    if (isIndicatorsButton(btn)) {
-      if (target === 0) return;
-      stop(event);
-      if (once(`ind:${target}`)) layoutSyncBus.openIndicatorsOnActive();
-      return;
-    }
+    // Symbol Search / Indicators: let the native dialog open on the shared header
+    // widget (full-bleed). Symbol changes route via handlePrimarySymbolChanged;
+    // new studies migrate to the active plot via study_event.
+    if (isSymbolSearchButton(btn) || isIndicatorsButton(btn)) return;
 
     const interval = parseQuickIntervalButton(btn);
     if (!interval) return;

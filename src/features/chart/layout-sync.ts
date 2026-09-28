@@ -33,6 +33,7 @@ interface PaneEntry {
   readonly controller: ChartController;
   unsubDrawing?: () => void;
   unsubMouse?: () => void;
+  unsubStudy?: () => void;
 }
 
 interface DrawingGroup {
@@ -58,6 +59,7 @@ class LayoutSyncBus {
   private sharedTool: string | null = null;
   private applyingTool = false;
   private syncingDrawings = false;
+  private migratingStudy = false;
   private readonly groups: DrawingGroup[] = [];
   private readonly entityToGroup = new Map<string, DrawingGroup>();
   /** Entity ids created as mirrors — ignore their create events to avoid loops. */
@@ -229,28 +231,14 @@ class LayoutSyncBus {
   }
 
   openIndicatorsOnActive(): void {
-    const target = this.headerTargetPane();
-    if (target !== this.activePane && target < this.activeCount) {
-      this.focusPane(target);
-    }
-    // CL may still open the dialog on the primary widget from the shared header
-    // click — close it, then open on the active chart (TV layers).
-    if (target > 0) {
-      this.panes.get(0)?.controller.closePopupsAndDialogs();
-      window.setTimeout(() => {
-        this.panes.get(0)?.controller.closePopupsAndDialogs();
-        this.panes.get(target)?.controller.openIndicators();
-      }, 0);
-      window.setTimeout(() => this.panes.get(0)?.controller.closePopupsAndDialogs(), 40);
-    }
-    this.panes.get(target)?.controller.openIndicators();
+    // Shared header lives on pane 0 — open the dialog there (full-bleed overlay).
+    // Newly created studies are migrated to the active plot via study_event.
+    this.panes.get(0)?.controller.openIndicators();
   }
 
   openSymbolSearchOnActive(): void {
+    // Dialog on pane 0; symbol change is routed by handlePrimarySymbolChanged.
     const target = this.headerTargetPane();
-    if (target !== this.activePane && target < this.activeCount) {
-      this.focusPane(target);
-    }
     if (this.activeCount > 1 && this.flags.symbol !== true && target > 0) {
       const keep = this.paneSymbols.get(0) ?? this.panes.get(0)?.controller.state.get().symbol ?? "";
       if (keep) {
@@ -258,15 +246,7 @@ class LayoutSyncBus {
         this.primarySymbolGuardUntil = Date.now() + 2500;
       }
     }
-    if (target > 0) {
-      this.panes.get(0)?.controller.closePopupsAndDialogs();
-      window.setTimeout(() => {
-        this.panes.get(0)?.controller.closePopupsAndDialogs();
-        this.panes.get(target)?.controller.openSymbolSearch();
-      }, 0);
-      window.setTimeout(() => this.panes.get(0)?.controller.closePopupsAndDialogs(), 40);
-    }
-    this.panes.get(target)?.controller.openSymbolSearch();
+    this.panes.get(0)?.controller.openSymbolSearch();
   }
 
   undoOnActive(): void {
@@ -300,6 +280,7 @@ class LayoutSyncBus {
     const prev = this.panes.get(index);
     prev?.unsubDrawing?.();
     prev?.unsubMouse?.();
+    prev?.unsubStudy?.();
     const entry: PaneEntry = { index, controller };
     entry.unsubDrawing = controller.onDrawingEvent((entityId, eventType) => {
       void this.onDrawingEvent(index, entityId, eventType);
@@ -315,6 +296,12 @@ class LayoutSyncBus {
       }
       this.focusPaneFromPlot(index);
     });
+    // Header Indicators dialog always creates studies on pane 0 — migrate to active plot.
+    if (index === 0) {
+      entry.unsubStudy = controller.onStudyEvent((entityId, eventType) => {
+        void this.onPrimaryStudyEvent(entityId, eventType);
+      });
+    }
     this.panes.set(index, entry);
     if (controller.isReady && this.activeCount > 1) {
       this.scheduleSeedFromPrimary();
@@ -324,6 +311,7 @@ class LayoutSyncBus {
       if (cur?.controller === controller) {
         cur.unsubDrawing?.();
         cur.unsubMouse?.();
+        cur.unsubStudy?.();
         this.panes.delete(index);
         this.pruneGroupsForPane(index);
       }
@@ -926,6 +914,36 @@ class LayoutSyncBus {
       fn();
     } finally {
       this.locked = false;
+    }
+  }
+
+  /**
+   * Studies added via the shared header Indicators dialog land on pane 0.
+   * Move them to the active plot so layers match TradingView.
+   */
+  private async onPrimaryStudyEvent(entityId: EntityId, eventType: string): Promise<void> {
+    if (this.migratingStudy || this.locked) return;
+    if (eventType !== "create" && eventType !== "paste_study") return;
+    if (this.activeCount < 2) return;
+    const target = this.headerTargetPane();
+    if (target <= 0 || target >= this.activeCount) return;
+
+    const source = this.panes.get(0);
+    const dest = this.panes.get(target);
+    if (!source?.controller.isReady || !dest?.controller.isReady) return;
+
+    // Let CL finish initializing the study before we read inputs / remove it.
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, 60);
+    });
+
+    this.migratingStudy = true;
+    try {
+      const snap = source.controller.takeStudyForMigrate(entityId);
+      if (!snap) return;
+      dest.controller.createStudyFromSnapshot(snap.name, snap.inputs);
+    } finally {
+      this.migratingStudy = false;
     }
   }
 

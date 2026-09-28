@@ -75,6 +75,8 @@ export class ChartController {
   private drawingBridge: ((entityId: EntityId, eventType: string) => void) | null = null;
   private readonly mouseDownHandlers = new Set<(params: MouseEventParams) => void>();
   private mouseDownBridge: ((params: MouseEventParams) => void) | null = null;
+  private readonly studyHandlers = new Set<(entityId: EntityId, eventType: string) => void>();
+  private studyBridge: ((entityId: EntityId, eventType: string) => void) | null = null;
 
   constructor(symbol: string, interval: Interval) {
     this.state = createStore<ChartState>({ symbol, interval, ready: false, error: null });
@@ -141,9 +143,10 @@ export class ChartController {
 
     if (this.desiredTheme && this.desiredTheme !== widget.getTheme()) void this.applyTheme(this.desiredTheme);
 
-    // Bind drawing_event + mouse_down bridges (handlers may register before attach).
+    // Bind drawing_event + mouse_down + study_event bridges (handlers may register before attach).
     this.bindDrawingBridge(widget);
     this.bindMouseDownBridge(widget);
+    this.bindStudyBridge(widget);
     // Match TradingView default: one-shot drawings (return to Cross after each shape).
     this.ensureStayInDrawingModeOff();
   }
@@ -200,6 +203,32 @@ export class ChartController {
     }
   }
 
+  private bindStudyBridge(widget: IChartingLibraryWidget): void {
+    if (this.studyBridge) {
+      try {
+        widget.unsubscribe("study_event", this.studyBridge);
+      } catch {
+        /* ignore */
+      }
+      this.studyBridge = null;
+    }
+    const bridge = (entityId: EntityId, eventType: string) => {
+      for (const handler of this.studyHandlers) {
+        try {
+          handler(entityId, eventType);
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+    try {
+      widget.subscribe("study_event", bridge);
+      this.studyBridge = bridge;
+    } catch {
+      this.studyBridge = null;
+    }
+  }
+
   detach(): void {
     cancelAnimationFrame(this.crosshairFrame);
     if (this.widget && this.drawingBridge) {
@@ -216,8 +245,16 @@ export class ChartController {
         /* ignore */
       }
     }
+    if (this.widget && this.studyBridge) {
+      try {
+        this.widget.unsubscribe("study_event", this.studyBridge);
+      } catch {
+        /* ignore */
+      }
+    }
     this.drawingBridge = null;
     this.mouseDownBridge = null;
+    this.studyBridge = null;
     this.widget = null;
     this.patch({ ready: false });
   }
@@ -559,6 +596,56 @@ export class ChartController {
     return () => {
       this.mouseDownHandlers.delete(handler);
     };
+  }
+
+  /** Study create/remove on this chart (multi-pane: migrate header-added studies). */
+  onStudyEvent(handler: (entityId: EntityId, eventType: string) => void): () => void {
+    this.studyHandlers.add(handler);
+    if (this.widget && !this.studyBridge) {
+      this.bindStudyBridge(this.widget);
+    }
+    return () => {
+      this.studyHandlers.delete(handler);
+    };
+  }
+
+  /**
+   * Snapshot a study for cloning onto another pane, then remove it locally.
+   * Returns null when the study cannot be read.
+   */
+  takeStudyForMigrate(entityId: EntityId): {
+    readonly name: string;
+    readonly inputs: Record<string, unknown>;
+  } | null {
+    const chart = this.activeChart();
+    if (!chart) return null;
+    try {
+      const info = chart.getAllStudies().find((s) => String(s.id) === String(entityId));
+      const name = (info?.name || "").trim();
+      if (!name) return null;
+      const study = chart.getStudyById(entityId);
+      const inputs: Record<string, unknown> = {};
+      for (const item of study.getInputValues()) {
+        const id = (item as { id?: string }).id;
+        const value = (item as { value?: unknown }).value;
+        if (id != null) inputs[id] = value;
+      }
+      chart.removeEntity(entityId);
+      return { name, inputs };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Create a study from a migrated snapshot. */
+  createStudyFromSnapshot(name: string, inputs: Record<string, unknown>): void {
+    const chart = this.activeChart();
+    if (!chart) return;
+    try {
+      void chart.createStudy(name, false, false, inputs as never);
+    } catch {
+      /* study API unavailable */
+    }
   }
 
   /** Open the library Object Tree (layers) for drawings / studies. */
