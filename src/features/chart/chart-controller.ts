@@ -238,6 +238,7 @@ export class ChartController {
     this.activeChart()?.setResolution(interval as ResolutionString);
   }
 
+
   getVisibleRange(): { from: number; to: number } | null {
     try {
       const range = this.activeChart()?.getVisibleRange();

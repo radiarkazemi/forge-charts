@@ -1,8 +1,14 @@
 import Box from "@mui/material/Box";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useServices } from "@/app/use-services";
+import type { ChartLayoutId } from "@/application";
 import { useStore } from "@/shared/hooks/useStore";
-import { chartPaneArea, getChartLayoutGrid, MAX_CHART_PANES } from "./chart-layouts";
+import {
+  mountPrimaryLayoutClip,
+  paneRectInWorkspace,
+  type ChromeInsets,
+} from "./chart-layout-geometry";
+import { getChartLayoutGrid, MAX_CHART_PANES } from "./chart-layouts";
 import { layoutSyncBus } from "./layout-sync";
 import { TradingViewChart } from "./TradingViewChart";
 
@@ -11,10 +17,14 @@ interface ChartWorkspaceProps {
   readonly onOpenProfile: () => void;
 }
 
+const DEFAULT_CHROME: ChromeInsets = { headerHeight: 38, leftToolbarWidth: 52 };
+
 /**
- * TradingView-style multi-chart workspace.
- * Original CL header stays on the primary pane; secondary panes are headerless
- * so the layout does not duplicate toolbars. Active pane: blue ring + star.
+ * Multi-chart workspace under the original Charting Library top navbar.
+ *
+ * Advanced Charts cannot natively setLayout(2h) — only layout "s" ships.
+ * We keep the unchanged primary CL header full-bleed, clip its plot to pane 0,
+ * and layer headerless secondary widgets in the remaining slots underneath.
  */
 export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceProps) {
   const { settings } = useServices();
@@ -25,6 +35,12 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   const grid = getChartLayoutGrid(chartLayout ?? "s");
   const multi = grid.count > 1;
   const [activePane, setActivePane] = useState(0);
+  const [chrome, setChrome] = useState<ChromeInsets>(DEFAULT_CHROME);
+  const [workspaceSize, setWorkspaceSize] = useState({ width: 0, height: 0 });
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
+  const primaryHostRef = useRef<HTMLDivElement | null>(null);
+  const layoutRef = useRef<ChartLayoutId>(chartLayout ?? "s");
+  layoutRef.current = chartLayout ?? "s";
 
   useEffect(() => {
     layoutSyncBus.setFlags(
@@ -43,50 +59,105 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
     layoutSyncBus.setActiveCount(grid.count);
     const t1 = window.setTimeout(() => layoutSyncBus.reflowVisible(), 50);
     const t2 = window.setTimeout(() => layoutSyncBus.reflowVisible(), 250);
+    const t3 = window.setTimeout(() => layoutSyncBus.reflowVisible(), 800);
     return () => {
       window.clearTimeout(t1);
       window.clearTimeout(t2);
+      window.clearTimeout(t3);
     };
   }, [chartLayout, grid.count]);
 
   useEffect(() => layoutSyncBus.subscribeActivePane(setActivePane), []);
 
+  useEffect(() => {
+    const el = workspaceRef.current;
+    if (!el) return;
+    const measure = () => {
+      setWorkspaceSize({ width: el.clientWidth, height: el.clientHeight });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Clip primary plot to pane 0; leave the original top navbar full width.
+  useEffect(() => {
+    const host = primaryHostRef.current;
+    if (!host) return;
+    return mountPrimaryLayoutClip(
+      host,
+      () => layoutRef.current,
+      (next) => {
+        setChrome((prev) =>
+          prev.headerHeight === next.headerHeight && prev.leftToolbarWidth === next.leftToolbarWidth
+            ? prev
+            : next,
+        );
+      },
+    );
+  }, [chartLayout, multi]);
+
   return (
     <Box
+      ref={workspaceRef}
       sx={{
         flex: 1,
         minWidth: 0,
         minHeight: 0,
-        display: "grid",
-        gridTemplateColumns: grid.columns,
-        gridTemplateRows: grid.rows,
-        gridTemplateAreas: grid.areas,
-        gap: "2px",
+        position: "relative",
         bgcolor: "#2a2e39",
-        p: "2px",
+        overflow: "hidden",
       }}
     >
-      {Array.from({ length: MAX_CHART_PANES }, (_, index) => {
-        const visible = index < grid.count;
+      {/* Primary widget: original CL navbar spans the full workspace width. */}
+      <Box
+        ref={primaryHostRef}
+        onPointerDownCapture={() => layoutSyncBus.focusPane(0)}
+        sx={{
+          position: "absolute",
+          inset: 0,
+          zIndex: 1,
+          bgcolor: "background.default",
+        }}
+      >
+        <TradingViewChart
+          onCreateAlert={onCreateAlert}
+          onOpenProfile={onOpenProfile}
+          paneIndex={0}
+          initialSymbol={paneSymbols[0] ?? lastSymbol}
+          hideHeader={false}
+        />
+      </Box>
+
+      {/* Secondary layers under the original navbar (kept mounted for layout switches). */}
+      {Array.from({ length: MAX_CHART_PANES - 1 }, (_, offset) => {
+        const index = offset + 1;
+        const visible = multi && index < grid.count;
+        const rect = visible
+          ? paneRectInWorkspace(chartLayout ?? "s", index, workspaceSize, chrome)
+          : null;
+        const shown = Boolean(visible && rect && rect.width >= 8 && rect.height >= 8);
+        const isActive = shown && activePane === index;
         const symbol = paneSymbols[index] ?? lastSymbol;
-        const isActive = visible && multi && activePane === index;
         return (
           <Box
-            key={`forge-pane-${index}-nav3`}
+            key={`forge-layer-${index}`}
             onPointerDownCapture={() => {
-              if (visible) layoutSyncBus.focusPane(index);
+              if (shown) layoutSyncBus.focusPane(index);
             }}
             sx={{
-              gridArea: visible ? chartPaneArea(index) : undefined,
-              minWidth: 0,
-              minHeight: 0,
-              display: visible ? "flex" : "none",
-              position: "relative",
-              outline: isActive ? "2px solid #2962FF" : "2px solid transparent",
-              outlineOffset: "-2px",
-              zIndex: isActive ? 2 : 1,
-              transition: "outline-color 120ms ease",
+              position: "absolute",
+              top: shown && rect ? rect.top : 0,
+              left: shown && rect ? rect.left : 0,
+              width: shown && rect ? rect.width : 1,
+              height: shown && rect ? rect.height : 1,
+              zIndex: isActive ? 3 : 2,
+              display: shown ? "block" : "none",
+              outline: isActive ? "2px solid #2962FF" : "1px solid #2a2e39",
+              outlineOffset: "-1px",
               bgcolor: "background.default",
+              overflow: "hidden",
             }}
           >
             {isActive ? (
@@ -115,12 +186,35 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
               onOpenProfile={onOpenProfile}
               paneIndex={index}
               initialSymbol={symbol}
-              // Keep the original TradingView header on pane 0 only.
-              hideHeader={index > 0}
+              hideHeader
             />
           </Box>
         );
       })}
+
+      {/* Active outline for primary plot slot (navbar stays untouched). */}
+      {multi && activePane === 0
+        ? (() => {
+            const rect = paneRectInWorkspace(chartLayout ?? "s", 0, workspaceSize, chrome);
+            if (!rect) return null;
+            return (
+              <Box
+                aria-hidden
+                sx={{
+                  position: "absolute",
+                  top: rect.top,
+                  left: rect.left,
+                  width: rect.width,
+                  height: rect.height,
+                  zIndex: 4,
+                  pointerEvents: "none",
+                  outline: "2px solid #2962FF",
+                  outlineOffset: "-2px",
+                }}
+              />
+            );
+          })()
+        : null}
     </Box>
   );
 }

@@ -157,6 +157,19 @@ export function TradingViewChart({
     };
   }, [isPrimary, barReplay]);
 
+  // Layout / replay bridge (original CL header stays on the primary pane).
+  useEffect(() => {
+    if (!isPrimary) return;
+    const onReplay = () => {
+      setForceReplayUi(true);
+      const w = chart.getWidget() ?? controller.getWidget();
+      if (w) barReplay.attach(w, datafeed);
+      void barReplay.enter();
+    };
+    window.addEventListener("forge:enter-bar-replay", onReplay);
+    return () => window.removeEventListener("forge:enter-bar-replay", onReplay);
+  }, [isPrimary, barReplay, chart, controller, datafeed]);
+
   useTradingViewWidget(containerRef, {
     controller,
     datafeed,

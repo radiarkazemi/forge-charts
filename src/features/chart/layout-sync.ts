@@ -170,6 +170,26 @@ class LayoutSyncBus {
     this.panes.get(this.activePane)?.controller.openIndicators();
   }
 
+  openSymbolSearchOnActive(): void {
+    this.panes.get(this.activePane)?.controller.openSymbolSearch();
+  }
+
+  undoOnActive(): void {
+    this.panes.get(this.activePane)?.controller.undo();
+  }
+
+  redoOnActive(): void {
+    this.panes.get(this.activePane)?.controller.redo();
+  }
+
+  openChartPropertiesOnActive(): void {
+    this.panes.get(this.activePane)?.controller.openChartProperties();
+  }
+
+  takeScreenshotOnActive(): void {
+    this.panes.get(this.activePane)?.controller.takeScreenshot();
+  }
+
   private emitPaneState(): void {
     const st = this.getPaneState(this.activePane);
     for (const listener of this.paneStateListeners) {
