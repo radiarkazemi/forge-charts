@@ -157,7 +157,7 @@ export function TradingViewChart({
     };
   }, [isPrimary, barReplay]);
 
-  // Shared multi-pane header dispatches this (CL header is hidden when multi).
+  // Layout / replay bridge (original CL header stays on the primary pane).
   useEffect(() => {
     if (!isPrimary) return;
     const onReplay = () => {

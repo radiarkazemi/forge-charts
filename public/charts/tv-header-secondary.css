@@ -1,4 +1,4 @@
-/* Secondary layout panes: hide Charting Library header — shared nav lives on pane 0. */
+/* Secondary layout panes: hide Charting Library header — original nav stays on pane 0. */
 .tv-header,
 .layout__area--top,
 [class*="header-chart-panel"],
