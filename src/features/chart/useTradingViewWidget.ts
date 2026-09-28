@@ -218,19 +218,25 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
               }
             }, 50);
           }
-          try {
-            const onLayoutChanged = () => {
-              try {
-                const next = widget?.layout();
-                if (next) onSetChartLayout(next as ChartLayoutId);
-              } catch {
-                /* ignore */
-              }
-            };
-            widget.subscribe("layout_changed", onLayoutChanged);
-          } catch {
-            /* layout_changed may be unavailable */
-          }
+          // Sync CL → settings only after the user changes layout in the native UI.
+          // Skipping the initial layout_changed prevents wiping settings.chartLayout
+          // back to "s" before our setLayout(2h/…) applies.
+          window.setTimeout(() => {
+            if (cancelled || !widget) return;
+            try {
+              const onLayoutChanged = () => {
+                try {
+                  const next = widget?.layout();
+                  if (next) onSetChartLayout(next as ChartLayoutId);
+                } catch {
+                  /* ignore */
+                }
+              };
+              widget.subscribe("layout_changed", onLayoutChanged);
+            } catch {
+              /* layout_changed may be unavailable */
+            }
+          }, 2500);
         }
         // Volume is disabled by featureset; also strip any leftover Volume from
         // layouts that migrated from older autosave keys once.

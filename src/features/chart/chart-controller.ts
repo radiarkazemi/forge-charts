@@ -248,11 +248,15 @@ export class ChartController {
       if (!w) return;
       const apply = () => {
         try {
-          const current = w.layout();
-          if (current === layout) return;
-          w.setLayout(layout as never);
-          // Debug probe for multi-chart verification (harmless in prod).
-          (window as unknown as { __forgeLayout?: string }).__forgeLayout = String(w.layout());
+          const before = String(w.layout());
+          if (before !== layout) {
+            w.setLayout(layout as never);
+          }
+          const after = String(w.layout());
+          const charts = typeof w.chartsCount === "function" ? w.chartsCount() : -1;
+          (window as unknown as { __forgeLayout?: string }).__forgeLayout = after;
+          (window as unknown as { __forgeLayoutDebug?: string }).__forgeLayoutDebug =
+            `want=${layout} before=${before} after=${after} charts=${charts}`;
         } catch (error) {
           (window as unknown as { __forgeLayoutError?: string }).__forgeLayoutError =
             error instanceof Error ? error.message : String(error);
