@@ -48,3 +48,12 @@
   overflow: hidden !important;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) !important;
 }
+
+/* Hide the horizontal “favorite drawings” strip — TV mobile uses the left pill only. */
+[class*="drawingToolbarBottom"],
+[class*="favorite-drawings"],
+[class*="favored-tools"],
+.drawingToolbar-C0LOKuDw,
+div[data-name="favorite-drawings-toolbar"] {
+  display: none !important;
+}
