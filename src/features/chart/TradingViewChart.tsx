@@ -69,11 +69,10 @@ export function TradingViewChart({
   useEffect(() => {
     const unregister = layoutSyncBus.register(paneIndex, controller);
     controller.setSyncHooks({
-      onSymbolChanged: (ticker) => {
+      onSymbolChanged: (ticker, previous) => {
         if (paneIndex === 0) {
-          // Shared CL header symbol search → active pane (restore primary if needed).
           const active = layoutSyncBus.getActivePane();
-          layoutSyncBus.handlePrimarySymbolChanged(ticker);
+          layoutSyncBus.handlePrimarySymbolChanged(ticker, previous);
           const applied = layoutSyncBus.getPaneState(active).symbol || ticker;
           settings.setPaneSymbol(active, applied);
           if (active === 0) {
@@ -83,19 +82,22 @@ export function TradingViewChart({
         }
         settings.setPaneSymbol(paneIndex, ticker);
         layoutSyncBus.recordPaneSymbol(paneIndex, ticker);
+        // Only mirrors when Symbol sync is ON.
         layoutSyncBus.notifySymbol(paneIndex, ticker);
       },
-      onIntervalChanged: (interval) => {
+      onIntervalChanged: (interval, previous) => {
         if (paneIndex === 0) {
-          // Shared CL header TF buttons → active pane (not always pane 0).
-          const active = layoutSyncBus.getActivePane();
-          layoutSyncBus.handlePrimaryIntervalChanged(interval);
-          if (active === 0) {
+          // Pass `previous` so we can restore pane 0 when the header TF was meant
+          // for another selected pane (CL always mutates the primary widget first).
+          layoutSyncBus.handlePrimaryIntervalChanged(interval, previous);
+          // After routing, active pane may have been corrected (header focus steal).
+          if (layoutSyncBus.getActivePane() === 0) {
             settings.rememberChart(settings.settings.get().lastSymbol, interval);
           }
           return;
         }
         layoutSyncBus.recordPaneInterval(paneIndex, interval);
+        // Only mirrors when Interval sync is ON (default OFF).
         layoutSyncBus.notifyInterval(paneIndex, interval);
       },
       onVisibleRangeChanged: (from, to) => layoutSyncBus.notifyVisibleRange(paneIndex, from, to),

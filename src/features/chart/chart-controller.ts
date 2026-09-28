@@ -41,8 +41,10 @@ export interface HorizontalLineOptions {
 }
 
 export interface ChartSyncHooks {
-  readonly onSymbolChanged?: (ticker: string) => void;
-  readonly onIntervalChanged?: (interval: Interval) => void;
+  /** `previous` is the ticker before this change (for multi-pane header routing). */
+  readonly onSymbolChanged?: (ticker: string, previous: string) => void;
+  /** `previous` is the interval before this change (for multi-pane header routing). */
+  readonly onIntervalChanged?: (interval: Interval, previous: Interval) => void;
   readonly onVisibleRangeChanged?: (from: number, to: number) => void;
   readonly onCrosshairMoved?: (time: number) => void;
 }
@@ -97,15 +99,17 @@ export class ChartController {
     const syncSymbol = () => {
       const ext = chart.symbolExt();
       const ticker = stripExchange(ext?.ticker ?? ext?.name ?? chart.symbol());
+      const previous = this.state.get().symbol;
       this.patch({ symbol: ticker });
       forceCountdown();
-      this.syncHooks.onSymbolChanged?.(ticker);
+      this.syncHooks.onSymbolChanged?.(ticker, previous);
     };
     chart.onSymbolChanged().subscribe(null, syncSymbol);
     chart.onIntervalChanged().subscribe(null, (interval) => {
+      const previous = this.state.get().interval;
       this.patch({ interval });
       forceCountdown();
-      this.syncHooks.onIntervalChanged?.(interval);
+      this.syncHooks.onIntervalChanged?.(interval, previous);
     });
     chart.crossHairMoved().subscribe(null, (params) => {
       this.scheduleCrosshair(params);
@@ -238,6 +242,21 @@ export class ChartController {
 
   setInterval(interval: Interval): void {
     this.activeChart()?.setResolution(interval as ResolutionString);
+  }
+
+  /**
+   * Restore interval after a redirected header TF change.
+   * Updates the widget and local store without relying on the async CL event.
+   */
+  restoreInterval(interval: Interval): void {
+    this.patch({ interval });
+    this.activeChart()?.setResolution(interval as ResolutionString);
+  }
+
+  /** Same for symbol restore after redirected header search. */
+  restoreSymbol(ticker: string): void {
+    this.patch({ symbol: ticker });
+    this.setSymbol(ticker);
   }
 
 

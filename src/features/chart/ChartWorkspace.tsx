@@ -46,16 +46,15 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   layoutRef.current = chartLayout ?? "s";
 
   useEffect(() => {
-    layoutSyncBus.setFlags(
-      layoutSync ?? {
-        symbol: true,
-        interval: false,
-        crosshair: false,
-        time: false,
-        dateRange: false,
-        drawings: true,
-      },
-    );
+    // Independent timeframes by default — Interval sync only when explicitly true.
+    layoutSyncBus.setFlags({
+      symbol: layoutSync?.symbol !== false,
+      interval: layoutSync?.interval === true,
+      crosshair: layoutSync?.crosshair === true,
+      time: layoutSync?.time === true,
+      dateRange: layoutSync?.dateRange === true,
+      drawings: layoutSync?.drawings !== false,
+    });
   }, [layoutSync]);
 
   useEffect(() => {

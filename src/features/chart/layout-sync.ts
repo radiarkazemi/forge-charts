@@ -69,12 +69,17 @@ class LayoutSyncBus {
   /** Last intentionally-applied interval per pane (for header routing). */
   private readonly paneIntervals = new Map<number, Interval>();
   private readonly paneSymbols = new Map<number, string>();
+  /** Pane focused before the latest focusPane (header clicks often re-focus 0). */
+  private priorChartPane = 0;
+  private lastFocusAtMs = 0;
 
   setFlags(flags: LayoutSyncFlags): void {
     // Always keep drawings ON unless the user explicitly turns them off.
+    // Interval sync stays OFF unless the user turns it on (independent TFs).
     this.flags = {
       ...DEFAULT_LAYOUT_SYNC,
       ...flags,
+      interval: flags.interval === true,
       drawings: flags.drawings !== false,
     };
   }
@@ -135,20 +140,23 @@ class LayoutSyncBus {
     };
   }
 
-  /** Change only the selected pane’s interval (never broadcasts unless Interval sync is ON). */
-  setActivePaneInterval(interval: Interval): void {
-    const active = this.activePane;
-    const entry = this.panes.get(active);
+  /** Change only one pane’s interval (never broadcasts unless Interval sync is ON). */
+  setPaneInterval(paneIndex: number, interval: Interval): void {
+    const entry = this.panes.get(paneIndex);
     if (!entry?.controller.isReady) return;
     this.withLock(() => {
       entry.controller.setInterval(interval);
-      this.paneIntervals.set(active, interval);
+      this.paneIntervals.set(paneIndex, interval);
     });
-    this.emitPaneState();
-    // Only mirror to other panes when the user explicitly enabled Interval sync.
-    if (this.flags.interval) {
-      this.notifyInterval(active, interval);
+    if (paneIndex === this.activePane) this.emitPaneState();
+    if (this.flags.interval === true) {
+      this.notifyInterval(paneIndex, interval);
     }
+  }
+
+  /** Change only the selected pane’s interval (never broadcasts unless Interval sync is ON). */
+  setActivePaneInterval(interval: Interval): void {
+    this.setPaneInterval(this.activePane, interval);
   }
 
   /** Change only the selected pane’s symbol (broadcast only when Symbol sync is ON). */
@@ -285,6 +293,10 @@ class LayoutSyncBus {
   focusPane(paneIndex: number): void {
     if (paneIndex < 0 || paneIndex >= this.activeCount) return;
     const changed = this.activePane !== paneIndex;
+    if (changed) {
+      this.priorChartPane = this.activePane;
+      this.lastFocusAtMs = Date.now();
+    }
     this.activePane = paneIndex;
     this.drawTargetPane = paneIndex;
     if (changed) {
@@ -296,6 +308,24 @@ class LayoutSyncBus {
     if (tool && tool !== "cursor" && tool !== "arrow_cursor" && paneIndex > 0) {
       void this.applyToolToPane(paneIndex, tool);
     }
+  }
+
+  /**
+   * Pane that should receive header TF/symbol changes.
+   * Header clicks often fire mouse_down on pane 0 right before the TF event —
+   * in that case keep the previously focused chart.
+   */
+  private headerTargetPane(): number {
+    if (this.activeCount < 2) return 0;
+    if (
+      this.activePane === 0 &&
+      this.priorChartPane > 0 &&
+      this.priorChartPane < this.activeCount &&
+      Date.now() - this.lastFocusAtMs < 500
+    ) {
+      return this.priorChartPane;
+    }
+    return this.activePane;
   }
 
   private emitActive(): void {
@@ -320,66 +350,94 @@ class LayoutSyncBus {
   }
 
   /**
-   * Primary CL header interval → active pane only.
-   * When another pane is focused (and Interval sync is off), apply TF there and
-   * restore the primary widget so the shared header doesn’t leave pane 0 changed.
+   * Primary CL header interval change.
+   * Default (Interval sync OFF): only the targeted chart changes.
+   * CL always mutates pane 0 first — when the target is another pane we apply
+   * there and restore pane 0 to `previous`.
    */
-  handlePrimaryIntervalChanged(interval: Interval): void {
+  handlePrimaryIntervalChanged(interval: Interval, previous?: Interval): void {
     if (this.locked) {
       this.paneIntervals.set(0, interval);
       return;
     }
-    if (this.activeCount < 2 || this.activePane === 0) {
-      this.paneIntervals.set(0, interval);
-      if (this.flags.interval) this.notifyInterval(0, interval);
-      return;
-    }
-    // Interval sync ON: keep native primary change and mirror to every pane.
-    if (this.flags.interval) {
+
+    const multi = this.activeCount > 1;
+    const syncOn = this.flags.interval === true;
+    const target = this.headerTargetPane();
+
+    // Sync ON → every visible pane follows the header.
+    if (multi && syncOn) {
       this.paneIntervals.set(0, interval);
       this.notifyInterval(0, interval);
       return;
     }
-    const primaryKeep =
-      this.paneIntervals.get(0) ?? this.panes.get(0)?.controller.state.get().interval ?? "15";
-    this.setActivePaneInterval(interval);
-    if (primaryKeep !== interval) {
-      const primary = this.panes.get(0);
+
+    // Target is the primary chart — native CL change is already correct.
+    if (!multi || target === 0) {
+      this.paneIntervals.set(0, interval);
+      return;
+    }
+
+    // Target is another pane: apply TF there only, snap primary back.
+    if (this.activePane !== target) {
+      this.activePane = target;
+      this.drawTargetPane = target;
+      this.emitActive();
+    }
+    const restoreTo = previous || this.paneIntervals.get(0) || "15";
+    this.setPaneInterval(target, interval);
+
+    const primary = this.panes.get(0);
+    if (primary?.controller.isReady && restoreTo !== interval) {
       this.withLock(() => {
-        primary?.controller.setInterval(primaryKeep);
-        this.paneIntervals.set(0, primaryKeep);
+        primary.controller.restoreInterval(restoreTo);
+        this.paneIntervals.set(0, restoreTo);
       });
+    } else {
+      this.paneIntervals.set(0, restoreTo);
     }
   }
 
   /**
-   * Primary CL header symbol → active pane only (restore primary when needed).
+   * Primary CL header symbol change — same routing rules as interval.
    */
-  handlePrimarySymbolChanged(ticker: string): void {
+  handlePrimarySymbolChanged(ticker: string, previous?: string): void {
     if (this.locked) {
       this.paneSymbols.set(0, ticker);
       return;
     }
-    if (this.activeCount < 2 || this.activePane === 0) {
-      this.paneSymbols.set(0, ticker);
-      if (this.flags.symbol) this.notifySymbol(0, ticker);
-      return;
-    }
-    // Symbol sync ON: keep native primary change and mirror.
-    if (this.flags.symbol) {
+
+    const multi = this.activeCount > 1;
+    const syncOn = this.flags.symbol === true;
+    const target = this.headerTargetPane();
+
+    if (multi && syncOn) {
       this.paneSymbols.set(0, ticker);
       this.notifySymbol(0, ticker);
       return;
     }
-    const primaryKeep =
-      this.paneSymbols.get(0) ?? this.panes.get(0)?.controller.state.get().symbol ?? "";
+
+    if (!multi || target === 0) {
+      this.paneSymbols.set(0, ticker);
+      return;
+    }
+
+    if (this.activePane !== target) {
+      this.activePane = target;
+      this.drawTargetPane = target;
+      this.emitActive();
+    }
+    const restoreTo = previous || this.paneSymbols.get(0) || "";
     this.setActivePaneSymbol(ticker);
-    if (primaryKeep && primaryKeep !== ticker) {
-      const primary = this.panes.get(0);
+
+    const primary = this.panes.get(0);
+    if (primary?.controller.isReady && restoreTo && restoreTo !== ticker) {
       this.withLock(() => {
-        primary?.controller.setSymbol(primaryKeep);
-        this.paneSymbols.set(0, primaryKeep);
+        primary.controller.restoreSymbol(restoreTo);
+        this.paneSymbols.set(0, restoreTo);
       });
+    } else if (restoreTo) {
+      this.paneSymbols.set(0, restoreTo);
     }
   }
 
@@ -419,7 +477,8 @@ class LayoutSyncBus {
 
   notifyInterval(sourceIndex: number, interval: Interval): void {
     this.paneIntervals.set(sourceIndex, interval);
-    if (!this.flags.interval || this.locked) return;
+    // Strict check — never mirror TF unless the user turned Interval sync ON.
+    if (this.flags.interval !== true || this.locked) return;
     this.withLock(() => {
       for (const { index, controller } of this.panes.values()) {
         if (index === sourceIndex || index >= this.activeCount) continue;
