@@ -43,7 +43,14 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   // Apply native multi-chart layout under the original CL header.
   useEffect(() => {
     if (!ready) return;
-    chart.setLayout(chartLayout ?? "s");
+    const layout = chartLayout ?? "s";
+    chart.setLayout(layout);
+    const t1 = window.setTimeout(() => chart.setLayout(layout), 600);
+    const t2 = window.setTimeout(() => chart.setLayout(layout), 2000);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
   }, [ready, chartLayout, chart]);
 
   return (

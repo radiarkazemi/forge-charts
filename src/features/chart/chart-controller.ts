@@ -248,6 +248,25 @@ export class ChartController {
       if (!w) return;
       if (w.layout() === layout) return;
       w.setLayout(layout as never);
+      // Autosave / content load can reset layout — re-assert shortly after.
+      window.setTimeout(() => {
+        try {
+          if (this.widget && this.widget.layout() !== layout) {
+            this.widget.setLayout(layout as never);
+          }
+        } catch {
+          /* ignore */
+        }
+      }, 400);
+      window.setTimeout(() => {
+        try {
+          if (this.widget && this.widget.layout() !== layout) {
+            this.widget.setLayout(layout as never);
+          }
+        } catch {
+          /* ignore */
+        }
+      }, 1500);
     } catch {
       /* layout not supported / widget not ready */
     }
