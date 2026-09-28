@@ -261,25 +261,37 @@ export function mountTvLayersHeader(container: HTMLElement): () => void {
   };
 
   const EVENT_TYPES = ["pointerdown", "mousedown", "touchstart", "click"] as const;
+  let attachedWin: Window | null = null;
 
   const detach = () => {
     if (!attachedDoc) return;
     for (const type of EVENT_TYPES) {
       attachedDoc.removeEventListener(type, onPointer, true);
       attachedDoc.removeEventListener(type, onMenuPointer, true);
+      try {
+        attachedWin?.removeEventListener(type, onPointer, true);
+        attachedWin?.removeEventListener(type, onMenuPointer, true);
+      } catch {
+        /* window gone */
+      }
     }
     attachedDoc = null;
+    attachedWin = null;
   };
 
   const attach = () => {
     const iframe = container.querySelector("iframe");
     const doc = iframe?.contentDocument;
+    const win = iframe?.contentWindow ?? null;
     if (!doc?.body) return false;
     if (attachedDoc === doc) return true;
     detach();
     attachedDoc = doc;
-    // Capture on every pointer family — CL/React may handle mousedown before click.
+    attachedWin = win;
+    // Capture on window + document for every pointer family so we run before CL.
     for (const type of EVENT_TYPES) {
+      win?.addEventListener(type, onPointer, true);
+      win?.addEventListener(type, onMenuPointer, true);
       doc.addEventListener(type, onPointer, true);
       doc.addEventListener(type, onMenuPointer, true);
     }

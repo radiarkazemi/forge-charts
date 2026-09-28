@@ -233,6 +233,16 @@ class LayoutSyncBus {
     if (target !== this.activePane && target < this.activeCount) {
       this.focusPane(target);
     }
+    // CL may still open the dialog on the primary widget from the shared header
+    // click — close it, then open on the active chart (TV layers).
+    if (target > 0) {
+      this.panes.get(0)?.controller.closePopupsAndDialogs();
+      window.setTimeout(() => {
+        this.panes.get(0)?.controller.closePopupsAndDialogs();
+        this.panes.get(target)?.controller.openIndicators();
+      }, 0);
+      window.setTimeout(() => this.panes.get(0)?.controller.closePopupsAndDialogs(), 40);
+    }
     this.panes.get(target)?.controller.openIndicators();
   }
 
@@ -247,6 +257,14 @@ class LayoutSyncBus {
         this.primarySymbolGuard = keep;
         this.primarySymbolGuardUntil = Date.now() + 2500;
       }
+    }
+    if (target > 0) {
+      this.panes.get(0)?.controller.closePopupsAndDialogs();
+      window.setTimeout(() => {
+        this.panes.get(0)?.controller.closePopupsAndDialogs();
+        this.panes.get(target)?.controller.openSymbolSearch();
+      }, 0);
+      window.setTimeout(() => this.panes.get(0)?.controller.closePopupsAndDialogs(), 40);
     }
     this.panes.get(target)?.controller.openSymbolSearch();
   }

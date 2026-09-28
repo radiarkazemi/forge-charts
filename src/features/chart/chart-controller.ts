@@ -588,6 +588,15 @@ export class ChartController {
     }
   }
 
+  /** Close library popups/dialogs (used when redirecting header actions to another pane). */
+  closePopupsAndDialogs(): void {
+    try {
+      this.widget?.closePopupsAndDialogs();
+    } catch {
+      /* chart not ready */
+    }
+  }
+
   /** Toggle the left drawing toolbar (mobile Draw button). */
   toggleDrawingToolbar(): void {
     try {
