@@ -6,6 +6,7 @@ import {
   type EntityId,
   type IChartingLibraryWidget,
   type IChartWidgetApi,
+  type MouseEventParams,
   type ResolutionString,
 } from "@/infrastructure/tradingview";
 import {
@@ -72,8 +73,8 @@ export class ChartController {
   private orcaEntityIds: EntityId[] = [];
   private readonly drawingHandlers = new Set<(entityId: EntityId, eventType: string) => void>();
   private drawingBridge: ((entityId: EntityId, eventType: string) => void) | null = null;
-  private readonly mouseDownHandlers = new Set<() => void>();
-  private mouseDownBridge: (() => void) | null = null;
+  private readonly mouseDownHandlers = new Set<(params: MouseEventParams) => void>();
+  private mouseDownBridge: ((params: MouseEventParams) => void) | null = null;
 
   constructor(symbol: string, interval: Interval) {
     this.state = createStore<ChartState>({ symbol, interval, ready: false, error: null });
@@ -182,10 +183,10 @@ export class ChartController {
       }
       this.mouseDownBridge = null;
     }
-    const bridge = () => {
+    const bridge = (params: MouseEventParams) => {
       for (const handler of this.mouseDownHandlers) {
         try {
-          handler();
+          handler(params);
         } catch {
           /* ignore */
         }
@@ -550,7 +551,7 @@ export class ChartController {
   }
 
   /** Clicks inside the chart iframe (for active-pane selection). */
-  onMouseDown(handler: () => void): () => void {
+  onMouseDown(handler: (params: MouseEventParams) => void): () => void {
     this.mouseDownHandlers.add(handler);
     if (this.widget && !this.mouseDownBridge) {
       this.bindMouseDownBridge(this.widget);

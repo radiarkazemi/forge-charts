@@ -141,7 +141,11 @@ export function TradingViewChart({
   useEffect(() => {
     const el = containerRef.current;
     if (!el || !ready) return;
-    const onPointer = () => layoutSyncBus.focusPane(paneIndex);
+    const onPointer = (event: PointerEvent) => {
+      // Primary iframe also hosts the shared header — ignore chrome clicks.
+      if (paneIndex === 0 && (event.clientY < 52 || event.clientX < 56)) return;
+      layoutSyncBus.focusPaneFromPlot(paneIndex);
+    };
     el.addEventListener("pointerdown", onPointer, true);
     return () => el.removeEventListener("pointerdown", onPointer, true);
   }, [paneIndex, ready]);

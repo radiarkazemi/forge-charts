@@ -165,6 +165,7 @@ function stop(event: Event): void {
 }
 
 function applyIntervalToActive(interval: Interval): void {
+  // Prefer the last plot the user clicked (TV active chart), not a stolen focus.
   layoutSyncBus.applyHeaderInterval(interval);
 }
 
@@ -200,20 +201,21 @@ export function mountTvLayersHeader(container: HTMLElement): () => void {
     const btn = raw.closest("button");
     if (!btn || !(btn instanceof HTMLElement)) return;
 
-    const active = layoutSyncBus.getActivePane();
+    // Prefer last plot click (TV active chart), not a stolen header focus.
+    const target = layoutSyncBus.getHeaderTargetPane();
 
     if (isSymbolSearchButton(btn)) {
       // Pane 0: let the native dialog run. Other panes: open on the active widget.
-      if (active === 0) return;
+      if (target === 0) return;
       stop(event);
-      if (once(`sym:${active}`)) layoutSyncBus.openSymbolSearchOnActive();
+      if (once(`sym:${target}`)) layoutSyncBus.openSymbolSearchOnActive();
       return;
     }
 
     if (isIndicatorsButton(btn)) {
-      if (active === 0) return;
+      if (target === 0) return;
       stop(event);
-      if (once(`ind:${active}`)) layoutSyncBus.openIndicatorsOnActive();
+      if (once(`ind:${target}`)) layoutSyncBus.openIndicatorsOnActive();
       return;
     }
 
@@ -221,13 +223,13 @@ export function mountTvLayersHeader(container: HTMLElement): () => void {
     if (!interval) return;
 
     // Interval sync ON or active primary → native CL change (+ bus sync).
-    if (active === 0 || layoutSyncBus.getFlags().interval === true) return;
+    if (target === 0 || layoutSyncBus.getFlags().interval === true) return;
 
     stop(event);
-    if (!once(`tf:${active}:${interval}`)) return;
+    if (!once(`tf:${target}:${interval}`)) return;
     applyIntervalToActive(interval);
     if (attachedDoc) {
-      const st = layoutSyncBus.getPaneState(layoutSyncBus.getActivePane());
+      const st = layoutSyncBus.getPaneState(target);
       syncHeaderChromeRetry(attachedDoc, st.symbol, interval);
     }
   };
@@ -235,8 +237,8 @@ export function mountTvLayersHeader(container: HTMLElement): () => void {
   // Interval dropdown / dialog menu items.
   const onMenuPointer = (event: Event) => {
     if (disposed || !shouldRoute()) return;
-    const active = layoutSyncBus.getActivePane();
-    if (active === 0 || layoutSyncBus.getFlags().interval === true) return;
+    const target = layoutSyncBus.getHeaderTargetPane();
+    if (target === 0 || layoutSyncBus.getFlags().interval === true) return;
 
     const raw = event.target;
     if (!(raw instanceof Element)) return;
@@ -250,10 +252,10 @@ export function mountTvLayersHeader(container: HTMLElement): () => void {
     if (!interval) return;
 
     stop(event);
-    if (!once(`menu:${active}:${interval}`)) return;
+    if (!once(`menu:${target}:${interval}`)) return;
     applyIntervalToActive(interval);
     if (attachedDoc) {
-      const st = layoutSyncBus.getPaneState(layoutSyncBus.getActivePane());
+      const st = layoutSyncBus.getPaneState(target);
       syncHeaderChromeRetry(attachedDoc, st.symbol, interval);
     }
   };

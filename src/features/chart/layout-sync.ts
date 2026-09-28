@@ -72,6 +72,9 @@ class LayoutSyncBus {
   /** Pane focused before the latest focusPane (header clicks often re-focus 0). */
   private priorChartPane = 0;
   private lastFocusAtMs = 0;
+  /** Last pane the user clicked on the plot (not header/toolbar). */
+  private plotFocusPane = 0;
+  private plotFocusAtMs = 0;
   /**
    * After a header intercept routes TF to a secondary pane, CL may still mutate
    * pane 0 — snap it back to this value for a short window.
@@ -119,6 +122,11 @@ class LayoutSyncBus {
 
   getActivePane(): number {
     return this.activePane;
+  }
+
+  /** Pane that should receive shared-header actions (TV active chart). */
+  getHeaderTargetPane(): number {
+    return this.headerTargetPane();
   }
 
   getSharedTool(): string | null {
@@ -222,31 +230,25 @@ class LayoutSyncBus {
 
   openIndicatorsOnActive(): void {
     const target = this.headerTargetPane();
-    if (this.activePane !== target && target < this.activeCount) {
-      this.activePane = target;
-      this.drawTargetPane = target;
-      this.emitActive();
-      this.emitPaneState();
+    if (target !== this.activePane && target < this.activeCount) {
+      this.focusPane(target);
     }
-    this.panes.get(this.activePane)?.controller.openIndicators();
+    this.panes.get(target)?.controller.openIndicators();
   }
 
   openSymbolSearchOnActive(): void {
     const target = this.headerTargetPane();
-    if (this.activePane !== target && target < this.activeCount) {
-      this.activePane = target;
-      this.drawTargetPane = target;
-      this.emitActive();
-      this.emitPaneState();
+    if (target !== this.activePane && target < this.activeCount) {
+      this.focusPane(target);
     }
-    if (this.activeCount > 1 && this.flags.symbol !== true && this.activePane > 0) {
+    if (this.activeCount > 1 && this.flags.symbol !== true && target > 0) {
       const keep = this.paneSymbols.get(0) ?? this.panes.get(0)?.controller.state.get().symbol ?? "";
       if (keep) {
         this.primarySymbolGuard = keep;
         this.primarySymbolGuardUntil = Date.now() + 2500;
       }
     }
-    this.panes.get(this.activePane)?.controller.openSymbolSearch();
+    this.panes.get(target)?.controller.openSymbolSearch();
   }
 
   undoOnActive(): void {
@@ -285,8 +287,15 @@ class LayoutSyncBus {
       void this.onDrawingEvent(index, entityId, eventType);
     });
     // Clicks inside the CL iframe never bubble to React — use library mouse_down.
-    entry.unsubMouse = controller.onMouseDown(() => {
-      this.focusPane(index);
+    entry.unsubMouse = controller.onMouseDown((params) => {
+      // Primary widget owns the shared header + left toolbar. Clicks there must
+      // NOT steal the active layer (TV: header drives whichever chart is selected).
+      if (index === 0) {
+        const y = params?.clientY ?? 0;
+        const x = params?.clientX ?? 0;
+        if (y < 52 || x < 56) return;
+      }
+      this.focusPaneFromPlot(index);
     });
     this.panes.set(index, entry);
     if (controller.isReady && this.activeCount > 1) {
@@ -377,20 +386,35 @@ class LayoutSyncBus {
     }
   }
 
+  /** User clicked a chart plot — this is the authoritative active layer. */
+  focusPaneFromPlot(paneIndex: number): void {
+    this.plotFocusPane = paneIndex;
+    this.plotFocusAtMs = Date.now();
+    this.focusPane(paneIndex);
+  }
+
   /**
    * Pane that should receive header TF/symbol changes.
-   * Header clicks often fire mouse_down on pane 0 right before the TF event —
-   * in that case keep the previously focused chart.
+   * Prefer the last plot the user clicked; only fall back to the short
+   * header-steal heuristic when there is no recent plot focus.
    */
   private headerTargetPane(): number {
     if (this.activeCount < 2) return 0;
-    // Header clicks can steal focus to pane 0 via CL mouse_down — keep the
-    // previously focused chart for a generous window covering async TF apply.
+    // Explicit plot click wins for several seconds (covers TF click after select).
+    if (
+      this.plotFocusAtMs > 0 &&
+      Date.now() - this.plotFocusAtMs < 8000 &&
+      this.plotFocusPane >= 0 &&
+      this.plotFocusPane < this.activeCount
+    ) {
+      return this.plotFocusPane;
+    }
+    // Very tight race: accidental focus to 0 in the same gesture as a header TF.
     if (
       this.activePane === 0 &&
       this.priorChartPane > 0 &&
       this.priorChartPane < this.activeCount &&
-      Date.now() - this.lastFocusAtMs < 1500
+      Date.now() - this.lastFocusAtMs < 200
     ) {
       return this.priorChartPane;
     }

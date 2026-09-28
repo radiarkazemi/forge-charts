@@ -168,7 +168,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
           <Box
             key={`forge-layer-${index}`}
             onPointerDownCapture={() => {
-              if (shown && !menusOpen) layoutSyncBus.focusPane(index);
+              if (shown && !menusOpen) layoutSyncBus.focusPaneFromPlot(index);
             }}
             sx={{
               position: "absolute",
