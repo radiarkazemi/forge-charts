@@ -52,7 +52,8 @@ export function SidePanel({
               right: overlayRight,
               bottom: 0,
               zIndex: 20,
-              width: pine ? `calc(100% - ${overlayRight}px)` : `min(${PANEL_WIDTH}px, calc(100% - ${overlayRight}px))`,
+              // Mobile: full width minus the rail (desktop keeps a capped panel).
+              width: `calc(100% - ${overlayRight}px)`,
               maxWidth: `calc(100% - ${overlayRight}px)`,
               boxShadow: "-8px 0 24px rgba(0,0,0,0.35)",
             }

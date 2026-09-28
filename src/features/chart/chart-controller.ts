@@ -556,6 +556,23 @@ export class ChartController {
     }
   }
 
+  /** Ensure left drawing toolbar starts collapsed (phones). */
+  ensureDrawingToolbarCollapsed(): void {
+    try {
+      const chart = this.activeChart() as
+        | (IChartWidgetApi & {
+            getCheckableActionState?: (id: string) => boolean;
+          })
+        | null;
+      if (!chart?.getCheckableActionState) return;
+      if (chart.getCheckableActionState("drawingToolbarAction")) {
+        chart.executeActionById("drawingToolbarAction");
+      }
+    } catch {
+      /* chart not ready */
+    }
+  }
+
   undo(): void {
     try {
       this.activeChart()?.executeActionById("undo");

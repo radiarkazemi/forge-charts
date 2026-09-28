@@ -108,6 +108,18 @@ export function TradingViewChart({
     layoutSyncBus.notifyPaneReady(paneIndex);
   }, [paneIndex, ready]);
 
+  // Phones: collapse left drawing toolbar so candles go edge-to-edge.
+  useEffect(() => {
+    if (!ready || !isPrimary) return;
+    if (typeof window === "undefined" || !window.matchMedia("(max-width: 900px)").matches) return;
+    const t1 = window.setTimeout(() => controller.ensureDrawingToolbarCollapsed(), 200);
+    const t2 = window.setTimeout(() => controller.ensureDrawingToolbarCollapsed(), 800);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [ready, isPrimary, controller]);
+
   // Click / touch on any pane focuses it (React shell — iframe uses mouse_down too).
   useEffect(() => {
     const el = containerRef.current;

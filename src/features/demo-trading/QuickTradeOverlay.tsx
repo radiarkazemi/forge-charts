@@ -1,4 +1,6 @@
 import Box from "@mui/material/Box";
+import useMediaQuery from "@mui/material/useMediaQuery";
+import { useTheme } from "@mui/material/styles";
 import type { CSSProperties, ChangeEvent } from "react";
 import { useEffect, useState, type RefObject } from "react";
 import { useServices } from "@/app/use-services";
@@ -30,6 +32,8 @@ export function QuickTradeOverlay({
 }: {
   readonly containerRef: RefObject<HTMLElement | null>;
 }) {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const { demoTrading, chart, quotes } = useServices();
   const snap = useStore(demoTrading.state);
   const symbol = useStore(chart.state, (s) => s.symbol);
@@ -45,7 +49,12 @@ export function QuickTradeOverlay({
   }, [snap.qty]);
 
   useEffect(() => {
-    if (!ready) return;
+    // Phones: hide on-chart Sell/Buy (use More → Trade / order ticket instead).
+    if (!ready || isMobile) {
+      removeLegendTradeSlots();
+      setAnchor(null);
+      return;
+    }
     let alive = true;
 
     const measure = () => {
@@ -72,9 +81,9 @@ export function QuickTradeOverlay({
       window.removeEventListener("resize", measure);
       removeLegendTradeSlots();
     };
-  }, [containerRef, symbol, ready]);
+  }, [containerRef, symbol, ready, isMobile]);
 
-  if (!ready || !anchor) return null;
+  if (!ready || !anchor || isMobile) return null;
 
   const openTicket = (side: "buy" | "sell") => {
     demoTrading.setSide(side);

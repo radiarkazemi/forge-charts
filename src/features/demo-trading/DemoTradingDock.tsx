@@ -77,15 +77,17 @@ export function DemoTradingDock({ mobile = false }: DemoTradingDockProps) {
   const marginLevel = usedMargin > 0 ? (acct.equity / usedMargin) * 100 : 0;
 
   if (!snap.dockOpen) {
+    // Mobile: hide the collapsed strip — open via More → Trade to free chart height.
+    if (mobile) return null;
     return (
       <Box
         sx={{
-          height: mobile ? 32 : 36,
+          height: 36,
           flexShrink: 0,
           display: "flex",
           alignItems: "center",
-          gap: mobile ? 0.75 : 1.5,
-          px: mobile ? 1 : 1.5,
+          gap: 1.5,
+          px: 1.5,
           bgcolor: "#1e222d",
           borderTop: "1px solid #2a2e39",
           color: "#d1d4dc",

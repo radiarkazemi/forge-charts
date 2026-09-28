@@ -49,7 +49,7 @@
     max-height: 42px !important;
   }
 
-  /* Drawing toolbar icons: larger hit area on touch */
+  /* Drawing toolbar icons: larger hit area on touch when Draw expands it */
   .layout__area--left .tv-group {
     min-width: 40px;
   }
@@ -63,5 +63,10 @@
   /* Keep zoom / move buttons clear of the price axis on narrow screens */
   .chart-controls-bar {
     bottom: 4px !important;
+  }
+
+  /* Prefer a leaner legend on phones */
+  .legend-source-item {
+    font-size: 11px !important;
   }
 }
