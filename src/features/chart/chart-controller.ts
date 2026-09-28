@@ -246,27 +246,23 @@ export class ChartController {
     try {
       const w = this.widget;
       if (!w) return;
-      if (w.layout() === layout) return;
-      w.setLayout(layout as never);
+      const apply = () => {
+        try {
+          const current = w.layout();
+          if (current === layout) return;
+          w.setLayout(layout as never);
+          // Debug probe for multi-chart verification (harmless in prod).
+          (window as unknown as { __forgeLayout?: string }).__forgeLayout = String(w.layout());
+        } catch (error) {
+          (window as unknown as { __forgeLayoutError?: string }).__forgeLayoutError =
+            error instanceof Error ? error.message : String(error);
+        }
+      };
+      apply();
       // Autosave / content load can reset layout — re-assert shortly after.
-      window.setTimeout(() => {
-        try {
-          if (this.widget && this.widget.layout() !== layout) {
-            this.widget.setLayout(layout as never);
-          }
-        } catch {
-          /* ignore */
-        }
-      }, 400);
-      window.setTimeout(() => {
-        try {
-          if (this.widget && this.widget.layout() !== layout) {
-            this.widget.setLayout(layout as never);
-          }
-        } catch {
-          /* ignore */
-        }
-      }, 1500);
+      window.setTimeout(apply, 400);
+      window.setTimeout(apply, 1500);
+      window.setTimeout(apply, 3000);
     } catch {
       /* layout not supported / widget not ready */
     }
