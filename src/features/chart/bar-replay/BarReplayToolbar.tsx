@@ -50,7 +50,7 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
       sx={{
         position: "absolute",
         left: "50%",
-        bottom: { xs: 64, sm: 52 },
+        bottom: { xs: 100, sm: 52 },
         transform: "translateX(-50%)",
         zIndex: 30,
         display: "flex",

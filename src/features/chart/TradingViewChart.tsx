@@ -250,7 +250,7 @@ export function TradingViewChart({
             sx={{
               position: "absolute",
               left: { xs: 8, sm: 56 },
-              bottom: { xs: 72, sm: 44 },
+              bottom: { xs: 12, sm: 44 },
               zIndex: 2,
             }}
           />

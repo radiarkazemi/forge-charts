@@ -42,14 +42,26 @@
   font-weight: 700 !important;
 }
 
-/* Leave room for touch targets on phones; keep drawing toolbar reachable */
+/* Leave room for touch targets on phones; denser header + toolbar */
 @media (max-width: 900px) {
   .tv-header {
-    min-height: 40px !important;
+    min-height: 38px !important;
+    max-height: 42px !important;
   }
 
-  /* Drawing toolbar icons: slightly larger hit area on touch */
+  /* Drawing toolbar icons: larger hit area on touch */
   .layout__area--left .tv-group {
-    min-width: 38px;
+    min-width: 40px;
+  }
+
+  /* Tighter symbol / interval controls so more of the chart is visible */
+  .tv-header .js-button-text,
+  .tv-header .apply-common-tooltip {
+    font-size: 12px !important;
+  }
+
+  /* Keep zoom / move buttons clear of the price axis on narrow screens */
+  .chart-controls-bar {
+    bottom: 4px !important;
   }
 }

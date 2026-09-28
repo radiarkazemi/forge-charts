@@ -18,6 +18,7 @@ import {
   PineRailIcon,
   WatchlistRailIcon,
 } from "./rail-icons";
+import { railWidth } from "./mobile-chrome";
 
 /** TradingView dark widget-bar colors */
 const RAIL_BG = "#131722";
@@ -128,13 +129,14 @@ export function SideRail({ active, onToggle, onOpenObjectTree, onOpenPine, compa
       component="nav"
       aria-label="Side panels"
       sx={{
-        width: compact ? 44 : 52,
+        width: railWidth(compact),
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        gap: 0.35,
-        py: 1.25,
+        gap: compact ? 0.2 : 0.35,
+        py: compact ? 0.75 : 1.25,
         px: 0.5,
+        pb: compact ? "calc(8px + env(safe-area-inset-bottom, 0px))" : 1.25,
         bgcolor: RAIL_BG,
         borderLeft: `1px solid ${RAIL_BORDER}`,
         flexShrink: 0,
@@ -142,9 +144,9 @@ export function SideRail({ active, onToggle, onOpenObjectTree, onOpenPine, compa
       }}
     >
       {top.map(renderButton)}
-      {!compact && mid.length > 0 ? (
+      {mid.length > 0 ? (
         <>
-          <Box sx={{ flex: 1, minHeight: 32 }} />
+          <Box sx={{ flex: 1, minHeight: compact ? 12 : 32 }} />
           {mid.map(renderButton)}
         </>
       ) : (

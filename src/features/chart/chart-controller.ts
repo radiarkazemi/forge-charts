@@ -547,6 +547,47 @@ export class ChartController {
     }
   }
 
+  /** Toggle the left drawing toolbar (mobile Draw button). */
+  toggleDrawingToolbar(): void {
+    try {
+      this.activeChart()?.executeActionById("drawingToolbarAction");
+    } catch {
+      /* chart not ready */
+    }
+  }
+
+  undo(): void {
+    try {
+      this.activeChart()?.executeActionById("undo");
+    } catch {
+      /* chart not ready */
+    }
+  }
+
+  redo(): void {
+    try {
+      this.activeChart()?.executeActionById("redo");
+    } catch {
+      /* chart not ready */
+    }
+  }
+
+  openChartProperties(): void {
+    try {
+      this.activeChart()?.executeActionById("chartProperties");
+    } catch {
+      /* chart not ready */
+    }
+  }
+
+  takeScreenshot(): void {
+    try {
+      void this.widget?.takeScreenshot();
+    } catch {
+      /* chart not ready */
+    }
+  }
+
   /* ── internals ─────────────────────────────────────────────────────── */
 
   private async applyTheme(mode: ThemeMode): Promise<void> {

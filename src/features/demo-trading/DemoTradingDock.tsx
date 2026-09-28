@@ -38,10 +38,15 @@ function formatStep(ms: number): string {
   return `${Math.round(ms / 1000)}s`;
 }
 
+interface DemoTradingDockProps {
+  /** Narrow viewports: shorter collapsed strip + smaller open height. */
+  readonly mobile?: boolean;
+}
+
 /**
  * TradingView-style bottom trading dock (demo / paper account strip).
  */
-export function DemoTradingDock() {
+export function DemoTradingDock({ mobile = false }: DemoTradingDockProps) {
   const { demoTrading, demoSpace, chart, quotes } = useServices();
   const snap = useStore(demoTrading.state);
   const spaceCtrl = useStore(demoSpace.state);
@@ -75,30 +80,42 @@ export function DemoTradingDock() {
     return (
       <Box
         sx={{
-          height: 36,
+          height: mobile ? 32 : 36,
           flexShrink: 0,
           display: "flex",
           alignItems: "center",
-          gap: 1.5,
-          px: 1.5,
+          gap: mobile ? 0.75 : 1.5,
+          px: mobile ? 1 : 1.5,
           bgcolor: "#1e222d",
           borderTop: "1px solid #2a2e39",
           color: "#d1d4dc",
+          minWidth: 0,
         }}
       >
         <Button
           size="small"
           onClick={() => demoTrading.setDockOpen(true)}
-          sx={{ textTransform: "none", color: "#d1d4dc", fontWeight: 600 }}
+          sx={{ textTransform: "none", color: "#d1d4dc", fontWeight: 600, minWidth: 0, px: mobile ? 0.75 : 1 }}
         >
-          Demo Trading
+          {mobile ? "Demo" : "Demo Trading"}
         </Button>
-        <Typography variant="caption" sx={{ color: "#787b86" }}>
-          {acct.name} · Equity {acct.equity.toFixed(2)} {acct.currency}
+        <Typography
+          variant="caption"
+          sx={{
+            color: "#787b86",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            minWidth: 0,
+          }}
+        >
+          {mobile
+            ? `${acct.equity.toFixed(0)} ${acct.currency}`
+            : `${acct.name} · Equity ${acct.equity.toFixed(2)} ${acct.currency}`}
         </Typography>
         {snap.space.active ? (
-          <Typography variant="caption" sx={{ color: "#f44336", fontWeight: 600 }}>
-            SPACE ACTIVE
+          <Typography variant="caption" sx={{ color: "#f44336", fontWeight: 600, flexShrink: 0 }}>
+            {mobile ? "LIVE" : "SPACE ACTIVE"}
           </Typography>
         ) : null}
         <Box sx={{ flex: 1 }} />
@@ -112,7 +129,7 @@ export function DemoTradingDock() {
   return (
     <Box
       sx={{
-        height: 200,
+        height: mobile ? 160 : 200,
         flexShrink: 0,
         display: "flex",
         flexDirection: "column",

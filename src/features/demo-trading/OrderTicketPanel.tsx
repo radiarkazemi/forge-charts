@@ -9,10 +9,15 @@ import { useStore } from "@/shared/hooks/useStore";
 
 const FONT = '"Trebuchet MS","Segoe UI",Tahoma,sans-serif';
 
+interface OrderTicketPanelProps {
+  /** On phones, float as a bottom sheet instead of a fixed side column. */
+  readonly mobile?: boolean;
+}
+
 /**
  * TradingView Order ticket (right panel) — Market / Limit / Stop + SL/TP brackets.
  */
-export function OrderTicketPanel() {
+export function OrderTicketPanel({ mobile = false }: OrderTicketPanelProps) {
   const { demoTrading, chart, quotes } = useServices();
   const snap = useStore(demoTrading.state);
   const symbol = useStore(chart.state, (s) => s.symbol);
@@ -53,19 +58,44 @@ export function OrderTicketPanel() {
 
   return (
     <Box
-      sx={{
-        width: 280,
-        flexShrink: 0,
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
-        bgcolor: "#131722",
-        borderLeft: "1px solid #2a2e39",
-        color: "#d1d4dc",
-        fontFamily: FONT,
-        fontSize: 12,
-        minHeight: 0,
-      }}
+      sx={
+        mobile
+          ? {
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              top: "auto",
+              height: "min(72%, 480px)",
+              width: "100%",
+              zIndex: 25,
+              display: "flex",
+              flexDirection: "column",
+              bgcolor: "#131722",
+              borderTop: "1px solid #2a2e39",
+              borderTopLeftRadius: 12,
+              borderTopRightRadius: 12,
+              boxShadow: "0 -8px 28px rgba(0,0,0,0.45)",
+              color: "#d1d4dc",
+              fontFamily: FONT,
+              fontSize: 12,
+              minHeight: 0,
+              pb: "env(safe-area-inset-bottom, 0px)",
+            }
+          : {
+              width: 280,
+              flexShrink: 0,
+              height: "100%",
+              display: "flex",
+              flexDirection: "column",
+              bgcolor: "#131722",
+              borderLeft: "1px solid #2a2e39",
+              color: "#d1d4dc",
+              fontFamily: FONT,
+              fontSize: 12,
+              minHeight: 0,
+            }
+      }
     >
       {/* Header */}
       <Box sx={{ display: "flex", alignItems: "center", height: 38, px: 1, borderBottom: "1px solid #2a2e39" }}>
