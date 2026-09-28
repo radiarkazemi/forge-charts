@@ -27,8 +27,6 @@ export interface TradingViewWidgetDeps {
   readonly libraryPath: string;
   readonly initialSymbol: string;
   readonly initialInterval: Interval;
-  /** Native CL multi-chart layout id (s / 2h / 2v / …). */
-  readonly initialLayout?: ChartLayoutId;
   readonly theme: ThemeMode;
   readonly alertCount: number;
   /** Primary pane mounts Forge header tools; secondary panes stay library-only. */
@@ -140,7 +138,6 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
   const readInitial = useEffectEvent(() => ({
     symbol: deps.initialSymbol,
     interval: deps.initialInterval,
-    layout: deps.initialLayout ?? ("s" as ChartLayoutId),
     theme: deps.theme,
     alertCount: deps.alertCount,
   }));
@@ -206,38 +203,6 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         window.clearTimeout(readyTimer);
         controller.attach(widget);
         onWidgetReady(widget);
-        // Restore native multi-chart layout under the original header.
-        if (isPrimary) {
-          const layout = initial.layout;
-          if (layout && layout !== "s") {
-            window.setTimeout(() => {
-              try {
-                widget?.setLayout(layout as never);
-              } catch {
-                /* ignore */
-              }
-            }, 50);
-          }
-          // Sync CL → settings only after the user changes layout in the native UI.
-          // Skipping the initial layout_changed prevents wiping settings.chartLayout
-          // back to "s" before our setLayout(2h/…) applies.
-          window.setTimeout(() => {
-            if (cancelled || !widget) return;
-            try {
-              const onLayoutChanged = () => {
-                try {
-                  const next = widget?.layout();
-                  if (next) onSetChartLayout(next as ChartLayoutId);
-                } catch {
-                  /* ignore */
-                }
-              };
-              widget.subscribe("layout_changed", onLayoutChanged);
-            } catch {
-              /* layout_changed may be unavailable */
-            }
-          }, 2500);
-        }
         // Volume is disabled by featureset; also strip any leftover Volume from
         // layouts that migrated from older autosave keys once.
         try {

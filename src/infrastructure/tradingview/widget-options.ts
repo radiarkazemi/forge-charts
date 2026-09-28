@@ -65,9 +65,6 @@ const ENABLED_FEATURES: ChartingLibraryFeatureset[] = [
   "show_zoom_and_move_buttons_on_touch",
   // Candle close countdown on the price scale (intraday resolutions).
   "countdown",
-  // Native multi-chart under the original top navbar (Select Layout).
-  "header_layouttoggle" as ChartingLibraryFeatureset,
-  "support_multicharts" as ChartingLibraryFeatureset,
 ];
 
 const DISABLED_FEATURES: ChartingLibraryFeatureset[] = [

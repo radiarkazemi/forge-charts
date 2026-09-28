@@ -238,47 +238,6 @@ export class ChartController {
     this.activeChart()?.setResolution(interval as ResolutionString);
   }
 
-  /**
-   * Native Charting Library multi-chart layout (original header stays; charts
-   * sit underneath). Layout ids match TV: s | 2h | 2v | 3h | …
-   */
-  setLayout(layout: string): void {
-    try {
-      const w = this.widget;
-      if (!w) return;
-      const apply = () => {
-        try {
-          const before = String(w.layout());
-          if (before !== layout) {
-            w.setLayout(layout as never);
-          }
-          const after = String(w.layout());
-          const charts = typeof w.chartsCount === "function" ? w.chartsCount() : -1;
-          (window as unknown as { __forgeLayout?: string }).__forgeLayout = after;
-          (window as unknown as { __forgeLayoutDebug?: string }).__forgeLayoutDebug =
-            `want=${layout} before=${before} after=${after} charts=${charts}`;
-        } catch (error) {
-          (window as unknown as { __forgeLayoutError?: string }).__forgeLayoutError =
-            error instanceof Error ? error.message : String(error);
-        }
-      };
-      apply();
-      // Autosave / content load can reset layout — re-assert shortly after.
-      window.setTimeout(apply, 400);
-      window.setTimeout(apply, 1500);
-      window.setTimeout(apply, 3000);
-    } catch {
-      /* layout not supported / widget not ready */
-    }
-  }
-
-  layout(): string | null {
-    try {
-      return this.widget?.layout() ?? null;
-    } catch {
-      return null;
-    }
-  }
 
   getVisibleRange(): { from: number; to: number } | null {
     try {
