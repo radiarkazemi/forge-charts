@@ -6,11 +6,13 @@ import { useStore } from "@/shared/hooks/useStore";
 import {
   mountPrimaryLayoutClip,
   paneRectInWorkspace,
+  watchPrimaryMenusOpen,
   type ChromeInsets,
 } from "./chart-layout-geometry";
 import { getChartLayoutGrid, MAX_CHART_PANES } from "./chart-layouts";
 import { layoutSyncBus } from "./layout-sync";
 import { TradingViewChart } from "./TradingViewChart";
+import { mountTvLayersHeader } from "./tv-layers-header";
 
 interface ChartWorkspaceProps {
   readonly onCreateAlert: () => void;
@@ -37,22 +39,23 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   const [activePane, setActivePane] = useState(0);
   const [chrome, setChrome] = useState<ChromeInsets>(DEFAULT_CHROME);
   const [workspaceSize, setWorkspaceSize] = useState({ width: 0, height: 0 });
+  /** When CL header menus are open, secondaries must not cover the dropdown. */
+  const [menusOpen, setMenusOpen] = useState(false);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const primaryHostRef = useRef<HTMLDivElement | null>(null);
   const layoutRef = useRef<ChartLayoutId>(chartLayout ?? "s");
   layoutRef.current = chartLayout ?? "s";
 
   useEffect(() => {
-    layoutSyncBus.setFlags(
-      layoutSync ?? {
-        symbol: true,
-        interval: false,
-        crosshair: false,
-        time: false,
-        dateRange: false,
-        drawings: true,
-      },
-    );
+    // Independent timeframes by default — Interval sync only when explicitly true.
+    layoutSyncBus.setFlags({
+      symbol: layoutSync?.symbol !== false,
+      interval: layoutSync?.interval === true,
+      crosshair: layoutSync?.crosshair === true,
+      time: layoutSync?.time === true,
+      dateRange: layoutSync?.dateRange === true,
+      drawings: layoutSync?.drawings !== false,
+    });
   }, [layoutSync]);
 
   useEffect(() => {
@@ -98,6 +101,25 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
     );
   }, [chartLayout, multi]);
 
+  // Layout / TF / indicator menus live in the primary iframe — don’t let layers steal clicks.
+  useEffect(() => {
+    if (!multi) {
+      setMenusOpen(false);
+      return;
+    }
+    const host = primaryHostRef.current;
+    if (!host) return;
+    return watchPrimaryMenusOpen(host, setMenusOpen);
+  }, [multi, chartLayout]);
+
+  // TV layers: route Symbol / Interval / Indicators from the shared header to the active pane.
+  useEffect(() => {
+    if (!multi) return;
+    const host = primaryHostRef.current;
+    if (!host) return;
+    return mountTvLayersHeader(host);
+  }, [multi, chartLayout]);
+
   return (
     <Box
       ref={workspaceRef}
@@ -113,11 +135,13 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
       {/* Primary widget: original CL navbar spans the full workspace width. */}
       <Box
         ref={primaryHostRef}
-        onPointerDownCapture={() => layoutSyncBus.focusPane(0)}
+        // Header / left toolbar clicks must NOT steal focus from the active layer.
+        // Pane 0 focus comes from CL mouse_down on the plot (and the plot outline hit area).
         sx={{
           position: "absolute",
           inset: 0,
-          zIndex: 1,
+          // Above layers while a CL menu is open so Select Layout / TF clicks work.
+          zIndex: menusOpen ? 6 : 1,
           bgcolor: "background.default",
         }}
       >
@@ -144,7 +168,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
           <Box
             key={`forge-layer-${index}`}
             onPointerDownCapture={() => {
-              if (shown) layoutSyncBus.focusPane(index);
+              if (shown && !menusOpen) layoutSyncBus.focusPaneFromPlot(index);
             }}
             sx={{
               position: "absolute",
@@ -154,6 +178,8 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
               height: shown && rect ? rect.height : 1,
               zIndex: isActive ? 3 : 2,
               display: shown ? "block" : "none",
+              // Pass clicks through to primary iframe menus (layout picker, etc.).
+              pointerEvents: menusOpen ? "none" : "auto",
               outline: isActive ? "2px solid #2962FF" : "1px solid #2a2e39",
               outlineOffset: "-1px",
               bgcolor: "background.default",

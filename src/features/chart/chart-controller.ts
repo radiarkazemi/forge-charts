@@ -6,6 +6,7 @@ import {
   type EntityId,
   type IChartingLibraryWidget,
   type IChartWidgetApi,
+  type MouseEventParams,
   type ResolutionString,
 } from "@/infrastructure/tradingview";
 import {
@@ -41,8 +42,10 @@ export interface HorizontalLineOptions {
 }
 
 export interface ChartSyncHooks {
-  readonly onSymbolChanged?: (ticker: string) => void;
-  readonly onIntervalChanged?: (interval: Interval) => void;
+  /** `previous` is the ticker before this change (for multi-pane header routing). */
+  readonly onSymbolChanged?: (ticker: string, previous: string) => void;
+  /** `previous` is the interval before this change (for multi-pane header routing). */
+  readonly onIntervalChanged?: (interval: Interval, previous: Interval) => void;
   readonly onVisibleRangeChanged?: (from: number, to: number) => void;
   readonly onCrosshairMoved?: (time: number) => void;
 }
@@ -70,8 +73,10 @@ export class ChartController {
   private orcaEntityIds: EntityId[] = [];
   private readonly drawingHandlers = new Set<(entityId: EntityId, eventType: string) => void>();
   private drawingBridge: ((entityId: EntityId, eventType: string) => void) | null = null;
-  private readonly mouseDownHandlers = new Set<() => void>();
-  private mouseDownBridge: (() => void) | null = null;
+  private readonly mouseDownHandlers = new Set<(params: MouseEventParams) => void>();
+  private mouseDownBridge: ((params: MouseEventParams) => void) | null = null;
+  private readonly studyHandlers = new Set<(entityId: EntityId, eventType: string) => void>();
+  private studyBridge: ((entityId: EntityId, eventType: string) => void) | null = null;
 
   constructor(symbol: string, interval: Interval) {
     this.state = createStore<ChartState>({ symbol, interval, ready: false, error: null });
@@ -97,15 +102,17 @@ export class ChartController {
     const syncSymbol = () => {
       const ext = chart.symbolExt();
       const ticker = stripExchange(ext?.ticker ?? ext?.name ?? chart.symbol());
+      const previous = this.state.get().symbol;
       this.patch({ symbol: ticker });
       forceCountdown();
-      this.syncHooks.onSymbolChanged?.(ticker);
+      this.syncHooks.onSymbolChanged?.(ticker, previous);
     };
     chart.onSymbolChanged().subscribe(null, syncSymbol);
     chart.onIntervalChanged().subscribe(null, (interval) => {
+      const previous = this.state.get().interval;
       this.patch({ interval });
       forceCountdown();
-      this.syncHooks.onIntervalChanged?.(interval);
+      this.syncHooks.onIntervalChanged?.(interval, previous);
     });
     chart.crossHairMoved().subscribe(null, (params) => {
       this.scheduleCrosshair(params);
@@ -136,9 +143,12 @@ export class ChartController {
 
     if (this.desiredTheme && this.desiredTheme !== widget.getTheme()) void this.applyTheme(this.desiredTheme);
 
-    // Bind drawing_event + mouse_down bridges (handlers may register before attach).
+    // Bind drawing_event + mouse_down + study_event bridges (handlers may register before attach).
     this.bindDrawingBridge(widget);
     this.bindMouseDownBridge(widget);
+    this.bindStudyBridge(widget);
+    // Match TradingView default: one-shot drawings (return to Cross after each shape).
+    this.ensureStayInDrawingModeOff();
   }
 
   private bindDrawingBridge(widget: IChartingLibraryWidget): void {
@@ -176,10 +186,10 @@ export class ChartController {
       }
       this.mouseDownBridge = null;
     }
-    const bridge = () => {
+    const bridge = (params: MouseEventParams) => {
       for (const handler of this.mouseDownHandlers) {
         try {
-          handler();
+          handler(params);
         } catch {
           /* ignore */
         }
@@ -190,6 +200,32 @@ export class ChartController {
       this.mouseDownBridge = bridge;
     } catch {
       this.mouseDownBridge = null;
+    }
+  }
+
+  private bindStudyBridge(widget: IChartingLibraryWidget): void {
+    if (this.studyBridge) {
+      try {
+        widget.unsubscribe("study_event", this.studyBridge);
+      } catch {
+        /* ignore */
+      }
+      this.studyBridge = null;
+    }
+    const bridge = (entityId: EntityId, eventType: string) => {
+      for (const handler of this.studyHandlers) {
+        try {
+          handler(entityId, eventType);
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+    try {
+      widget.subscribe("study_event", bridge);
+      this.studyBridge = bridge;
+    } catch {
+      this.studyBridge = null;
     }
   }
 
@@ -209,8 +245,16 @@ export class ChartController {
         /* ignore */
       }
     }
+    if (this.widget && this.studyBridge) {
+      try {
+        this.widget.unsubscribe("study_event", this.studyBridge);
+      } catch {
+        /* ignore */
+      }
+    }
     this.drawingBridge = null;
     this.mouseDownBridge = null;
+    this.studyBridge = null;
     this.widget = null;
     this.patch({ ready: false });
   }
@@ -235,7 +279,22 @@ export class ChartController {
   }
 
   setInterval(interval: Interval): void {
-    this.activeChart()?.setResolution(interval as ResolutionString);
+    void this.activeChart()?.setResolution(interval as ResolutionString, { doNotActivateChart: true });
+  }
+
+  /**
+   * Restore interval after a redirected header TF change.
+   * Updates the widget and local store without relying on the async CL event.
+   */
+  restoreInterval(interval: Interval): void {
+    this.patch({ interval });
+    void this.activeChart()?.setResolution(interval as ResolutionString, { doNotActivateChart: true });
+  }
+
+  /** Same for symbol restore after redirected header search. */
+  restoreSymbol(ticker: string): void {
+    this.patch({ symbol: ticker });
+    this.setSymbol(ticker);
   }
 
 
@@ -289,6 +348,24 @@ export class ChartController {
   requestResize(): void {
     try {
       window.dispatchEvent(new Event("resize"));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Turn off sticky drawing mode so tools return to Cross after one use. */
+  ensureStayInDrawingModeOff(): void {
+    try {
+      const chart = this.activeChart() as
+        | (IChartWidgetApi & {
+            getCheckableActionState?: (id: string) => boolean;
+            executeActionById: (id: string) => void;
+          })
+        | null;
+      if (!chart?.getCheckableActionState) return;
+      if (chart.getCheckableActionState("stayInDrawingModeAction")) {
+        chart.executeActionById("stayInDrawingModeAction");
+      }
     } catch {
       /* ignore */
     }
@@ -511,7 +588,7 @@ export class ChartController {
   }
 
   /** Clicks inside the chart iframe (for active-pane selection). */
-  onMouseDown(handler: () => void): () => void {
+  onMouseDown(handler: (params: MouseEventParams) => void): () => void {
     this.mouseDownHandlers.add(handler);
     if (this.widget && !this.mouseDownBridge) {
       this.bindMouseDownBridge(this.widget);
@@ -519,6 +596,56 @@ export class ChartController {
     return () => {
       this.mouseDownHandlers.delete(handler);
     };
+  }
+
+  /** Study create/remove on this chart (multi-pane: migrate header-added studies). */
+  onStudyEvent(handler: (entityId: EntityId, eventType: string) => void): () => void {
+    this.studyHandlers.add(handler);
+    if (this.widget && !this.studyBridge) {
+      this.bindStudyBridge(this.widget);
+    }
+    return () => {
+      this.studyHandlers.delete(handler);
+    };
+  }
+
+  /**
+   * Snapshot a study for cloning onto another pane, then remove it locally.
+   * Returns null when the study cannot be read.
+   */
+  takeStudyForMigrate(entityId: EntityId): {
+    readonly name: string;
+    readonly inputs: Record<string, unknown>;
+  } | null {
+    const chart = this.activeChart();
+    if (!chart) return null;
+    try {
+      const info = chart.getAllStudies().find((s) => String(s.id) === String(entityId));
+      const name = (info?.name || "").trim();
+      if (!name) return null;
+      const study = chart.getStudyById(entityId);
+      const inputs: Record<string, unknown> = {};
+      for (const item of study.getInputValues()) {
+        const id = (item as { id?: string }).id;
+        const value = (item as { value?: unknown }).value;
+        if (id != null) inputs[id] = value;
+      }
+      chart.removeEntity(entityId);
+      return { name, inputs };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Create a study from a migrated snapshot. */
+  createStudyFromSnapshot(name: string, inputs: Record<string, unknown>): void {
+    const chart = this.activeChart();
+    if (!chart) return;
+    try {
+      void chart.createStudy(name, false, false, inputs as never);
+    } catch {
+      /* study API unavailable */
+    }
   }
 
   /** Open the library Object Tree (layers) for drawings / studies. */
@@ -543,6 +670,15 @@ export class ChartController {
   openSymbolSearch(): void {
     try {
       this.activeChart()?.executeActionById("symbolSearch");
+    } catch {
+      /* chart not ready */
+    }
+  }
+
+  /** Close library popups/dialogs (used when redirecting header actions to another pane). */
+  closePopupsAndDialogs(): void {
+    try {
+      this.widget?.closePopupsAndDialogs();
     } catch {
       /* chart not ready */
     }

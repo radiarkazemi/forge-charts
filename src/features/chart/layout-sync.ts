@@ -33,6 +33,7 @@ interface PaneEntry {
   readonly controller: ChartController;
   unsubDrawing?: () => void;
   unsubMouse?: () => void;
+  unsubStudy?: () => void;
 }
 
 interface DrawingGroup {
@@ -58,6 +59,7 @@ class LayoutSyncBus {
   private sharedTool: string | null = null;
   private applyingTool = false;
   private syncingDrawings = false;
+  private migratingStudy = false;
   private readonly groups: DrawingGroup[] = [];
   private readonly entityToGroup = new Map<string, DrawingGroup>();
   /** Entity ids created as mirrors — ignore their create events to avoid loops. */
@@ -69,12 +71,32 @@ class LayoutSyncBus {
   /** Last intentionally-applied interval per pane (for header routing). */
   private readonly paneIntervals = new Map<number, Interval>();
   private readonly paneSymbols = new Map<number, string>();
+  /** Pane focused before the latest focusPane (header clicks often re-focus 0). */
+  private priorChartPane = 0;
+  private lastFocusAtMs = 0;
+  /** Last pane the user clicked on the plot (not header/toolbar). */
+  private plotFocusPane = 0;
+  private plotFocusAtMs = 0;
+  /**
+   * After a header intercept routes TF to a secondary pane, CL may still mutate
+   * pane 0 — snap it back to this value for a short window.
+   */
+  private primaryIntervalGuard: Interval | null = null;
+  private primaryIntervalGuardUntil = 0;
+  private primarySymbolGuard: string | null = null;
+  private primarySymbolGuardUntil = 0;
+  /** Ignore primary onIntervalChanged echoes while we force-restore pane 0. */
+  private ignoringPrimaryInterval = false;
+  private ignorePrimaryIntervalTimer = 0;
+  private restorePrimaryTimer = 0;
 
   setFlags(flags: LayoutSyncFlags): void {
     // Always keep drawings ON unless the user explicitly turns them off.
+    // Interval sync stays OFF unless the user turns it on (independent TFs).
     this.flags = {
       ...DEFAULT_LAYOUT_SYNC,
       ...flags,
+      interval: flags.interval === true,
       drawings: flags.drawings !== false,
     };
   }
@@ -102,6 +124,11 @@ class LayoutSyncBus {
 
   getActivePane(): number {
     return this.activePane;
+  }
+
+  /** Pane that should receive shared-header actions (TV active chart). */
+  getHeaderTargetPane(): number {
+    return this.headerTargetPane();
   }
 
   getSharedTool(): string | null {
@@ -135,20 +162,57 @@ class LayoutSyncBus {
     };
   }
 
-  /** Change only the selected pane’s interval (never broadcasts unless Interval sync is ON). */
-  setActivePaneInterval(interval: Interval): void {
-    const active = this.activePane;
-    const entry = this.panes.get(active);
+  /** Change only one pane’s interval (never broadcasts unless Interval sync is ON). */
+  setPaneInterval(paneIndex: number, interval: Interval): void {
+    const entry = this.panes.get(paneIndex);
     if (!entry?.controller.isReady) return;
     this.withLock(() => {
       entry.controller.setInterval(interval);
-      this.paneIntervals.set(active, interval);
+      this.paneIntervals.set(paneIndex, interval);
     });
-    this.emitPaneState();
-    // Only mirror to other panes when the user explicitly enabled Interval sync.
-    if (this.flags.interval) {
-      this.notifyInterval(active, interval);
+    if (paneIndex === this.activePane) this.emitPaneState();
+    if (this.flags.interval === true) {
+      this.notifyInterval(paneIndex, interval);
     }
+  }
+
+  /** Change only the selected pane’s interval (never broadcasts unless Interval sync is ON). */
+  setActivePaneInterval(interval: Interval): void {
+    this.setPaneInterval(this.activePane, interval);
+  }
+
+  /**
+   * Header TF click (TV layers): apply to the active chart only.
+   * Interval sync ON → every visible pane. Otherwise only the focused pane.
+   * When the focused pane is secondary, guard pane 0 against accidental CL mutation.
+   */
+  applyHeaderInterval(interval: Interval): void {
+    const multi = this.activeCount > 1;
+    const syncOn = this.flags.interval === true;
+    const target = this.headerTargetPane();
+
+    if (!multi || syncOn) {
+      this.setPaneInterval(0, interval);
+      return;
+    }
+
+    if (target === 0) {
+      this.setPaneInterval(0, interval);
+      return;
+    }
+
+    if (this.activePane !== target) {
+      this.activePane = target;
+      this.drawTargetPane = target;
+      this.emitActive();
+      this.emitPaneState();
+    }
+
+    const keep = this.paneIntervals.get(0) ?? this.panes.get(0)?.controller.state.get().interval ?? "15";
+    this.armPrimaryIntervalGuard(keep);
+    this.setPaneInterval(target, interval);
+    // CL often still mutates pane 0 from the same click — pin it back.
+    if (keep !== interval) this.forceRestorePrimaryInterval(keep);
   }
 
   /** Change only the selected pane’s symbol (broadcast only when Symbol sync is ON). */
@@ -167,11 +231,22 @@ class LayoutSyncBus {
   }
 
   openIndicatorsOnActive(): void {
-    this.panes.get(this.activePane)?.controller.openIndicators();
+    // Shared header lives on pane 0 — open the dialog there (full-bleed overlay).
+    // Newly created studies are migrated to the active plot via study_event.
+    this.panes.get(0)?.controller.openIndicators();
   }
 
   openSymbolSearchOnActive(): void {
-    this.panes.get(this.activePane)?.controller.openSymbolSearch();
+    // Dialog on pane 0; symbol change is routed by handlePrimarySymbolChanged.
+    const target = this.headerTargetPane();
+    if (this.activeCount > 1 && this.flags.symbol !== true && target > 0) {
+      const keep = this.paneSymbols.get(0) ?? this.panes.get(0)?.controller.state.get().symbol ?? "";
+      if (keep) {
+        this.primarySymbolGuard = keep;
+        this.primarySymbolGuardUntil = Date.now() + 2500;
+      }
+    }
+    this.panes.get(0)?.controller.openSymbolSearch();
   }
 
   undoOnActive(): void {
@@ -205,14 +280,28 @@ class LayoutSyncBus {
     const prev = this.panes.get(index);
     prev?.unsubDrawing?.();
     prev?.unsubMouse?.();
+    prev?.unsubStudy?.();
     const entry: PaneEntry = { index, controller };
     entry.unsubDrawing = controller.onDrawingEvent((entityId, eventType) => {
       void this.onDrawingEvent(index, entityId, eventType);
     });
     // Clicks inside the CL iframe never bubble to React — use library mouse_down.
-    entry.unsubMouse = controller.onMouseDown(() => {
-      this.focusPane(index);
+    entry.unsubMouse = controller.onMouseDown((params) => {
+      // Primary widget owns the shared header + left toolbar. Clicks there must
+      // NOT steal the active layer (TV: header drives whichever chart is selected).
+      if (index === 0) {
+        const y = params?.clientY ?? 0;
+        const x = params?.clientX ?? 0;
+        if (y < 52 || x < 56) return;
+      }
+      this.focusPaneFromPlot(index);
     });
+    // Header Indicators dialog always creates studies on pane 0 — migrate to active plot.
+    if (index === 0) {
+      entry.unsubStudy = controller.onStudyEvent((entityId, eventType) => {
+        void this.onPrimaryStudyEvent(entityId, eventType);
+      });
+    }
     this.panes.set(index, entry);
     if (controller.isReady && this.activeCount > 1) {
       this.scheduleSeedFromPrimary();
@@ -222,6 +311,7 @@ class LayoutSyncBus {
       if (cur?.controller === controller) {
         cur.unsubDrawing?.();
         cur.unsubMouse?.();
+        cur.unsubStudy?.();
         this.panes.delete(index);
         this.pruneGroupsForPane(index);
       }
@@ -263,11 +353,19 @@ class LayoutSyncBus {
     if (this.applyingTool) return;
     if (sourceIndex !== 0) return;
     this.sharedTool = tool;
+    // Cursor / eraser: mirror to all panes. Drawing tools: only the active draw target.
+    if (!tool || tool === "cursor" || tool === "arrow_cursor" || tool === "dot") {
+      for (const { index } of this.panes.values()) {
+        if (index === 0 || index >= this.activeCount) continue;
+        void this.applyToolToPane(index, tool ?? "cursor");
+      }
+      return;
+    }
     const target =
       this.drawTargetPane > 0 && this.drawTargetPane < this.activeCount
         ? this.drawTargetPane
         : this.activePane;
-    if (target > 0 && tool) {
+    if (target > 0) {
       this.activePane = target;
       this.emitActive();
       void this.applyToolToPane(target, tool);
@@ -277,6 +375,10 @@ class LayoutSyncBus {
   focusPane(paneIndex: number): void {
     if (paneIndex < 0 || paneIndex >= this.activeCount) return;
     const changed = this.activePane !== paneIndex;
+    if (changed) {
+      this.priorChartPane = this.activePane;
+      this.lastFocusAtMs = Date.now();
+    }
     this.activePane = paneIndex;
     this.drawTargetPane = paneIndex;
     if (changed) {
@@ -284,9 +386,45 @@ class LayoutSyncBus {
       this.emitPaneState();
     }
     const tool = this.sharedTool;
-    if (tool && paneIndex > 0) {
+    // Only re-apply an active drawing tool (not cursor) when focusing a secondary pane.
+    if (tool && tool !== "cursor" && tool !== "arrow_cursor" && paneIndex > 0) {
       void this.applyToolToPane(paneIndex, tool);
     }
+  }
+
+  /** User clicked a chart plot — this is the authoritative active layer. */
+  focusPaneFromPlot(paneIndex: number): void {
+    this.plotFocusPane = paneIndex;
+    this.plotFocusAtMs = Date.now();
+    this.focusPane(paneIndex);
+  }
+
+  /**
+   * Pane that should receive header TF/symbol changes.
+   * Prefer the last plot the user clicked; only fall back to the short
+   * header-steal heuristic when there is no recent plot focus.
+   */
+  private headerTargetPane(): number {
+    if (this.activeCount < 2) return 0;
+    // Explicit plot click wins for several seconds (covers TF click after select).
+    if (
+      this.plotFocusAtMs > 0 &&
+      Date.now() - this.plotFocusAtMs < 8000 &&
+      this.plotFocusPane >= 0 &&
+      this.plotFocusPane < this.activeCount
+    ) {
+      return this.plotFocusPane;
+    }
+    // Very tight race: accidental focus to 0 in the same gesture as a header TF.
+    if (
+      this.activePane === 0 &&
+      this.priorChartPane > 0 &&
+      this.priorChartPane < this.activeCount &&
+      Date.now() - this.lastFocusAtMs < 200
+    ) {
+      return this.priorChartPane;
+    }
+    return this.activePane;
   }
 
   private emitActive(): void {
@@ -311,25 +449,164 @@ class LayoutSyncBus {
   }
 
   /**
-   * Primary CL header interval → active pane only (interval sync stays off by default).
+   * Primary CL header interval change (safety net).
+   * Prefer `applyHeaderInterval` via capture-phase intercept so CL never mutates
+   * pane 0. If a change still lands here, route like TradingView layers:
+   * Interval sync OFF → only the active pane; restore pane 0 when needed.
    */
-  handlePrimaryIntervalChanged(interval: Interval): void {
-    if (this.locked) return;
-    if (this.activeCount < 2) {
+  handlePrimaryIntervalChanged(interval: Interval, previous?: Interval): void {
+    if (this.locked || this.ignoringPrimaryInterval) {
       this.paneIntervals.set(0, interval);
       return;
     }
-    this.setActivePaneInterval(interval);
-  }
 
-  handlePrimarySymbolChanged(ticker: string): void {
-    if (this.locked) return;
-    if (this.activeCount < 2) {
-      this.paneSymbols.set(0, ticker);
-      if (this.flags.symbol) this.notifySymbol(0, ticker);
+    const multi = this.activeCount > 1;
+    const syncOn = this.flags.interval === true;
+
+    // Intercept already applied TF to a secondary pane — undo CL's pane-0 mutation.
+    if (
+      multi &&
+      !syncOn &&
+      this.primaryIntervalGuard &&
+      Date.now() < this.primaryIntervalGuardUntil &&
+      this.primaryIntervalGuard !== interval
+    ) {
+      this.forceRestorePrimaryInterval(this.primaryIntervalGuard);
       return;
     }
+
+    const target = this.headerTargetPane();
+
+    // Sync ON → every visible pane follows the header.
+    if (multi && syncOn) {
+      this.paneIntervals.set(0, interval);
+      this.notifyInterval(0, interval);
+      return;
+    }
+
+    // Target is the primary chart — native CL change is already correct.
+    if (!multi || target === 0) {
+      this.paneIntervals.set(0, interval);
+      return;
+    }
+
+    // Target is another pane: apply TF there only, snap primary back.
+    if (this.activePane !== target) {
+      this.activePane = target;
+      this.drawTargetPane = target;
+      this.emitActive();
+      this.emitPaneState();
+    }
+    const restoreTo =
+      (this.primaryIntervalGuard && Date.now() < this.primaryIntervalGuardUntil
+        ? this.primaryIntervalGuard
+        : null) ||
+      previous ||
+      this.paneIntervals.get(0) ||
+      "15";
+
+    this.armPrimaryIntervalGuard(restoreTo);
+    // Only push to the target if it isn't already on this TF (avoid clobbering).
+    const targetInterval = this.paneIntervals.get(target) ?? this.panes.get(target)?.controller.state.get().interval;
+    if (targetInterval !== interval) {
+      this.setPaneInterval(target, interval);
+    }
+
+    if (restoreTo !== interval) {
+      this.forceRestorePrimaryInterval(restoreTo);
+    } else {
+      this.paneIntervals.set(0, restoreTo);
+    }
+  }
+
+  /**
+   * Primary CL header symbol change — same routing rules as interval.
+   */
+  handlePrimarySymbolChanged(ticker: string, previous?: string): void {
+    if (this.locked) {
+      this.paneSymbols.set(0, ticker);
+      return;
+    }
+
+    const multi = this.activeCount > 1;
+    const syncOn = this.flags.symbol === true;
+
+    if (
+      multi &&
+      !syncOn &&
+      this.primarySymbolGuard &&
+      Date.now() < this.primarySymbolGuardUntil &&
+      this.normalizeSymbol(this.primarySymbolGuard) !== this.normalizeSymbol(ticker)
+    ) {
+      const keep = this.primarySymbolGuard;
+      const primary = this.panes.get(0);
+      if (primary?.controller.isReady) {
+        this.withLock(() => {
+          primary.controller.restoreSymbol(keep);
+          this.paneSymbols.set(0, keep);
+        });
+      } else {
+        this.paneSymbols.set(0, keep);
+      }
+      return;
+    }
+
+    const target = this.headerTargetPane();
+
+    if (multi && syncOn) {
+      this.paneSymbols.set(0, ticker);
+      this.notifySymbol(0, ticker);
+      return;
+    }
+
+    if (!multi || target === 0) {
+      this.paneSymbols.set(0, ticker);
+      return;
+    }
+
+    if (this.activePane !== target) {
+      this.activePane = target;
+      this.drawTargetPane = target;
+      this.emitActive();
+    }
+    const restoreTo =
+      (this.primarySymbolGuard && Date.now() < this.primarySymbolGuardUntil
+        ? this.primarySymbolGuard
+        : null) ||
+      previous ||
+      this.paneSymbols.get(0) ||
+      "";
+
+    // Guard before set — openSymbolSearch on secondary may still race with pane 0.
+    if (restoreTo) {
+      this.primarySymbolGuard = restoreTo;
+      this.primarySymbolGuardUntil = Date.now() + 1200;
+    }
     this.setActivePaneSymbol(ticker);
+
+    const primary = this.panes.get(0);
+    if (primary?.controller.isReady && restoreTo && restoreTo !== ticker) {
+      this.withLock(() => {
+        primary.controller.restoreSymbol(restoreTo);
+        this.paneSymbols.set(0, restoreTo);
+      });
+    } else if (restoreTo) {
+      this.paneSymbols.set(0, restoreTo);
+    }
+  }
+
+  /** After one drawing completes, return every pane to the Cross tool. */
+  async resetToolsToCursor(): Promise<void> {
+    this.sharedTool = "cursor";
+    this.applyingTool = true;
+    try {
+      for (const { index, controller } of this.panes.values()) {
+        if (index >= this.activeCount || !controller.isReady) continue;
+        await controller.selectLineTool("cursor");
+      }
+    } finally {
+      this.applyingTool = false;
+    }
   }
 
   recordPaneInterval(paneIndex: number, interval: Interval): void {
@@ -354,7 +631,8 @@ class LayoutSyncBus {
 
   notifyInterval(sourceIndex: number, interval: Interval): void {
     this.paneIntervals.set(sourceIndex, interval);
-    if (!this.flags.interval || this.locked) return;
+    // Strict check — never mirror TF unless the user turned Interval sync ON.
+    if (this.flags.interval !== true || this.locked) return;
     this.withLock(() => {
       for (const { index, controller } of this.panes.values()) {
         if (index === sourceIndex || index >= this.activeCount) continue;
@@ -456,11 +734,19 @@ class LayoutSyncBus {
     entityId: EntityId,
     eventType: string,
   ): Promise<void> {
-    if (!this.flags.drawings || this.syncingDrawings) return;
-    if (paneIndex >= this.activeCount) return;
-    if (this.activeCount < 2) return;
-
     const idKey = String(entityId);
+    const shouldResetTool =
+      eventType === "create" && !this.applyingTool && !this.mirrorIds.has(idKey);
+
+    // Single-pane (or drawings sync off): still return to Cross after one use.
+    if (this.activeCount < 2 || !this.flags.drawings) {
+      if (shouldResetTool) await this.resetToolsToCursor();
+      return;
+    }
+
+    if (this.syncingDrawings) return;
+    if (paneIndex >= this.activeCount) return;
+
     // Ignore events from shapes we created as mirrors (prevents sync loops / UI lock).
     if (this.mirrorIds.has(idKey)) {
       if (eventType === "remove") this.mirrorIds.delete(idKey);
@@ -494,6 +780,7 @@ class LayoutSyncBus {
       eventType !== "move" &&
       eventType !== "properties_changed"
     ) {
+      if (shouldResetTool) await this.resetToolsToCursor();
       return;
     }
 
@@ -501,16 +788,26 @@ class LayoutSyncBus {
     this.focusPane(paneIndex);
 
     const source = this.panes.get(paneIndex);
-    if (!source?.controller.isReady) return;
+    if (!source?.controller.isReady) {
+      if (shouldResetTool) await this.resetToolsToCursor();
+      return;
+    }
     const chart = source.controller.getWidget()?.activeChart();
-    if (!chart) return;
+    if (!chart) {
+      if (shouldResetTool) await this.resetToolsToCursor();
+      return;
+    }
 
+    // Capture tool hint before we reset to Cross.
     const toolHint =
       normalizeShapeName(source.controller.selectedLineTool()) ??
       normalizeShapeName(this.sharedTool);
 
     const snap = await readShapeSnapshotRetry(chart, entityId, toolHint);
-    if (!snap) return;
+    if (!snap) {
+      if (shouldResetTool) await this.resetToolsToCursor();
+      return;
+    }
 
     let group = this.entityToGroup.get(idKey);
     if (!group) {
@@ -587,6 +884,8 @@ class LayoutSyncBus {
     } finally {
       this.syncingDrawings = false;
     }
+
+    if (shouldResetTool) await this.resetToolsToCursor();
   }
 
   private normalizeSymbol(symbol: string): string {
@@ -616,6 +915,90 @@ class LayoutSyncBus {
     } finally {
       this.locked = false;
     }
+  }
+
+  /**
+   * Studies added via the shared header Indicators dialog land on pane 0.
+   * Move them to the active plot so layers match TradingView.
+   */
+  private async onPrimaryStudyEvent(entityId: EntityId, eventType: string): Promise<void> {
+    if (this.migratingStudy || this.locked) return;
+    if (eventType !== "create" && eventType !== "paste_study") return;
+    if (this.activeCount < 2) return;
+    const target = this.headerTargetPane();
+    if (target <= 0 || target >= this.activeCount) return;
+
+    const source = this.panes.get(0);
+    const dest = this.panes.get(target);
+    if (!source?.controller.isReady || !dest?.controller.isReady) return;
+
+    // Let CL finish initializing the study before we read inputs / remove it.
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, 60);
+    });
+
+    this.migratingStudy = true;
+    try {
+      const snap = source.controller.takeStudyForMigrate(entityId);
+      if (!snap) return;
+      dest.controller.createStudyFromSnapshot(snap.name, snap.inputs);
+    } finally {
+      this.migratingStudy = false;
+    }
+  }
+
+  private armPrimaryIntervalGuard(keep: Interval): void {
+    this.primaryIntervalGuard = keep;
+    this.primaryIntervalGuardUntil = Date.now() + 2000;
+  }
+
+  /**
+   * CL setResolution is async and can finish after our first restore.
+   * Retry with ignore-flag so restore echoes don't re-route to the active pane.
+   */
+  private forceRestorePrimaryInterval(interval: Interval): void {
+    const primary = this.panes.get(0);
+    if (!primary?.controller.isReady) {
+      this.paneIntervals.set(0, interval);
+      return;
+    }
+
+    this.ignoringPrimaryInterval = true;
+    window.clearTimeout(this.ignorePrimaryIntervalTimer);
+    this.ignorePrimaryIntervalTimer = window.setTimeout(() => {
+      this.ignoringPrimaryInterval = false;
+    }, 2000);
+
+    window.clearTimeout(this.restorePrimaryTimer);
+    const delays = [0, 30, 80, 160, 320, 640];
+    let step = 0;
+
+    const tick = () => {
+      const entry = this.panes.get(0);
+      if (!entry?.controller.isReady) return;
+      this.locked = true;
+      try {
+        entry.controller.restoreInterval(interval);
+        this.paneIntervals.set(0, interval);
+      } finally {
+        this.locked = false;
+      }
+
+      const current = entry.controller.state.get().interval;
+      const widgetRes = (() => {
+        try {
+          return entry.controller.getWidget()?.activeChart().resolution() as Interval | undefined;
+        } catch {
+          return undefined;
+        }
+      })();
+      const ok = current === interval && (widgetRes == null || widgetRes === interval);
+      step += 1;
+      if (ok || step >= delays.length) return;
+      this.restorePrimaryTimer = window.setTimeout(tick, delays[step]!);
+    };
+
+    tick();
   }
 }
 

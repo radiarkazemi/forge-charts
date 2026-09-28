@@ -30,6 +30,7 @@ export type {
   LineToolsAndGroupsLoadRequestContext,
   LineToolsAndGroupsLoadRequestType,
   LineToolsAndGroupsState,
+  MouseEventParams,
   OnReadyCallback,
   PeriodParams,
   ResolutionString,

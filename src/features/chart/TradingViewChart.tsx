@@ -69,18 +69,35 @@ export function TradingViewChart({
   useEffect(() => {
     const unregister = layoutSyncBus.register(paneIndex, controller);
     controller.setSyncHooks({
-      onSymbolChanged: (ticker) => {
+      onSymbolChanged: (ticker, previous) => {
+        if (paneIndex === 0) {
+          const active = layoutSyncBus.getActivePane();
+          layoutSyncBus.handlePrimarySymbolChanged(ticker, previous);
+          const applied = layoutSyncBus.getPaneState(active).symbol || ticker;
+          settings.setPaneSymbol(active, applied);
+          if (active === 0) {
+            settings.rememberChart(applied, settings.settings.get().lastInterval);
+          }
+          return;
+        }
         settings.setPaneSymbol(paneIndex, ticker);
         layoutSyncBus.recordPaneSymbol(paneIndex, ticker);
-        // Broadcast only when Symbol sync is ON (notifySymbol checks the flag).
+        // Only mirrors when Symbol sync is ON.
         layoutSyncBus.notifySymbol(paneIndex, ticker);
       },
-      onIntervalChanged: (interval) => {
-        layoutSyncBus.recordPaneInterval(paneIndex, interval);
+      onIntervalChanged: (interval, previous) => {
         if (paneIndex === 0) {
-          settings.rememberChart(settings.settings.get().lastSymbol, interval);
+          // Pass `previous` so we can restore pane 0 when the header TF was meant
+          // for another selected pane (CL always mutates the primary widget first).
+          layoutSyncBus.handlePrimaryIntervalChanged(interval, previous);
+          // After routing, active pane may have been corrected (header focus steal).
+          if (layoutSyncBus.getActivePane() === 0) {
+            settings.rememberChart(settings.settings.get().lastSymbol, interval);
+          }
+          return;
         }
-        // Broadcast only when Interval sync is ON — default OFF so panes stay independent.
+        layoutSyncBus.recordPaneInterval(paneIndex, interval);
+        // Only mirrors when Interval sync is ON (default OFF).
         layoutSyncBus.notifyInterval(paneIndex, interval);
       },
       onVisibleRangeChanged: (from, to) => layoutSyncBus.notifyVisibleRange(paneIndex, from, to),
@@ -124,7 +141,11 @@ export function TradingViewChart({
   useEffect(() => {
     const el = containerRef.current;
     if (!el || !ready) return;
-    const onPointer = () => layoutSyncBus.focusPane(paneIndex);
+    const onPointer = (event: PointerEvent) => {
+      // Primary iframe also hosts the shared header — ignore chrome clicks.
+      if (paneIndex === 0 && (event.clientY < 52 || event.clientX < 56)) return;
+      layoutSyncBus.focusPaneFromPlot(paneIndex);
+    };
     el.addEventListener("pointerdown", onPointer, true);
     return () => el.removeEventListener("pointerdown", onPointer, true);
   }, [paneIndex, ready]);
