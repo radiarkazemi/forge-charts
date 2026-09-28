@@ -41,6 +41,11 @@ export interface HeaderToolbarHandlers {
    * Primary keeps the full Forge header chrome.
    */
   readonly compact?: boolean;
+  /**
+   * Phone / narrow viewport: skip bulky Forge text buttons (bottom bar covers
+   * Alert / Trade / etc.). Keep layout menu + profile avatar only.
+   */
+  readonly mobile?: boolean;
 }
 
 export interface HeaderToolbarApi {
@@ -143,135 +148,140 @@ export function mountHeaderToolbar(
     };
   }
 
-  widget.createButton({
-    align: "left",
-    useTradingViewStyle: true,
-    text: "Alert",
-    title: "Create a price alert",
-    onClick: () => handlers.onCreateAlert(),
-  });
+  // Desktop-only Forge chrome — phones use MobileBottomBar instead.
+  if (!handlers.mobile) {
+    widget.createButton({
+      align: "left",
+      useTradingViewStyle: true,
+      text: "Alert",
+      title: "Create a price alert",
+      onClick: () => handlers.onCreateAlert(),
+    });
 
-  widget.createButton({
-    align: "left",
-    useTradingViewStyle: true,
-    text: "Replay",
-    title: "Bar Replay — select a bar and play history forward",
-    onClick: () => handlers.onEnterBarReplay(),
-  });
+    widget.createButton({
+      align: "left",
+      useTradingViewStyle: true,
+      text: "Replay",
+      title: "Bar Replay — select a bar and play history forward",
+      onClick: () => handlers.onEnterBarReplay(),
+    });
 
-  void widget.createDropdown({
-    title: "Trade",
-    tooltip: "Paper trade markers",
-    align: "right",
-    items: [
-      { title: "Buy (mark entry)", onSelect: () => void placeTradeMarker(widget, handlers, "buy") },
-      { title: "Sell (mark entry)", onSelect: () => void placeTradeMarker(widget, handlers, "sell") },
-      {
-        title: "Clear trade markers",
-        onSelect: () => {
-          try {
-            widget.activeChart().executeActionById("paneRemoveAllStudiesDrawingTools");
-          } catch {
-            /* ignore */
-          }
+    void widget.createDropdown({
+      title: "Trade",
+      tooltip: "Paper trade markers",
+      align: "right",
+      items: [
+        { title: "Buy (mark entry)", onSelect: () => void placeTradeMarker(widget, handlers, "buy") },
+        { title: "Sell (mark entry)", onSelect: () => void placeTradeMarker(widget, handlers, "sell") },
+        {
+          title: "Clear trade markers",
+          onSelect: () => {
+            try {
+              widget.activeChart().executeActionById("paneRemoveAllStudiesDrawingTools");
+            } catch {
+              /* ignore */
+            }
+          },
         },
+      ],
+    });
+
+    widget.createButton({
+      align: "right",
+      useTradingViewStyle: true,
+      text: "Publish",
+      title: "Download a chart snapshot",
+      onClick: () => {
+        void publishSnapshot(widget);
       },
-    ],
-  });
+    });
 
-  widget.createButton({
-    align: "right",
-    useTradingViewStyle: true,
-    text: "Publish",
-    title: "Download a chart snapshot",
-    onClick: () => {
-      void publishSnapshot(widget);
-    },
-  });
-
-  void widget.createDropdown({
-    title: "Tools",
-    tooltip: "Drawing helpers",
-    align: "right",
-    items: [
-      {
-        title: "Dealing Range (Premium / Discount)",
-        onSelect: () => {
-          void activateDealingRange(widget);
+    void widget.createDropdown({
+      title: "Tools",
+      tooltip: "Drawing helpers",
+      align: "right",
+      items: [
+        {
+          title: "Dealing Range (Premium / Discount)",
+          onSelect: () => {
+            void activateDealingRange(widget);
+          },
         },
-      },
-    ],
-  });
+      ],
+    });
+  }
 
   // Named layout menu (TradingView: layout name immediately left of Select Layout / profile).
   const layoutName = handlers.getProfile().displayName || "Layout";
-  void widget.createDropdown({
-    title: layoutName,
-    tooltip: "Save and manage chart layouts",
-    align: "right",
-    items: [
-      {
-        title: "Save layout    Ctrl + S",
-        onSelect: () => {
-          try {
-            widget.save(() => {
-              /* persisted via save_load_adapter */
-            });
-          } catch {
-            /* ignore */
-          }
+  if (!handlers.mobile) {
+    void widget.createDropdown({
+      title: layoutName,
+      tooltip: "Save and manage chart layouts",
+      align: "right",
+      items: [
+        {
+          title: "Save layout    Ctrl + S",
+          onSelect: () => {
+            try {
+              widget.save(() => {
+                /* persisted via save_load_adapter */
+              });
+            } catch {
+              /* ignore */
+            }
+          },
         },
-      },
-      {
-        title: "Autosave  ● ON",
-        onSelect: () => {
-          /* always on via auto_save_delay */
+        {
+          title: "Autosave  ● ON",
+          onSelect: () => {
+            /* always on via auto_save_delay */
+          },
         },
-      },
-      {
-        title: "Make a copy…",
-        onSelect: () => {
-          try {
-            widget.save(() => {
-              /* copy via autosave snapshot */
-            });
-          } catch {
-            /* ignore */
-          }
+        {
+          title: "Make a copy…",
+          onSelect: () => {
+            try {
+              widget.save(() => {
+                /* copy via autosave snapshot */
+              });
+            } catch {
+              /* ignore */
+            }
+          },
         },
-      },
-      {
-        title: "Rename…",
-        onSelect: () => handlers.onOpenProfile(),
-      },
-      {
-        title: "Create new layout…",
-        onSelect: () => {
-          try {
-            widget.activeChart().resetData();
-          } catch {
-            /* ignore */
-          }
+        {
+          title: "Rename…",
+          onSelect: () => handlers.onOpenProfile(),
         },
-      },
-      {
-        title: `Recently used · ${layoutName}`,
-        onSelect: () => {
-          /* current layout */
+        {
+          title: "Create new layout…",
+          onSelect: () => {
+            try {
+              widget.activeChart().resetData();
+            } catch {
+              /* ignore */
+            }
+          },
         },
-      },
-      {
-        title: "Open layout…",
-        onSelect: () => {
-          try {
-            (widget as unknown as { showLoadChartDialog?: () => void }).showLoadChartDialog?.();
-          } catch {
-            /* ignore */
-          }
+        {
+          title: `Recently used · ${layoutName}`,
+          onSelect: () => {
+            /* current layout */
+          },
         },
-      },
-    ],
-  });
+        {
+          title: "Open layout…",
+          onSelect: () => {
+            try {
+              (widget as unknown as { showLoadChartDialog?: () => void }).showLoadChartDialog?.();
+            } catch {
+              /* ignore */
+            }
+          },
+        },
+      ],
+    });
+  }
 
   // Multi-pane Select Layout — icon-only dashed square (never templates 2×2).
   void widget

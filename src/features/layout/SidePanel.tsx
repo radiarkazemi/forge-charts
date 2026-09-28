@@ -4,6 +4,7 @@ import { AlertsPanel } from "@/features/alerts/AlertsPanel";
 import { DataWindowPanel } from "@/features/data-window/DataWindowPanel";
 import { PineEditorPanel } from "@/features/pine/PineEditorPanel";
 import { WatchlistPanel } from "@/features/watchlist/WatchlistPanel";
+import { RAIL_WIDTH_COMPACT } from "./mobile-chrome";
 
 interface SidePanelProps {
   readonly panel: SidePanelId;
@@ -13,6 +14,8 @@ interface SidePanelProps {
   readonly onRunPine?: (code: string) => Promise<{ ok: boolean; message: string }>;
   /** When true, panel floats over the chart (mobile) instead of shrinking it. */
   readonly overlay?: boolean;
+  /** Offset from the right edge when overlaying (matches compact rail). */
+  readonly overlayRight?: number;
 }
 
 const PANEL_WIDTH = 420;
@@ -24,6 +27,7 @@ export function SidePanel({
   onOpenObjectTree,
   onRunPine,
   overlay = false,
+  overlayRight = RAIL_WIDTH_COMPACT,
 }: SidePanelProps) {
   const pine = panel === "pine";
   return (
@@ -31,7 +35,9 @@ export function SidePanel({
       square
       elevation={overlay ? 8 : 0}
       sx={{
-        width: pine ? "100%" : { xs: `min(100%, ${PANEL_WIDTH}px)`, sm: 320 },
+        width: pine
+          ? "100%"
+          : { xs: `min(100%, ${PANEL_WIDTH}px)`, sm: 320 },
         height: "100%",
         display: "flex",
         flexDirection: "column",
@@ -43,10 +49,13 @@ export function SidePanel({
           ? {
               position: "absolute",
               top: 0,
-              right: 52,
+              right: overlayRight,
               bottom: 0,
               zIndex: 20,
-              maxWidth: "calc(100% - 52px)",
+              // Mobile: full width minus the rail (desktop keeps a capped panel).
+              width: `calc(100% - ${overlayRight}px)`,
+              maxWidth: `calc(100% - ${overlayRight}px)`,
+              boxShadow: "-8px 0 24px rgba(0,0,0,0.35)",
             }
           : {}),
       }}

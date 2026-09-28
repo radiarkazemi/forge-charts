@@ -18,6 +18,7 @@ import {
   PineRailIcon,
   WatchlistRailIcon,
 } from "./rail-icons";
+import { railWidth } from "./mobile-chrome";
 
 /** TradingView dark widget-bar colors */
 const RAIL_BG = "#131722";
@@ -84,7 +85,14 @@ export function SideRail({ active, onToggle, onOpenObjectTree, onOpenPine, compa
       else if (item.href) window.open(item.href, "_blank", "noopener");
     };
     return (
-      <Tooltip key={item.label} title={item.label} placement="left">
+      <Tooltip
+        key={item.label}
+        title={item.label}
+        placement="left"
+        disableHoverListener={compact}
+        disableFocusListener={compact}
+        disableTouchListener
+      >
         <IconButton
           size="small"
           aria-label={item.label}
@@ -93,8 +101,8 @@ export function SideRail({ active, onToggle, onOpenObjectTree, onOpenPine, compa
           disableRipple
           sx={{
             position: "relative",
-            width: 40,
-            height: 40,
+            width: compact ? 36 : 40,
+            height: compact ? 36 : 40,
             color: pressed ? ICON_ACTIVE : ICON_IDLE,
             bgcolor: pressed ? ICON_ACTIVE_BG : "transparent",
             borderRadius: "4px",
@@ -117,7 +125,7 @@ export function SideRail({ active, onToggle, onOpenObjectTree, onOpenPine, compa
               : undefined,
           }}
         >
-          <Icon sx={{ fontSize: 22, color: "inherit" }} />
+          <Icon sx={{ fontSize: compact ? 20 : 22, color: "inherit" }} />
         </IconButton>
       </Tooltip>
     );
@@ -128,13 +136,14 @@ export function SideRail({ active, onToggle, onOpenObjectTree, onOpenPine, compa
       component="nav"
       aria-label="Side panels"
       sx={{
-        width: compact ? 44 : 52,
+        width: railWidth(compact),
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        gap: 0.35,
-        py: 1.25,
+        gap: compact ? 0.2 : 0.35,
+        py: compact ? 0.75 : 1.25,
         px: 0.5,
+        pb: compact ? "calc(8px + env(safe-area-inset-bottom, 0px))" : 1.25,
         bgcolor: RAIL_BG,
         borderLeft: `1px solid ${RAIL_BORDER}`,
         flexShrink: 0,
@@ -142,9 +151,9 @@ export function SideRail({ active, onToggle, onOpenObjectTree, onOpenPine, compa
       }}
     >
       {top.map(renderButton)}
-      {!compact && mid.length > 0 ? (
+      {mid.length > 0 ? (
         <>
-          <Box sx={{ flex: 1, minHeight: 32 }} />
+          <Box sx={{ flex: 1, minHeight: compact ? 12 : 32 }} />
           {mid.map(renderButton)}
         </>
       ) : (

@@ -219,10 +219,24 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
   const enabled = ENABLED_FEATURES.filter((f) => {
     if (hideHeader && HEADER_FEATURES.includes(f)) return false;
     if (secondary && (f === "left_toolbar" || f === "side_toolbar_in_fullscreen_mode")) return false;
+    // Phones: drop bulky header chrome — bottom bar covers search / interval / indicators.
+    if (
+      mobile &&
+      !secondary &&
+      !hideHeader &&
+      (f === "header_compare" || f === "header_saveload" || f === "header_fullscreen_button")
+    ) {
+      return false;
+    }
     return true;
   });
 
-  const disabled = secondary ? SECONDARY_DISABLED : hideHeader ? NO_HEADER_DISABLED : DISABLED_FEATURES;
+  const baseDisabled = secondary ? SECONDARY_DISABLED : hideHeader ? NO_HEADER_DISABLED : DISABLED_FEATURES;
+  // Mobile: allow hide_left_toolbar_by_default so candles go edge-to-edge until Draw is tapped.
+  const disabled =
+    mobile && !secondary
+      ? baseDisabled.filter((f) => f !== "hide_left_toolbar_by_default")
+      : baseDisabled;
 
   return {
     container: input.container,

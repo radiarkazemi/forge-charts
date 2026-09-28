@@ -281,6 +281,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
             themeLabel: initial.theme === "dark" ? "Dark" : "Light",
             alertCount: initial.alertCount,
             compact: false,
+            mobile: isMobile,
           });
           onHeaderReady(api);
         });

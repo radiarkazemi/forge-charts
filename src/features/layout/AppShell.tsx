@@ -11,15 +11,14 @@ import { ProfileDialog } from "@/features/profile/ProfileDialog";
 import { ProfileMenu } from "@/features/profile/ProfileMenu";
 import { activeProfile } from "@/application";
 import { useStore } from "@/shared/hooks/useStore";
+import { MobileBottomBar } from "./MobileBottomBar";
+import { RAIL_WIDTH_COMPACT } from "./mobile-chrome";
 import { SidePanel } from "./SidePanel";
 import { SideRail } from "./SideRail";
 
 /**
- * Chart shell matching TradingView Supercharts:
- * - Right widget rail
- * - Pine Editor docks to the right of the chart
- * - Demo Trading dock at the bottom (paper account / positions)
- * - Order ticket drawer when trading is active
+ * Chart shell matching TradingView Supercharts.
+ * Mobile: single pane, overlay side panels, bottom tool bar, compact rail.
  */
 export function AppShell() {
   const theme = useTheme();
@@ -39,7 +38,7 @@ export function AppShell() {
     if (typeof document === "undefined") return null;
     const el = document.createElement("div");
     el.style.cssText =
-      "position:fixed;top:6px;right:56px;width:1px;height:28px;pointer-events:none;z-index:40;";
+      "position:fixed;top:6px;right:48px;width:1px;height:28px;pointer-events:none;z-index:40;";
     document.body.appendChild(el);
     return el;
   })[0];
@@ -55,8 +54,16 @@ export function AppShell() {
   }, [symbol]);
 
   useEffect(() => {
-    if (isMobile && settings.settings.get().sidePanel && settings.settings.get().sidePanel !== "pine") {
+    if (!isMobile) return;
+    // Phones: reclaim plot area — single pane + no docked side panels.
+    if (settings.settings.get().chartLayout !== "s") {
+      settings.setChartLayout("s");
+    }
+    if (settings.settings.get().sidePanel) {
       settings.setSidePanel(null);
+    }
+    if (demoTrading.state.get().dockOpen) {
+      demoTrading.setDockOpen(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: mobile breakpoint only
   }, [isMobile]);
@@ -67,11 +74,18 @@ export function AppShell() {
     return () => window.removeEventListener("forge:open-profile-menu", onOpen);
   }, [profileAnchorRef]);
 
+  useEffect(() => {
+    if (profileAnchorRef) {
+      profileAnchorRef.style.right = isMobile ? `${RAIL_WIDTH_COMPACT + 4}px` : "56px";
+    }
+  }, [isMobile, profileAnchorRef]);
+
   const openAlertDialog = () => setAlertDialogOpen(true);
   const openProfileMenu = () => setProfileMenuAnchor(profileAnchorRef);
 
-  const pineOpen = sidePanel === "pine";
-  const sideDock = sidePanel && sidePanel !== "pine" ? sidePanel : null;
+  const overlayPanel = isMobile && sidePanel ? sidePanel : null;
+  const desktopSideDock = !isMobile && sidePanel && sidePanel !== "pine" ? sidePanel : null;
+  const desktopPine = !isMobile && sidePanel === "pine";
 
   return (
     <Box
@@ -88,39 +102,57 @@ export function AppShell() {
         <Box sx={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
           <Box sx={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0, position: "relative" }}>
             <ChartWorkspace onCreateAlert={openAlertDialog} onOpenProfile={openProfileMenu} />
-            {sideDock ? (
+            {desktopSideDock ? (
+              <SidePanel
+                panel={desktopSideDock}
+                onClose={() => settings.setSidePanel(null)}
+                onCreateAlert={openAlertDialog}
+                onOpenObjectTree={() => chart.openObjectTree()}
+                onRunPine={(code) => chart.runPineDraft(code)}
+              />
+            ) : null}
+            {ticketOpen ? <OrderTicketPanel mobile={isMobile} /> : null}
+            {overlayPanel ? (
               <>
-                {isMobile ? (
-                  <Box
-                    onClick={() => settings.setSidePanel(null)}
-                    sx={{
-                      position: "absolute",
-                      inset: 0,
-                      right: 52,
-                      bgcolor: "rgba(0,0,0,0.45)",
-                      zIndex: 19,
-                    }}
-                  />
-                ) : null}
+                <Box
+                  onClick={() => settings.setSidePanel(null)}
+                  sx={{
+                    position: "absolute",
+                    inset: 0,
+                    right: RAIL_WIDTH_COMPACT,
+                    bgcolor: "rgba(0,0,0,0.5)",
+                    zIndex: 19,
+                  }}
+                />
                 <SidePanel
-                  panel={sideDock}
+                  panel={overlayPanel}
                   onClose={() => settings.setSidePanel(null)}
                   onCreateAlert={openAlertDialog}
                   onOpenObjectTree={() => chart.openObjectTree()}
                   onRunPine={(code) => chart.runPineDraft(code)}
-                  overlay={isMobile}
+                  overlay
+                  overlayRight={RAIL_WIDTH_COMPACT}
                 />
               </>
             ) : null}
-            {ticketOpen ? <OrderTicketPanel /> : null}
           </Box>
-          <DemoTradingDock />
+          <DemoTradingDock mobile={isMobile} />
+          {isMobile ? (
+            <MobileBottomBar
+              onCreateAlert={openAlertDialog}
+              onOpenWatchlist={() => settings.toggleSidePanel("watchlist")}
+              onOpenTrade={() => {
+                demoTrading.setTicketOpen(true);
+                demoTrading.setDockOpen(true);
+              }}
+            />
+          ) : null}
         </Box>
 
-        {pineOpen ? (
+        {desktopPine ? (
           <Box
             sx={{
-              width: { xs: "min(100%, 420px)", md: "min(48vw, 640px)" },
+              width: { md: "min(48vw, 640px)" },
               flexShrink: 0,
               minHeight: 0,
               display: "flex",

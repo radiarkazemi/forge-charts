@@ -13,6 +13,8 @@ import ListItemText from "@mui/material/ListItemText";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
+import useMediaQuery from "@mui/material/useMediaQuery";
+import { useTheme } from "@mui/material/styles";
 import { useServices } from "@/app/use-services";
 import { AVATAR_COLORS, activeProfile, type UserProfile } from "@/application";
 import { useStore } from "@/shared/hooks/useStore";
@@ -23,8 +25,10 @@ interface ProfileDialogProps {
 }
 
 export function ProfileDialog({ open, onClose }: ProfileDialogProps) {
+  const theme = useTheme();
+  const fullScreen = useMediaQuery(theme.breakpoints.down("md"));
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs" fullScreen={fullScreen}>
       {open ? <ProfileDialogBody onClose={onClose} /> : null}
     </Dialog>
   );
