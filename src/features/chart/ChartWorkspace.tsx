@@ -12,6 +12,7 @@ import {
 import { getChartLayoutGrid, MAX_CHART_PANES } from "./chart-layouts";
 import { layoutSyncBus } from "./layout-sync";
 import { TradingViewChart } from "./TradingViewChart";
+import { mountTvLayersHeader } from "./tv-layers-header";
 
 interface ChartWorkspaceProps {
   readonly onCreateAlert: () => void;
@@ -111,6 +112,14 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
     return watchPrimaryMenusOpen(host, setMenusOpen);
   }, [multi, chartLayout]);
 
+  // TV layers: route Symbol / Interval / Indicators from the shared header to the active pane.
+  useEffect(() => {
+    if (!multi) return;
+    const host = primaryHostRef.current;
+    if (!host) return;
+    return mountTvLayersHeader(host);
+  }, [multi, chartLayout]);
+
   return (
     <Box
       ref={workspaceRef}
@@ -126,7 +135,8 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
       {/* Primary widget: original CL navbar spans the full workspace width. */}
       <Box
         ref={primaryHostRef}
-        onPointerDownCapture={() => layoutSyncBus.focusPane(0)}
+        // Header / left toolbar clicks must NOT steal focus from the active layer.
+        // Pane 0 focus comes from CL mouse_down on the plot (and the plot outline hit area).
         sx={{
           position: "absolute",
           inset: 0,

@@ -72,6 +72,14 @@ class LayoutSyncBus {
   /** Pane focused before the latest focusPane (header clicks often re-focus 0). */
   private priorChartPane = 0;
   private lastFocusAtMs = 0;
+  /**
+   * After a header intercept routes TF to a secondary pane, CL may still mutate
+   * pane 0 — snap it back to this value for a short window.
+   */
+  private primaryIntervalGuard: Interval | null = null;
+  private primaryIntervalGuardUntil = 0;
+  private primarySymbolGuard: string | null = null;
+  private primarySymbolGuardUntil = 0;
 
   setFlags(flags: LayoutSyncFlags): void {
     // Always keep drawings ON unless the user explicitly turns them off.
@@ -159,6 +167,38 @@ class LayoutSyncBus {
     this.setPaneInterval(this.activePane, interval);
   }
 
+  /**
+   * Header TF click (TV layers): apply to the active chart only.
+   * Interval sync ON → every visible pane. Otherwise only the focused pane.
+   * When the focused pane is secondary, guard pane 0 against accidental CL mutation.
+   */
+  applyHeaderInterval(interval: Interval): void {
+    const multi = this.activeCount > 1;
+    const syncOn = this.flags.interval === true;
+    const target = this.headerTargetPane();
+
+    if (!multi || syncOn) {
+      this.setPaneInterval(0, interval);
+      return;
+    }
+
+    if (target === 0) {
+      this.setPaneInterval(0, interval);
+      return;
+    }
+
+    if (this.activePane !== target) {
+      this.activePane = target;
+      this.drawTargetPane = target;
+      this.emitActive();
+    }
+
+    const keep = this.paneIntervals.get(0) ?? this.panes.get(0)?.controller.state.get().interval ?? "15";
+    this.primaryIntervalGuard = keep;
+    this.primaryIntervalGuardUntil = Date.now() + 1200;
+    this.setPaneInterval(target, interval);
+  }
+
   /** Change only the selected pane’s symbol (broadcast only when Symbol sync is ON). */
   setActivePaneSymbol(ticker: string): void {
     const active = this.activePane;
@@ -175,10 +215,31 @@ class LayoutSyncBus {
   }
 
   openIndicatorsOnActive(): void {
+    const target = this.headerTargetPane();
+    if (this.activePane !== target && target < this.activeCount) {
+      this.activePane = target;
+      this.drawTargetPane = target;
+      this.emitActive();
+      this.emitPaneState();
+    }
     this.panes.get(this.activePane)?.controller.openIndicators();
   }
 
   openSymbolSearchOnActive(): void {
+    const target = this.headerTargetPane();
+    if (this.activePane !== target && target < this.activeCount) {
+      this.activePane = target;
+      this.drawTargetPane = target;
+      this.emitActive();
+      this.emitPaneState();
+    }
+    if (this.activeCount > 1 && this.flags.symbol !== true && this.activePane > 0) {
+      const keep = this.paneSymbols.get(0) ?? this.panes.get(0)?.controller.state.get().symbol ?? "";
+      if (keep) {
+        this.primarySymbolGuard = keep;
+        this.primarySymbolGuardUntil = Date.now() + 2500;
+      }
+    }
     this.panes.get(this.activePane)?.controller.openSymbolSearch();
   }
 
@@ -350,10 +411,10 @@ class LayoutSyncBus {
   }
 
   /**
-   * Primary CL header interval change.
-   * Default (Interval sync OFF): only the targeted chart changes.
-   * CL always mutates pane 0 first — when the target is another pane we apply
-   * there and restore pane 0 to `previous`.
+   * Primary CL header interval change (safety net).
+   * Prefer `applyHeaderInterval` via capture-phase intercept so CL never mutates
+   * pane 0. If a change still lands here, route like TradingView layers:
+   * Interval sync OFF → only the active pane; restore pane 0 when needed.
    */
   handlePrimaryIntervalChanged(interval: Interval, previous?: Interval): void {
     if (this.locked) {
@@ -363,6 +424,28 @@ class LayoutSyncBus {
 
     const multi = this.activeCount > 1;
     const syncOn = this.flags.interval === true;
+
+    // Intercept already applied TF to a secondary pane — undo CL's pane-0 mutation.
+    if (
+      multi &&
+      !syncOn &&
+      this.primaryIntervalGuard &&
+      Date.now() < this.primaryIntervalGuardUntil &&
+      this.primaryIntervalGuard !== interval
+    ) {
+      const keep = this.primaryIntervalGuard;
+      const primary = this.panes.get(0);
+      if (primary?.controller.isReady) {
+        this.withLock(() => {
+          primary.controller.restoreInterval(keep);
+          this.paneIntervals.set(0, keep);
+        });
+      } else {
+        this.paneIntervals.set(0, keep);
+      }
+      return;
+    }
+
     const target = this.headerTargetPane();
 
     // Sync ON → every visible pane follows the header.
@@ -384,7 +467,13 @@ class LayoutSyncBus {
       this.drawTargetPane = target;
       this.emitActive();
     }
-    const restoreTo = previous || this.paneIntervals.get(0) || "15";
+    const restoreTo =
+      (this.primaryIntervalGuard && Date.now() < this.primaryIntervalGuardUntil
+        ? this.primaryIntervalGuard
+        : null) ||
+      previous ||
+      this.paneIntervals.get(0) ||
+      "15";
     this.setPaneInterval(target, interval);
 
     const primary = this.panes.get(0);
@@ -409,6 +498,27 @@ class LayoutSyncBus {
 
     const multi = this.activeCount > 1;
     const syncOn = this.flags.symbol === true;
+
+    if (
+      multi &&
+      !syncOn &&
+      this.primarySymbolGuard &&
+      Date.now() < this.primarySymbolGuardUntil &&
+      this.normalizeSymbol(this.primarySymbolGuard) !== this.normalizeSymbol(ticker)
+    ) {
+      const keep = this.primarySymbolGuard;
+      const primary = this.panes.get(0);
+      if (primary?.controller.isReady) {
+        this.withLock(() => {
+          primary.controller.restoreSymbol(keep);
+          this.paneSymbols.set(0, keep);
+        });
+      } else {
+        this.paneSymbols.set(0, keep);
+      }
+      return;
+    }
+
     const target = this.headerTargetPane();
 
     if (multi && syncOn) {
@@ -427,7 +537,19 @@ class LayoutSyncBus {
       this.drawTargetPane = target;
       this.emitActive();
     }
-    const restoreTo = previous || this.paneSymbols.get(0) || "";
+    const restoreTo =
+      (this.primarySymbolGuard && Date.now() < this.primarySymbolGuardUntil
+        ? this.primarySymbolGuard
+        : null) ||
+      previous ||
+      this.paneSymbols.get(0) ||
+      "";
+
+    // Guard before set — openSymbolSearch on secondary may still race with pane 0.
+    if (restoreTo) {
+      this.primarySymbolGuard = restoreTo;
+      this.primarySymbolGuardUntil = Date.now() + 1200;
+    }
     this.setActivePaneSymbol(ticker);
 
     const primary = this.panes.get(0);
