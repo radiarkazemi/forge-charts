@@ -142,9 +142,11 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
           position: "absolute",
           inset: 0,
           // Above layers only while a header menu is open so dropdowns receive clicks.
-          // Iframe shell is transparent outside header/plot — secondaries stay visible.
+          // Shell must stay see-through outside header/plot — secondaries stay visible.
           zIndex: menusOpen ? 6 : 1,
           bgcolor: multi ? "transparent" : "background.default",
+          backgroundColor: multi ? "transparent" : undefined,
+          "& iframe": multi ? { backgroundColor: "transparent !important" } : undefined,
         }}
       >
         <TradingViewChart

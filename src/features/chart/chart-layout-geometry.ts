@@ -132,12 +132,12 @@ export function paneRectInWorkspace(
 
   const contentW = Math.max(0, workspace.width - chrome.leftToolbarWidth);
   const contentH = Math.max(0, workspace.height - chrome.headerHeight);
-  const axis = Math.max(40, chrome.priceAxisWidth);
 
-  // If this pane starts to the right of another, clear the previous pane’s y-axis.
-  const leftPad = slot.x > 0 ? axis + PANE_GAP : 0;
+  // Primary plot is clipped to its full slot with the price axis pinned on the
+  // slot’s trailing edge — neighbors only need a hairline gap, not a second
+  // axis-width gutter (that was leaving a dead black band between panes).
+  const leftPad = slot.x > 0 ? PANE_GAP : 0;
   const topPad = slot.y > 0 ? PANE_GAP : 0;
-  // If another pane sits to the right, this pane keeps its axis; neighbor is padded.
   const rightTrim = 0;
   const bottomTrim = slot.y + slot.h < 1 ? PANE_GAP : 0;
 
