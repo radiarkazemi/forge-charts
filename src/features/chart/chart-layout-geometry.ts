@@ -98,23 +98,21 @@ export function paneRectInWorkspace(
   };
 }
 
-function setImportant(el: HTMLElement, prop: string, value: string): void {
-  el.style.setProperty(prop, value, "important");
-}
-
 function readChrome(doc: Document): ChromeInsets {
   const topEl = doc.querySelector(".layout__area--top") as HTMLElement | null;
   const leftEl = doc.querySelector(".layout__area--left") as HTMLElement | null;
   const centerEl = doc.querySelector(".layout__area--center") as HTMLElement | null;
   // Prefer the real plot top (TV leaves a 2–4px gap under the header).
+  // When our multi-clip stylesheet is active, ignore its overridden top.
+  const clipped = Boolean(doc.getElementById(STYLE_ID)?.textContent);
   const headerHeight =
-    centerEl && centerEl.offsetTop > 0
+    !clipped && centerEl && centerEl.offsetTop > 0
       ? centerEl.offsetTop
       : topEl
         ? topEl.offsetTop + topEl.offsetHeight
         : DEFAULT_CHROME.headerHeight;
   return {
-    headerHeight,
+    headerHeight: headerHeight || DEFAULT_CHROME.headerHeight,
     leftToolbarWidth: leftEl?.offsetWidth ?? 0,
   };
 }
@@ -122,7 +120,9 @@ function readChrome(doc: Document): ChromeInsets {
 /**
  * Constrain the primary Charting Library plot to pane 0 so the original
  * top navbar stays full-width while secondary layers sit beside/under it.
- * Returns null when the iframe / layout DOM is not ready yet.
+ *
+ * Only injects a stylesheet — never mutates TV's own inline layout styles
+ * (clearing those was collapsing the header + leaving a gap at the bottom).
  */
 export function applyPrimaryLayoutClip(
   container: HTMLElement,
@@ -138,7 +138,6 @@ export function applyPrimaryLayoutClip(
   }
 
   const centerEl = doc.querySelector(".layout__area--center") as HTMLElement | null;
-  const bottomEl = doc.querySelector(".layout__area--bottom") as HTMLElement | null;
   const topEl = doc.querySelector(".layout__area--top") as HTMLElement | null;
   if (!centerEl || !topEl) return null;
 
@@ -158,14 +157,13 @@ export function applyPrimaryLayoutClip(
   const height = slot.h * contentH;
   if (width < 16 || height < 16) return null;
 
-  // CSS sheet (survives some TV recalculations) + inline !important (wins immediately).
   let styleEl = doc.getElementById(STYLE_ID) as HTMLStyleElement | null;
   if (!styleEl) {
     styleEl = doc.createElement("style");
     styleEl.id = STYLE_ID;
     doc.head.appendChild(styleEl);
   }
-  styleEl.textContent = `
+  const next = `
     .layout__area--center {
       left: ${left}px !important;
       top: ${top}px !important;
@@ -185,36 +183,25 @@ export function applyPrimaryLayoutClip(
       width: 100% !important;
     }
   `;
-
-  setImportant(centerEl, "left", `${left}px`);
-  setImportant(centerEl, "top", `${top}px`);
-  setImportant(centerEl, "width", `${width}px`);
-  setImportant(centerEl, "height", `${height}px`);
-  setImportant(centerEl, "right", "auto");
-  setImportant(centerEl, "bottom", "auto");
-
-  if (bottomEl) {
-    setImportant(bottomEl, "left", `${left}px`);
-    setImportant(bottomEl, "width", `${width}px`);
-    setImportant(bottomEl, "right", "auto");
-  }
+  if (styleEl.textContent !== next) styleEl.textContent = next;
 
   return chrome;
 }
 
+/** Remove only our clip stylesheet — leave TradingView inline layout alone. */
 export function clearPrimaryLayoutClip(container: HTMLElement): void {
   try {
     const doc = container.querySelector("iframe")?.contentDocument;
-    if (!doc) return;
-    doc.getElementById(STYLE_ID)?.remove();
-    const centerEl = doc.querySelector(".layout__area--center") as HTMLElement | null;
-    const bottomEl = doc.querySelector(".layout__area--bottom") as HTMLElement | null;
-    for (const el of [centerEl, bottomEl]) {
-      if (!el) continue;
-      for (const prop of ["left", "top", "width", "height", "right", "bottom"]) {
-        el.style.removeProperty(prop);
-      }
+    const styleEl = doc?.getElementById(STYLE_ID);
+    if (!styleEl) return;
+    styleEl.remove();
+    // Ask CL to reflow now that our !important overrides are gone.
+    try {
+      container.querySelector("iframe")?.contentWindow?.dispatchEvent(new Event("resize"));
+    } catch {
+      /* ignore */
     }
+    window.dispatchEvent(new Event("resize"));
   } catch {
     /* ignore */
   }
@@ -222,8 +209,7 @@ export function clearPrimaryLayoutClip(container: HTMLElement): void {
 
 /**
  * Keep the primary plot clipped for as long as `layout` is multi-pane.
- * Retries until the CL iframe layout areas exist, then re-applies on resize
- * and when TradingView overwrites inline styles.
+ * Single-pane: do not touch the CL layout DOM at all.
  */
 export function mountPrimaryLayoutClip(
   container: HTMLElement,
@@ -235,57 +221,69 @@ export function mountPrimaryLayoutClip(
   let ro: ResizeObserver | null = null;
   let pollTimer = 0;
   let debounce = 0;
+  let lastLayout: ChartLayoutId | null = null;
+
+  const measureChromeOnly = () => {
+    const doc = container.querySelector("iframe")?.contentDocument;
+    if (!doc?.documentElement) return;
+    onChrome(readChrome(doc));
+  };
 
   const apply = () => {
     if (stopped) return;
     const layout = getLayout();
+    const layoutChanged = lastLayout !== null && lastLayout !== layout;
+    lastLayout = layout;
+
     if (layout === "s") {
-      clearPrimaryLayoutClip(container);
-      onChrome(DEFAULT_CHROME);
+      // Only clear when leaving a multi layout — never strip TV styles on boot.
+      if (layoutChanged) clearPrimaryLayoutClip(container);
+      measureChromeOnly();
       return;
     }
+
     const chrome = applyPrimaryLayoutClip(container, layout);
     if (chrome) onChrome(chrome);
   };
 
   const schedule = () => {
     window.clearTimeout(debounce);
-    debounce = window.setTimeout(apply, 16);
+    debounce = window.setTimeout(apply, 32);
   };
 
   const bindDocObservers = () => {
     mo?.disconnect();
     ro?.disconnect();
+    if (getLayout() === "s") return false;
+
     const doc = container.querySelector("iframe")?.contentDocument;
     if (!doc?.body) return false;
 
+    // Re-apply clip if TV rewrites layout area geometry; do not observe every style tick.
     mo = new MutationObserver(schedule);
-    mo.observe(doc.body, {
-      attributes: true,
-      attributeFilter: ["style", "class"],
-      subtree: true,
-      childList: true,
-    });
+    const center = doc.querySelector(".layout__area--center");
+    if (center) {
+      mo.observe(center, { attributes: true, attributeFilter: ["style"] });
+    }
 
     ro = new ResizeObserver(schedule);
     ro.observe(container);
-    const center = doc.querySelector(".layout__area--center");
-    if (center) ro.observe(center);
     return true;
   };
 
   apply();
   bindDocObservers();
 
-  // Poll until layout DOM is ready (CL iframe mounts asynchronously).
   let tries = 0;
   pollTimer = window.setInterval(() => {
     tries += 1;
     apply();
     bindDocObservers();
+    const layout = getLayout();
     const doc = container.querySelector("iframe")?.contentDocument;
-    const ready = Boolean(doc?.querySelector(".layout__area--center") && doc.getElementById(STYLE_ID)?.textContent);
-    if (ready || tries > 60) {
+    const centerReady = Boolean(doc?.querySelector(".layout__area--center"));
+    const clipReady = layout === "s" || Boolean(doc?.getElementById(STYLE_ID)?.textContent);
+    if ((centerReady && clipReady) || tries > 60) {
       window.clearInterval(pollTimer);
       pollTimer = 0;
     }
