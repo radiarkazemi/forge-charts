@@ -238,6 +238,29 @@ export class ChartController {
     this.activeChart()?.setResolution(interval as ResolutionString);
   }
 
+  /**
+   * Native Charting Library multi-chart layout (original header stays; charts
+   * sit underneath). Layout ids match TV: s | 2h | 2v | 3h | …
+   */
+  setLayout(layout: string): void {
+    try {
+      const w = this.widget;
+      if (!w) return;
+      if (w.layout() === layout) return;
+      w.setLayout(layout as never);
+    } catch {
+      /* layout not supported / widget not ready */
+    }
+  }
+
+  layout(): string | null {
+    try {
+      return this.widget?.layout() ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   getVisibleRange(): { from: number; to: number } | null {
     try {
       const range = this.activeChart()?.getVisibleRange();

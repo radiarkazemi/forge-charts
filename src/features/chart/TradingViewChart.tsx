@@ -178,6 +178,7 @@ export function TradingViewChart({
     libraryPath: config.tvLibraryPath,
     initialSymbol: symbolForPane,
     initialInterval: settings.settings.get().lastInterval,
+    initialLayout: settings.settings.get().chartLayout ?? "s",
     theme,
     alertCount,
     isPrimary,
@@ -196,7 +197,12 @@ export function TradingViewChart({
     onOpenAlertsPanel: () => settings.setSidePanel("alerts"),
     onOpenWatchlist: () => settings.setSidePanel("watchlist"),
     onOpenObjectTree: () => chart.openObjectTree(),
-    onSetChartLayout: (layout) => settings.setChartLayout(layout),
+    onSetChartLayout: (layout) => {
+      if (settings.settings.get().chartLayout !== layout) {
+        settings.setChartLayout(layout);
+      }
+      chart.setLayout(layout);
+    },
     onToggleLayoutSync: (key) => settings.toggleLayoutSync(key),
     getLayoutSync: () => settings.settings.get().layoutSync,
     onSymbolChanged: (index, ticker) => settings.setPaneSymbol(index, ticker),
