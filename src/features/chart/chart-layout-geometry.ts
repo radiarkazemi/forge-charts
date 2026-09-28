@@ -338,23 +338,41 @@ export function clearPrimaryLayoutClip(container: HTMLElement): void {
   }
 }
 
+/** Menu/dialog hole in parent (workspace) coordinates — punch through secondary layers. */
+export interface MenuHoleRect {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface PrimaryMenuState {
+  readonly open: boolean;
+  /** Bounding box of the open header menu/dialog in workspace/page coords. */
+  readonly hole: MenuHoleRect | null;
+}
+
 /**
  * Watch the primary CL iframe for open header menus (layout picker, etc.).
- * Left-toolbar drawing flyouts are ignored — they must not hide secondary panes.
+ * Left-toolbar drawing flyouts are ignored — they must not affect layers.
+ *
+ * Important: never raise the primary iframe above secondary panes. Iframe
+ * transparency does not reveal sibling layers underneath — that paints the
+ * workspace background (black flash). Instead we report a hole rect so
+ * secondaries can clip-path around the menu while staying visually on top.
  */
 export function watchPrimaryMenusOpen(
   container: HTMLElement,
-  onChange: (open: boolean) => void,
+  onChange: (state: PrimaryMenuState) => void,
 ): () => void {
   let stopped = false;
   let mo: MutationObserver | null = null;
-  let last = false;
+  let lastKey = "";
   let poll = 0;
   let debounce = 0;
   let boundDoc: Document | null = null;
 
   const isDrawingChrome = (el: Element): boolean => {
-    // Drawing toolbar flyouts / favorites — never raise primary over layers.
     if (el.closest(".layout__area--left")) return true;
     if (
       el.closest(
@@ -379,47 +397,67 @@ export function watchPrimaryMenusOpen(
 
   const isHeaderMenu = (el: Element): boolean => !isDrawingChrome(el);
 
+  const visibleBox = (node: Element, doc: Document): DOMRect | null => {
+    const style = doc.defaultView?.getComputedStyle(node);
+    if (style && (style.display === "none" || style.visibility === "hidden" || style.opacity === "0")) {
+      return null;
+    }
+    const r = node.getBoundingClientRect();
+    if (r.width < 8 || r.height < 8) return null;
+    return r;
+  };
+
   const check = () => {
     if (stopped) return;
-    const doc = container.querySelector("iframe")?.contentDocument;
-    if (!doc) return;
+    const iframe = container.querySelector("iframe");
+    const doc = iframe?.contentDocument;
+    if (!doc || !iframe) return;
 
-    const nodes = doc.querySelectorAll(
-      [
-        '[class*="menuWrap"]',
-        '[class*="menuBox"]',
-        '[data-name="menu-inner"]',
-        '[class*="popupMenu"]',
-        '[role="menu"]',
-        '[data-name="layout-menu"]',
-        '[class*="context-menu"]',
-      ].join(","),
-    );
+    const candidates: Element[] = [
+      ...doc.querySelectorAll(
+        [
+          '[class*="menuWrap"]',
+          '[class*="menuBox"]',
+          '[data-name="menu-inner"]',
+          '[class*="popupMenu"]',
+          '[role="menu"]',
+          '[data-name="layout-menu"]',
+          '[class*="context-menu"]',
+          '[data-name="indicators-dialog"]',
+          '[data-name="symbol-search-items-dialog"]',
+          '[role="dialog"]',
+        ].join(","),
+      ),
+    ];
 
-    let open = false;
-    for (const node of nodes) {
+    let best: DOMRect | null = null;
+    for (const node of candidates) {
       if (!isHeaderMenu(node)) continue;
-      const style = doc.defaultView?.getComputedStyle(node);
-      if (style && (style.display === "none" || style.visibility === "hidden")) continue;
-      // Tiny / zero-size leftovers from CL.
-      const r = node.getBoundingClientRect();
-      if (r.width < 8 || r.height < 8) continue;
-      open = true;
-      break;
+      const r = visibleBox(node, doc);
+      if (!r) continue;
+      if (!best || r.width * r.height > best.width * best.height) best = r;
     }
 
-    // Dialogs from the top header (layout is usually a menu; keep dialogs too).
-    if (!open) {
-      const dialog = doc.querySelector(
-        '[data-name="indicators-dialog"], [data-name="symbol-search-items-dialog"], [role="dialog"]',
-      );
-      if (dialog && isHeaderMenu(dialog)) open = true;
+    const open = Boolean(best);
+    let hole: MenuHoleRect | null = null;
+    if (best) {
+      const ir = iframe.getBoundingClientRect();
+      // Pad so shadows / submenu edges aren’t clipped.
+      const pad = 6;
+      hole = {
+        left: Math.round(ir.left + best.left - pad),
+        top: Math.round(ir.top + best.top - pad),
+        width: Math.round(best.width + pad * 2),
+        height: Math.round(best.height + pad * 2),
+      };
     }
 
-    if (open !== last) {
-      last = open;
-      onChange(open);
-    }
+    const key = open
+      ? `1:${hole?.left}:${hole?.top}:${hole?.width}:${hole?.height}`
+      : "0";
+    if (key === lastKey) return;
+    lastKey = key;
+    onChange({ open, hole });
   };
 
   const scheduleCheck = () => {
@@ -441,7 +479,6 @@ export function watchPrimaryMenusOpen(
   };
 
   bind();
-  // Light attach poll until the iframe document exists, then stop.
   let tries = 0;
   poll = window.setInterval(() => {
     tries += 1;
@@ -457,6 +494,27 @@ export function watchPrimaryMenusOpen(
     window.clearTimeout(debounce);
     mo?.disconnect();
   };
+}
+
+/** CSS clip-path that keeps a layer visible except for a rectangular hole. */
+export function clipPathExcludingHole(
+  layer: { left: number; top: number; width: number; height: number },
+  hole: MenuHoleRect | null,
+): string | undefined {
+  if (!hole || layer.width < 8 || layer.height < 8) return undefined;
+  const hl = hole.left - layer.left;
+  const ht = hole.top - layer.top;
+  const hr = hl + hole.width;
+  const hb = ht + hole.height;
+  // No overlap — nothing to punch.
+  if (hr <= 0 || hb <= 0 || hl >= layer.width || ht >= layer.height) return undefined;
+  const l = Math.max(0, hl);
+  const t = Math.max(0, ht);
+  const r = Math.min(layer.width, hr);
+  const b = Math.min(layer.height, hb);
+  if (r - l < 4 || b - t < 4) return undefined;
+  // evenodd: outer ring minus inner hole (coords relative to the layer box).
+  return `polygon(evenodd, 0px 0px, ${layer.width}px 0px, ${layer.width}px ${layer.height}px, 0px ${layer.height}px, 0px 0px, ${l}px ${t}px, ${l}px ${b}px, ${r}px ${b}px, ${r}px ${t}px, ${l}px ${t}px)`;
 }
 
 /**

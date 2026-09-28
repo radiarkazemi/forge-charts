@@ -4,10 +4,12 @@ import { useServices } from "@/app/use-services";
 import type { ChartLayoutId } from "@/application";
 import { useStore } from "@/shared/hooks/useStore";
 import {
+  clipPathExcludingHole,
   mountPrimaryLayoutClip,
   paneRectInWorkspace,
   watchPrimaryMenusOpen,
   type ChromeInsets,
+  type MenuHoleRect,
 } from "./chart-layout-geometry";
 import { getChartLayoutGrid, MAX_CHART_PANES } from "./chart-layouts";
 import { layoutSyncBus } from "./layout-sync";
@@ -39,8 +41,13 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   const [activePane, setActivePane] = useState(0);
   const [chrome, setChrome] = useState<ChromeInsets>(DEFAULT_CHROME);
   const [workspaceSize, setWorkspaceSize] = useState({ width: 0, height: 0 });
-  /** When CL header menus are open, secondaries must not cover the dropdown. */
+  /**
+   * Header menus live inside the primary iframe. We never raise that iframe above
+   * layers (transparent iframe still occludes siblings). Instead secondaries get
+   * pointer-events:none + a clip-path hole around the open menu.
+   */
   const [menusOpen, setMenusOpen] = useState(false);
+  const [menuHole, setMenuHole] = useState<MenuHoleRect | null>(null);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const primaryHostRef = useRef<HTMLDivElement | null>(null);
   const layoutRef = useRef<ChartLayoutId>(chartLayout ?? "s");
@@ -102,15 +109,30 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
     );
   }, [chartLayout, multi]);
 
-  // Layout / TF / indicator menus live in the primary iframe — don’t let layers steal clicks.
+  // Layout / TF / indicator menus live in the primary iframe — punch a hole in layers.
   useEffect(() => {
     if (!multi) {
       setMenusOpen(false);
+      setMenuHole(null);
       return;
     }
     const host = primaryHostRef.current;
     if (!host) return;
-    return watchPrimaryMenusOpen(host, setMenusOpen);
+    return watchPrimaryMenusOpen(host, (state) => {
+      setMenusOpen(state.open);
+      // Hole comes in viewport coords — convert to workspace-local for clip-path.
+      const wr = workspaceRef.current?.getBoundingClientRect();
+      if (!state.hole || !wr) {
+        setMenuHole(state.hole);
+        return;
+      }
+      setMenuHole({
+        left: state.hole.left - wr.left,
+        top: state.hole.top - wr.top,
+        width: state.hole.width,
+        height: state.hole.height,
+      });
+    });
   }, [multi, chartLayout]);
 
   // TV layers: route Symbol / Interval / Indicators from the shared header to the active pane.
@@ -141,9 +163,8 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
         sx={{
           position: "absolute",
           inset: 0,
-          // Above layers only while a header menu is open so dropdowns receive clicks.
-          // Shell must stay see-through outside header/plot — secondaries stay visible.
-          zIndex: menusOpen ? 6 : 1,
+          // Stay under secondary layers. Menus show through clip-path holes instead.
+          zIndex: 1,
           bgcolor: multi ? "transparent" : "background.default",
           backgroundColor: multi ? "transparent" : undefined,
           "& iframe": multi ? { backgroundColor: "transparent !important" } : undefined,
@@ -169,6 +190,13 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
         const shown = Boolean(visible && rect && rect.width >= 8 && rect.height >= 8);
         const isActive = shown && activePane === index;
         const symbol = paneSymbols[index] ?? lastSymbol;
+        const holeClip =
+          shown && rect && menusOpen
+            ? clipPathExcludingHole(
+                { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+                menuHole,
+              )
+            : undefined;
         return (
           <Box
             key={`forge-layer-${index}`}
@@ -181,11 +209,12 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
               left: shown && rect ? rect.left : 0,
               width: shown && rect ? rect.width : 1,
               height: shown && rect ? rect.height : 1,
-              // Stay under header menus (z=6) but always above the idle primary shell.
-              zIndex: menusOpen ? 5 : isActive ? 3 : 2,
+              // Always above the primary shell so panes stay painted.
+              zIndex: isActive ? 3 : 2,
               display: shown ? "block" : "none",
-              // Pass clicks through to primary header menus only — panes stay painted.
+              // Pass clicks through to primary header menus; clip a hole so the menu shows.
               pointerEvents: menusOpen ? "none" : "auto",
+              clipPath: holeClip,
               outline: isActive ? "2px solid #2962FF" : "1px solid #2a2e39",
               outlineOffset: "-1px",
               bgcolor: "background.default",
