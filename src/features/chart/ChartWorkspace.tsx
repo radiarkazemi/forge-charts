@@ -1,10 +1,10 @@
 import Box from "@mui/material/Box";
 import { useEffect, useRef, useState } from "react";
 import { useServices } from "@/app/use-services";
+import type { ChartLayoutId } from "@/application";
 import { useStore } from "@/shared/hooks/useStore";
 import {
-  applyPrimaryLayoutClip,
-  clearPrimaryLayoutClip,
+  mountPrimaryLayoutClip,
   paneRectInWorkspace,
   type ChromeInsets,
 } from "./chart-layout-geometry";
@@ -39,6 +39,8 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   const [workspaceSize, setWorkspaceSize] = useState({ width: 0, height: 0 });
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const primaryHostRef = useRef<HTMLDivElement | null>(null);
+  const layoutRef = useRef<ChartLayoutId>(chartLayout ?? "s");
+  layoutRef.current = chartLayout ?? "s";
 
   useEffect(() => {
     layoutSyncBus.setFlags(
@@ -57,9 +59,11 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
     layoutSyncBus.setActiveCount(grid.count);
     const t1 = window.setTimeout(() => layoutSyncBus.reflowVisible(), 50);
     const t2 = window.setTimeout(() => layoutSyncBus.reflowVisible(), 250);
+    const t3 = window.setTimeout(() => layoutSyncBus.reflowVisible(), 800);
     return () => {
       window.clearTimeout(t1);
       window.clearTimeout(t2);
+      window.clearTimeout(t3);
     };
   }, [chartLayout, grid.count]);
 
@@ -81,42 +85,18 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   useEffect(() => {
     const host = primaryHostRef.current;
     if (!host) return;
-
-    const apply = () => {
-      if (!multi) {
-        clearPrimaryLayoutClip(host);
-        setChrome(DEFAULT_CHROME);
-        return;
-      }
-      const next = applyPrimaryLayoutClip(host, chartLayout ?? "s");
-      setChrome(next);
-      layoutSyncBus.reflowVisible();
-    };
-
-    apply();
-    const timers = [50, 200, 600, 1200].map((ms) => window.setTimeout(apply, ms));
-    const ro = new ResizeObserver(apply);
-    ro.observe(host);
-    const iframe = host.querySelector("iframe");
-    if (iframe) {
-      try {
-        iframe.contentWindow?.addEventListener("resize", apply);
-      } catch {
-        /* ignore */
-      }
-    }
-    return () => {
-      timers.forEach((id) => window.clearTimeout(id));
-      ro.disconnect();
-      if (iframe) {
-        try {
-          iframe.contentWindow?.removeEventListener("resize", apply);
-        } catch {
-          /* ignore */
-        }
-      }
-    };
-  }, [chartLayout, multi, workspaceSize.width, workspaceSize.height]);
+    return mountPrimaryLayoutClip(
+      host,
+      () => layoutRef.current,
+      (next) => {
+        setChrome((prev) =>
+          prev.headerHeight === next.headerHeight && prev.leftToolbarWidth === next.leftToolbarWidth
+            ? prev
+            : next,
+        );
+      },
+    );
+  }, [chartLayout, multi]);
 
   return (
     <Box

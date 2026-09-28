@@ -65,6 +65,7 @@ const SLOTS: Record<ChartLayoutId, readonly ContentSlot[]> = {
 };
 
 const DEFAULT_CHROME: ChromeInsets = { headerHeight: 38, leftToolbarWidth: 52 };
+const STYLE_ID = "forge-primary-layout-clip";
 
 export function contentSlotsFor(layout: ChartLayoutId): readonly ContentSlot[] {
   return SLOTS[layout] ?? SLOTS.s;
@@ -97,52 +98,65 @@ export function paneRectInWorkspace(
   };
 }
 
+function setImportant(el: HTMLElement, prop: string, value: string): void {
+  el.style.setProperty(prop, value, "important");
+}
+
+function readChrome(doc: Document): ChromeInsets {
+  const topEl = doc.querySelector(".layout__area--top") as HTMLElement | null;
+  const leftEl = doc.querySelector(".layout__area--left") as HTMLElement | null;
+  return {
+    headerHeight: topEl?.offsetHeight || DEFAULT_CHROME.headerHeight,
+    leftToolbarWidth: leftEl?.offsetWidth ?? 0,
+  };
+}
+
 /**
  * Constrain the primary Charting Library plot to pane 0 so the original
  * top navbar stays full-width while secondary layers sit beside/under it.
+ * Returns null when the iframe / layout DOM is not ready yet.
  */
 export function applyPrimaryLayoutClip(
   container: HTMLElement,
   layout: ChartLayoutId,
-): ChromeInsets {
+): ChromeInsets | null {
   const iframe = container.querySelector("iframe");
   const doc = iframe?.contentDocument;
-  if (!doc?.documentElement) return DEFAULT_CHROME;
+  if (!doc?.documentElement || !doc.head) return null;
 
-  const topEl = doc.querySelector(".layout__area--top") as HTMLElement | null;
-  const leftEl = doc.querySelector(".layout__area--left") as HTMLElement | null;
+  if (layout === "s") {
+    clearPrimaryLayoutClip(container);
+    return readChrome(doc);
+  }
+
   const centerEl = doc.querySelector(".layout__area--center") as HTMLElement | null;
   const bottomEl = doc.querySelector(".layout__area--bottom") as HTMLElement | null;
+  const topEl = doc.querySelector(".layout__area--top") as HTMLElement | null;
+  if (!centerEl || !topEl) return null;
 
-  const headerHeight = topEl?.offsetHeight || DEFAULT_CHROME.headerHeight;
-  const leftToolbarWidth = leftEl?.offsetWidth ?? 0;
-  const chrome: ChromeInsets = { headerHeight, leftToolbarWidth };
-
-  let styleEl = doc.getElementById("forge-primary-layout-clip") as HTMLStyleElement | null;
-  if (layout === "s") {
-    styleEl?.remove();
-    return chrome;
-  }
-
-  if (!styleEl) {
-    styleEl = doc.createElement("style");
-    styleEl.id = "forge-primary-layout-clip";
-    doc.head.appendChild(styleEl);
-  }
-
+  const chrome = readChrome(doc);
   const slot = contentSlotsFor(layout)[0];
-  if (!slot || !centerEl) return chrome;
+  if (!slot) return chrome;
 
   const W = doc.documentElement.clientWidth || container.clientWidth;
   const H = doc.documentElement.clientHeight || container.clientHeight;
-  const contentW = Math.max(0, W - leftToolbarWidth);
-  const contentH = Math.max(0, H - headerHeight);
-  const left = leftToolbarWidth + slot.x * contentW;
-  const top = headerHeight + slot.y * contentH;
+  if (W < 32 || H < 32) return null;
+
+  const contentW = Math.max(0, W - chrome.leftToolbarWidth);
+  const contentH = Math.max(0, H - chrome.headerHeight);
+  const left = chrome.leftToolbarWidth + slot.x * contentW;
+  const top = chrome.headerHeight + slot.y * contentH;
   const width = slot.w * contentW;
   const height = slot.h * contentH;
+  if (width < 16 || height < 16) return null;
 
-  // Keep the original header + left drawing toolbar full-size; clip only the plot.
+  // CSS sheet (survives some TV recalculations) + inline !important (wins immediately).
+  let styleEl = doc.getElementById(STYLE_ID) as HTMLStyleElement | null;
+  if (!styleEl) {
+    styleEl = doc.createElement("style");
+    styleEl.id = STYLE_ID;
+    doc.head.appendChild(styleEl);
+  }
   styleEl.textContent = `
     .layout__area--center {
       left: ${left}px !important;
@@ -162,20 +176,118 @@ export function applyPrimaryLayoutClip(
       right: 0 !important;
       width: 100% !important;
     }
-    .layout__area--left {
-      top: ${headerHeight}px !important;
-      bottom: 0 !important;
-    }
   `;
 
-  void bottomEl;
+  setImportant(centerEl, "left", `${left}px`);
+  setImportant(centerEl, "top", `${top}px`);
+  setImportant(centerEl, "width", `${width}px`);
+  setImportant(centerEl, "height", `${height}px`);
+  setImportant(centerEl, "right", "auto");
+  setImportant(centerEl, "bottom", "auto");
+
+  if (bottomEl) {
+    setImportant(bottomEl, "left", `${left}px`);
+    setImportant(bottomEl, "width", `${width}px`);
+    setImportant(bottomEl, "right", "auto");
+  }
+
   return chrome;
 }
 
 export function clearPrimaryLayoutClip(container: HTMLElement): void {
   try {
-    container.querySelector("iframe")?.contentDocument?.getElementById("forge-primary-layout-clip")?.remove();
+    const doc = container.querySelector("iframe")?.contentDocument;
+    if (!doc) return;
+    doc.getElementById(STYLE_ID)?.remove();
+    const centerEl = doc.querySelector(".layout__area--center") as HTMLElement | null;
+    const bottomEl = doc.querySelector(".layout__area--bottom") as HTMLElement | null;
+    for (const el of [centerEl, bottomEl]) {
+      if (!el) continue;
+      for (const prop of ["left", "top", "width", "height", "right", "bottom"]) {
+        el.style.removeProperty(prop);
+      }
+    }
   } catch {
     /* ignore */
   }
+}
+
+/**
+ * Keep the primary plot clipped for as long as `layout` is multi-pane.
+ * Retries until the CL iframe layout areas exist, then re-applies on resize
+ * and when TradingView overwrites inline styles.
+ */
+export function mountPrimaryLayoutClip(
+  container: HTMLElement,
+  getLayout: () => ChartLayoutId,
+  onChrome: (chrome: ChromeInsets) => void,
+): () => void {
+  let stopped = false;
+  let mo: MutationObserver | null = null;
+  let ro: ResizeObserver | null = null;
+  let pollTimer = 0;
+  let debounce = 0;
+
+  const apply = () => {
+    if (stopped) return;
+    const layout = getLayout();
+    if (layout === "s") {
+      clearPrimaryLayoutClip(container);
+      onChrome(DEFAULT_CHROME);
+      return;
+    }
+    const chrome = applyPrimaryLayoutClip(container, layout);
+    if (chrome) onChrome(chrome);
+  };
+
+  const schedule = () => {
+    window.clearTimeout(debounce);
+    debounce = window.setTimeout(apply, 16);
+  };
+
+  const bindDocObservers = () => {
+    mo?.disconnect();
+    ro?.disconnect();
+    const doc = container.querySelector("iframe")?.contentDocument;
+    if (!doc?.body) return false;
+
+    mo = new MutationObserver(schedule);
+    mo.observe(doc.body, {
+      attributes: true,
+      attributeFilter: ["style", "class"],
+      subtree: true,
+      childList: true,
+    });
+
+    ro = new ResizeObserver(schedule);
+    ro.observe(container);
+    const center = doc.querySelector(".layout__area--center");
+    if (center) ro.observe(center);
+    return true;
+  };
+
+  apply();
+  bindDocObservers();
+
+  // Poll until layout DOM is ready (CL iframe mounts asynchronously).
+  let tries = 0;
+  pollTimer = window.setInterval(() => {
+    tries += 1;
+    apply();
+    bindDocObservers();
+    const doc = container.querySelector("iframe")?.contentDocument;
+    const ready = Boolean(doc?.querySelector(".layout__area--center") && doc.getElementById(STYLE_ID)?.textContent);
+    if (ready || tries > 60) {
+      window.clearInterval(pollTimer);
+      pollTimer = 0;
+    }
+  }, 250);
+
+  return () => {
+    stopped = true;
+    window.clearTimeout(debounce);
+    if (pollTimer) window.clearInterval(pollTimer);
+    mo?.disconnect();
+    ro?.disconnect();
+  };
 }
