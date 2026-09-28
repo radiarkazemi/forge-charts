@@ -97,7 +97,7 @@ const HEADER_FEATURES: ChartingLibraryFeatureset[] = [
 const SECONDARY_DISABLED: ChartingLibraryFeatureset[] = [
   ...DISABLED_FEATURES,
   ...HEADER_FEATURES,
-  "timeframes_toolbar",
+  // Keep bottom time-axis / rangeframes on each layer (matches TV multi-chart).
   "left_toolbar",
   "side_toolbar_in_fullscreen_mode",
 ];
@@ -105,7 +105,6 @@ const SECONDARY_DISABLED: ChartingLibraryFeatureset[] = [
 const NO_HEADER_DISABLED: ChartingLibraryFeatureset[] = [
   ...DISABLED_FEATURES,
   ...HEADER_FEATURES,
-  "timeframes_toolbar",
 ];
 
 /** Match TradingView's common top-bar favorites: 1m 5m 15m 30m 1h 4h D W M 3M */

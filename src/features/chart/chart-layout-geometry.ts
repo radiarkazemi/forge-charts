@@ -105,8 +105,16 @@ function setImportant(el: HTMLElement, prop: string, value: string): void {
 function readChrome(doc: Document): ChromeInsets {
   const topEl = doc.querySelector(".layout__area--top") as HTMLElement | null;
   const leftEl = doc.querySelector(".layout__area--left") as HTMLElement | null;
+  const centerEl = doc.querySelector(".layout__area--center") as HTMLElement | null;
+  // Prefer the real plot top (TV leaves a 2–4px gap under the header).
+  const headerHeight =
+    centerEl && centerEl.offsetTop > 0
+      ? centerEl.offsetTop
+      : topEl
+        ? topEl.offsetTop + topEl.offsetHeight
+        : DEFAULT_CHROME.headerHeight;
   return {
-    headerHeight: topEl?.offsetHeight || DEFAULT_CHROME.headerHeight,
+    headerHeight,
     leftToolbarWidth: leftEl?.offsetWidth ?? 0,
   };
 }
