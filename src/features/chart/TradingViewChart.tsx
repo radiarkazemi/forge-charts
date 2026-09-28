@@ -70,17 +70,32 @@ export function TradingViewChart({
     const unregister = layoutSyncBus.register(paneIndex, controller);
     controller.setSyncHooks({
       onSymbolChanged: (ticker) => {
+        if (paneIndex === 0) {
+          // Shared CL header symbol search → active pane (restore primary if needed).
+          const active = layoutSyncBus.getActivePane();
+          layoutSyncBus.handlePrimarySymbolChanged(ticker);
+          const applied = layoutSyncBus.getPaneState(active).symbol || ticker;
+          settings.setPaneSymbol(active, applied);
+          if (active === 0) {
+            settings.rememberChart(applied, settings.settings.get().lastInterval);
+          }
+          return;
+        }
         settings.setPaneSymbol(paneIndex, ticker);
         layoutSyncBus.recordPaneSymbol(paneIndex, ticker);
-        // Broadcast only when Symbol sync is ON (notifySymbol checks the flag).
         layoutSyncBus.notifySymbol(paneIndex, ticker);
       },
       onIntervalChanged: (interval) => {
-        layoutSyncBus.recordPaneInterval(paneIndex, interval);
         if (paneIndex === 0) {
-          settings.rememberChart(settings.settings.get().lastSymbol, interval);
+          // Shared CL header TF buttons → active pane (not always pane 0).
+          const active = layoutSyncBus.getActivePane();
+          layoutSyncBus.handlePrimaryIntervalChanged(interval);
+          if (active === 0) {
+            settings.rememberChart(settings.settings.get().lastSymbol, interval);
+          }
+          return;
         }
-        // Broadcast only when Interval sync is ON — default OFF so panes stay independent.
+        layoutSyncBus.recordPaneInterval(paneIndex, interval);
         layoutSyncBus.notifyInterval(paneIndex, interval);
       },
       onVisibleRangeChanged: (from, to) => layoutSyncBus.notifyVisibleRange(paneIndex, from, to),

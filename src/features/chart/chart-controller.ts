@@ -139,6 +139,8 @@ export class ChartController {
     // Bind drawing_event + mouse_down bridges (handlers may register before attach).
     this.bindDrawingBridge(widget);
     this.bindMouseDownBridge(widget);
+    // Match TradingView default: one-shot drawings (return to Cross after each shape).
+    this.ensureStayInDrawingModeOff();
   }
 
   private bindDrawingBridge(widget: IChartingLibraryWidget): void {
@@ -289,6 +291,24 @@ export class ChartController {
   requestResize(): void {
     try {
       window.dispatchEvent(new Event("resize"));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Turn off sticky drawing mode so tools return to Cross after one use. */
+  ensureStayInDrawingModeOff(): void {
+    try {
+      const chart = this.activeChart() as
+        | (IChartWidgetApi & {
+            getCheckableActionState?: (id: string) => boolean;
+            executeActionById: (id: string) => void;
+          })
+        | null;
+      if (!chart?.getCheckableActionState) return;
+      if (chart.getCheckableActionState("stayInDrawingModeAction")) {
+        chart.executeActionById("stayInDrawingModeAction");
+      }
     } catch {
       /* ignore */
     }

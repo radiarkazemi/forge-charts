@@ -263,11 +263,19 @@ class LayoutSyncBus {
     if (this.applyingTool) return;
     if (sourceIndex !== 0) return;
     this.sharedTool = tool;
+    // Cursor / eraser: mirror to all panes. Drawing tools: only the active draw target.
+    if (!tool || tool === "cursor" || tool === "arrow_cursor" || tool === "dot") {
+      for (const { index } of this.panes.values()) {
+        if (index === 0 || index >= this.activeCount) continue;
+        void this.applyToolToPane(index, tool ?? "cursor");
+      }
+      return;
+    }
     const target =
       this.drawTargetPane > 0 && this.drawTargetPane < this.activeCount
         ? this.drawTargetPane
         : this.activePane;
-    if (target > 0 && tool) {
+    if (target > 0) {
       this.activePane = target;
       this.emitActive();
       void this.applyToolToPane(target, tool);
@@ -284,7 +292,8 @@ class LayoutSyncBus {
       this.emitPaneState();
     }
     const tool = this.sharedTool;
-    if (tool && paneIndex > 0) {
+    // Only re-apply an active drawing tool (not cursor) when focusing a secondary pane.
+    if (tool && tool !== "cursor" && tool !== "arrow_cursor" && paneIndex > 0) {
       void this.applyToolToPane(paneIndex, tool);
     }
   }
@@ -311,25 +320,81 @@ class LayoutSyncBus {
   }
 
   /**
-   * Primary CL header interval → active pane only (interval sync stays off by default).
+   * Primary CL header interval → active pane only.
+   * When another pane is focused (and Interval sync is off), apply TF there and
+   * restore the primary widget so the shared header doesn’t leave pane 0 changed.
    */
   handlePrimaryIntervalChanged(interval: Interval): void {
-    if (this.locked) return;
-    if (this.activeCount < 2) {
+    if (this.locked) {
       this.paneIntervals.set(0, interval);
       return;
     }
+    if (this.activeCount < 2 || this.activePane === 0) {
+      this.paneIntervals.set(0, interval);
+      if (this.flags.interval) this.notifyInterval(0, interval);
+      return;
+    }
+    // Interval sync ON: keep native primary change and mirror to every pane.
+    if (this.flags.interval) {
+      this.paneIntervals.set(0, interval);
+      this.notifyInterval(0, interval);
+      return;
+    }
+    const primaryKeep =
+      this.paneIntervals.get(0) ?? this.panes.get(0)?.controller.state.get().interval ?? "15";
     this.setActivePaneInterval(interval);
+    if (primaryKeep !== interval) {
+      const primary = this.panes.get(0);
+      this.withLock(() => {
+        primary?.controller.setInterval(primaryKeep);
+        this.paneIntervals.set(0, primaryKeep);
+      });
+    }
   }
 
+  /**
+   * Primary CL header symbol → active pane only (restore primary when needed).
+   */
   handlePrimarySymbolChanged(ticker: string): void {
-    if (this.locked) return;
-    if (this.activeCount < 2) {
+    if (this.locked) {
+      this.paneSymbols.set(0, ticker);
+      return;
+    }
+    if (this.activeCount < 2 || this.activePane === 0) {
       this.paneSymbols.set(0, ticker);
       if (this.flags.symbol) this.notifySymbol(0, ticker);
       return;
     }
+    // Symbol sync ON: keep native primary change and mirror.
+    if (this.flags.symbol) {
+      this.paneSymbols.set(0, ticker);
+      this.notifySymbol(0, ticker);
+      return;
+    }
+    const primaryKeep =
+      this.paneSymbols.get(0) ?? this.panes.get(0)?.controller.state.get().symbol ?? "";
     this.setActivePaneSymbol(ticker);
+    if (primaryKeep && primaryKeep !== ticker) {
+      const primary = this.panes.get(0);
+      this.withLock(() => {
+        primary?.controller.setSymbol(primaryKeep);
+        this.paneSymbols.set(0, primaryKeep);
+      });
+    }
+  }
+
+  /** After one drawing completes, return every pane to the Cross tool. */
+  async resetToolsToCursor(): Promise<void> {
+    this.sharedTool = "cursor";
+    this.applyingTool = true;
+    try {
+      for (const { index, controller } of this.panes.values()) {
+        if (index >= this.activeCount || !controller.isReady) continue;
+        await controller.selectLineTool("cursor");
+      }
+    } finally {
+      this.applyingTool = false;
+    }
   }
 
   recordPaneInterval(paneIndex: number, interval: Interval): void {
@@ -456,11 +521,19 @@ class LayoutSyncBus {
     entityId: EntityId,
     eventType: string,
   ): Promise<void> {
-    if (!this.flags.drawings || this.syncingDrawings) return;
-    if (paneIndex >= this.activeCount) return;
-    if (this.activeCount < 2) return;
-
     const idKey = String(entityId);
+    const shouldResetTool =
+      eventType === "create" && !this.applyingTool && !this.mirrorIds.has(idKey);
+
+    // Single-pane (or drawings sync off): still return to Cross after one use.
+    if (this.activeCount < 2 || !this.flags.drawings) {
+      if (shouldResetTool) await this.resetToolsToCursor();
+      return;
+    }
+
+    if (this.syncingDrawings) return;
+    if (paneIndex >= this.activeCount) return;
+
     // Ignore events from shapes we created as mirrors (prevents sync loops / UI lock).
     if (this.mirrorIds.has(idKey)) {
       if (eventType === "remove") this.mirrorIds.delete(idKey);
@@ -494,6 +567,7 @@ class LayoutSyncBus {
       eventType !== "move" &&
       eventType !== "properties_changed"
     ) {
+      if (shouldResetTool) await this.resetToolsToCursor();
       return;
     }
 
@@ -501,16 +575,26 @@ class LayoutSyncBus {
     this.focusPane(paneIndex);
 
     const source = this.panes.get(paneIndex);
-    if (!source?.controller.isReady) return;
+    if (!source?.controller.isReady) {
+      if (shouldResetTool) await this.resetToolsToCursor();
+      return;
+    }
     const chart = source.controller.getWidget()?.activeChart();
-    if (!chart) return;
+    if (!chart) {
+      if (shouldResetTool) await this.resetToolsToCursor();
+      return;
+    }
 
+    // Capture tool hint before we reset to Cross.
     const toolHint =
       normalizeShapeName(source.controller.selectedLineTool()) ??
       normalizeShapeName(this.sharedTool);
 
     const snap = await readShapeSnapshotRetry(chart, entityId, toolHint);
-    if (!snap) return;
+    if (!snap) {
+      if (shouldResetTool) await this.resetToolsToCursor();
+      return;
+    }
 
     let group = this.entityToGroup.get(idKey);
     if (!group) {
@@ -587,6 +671,8 @@ class LayoutSyncBus {
     } finally {
       this.syncingDrawings = false;
     }
+
+    if (shouldResetTool) await this.resetToolsToCursor();
   }
 
   private normalizeSymbol(symbol: string): string {

@@ -85,10 +85,12 @@ export function paneRectInWorkspace(
 
   const contentW = Math.max(0, workspace.width - chrome.leftToolbarWidth);
   const contentH = Math.max(0, workspace.height - chrome.headerHeight);
-  const left = chrome.leftToolbarWidth + slot.x * contentW + (slot.x > 0 ? gap / 2 : 0);
-  const top = chrome.headerHeight + slot.y * contentH + (slot.y > 0 ? gap / 2 : 0);
-  const width = slot.w * contentW - (slot.x > 0 ? gap / 2 : 0) - (slot.x + slot.w < 1 ? gap / 2 : 0);
-  const height = slot.h * contentH - (slot.y > 0 ? gap / 2 : 0) - (slot.y + slot.h < 1 ? gap / 2 : 0);
+  // Wider seam so the left pane’s price scale isn’t covered by the next layer.
+  const seam = Math.max(gap, 6);
+  const left = chrome.leftToolbarWidth + slot.x * contentW + (slot.x > 0 ? seam / 2 : 0);
+  const top = chrome.headerHeight + slot.y * contentH + (slot.y > 0 ? seam / 2 : 0);
+  const width = slot.w * contentW - (slot.x > 0 ? seam / 2 : 0) - (slot.x + slot.w < 1 ? seam / 2 : 0);
+  const height = slot.h * contentH - (slot.y > 0 ? seam / 2 : 0) - (slot.y + slot.h < 1 ? seam / 2 : 0);
 
   return {
     left: Math.round(left),
@@ -151,10 +153,12 @@ export function applyPrimaryLayoutClip(
 
   const contentW = Math.max(0, W - chrome.leftToolbarWidth);
   const contentH = Math.max(0, H - chrome.headerHeight);
+  const seam = 6;
   const left = chrome.leftToolbarWidth + slot.x * contentW;
   const top = chrome.headerHeight + slot.y * contentH;
-  const width = slot.w * contentW;
-  const height = slot.h * contentH;
+  // Leave a seam on the right/bottom edge so sibling layers don’t cover the price scale.
+  const width = slot.w * contentW - (slot.x + slot.w < 1 ? seam / 2 : 0);
+  const height = slot.h * contentH - (slot.y + slot.h < 1 ? seam / 2 : 0);
   if (width < 16 || height < 16) return null;
 
   let styleEl = doc.getElementById(STYLE_ID) as HTMLStyleElement | null;
@@ -205,6 +209,67 @@ export function clearPrimaryLayoutClip(container: HTMLElement): void {
   } catch {
     /* ignore */
   }
+}
+
+/**
+ * Watch the primary CL iframe for open menus/dropdowns (layout picker, TF, etc.).
+ * While open, secondary layers must not steal pointer events over the chart.
+ */
+export function watchPrimaryMenusOpen(
+  container: HTMLElement,
+  onChange: (open: boolean) => void,
+): () => void {
+  let stopped = false;
+  let mo: MutationObserver | null = null;
+  let last = false;
+  let poll = 0;
+
+  const check = () => {
+    if (stopped) return;
+    const doc = container.querySelector("iframe")?.contentDocument;
+    if (!doc) return;
+    const open = Boolean(
+      doc.querySelector(
+        [
+          '[class*="menuWrap"]',
+          '[class*="menuBox"]',
+          '[data-name="menu-inner"]',
+          '[class*="popupMenu"]',
+          '[class*="dropdown-"][class*="open"]',
+          '.tv-dropdown__body',
+          '[role="menu"]',
+          '[class*="context-menu"]',
+        ].join(","),
+      ),
+    );
+    if (open !== last) {
+      last = open;
+      onChange(open);
+    }
+  };
+
+  const bind = () => {
+    mo?.disconnect();
+    const doc = container.querySelector("iframe")?.contentDocument;
+    if (!doc?.body) return false;
+    mo = new MutationObserver(check);
+    mo.observe(doc.body, { childList: true, subtree: true, attributes: true });
+    check();
+    return true;
+  };
+
+  bind();
+  poll = window.setInterval(() => {
+    if (bind()) {
+      /* keep observing — iframe may remount */
+    }
+  }, 1000);
+
+  return () => {
+    stopped = true;
+    window.clearInterval(poll);
+    mo?.disconnect();
+  };
 }
 
 /**
