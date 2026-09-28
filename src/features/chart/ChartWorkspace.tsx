@@ -153,6 +153,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
           paneIndex={0}
           initialSymbol={paneSymbols[0] ?? lastSymbol}
           hideHeader={false}
+          transparentShell={multi}
         />
       </Box>
 

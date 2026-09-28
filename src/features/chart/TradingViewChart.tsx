@@ -29,6 +29,11 @@ interface TradingViewChartProps {
   readonly initialSymbol?: string;
   /** Multi-layout: hide Charting Library header on secondary panes. */
   readonly hideHeader?: boolean;
+  /**
+   * Multi-layout primary shell must be see-through outside the clipped plot
+   * so raising z-index for header menus does not cover secondary layers.
+   */
+  readonly transparentShell?: boolean;
 }
 
 export function TradingViewChart({
@@ -37,6 +42,7 @@ export function TradingViewChart({
   paneIndex = 0,
   initialSymbol,
   hideHeader = false,
+  transparentShell = false,
 }: TradingViewChartProps) {
   const { chart, barReplay, datafeed, saveLoadAdapter, storage, settings, alerts, quotes, config, demoTrading, demoSpace } =
     useServices();
@@ -249,9 +255,9 @@ export function TradingViewChart({
         minHeight: 0,
         width: "100%",
         height: "100%",
-        bgcolor: "background.default",
+        bgcolor: transparentShell ? "transparent" : "background.default",
         borderRight: isPrimary ? 0 : 1,
-        borderBottom: 1,
+        borderBottom: transparentShell ? 0 : 1,
         borderColor: "divider",
         overflow: "hidden",
       }}

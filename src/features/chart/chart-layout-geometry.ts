@@ -155,6 +155,62 @@ export function paneRectInWorkspace(
 }
 
 /**
+ * CL still lays out the chart table at full iframe width even when
+ * `.layout__area--center` is clipped. Pin each real price-axis column to the
+ * clipped pane’s right edge so the left layer keeps a usable y-scale.
+ */
+function pinPrimaryPriceAxes(doc: Document): void {
+  const center = doc.querySelector(".layout__area--center") as HTMLElement | null;
+  if (!center) return;
+  const cr = center.getBoundingClientRect();
+  if (cr.width < 32) return;
+
+  const axes = doc.querySelectorAll<HTMLElement>(".chart-markup-table.price-axis-container");
+  for (const main of axes) {
+    // Skip empty left stubs and time-axis corner cells.
+    if (main.offsetHeight < 40 || main.offsetWidth < 20) {
+      if (main.dataset.forgeAxisPin) {
+        main.style.removeProperty("transform");
+        main.style.removeProperty("z-index");
+        main.style.removeProperty("background");
+        delete main.dataset.forgeAxisPin;
+      }
+      continue;
+    }
+
+    const cs = doc.defaultView?.getComputedStyle(main);
+    let currentTx = 0;
+    const t = cs?.transform;
+    if (t && t !== "none") {
+      const m = t.match(/matrix\(([^)]+)\)/);
+      const parts = m?.[1]?.split(",") ?? [];
+      currentTx = parseFloat(parts[4] ?? "0") || 0;
+    }
+
+    const mr = main.getBoundingClientRect();
+    const naturalLeft = mr.left - currentTx;
+    const dx = Math.round(cr.right - mr.width - naturalLeft);
+    if (Math.abs(dx - currentTx) < 0.5 && main.dataset.forgeAxisPin === "1") continue;
+
+    main.style.setProperty("transform", `translateX(${dx}px)`, "important");
+    main.style.setProperty("z-index", "30", "important");
+    main.style.setProperty("background", "var(--tv-color-platform-background, #131722)", "important");
+    main.dataset.forgeAxisPin = "1";
+  }
+}
+
+function clearPrimaryPriceAxisPins(doc: Document | null | undefined): void {
+  if (!doc) return;
+  for (const main of doc.querySelectorAll<HTMLElement>(".chart-markup-table.price-axis-container")) {
+    if (!main.dataset.forgeAxisPin) continue;
+    main.style.removeProperty("transform");
+    main.style.removeProperty("z-index");
+    main.style.removeProperty("background");
+    delete main.dataset.forgeAxisPin;
+  }
+}
+
+/**
  * Constrain the primary Charting Library plot to pane 0 so the original
  * top navbar stays full-width while secondary layers sit beside/under it.
  *
@@ -190,11 +246,20 @@ export function applyPrimaryLayoutClip(
   const contentH = Math.max(0, H - chrome.headerHeight);
   const left = chrome.leftToolbarWidth + slot.x * contentW;
   const top = chrome.headerHeight + slot.y * contentH;
-  // Full slot width — price axis lives inside the primary plot. Secondary layers
-  // are positioned with a left pad (see paneRectInWorkspace) so they don’t cover it.
+  // Full slot width — price axis is pinned to this edge (see pinPrimaryPriceAxes).
+  // Secondary layers use a left pad so they don’t cover the pinned scale.
   const width = slot.w * contentW;
   const height = slot.h * contentH - (slot.y + slot.h < 1 ? PANE_GAP : 0);
   if (width < 16 || height < 16) return null;
+
+  // Iframe element must stay see-through so raised z-index for header menus
+  // does not paint a solid sheet over secondary layers.
+  try {
+    iframe?.style.setProperty("background", "transparent", "important");
+    iframe?.setAttribute("allowtransparency", "true");
+  } catch {
+    /* ignore */
+  }
 
   let styleEl = doc.getElementById(STYLE_ID) as HTMLStyleElement | null;
   if (!styleEl) {
@@ -202,10 +267,15 @@ export function applyPrimaryLayoutClip(
     styleEl.id = STYLE_ID;
     doc.head.appendChild(styleEl);
   }
-  // Transparent shell so raising primary z-index for header menus does not
-  // paint over secondary layers (fixes “second chart disappears” flash).
+  // Transparent shell + overflow clip: CL’s chart-container stays ~full width
+  // internally; without overflow:hidden it bleeds into the secondary slot when
+  // the primary host is raised above layers for open header menus.
   const next = `
     html, body {
+      background: transparent !important;
+    }
+    .js-rootresizer__contents,
+    .layout-with-border-radius {
       background: transparent !important;
     }
     .layout__area--center {
@@ -215,7 +285,11 @@ export function applyPrimaryLayoutClip(
       height: ${height}px !important;
       right: auto !important;
       bottom: auto !important;
+      overflow: hidden !important;
       background-color: var(--tv-color-platform-background, #131722) !important;
+    }
+    .layout__area--center .chart-container-border {
+      background-color: transparent !important;
     }
     .layout__area--bottom {
       left: ${left}px !important;
@@ -232,15 +306,24 @@ export function applyPrimaryLayoutClip(
       background-color: var(--tv-color-platform-background, #131722) !important;
     }
   `;
-  if (styleEl.textContent !== next) styleEl.textContent = next;
+  if (styleEl.textContent !== next) {
+    styleEl.textContent = next;
+  }
 
-  return chrome;
+  pinPrimaryPriceAxes(doc);
+
+  return {
+    ...chrome,
+    // Prefer the real pinned axis width so secondary left-pad clears it.
+    priceAxisWidth: readPriceAxisWidth(doc, chrome.priceAxisWidth),
+  };
 }
 
 /** Remove only our clip stylesheet — leave TradingView inline layout alone. */
 export function clearPrimaryLayoutClip(container: HTMLElement): void {
   try {
     const doc = container.querySelector("iframe")?.contentDocument;
+    clearPrimaryPriceAxisPins(doc);
     const styleEl = doc?.getElementById(STYLE_ID);
     if (!styleEl) return;
     styleEl.remove();
@@ -270,16 +353,31 @@ export function watchPrimaryMenusOpen(
   let debounce = 0;
   let boundDoc: Document | null = null;
 
-  const isHeaderMenu = (el: Element): boolean => {
-    // Drawing toolbar flyouts live under the left area — never treat as “menusOpen”.
-    if (el.closest(".layout__area--left")) return false;
-    if (el.closest(".drawing-toolbar, [class*='drawingToolbar'], [class*='drawing-toolbar']")) {
-      return false;
+  const isDrawingChrome = (el: Element): boolean => {
+    // Drawing toolbar flyouts / favorites — never raise primary over layers.
+    if (el.closest(".layout__area--left")) return true;
+    if (
+      el.closest(
+        [
+          ".drawing-toolbar",
+          "[class*='drawingToolbar']",
+          "[class*='drawing-toolbar']",
+          "[class*='floating-toolbar']",
+          "[class*='floatingToolbar']",
+          "[data-name='drawing-toolbar']",
+          "[class*='toolbox']",
+          "[class*='Toolbar'][class*='drawing']",
+        ].join(","),
+      )
+    ) {
+      return true;
     }
-    // Favorites / floating tool strips near drawings.
-    if (el.closest("[class*='floating-toolbar'], [class*='floatingToolbar']")) return false;
-    return true;
+    const name = (el.getAttribute("data-name") || "").toLowerCase();
+    if (name.includes("drawing") || name.includes("line-tool") || name.includes("linetool")) return true;
+    return false;
   };
+
+  const isHeaderMenu = (el: Element): boolean => !isDrawingChrome(el);
 
   const check = () => {
     if (stopped) return;
@@ -303,6 +401,9 @@ export function watchPrimaryMenusOpen(
       if (!isHeaderMenu(node)) continue;
       const style = doc.defaultView?.getComputedStyle(node);
       if (style && (style.display === "none" || style.visibility === "hidden")) continue;
+      // Tiny / zero-size leftovers from CL.
+      const r = node.getBoundingClientRect();
+      if (r.width < 8 || r.height < 8) continue;
       open = true;
       break;
     }
@@ -323,7 +424,7 @@ export function watchPrimaryMenusOpen(
 
   const scheduleCheck = () => {
     window.clearTimeout(debounce);
-    debounce = window.setTimeout(check, 48);
+    debounce = window.setTimeout(check, 80);
   };
 
   const bind = () => {
@@ -371,6 +472,7 @@ export function mountPrimaryLayoutClip(
   let mo: MutationObserver | null = null;
   let ro: ResizeObserver | null = null;
   let pollTimer = 0;
+  let pinTimer = 0;
   let debounce = 0;
   let lastLayout: ChartLayoutId | null = null;
   let lastCss = "";
@@ -402,7 +504,7 @@ export function mountPrimaryLayoutClip(
 
   const schedule = () => {
     window.clearTimeout(debounce);
-    debounce = window.setTimeout(apply, 48);
+    debounce = window.setTimeout(apply, 64);
   };
 
   const bindDocObservers = () => {
@@ -446,10 +548,20 @@ export function mountPrimaryLayoutClip(
     }
   }, 400);
 
+  // Light pin keep-alive — CL occasionally rebuilds axis nodes after tool/layout UI.
+  // Avoid rAF; 500ms is enough and much cheaper for multi-pane.
+  pinTimer = window.setInterval(() => {
+    if (stopped || getLayout() === "s") return;
+    const doc = container.querySelector("iframe")?.contentDocument;
+    if (!doc?.getElementById(STYLE_ID)) return;
+    pinPrimaryPriceAxes(doc);
+  }, 500);
+
   return () => {
     stopped = true;
     window.clearTimeout(debounce);
     if (pollTimer) window.clearInterval(pollTimer);
+    if (pinTimer) window.clearInterval(pinTimer);
     mo?.disconnect();
     ro?.disconnect();
   };
