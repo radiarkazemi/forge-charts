@@ -117,25 +117,45 @@ function syncHeaderChrome(doc: Document, symbol: string, interval: Interval): vo
 
   const buttons = doc.querySelectorAll<HTMLElement>("button[data-value], button[role='radio']");
   for (const btn of buttons) {
-    const parsed = parseQuickIntervalButton(btn);
+    const dataValue = btn.getAttribute("data-value");
+    const parsed =
+      dataValue && isIntervalValue(dataValue) ? dataValue : parseQuickIntervalButton(btn);
     if (!parsed) continue;
+    // Skip chart-style radios (candle, etc.)
+    if (!isIntervalValue(String(parsed)) && !INTERVAL_TEXT_MAP[String(parsed)]) continue;
     const active = parsed === interval;
     btn.classList.toggle("isActive-GwQQdU8S", active);
-    if (active) btn.setAttribute("aria-pressed", "true");
-    else btn.removeAttribute("aria-pressed");
-    if (btn.getAttribute("role") === "radio") {
-      btn.setAttribute("aria-checked", active ? "true" : "false");
+    btn.classList.toggle("isActive", active);
+    if (active) {
+      btn.setAttribute("aria-pressed", "true");
+      btn.setAttribute("aria-checked", "true");
+    } else {
+      btn.removeAttribute("aria-pressed");
+      if (btn.getAttribute("role") === "radio") btn.setAttribute("aria-checked", "false");
     }
   }
 
-  // Also refresh the resolution menu button label when present.
-  const menuBtn = doc.querySelector<HTMLElement>(
-    '[data-name="time-interval-desktop"], [data-name="time-interval"] button, #header-toolbar-intervals button',
+  // Resolution menu / dropdown label — reflect the active pane, not pane 0.
+  const labelText = labelForInterval(interval);
+  const menuRoots = doc.querySelectorAll<HTMLElement>(
+    '#header-toolbar-intervals, [data-name="time-interval-desktop"], [data-name="time-interval"]',
   );
-  if (menuBtn) {
-    const label = menuBtn.querySelector(".js-button-text, [class*='value']");
-    if (label) label.textContent = labelForInterval(interval);
+  for (const root of menuRoots) {
+    const label =
+      root.querySelector(".js-button-text") ||
+      root.querySelector("[class*='value']") ||
+      root.querySelector("button .js-button-text");
+    if (label) label.textContent = labelText;
   }
+}
+
+/** CL async restore often repaints header to pane 0 — re-assert active chrome. */
+function syncHeaderChromeRetry(doc: Document, symbol: string, interval: Interval): void {
+  syncHeaderChrome(doc, symbol, interval);
+  window.setTimeout(() => syncHeaderChrome(doc, symbol, interval), 50);
+  window.setTimeout(() => syncHeaderChrome(doc, symbol, interval), 200);
+  window.setTimeout(() => syncHeaderChrome(doc, symbol, interval), 500);
+  window.setTimeout(() => syncHeaderChrome(doc, symbol, interval), 1000);
 }
 
 function stop(event: Event): void {
@@ -208,7 +228,7 @@ export function mountTvLayersHeader(container: HTMLElement): () => void {
     applyIntervalToActive(interval);
     if (attachedDoc) {
       const st = layoutSyncBus.getPaneState(layoutSyncBus.getActivePane());
-      syncHeaderChrome(attachedDoc, st.symbol, interval);
+      syncHeaderChromeRetry(attachedDoc, st.symbol, interval);
     }
   };
 
@@ -234,7 +254,7 @@ export function mountTvLayersHeader(container: HTMLElement): () => void {
     applyIntervalToActive(interval);
     if (attachedDoc) {
       const st = layoutSyncBus.getPaneState(layoutSyncBus.getActivePane());
-      syncHeaderChrome(attachedDoc, st.symbol, interval);
+      syncHeaderChromeRetry(attachedDoc, st.symbol, interval);
     }
   };
 
@@ -265,7 +285,7 @@ export function mountTvLayersHeader(container: HTMLElement): () => void {
     unsubPane?.();
     unsubPane = layoutSyncBus.subscribeActivePaneState((state) => {
       if (layoutSyncBus.getActiveCount() < 2) return;
-      if (attachedDoc) syncHeaderChrome(attachedDoc, state.symbol, state.interval);
+      if (attachedDoc) syncHeaderChromeRetry(attachedDoc, state.symbol, state.interval);
     });
     return true;
   };
