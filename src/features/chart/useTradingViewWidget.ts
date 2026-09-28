@@ -261,8 +261,8 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         }
       });
 
-      // Primary pane keeps the original CL/Forge header (secondary panes are headerless).
-      if (isPrimary && !hideHeader) {
+      // Desktop primary keeps the original CL/Forge header. Mobile uses the bottom shell.
+      if (isPrimary && !hideHeader && !isMobile) {
         void widget.headerReady().then(() => {
           if (cancelled || !widget) return;
           const api = mountHeaderToolbar(widget, {

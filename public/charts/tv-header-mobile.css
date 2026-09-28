@@ -1,0 +1,59 @@
+/*
+ * TradingView mobile chart shell:
+ * hide the desktop top toolbar; legend + plot fill the widget;
+ * drawing toolbar floats as a compact left pill when Draw is on.
+ */
+
+.tv-header,
+.layout__area--top,
+[class*="header-chart-panel"] {
+  display: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  overflow: hidden !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+.layout__area--center {
+  top: 0 !important;
+}
+
+/* Keep the legend readable like TV mobile (symbol + price on the plot). */
+.legend-source-item,
+.sourcesWrapper-l31H9iuA,
+.legendWrapper-l31H9iuA {
+  font-size: 12px !important;
+}
+
+.chart-controls-bar {
+  display: none !important;
+}
+
+/* Floating left drawing toolbar — compact pill against the left edge. */
+.layout__area--left {
+  top: 48px !important;
+  bottom: auto !important;
+  height: auto !important;
+}
+
+.layout__area--left .tv-group,
+.drawingToolbar-g3SlJJk1,
+[class*="drawingToolbar"] {
+  border-radius: 8px !important;
+  overflow: hidden !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) !important;
+}
+
+/* Hide the horizontal “favorite drawings” strip — TV mobile uses the left pill only. */
+[class*="drawingToolbarBottom"],
+[class*="favorite-drawings"],
+[class*="favored-tools"],
+.drawingToolbar-C0LOKuDw,
+div[data-name="favorite-drawings-toolbar"] {
+  display: none !important;
+}
