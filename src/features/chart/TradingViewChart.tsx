@@ -27,7 +27,7 @@ interface TradingViewChartProps {
   /** 0 = primary (alerts, Forge header, shared controller). */
   readonly paneIndex?: number;
   readonly initialSymbol?: string;
-  /** Multi-layout: hide Charting Library header (shared LayoutTopBar above). */
+  /** Multi-layout: hide Charting Library header on secondary panes. */
   readonly hideHeader?: boolean;
 }
 

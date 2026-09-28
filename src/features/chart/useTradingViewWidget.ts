@@ -32,7 +32,7 @@ export interface TradingViewWidgetDeps {
   /** Primary pane mounts Forge header tools; secondary panes stay library-only. */
   readonly isPrimary?: boolean;
   readonly paneIndex?: number;
-  /** Multi-layout: hide CL header (shared LayoutTopBar sits above the grid). */
+  /** Multi-layout: hide CL header on secondary panes (primary keeps original navbar). */
   readonly hideHeader?: boolean;
   readonly onCreateAlert: () => void;
   readonly onToggleTheme: () => void;
@@ -261,7 +261,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         }
       });
 
-      // Single-chart primary keeps the CL/Forge header. Multi-layout uses LayoutTopBar.
+      // Primary pane keeps the original CL/Forge header (secondary panes are headerless).
       if (isPrimary && !hideHeader) {
         void widget.headerReady().then(() => {
           if (cancelled || !widget) return;

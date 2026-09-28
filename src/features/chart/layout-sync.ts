@@ -38,6 +38,8 @@ interface PaneEntry {
 interface DrawingGroup {
   readonly key: string;
   readonly entities: Map<number, EntityId>;
+  /** Canonical create* shape id (e.g. long_position) — used to detect bad mirrors. */
+  shape?: string;
 }
 
 /**
@@ -289,8 +291,7 @@ class LayoutSyncBus {
   }
 
   /**
-   * Legacy primary-header interval hook — only updates the active pane.
-   * Prefer setActivePaneInterval from the shared LayoutTopBar.
+   * Primary CL header interval → active pane only (interval sync stays off by default).
    */
   handlePrimaryIntervalChanged(interval: Interval): void {
     if (this.locked) return;
@@ -298,7 +299,6 @@ class LayoutSyncBus {
       this.paneIntervals.set(0, interval);
       return;
     }
-    // Never broadcast from the embedded header; LayoutTopBar owns multi-pane TF.
     this.setActivePaneInterval(interval);
   }
 
@@ -501,6 +501,7 @@ class LayoutSyncBus {
       this.groups.push(group);
     }
     group.entities.set(paneIndex, entityId);
+    group.shape = snap.shape;
     this.entityToGroup.set(idKey, group);
 
     this.syncingDrawings = true;
@@ -517,8 +518,43 @@ class LayoutSyncBus {
         if (!destChart) continue;
 
         if (existing) {
-          this.mirrorIds.add(String(existing));
-          applyShapeSnapshot(destChart, existing, snap);
+          // If an earlier sync created a wrong type (e.g. trend_line for Long),
+          // remove and recreate with the correct full shape.
+          let peerShape: string | null = null;
+          try {
+            const peerInfo = destChart.getAllShapes().find((s) => s.id === existing);
+            peerShape = normalizeShapeName(peerInfo?.name);
+          } catch {
+            /* ignore */
+          }
+          const wrongType =
+            peerShape != null &&
+            peerShape !== snap.shape &&
+            (snap.shape === "long_position" ||
+              snap.shape === "short_position" ||
+              snap.shape.startsWith("fib_") ||
+              peerShape === "trend_line" ||
+              peerShape === "horizontal_line");
+
+          if (wrongType) {
+            this.mirrorIds.add(String(existing));
+            try {
+              destChart.removeEntity(existing);
+            } catch {
+              /* ignore */
+            }
+            this.entityToGroup.delete(String(existing));
+            group.entities.delete(index);
+            const created = await createShapeFromSnapshot(destChart, snap);
+            if (created) {
+              this.mirrorIds.add(String(created));
+              group.entities.set(index, created);
+              this.entityToGroup.set(String(created), group);
+            }
+          } else {
+            this.mirrorIds.add(String(existing));
+            applyShapeSnapshot(destChart, existing, snap);
+          }
         } else {
           const created = await createShapeFromSnapshot(destChart, snap);
           if (created) {
