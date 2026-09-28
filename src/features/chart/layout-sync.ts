@@ -80,6 +80,10 @@ class LayoutSyncBus {
   private primaryIntervalGuardUntil = 0;
   private primarySymbolGuard: string | null = null;
   private primarySymbolGuardUntil = 0;
+  /** Ignore primary onIntervalChanged echoes while we force-restore pane 0. */
+  private ignoringPrimaryInterval = false;
+  private ignorePrimaryIntervalTimer = 0;
+  private restorePrimaryTimer = 0;
 
   setFlags(flags: LayoutSyncFlags): void {
     // Always keep drawings ON unless the user explicitly turns them off.
@@ -191,12 +195,14 @@ class LayoutSyncBus {
       this.activePane = target;
       this.drawTargetPane = target;
       this.emitActive();
+      this.emitPaneState();
     }
 
     const keep = this.paneIntervals.get(0) ?? this.panes.get(0)?.controller.state.get().interval ?? "15";
-    this.primaryIntervalGuard = keep;
-    this.primaryIntervalGuardUntil = Date.now() + 1200;
+    this.armPrimaryIntervalGuard(keep);
     this.setPaneInterval(target, interval);
+    // CL often still mutates pane 0 from the same click — pin it back.
+    if (keep !== interval) this.forceRestorePrimaryInterval(keep);
   }
 
   /** Change only the selected pane’s symbol (broadcast only when Symbol sync is ON). */
@@ -378,11 +384,13 @@ class LayoutSyncBus {
    */
   private headerTargetPane(): number {
     if (this.activeCount < 2) return 0;
+    // Header clicks can steal focus to pane 0 via CL mouse_down — keep the
+    // previously focused chart for a generous window covering async TF apply.
     if (
       this.activePane === 0 &&
       this.priorChartPane > 0 &&
       this.priorChartPane < this.activeCount &&
-      Date.now() - this.lastFocusAtMs < 500
+      Date.now() - this.lastFocusAtMs < 1500
     ) {
       return this.priorChartPane;
     }
@@ -417,7 +425,7 @@ class LayoutSyncBus {
    * Interval sync OFF → only the active pane; restore pane 0 when needed.
    */
   handlePrimaryIntervalChanged(interval: Interval, previous?: Interval): void {
-    if (this.locked) {
+    if (this.locked || this.ignoringPrimaryInterval) {
       this.paneIntervals.set(0, interval);
       return;
     }
@@ -433,16 +441,7 @@ class LayoutSyncBus {
       Date.now() < this.primaryIntervalGuardUntil &&
       this.primaryIntervalGuard !== interval
     ) {
-      const keep = this.primaryIntervalGuard;
-      const primary = this.panes.get(0);
-      if (primary?.controller.isReady) {
-        this.withLock(() => {
-          primary.controller.restoreInterval(keep);
-          this.paneIntervals.set(0, keep);
-        });
-      } else {
-        this.paneIntervals.set(0, keep);
-      }
+      this.forceRestorePrimaryInterval(this.primaryIntervalGuard);
       return;
     }
 
@@ -466,6 +465,7 @@ class LayoutSyncBus {
       this.activePane = target;
       this.drawTargetPane = target;
       this.emitActive();
+      this.emitPaneState();
     }
     const restoreTo =
       (this.primaryIntervalGuard && Date.now() < this.primaryIntervalGuardUntil
@@ -474,14 +474,16 @@ class LayoutSyncBus {
       previous ||
       this.paneIntervals.get(0) ||
       "15";
-    this.setPaneInterval(target, interval);
 
-    const primary = this.panes.get(0);
-    if (primary?.controller.isReady && restoreTo !== interval) {
-      this.withLock(() => {
-        primary.controller.restoreInterval(restoreTo);
-        this.paneIntervals.set(0, restoreTo);
-      });
+    this.armPrimaryIntervalGuard(restoreTo);
+    // Only push to the target if it isn't already on this TF (avoid clobbering).
+    const targetInterval = this.paneIntervals.get(target) ?? this.panes.get(target)?.controller.state.get().interval;
+    if (targetInterval !== interval) {
+      this.setPaneInterval(target, interval);
+    }
+
+    if (restoreTo !== interval) {
+      this.forceRestorePrimaryInterval(restoreTo);
     } else {
       this.paneIntervals.set(0, restoreTo);
     }
@@ -883,6 +885,60 @@ class LayoutSyncBus {
     } finally {
       this.locked = false;
     }
+  }
+
+  private armPrimaryIntervalGuard(keep: Interval): void {
+    this.primaryIntervalGuard = keep;
+    this.primaryIntervalGuardUntil = Date.now() + 2000;
+  }
+
+  /**
+   * CL setResolution is async and can finish after our first restore.
+   * Retry with ignore-flag so restore echoes don't re-route to the active pane.
+   */
+  private forceRestorePrimaryInterval(interval: Interval): void {
+    const primary = this.panes.get(0);
+    if (!primary?.controller.isReady) {
+      this.paneIntervals.set(0, interval);
+      return;
+    }
+
+    this.ignoringPrimaryInterval = true;
+    window.clearTimeout(this.ignorePrimaryIntervalTimer);
+    this.ignorePrimaryIntervalTimer = window.setTimeout(() => {
+      this.ignoringPrimaryInterval = false;
+    }, 2000);
+
+    window.clearTimeout(this.restorePrimaryTimer);
+    const delays = [0, 30, 80, 160, 320, 640];
+    let step = 0;
+
+    const tick = () => {
+      const entry = this.panes.get(0);
+      if (!entry?.controller.isReady) return;
+      this.locked = true;
+      try {
+        entry.controller.restoreInterval(interval);
+        this.paneIntervals.set(0, interval);
+      } finally {
+        this.locked = false;
+      }
+
+      const current = entry.controller.state.get().interval;
+      const widgetRes = (() => {
+        try {
+          return entry.controller.getWidget()?.activeChart().resolution() as Interval | undefined;
+        } catch {
+          return undefined;
+        }
+      })();
+      const ok = current === interval && (widgetRes == null || widgetRes === interval);
+      step += 1;
+      if (ok || step >= delays.length) return;
+      this.restorePrimaryTimer = window.setTimeout(tick, delays[step]!);
+    };
+
+    tick();
   }
 }
 

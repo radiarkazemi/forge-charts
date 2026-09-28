@@ -241,7 +241,7 @@ export class ChartController {
   }
 
   setInterval(interval: Interval): void {
-    this.activeChart()?.setResolution(interval as ResolutionString);
+    void this.activeChart()?.setResolution(interval as ResolutionString, { doNotActivateChart: true });
   }
 
   /**
@@ -250,7 +250,7 @@ export class ChartController {
    */
   restoreInterval(interval: Interval): void {
     this.patch({ interval });
-    this.activeChart()?.setResolution(interval as ResolutionString);
+    void this.activeChart()?.setResolution(interval as ResolutionString, { doNotActivateChart: true });
   }
 
   /** Same for symbol restore after redirected header search. */

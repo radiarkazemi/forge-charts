@@ -158,8 +158,19 @@ export function mountTvLayersHeader(container: HTMLElement): () => void {
   let unsubPane: (() => void) | null = null;
   let mo: MutationObserver | null = null;
   let poll = 0;
+  /** Dedupe mousedown+click on the same control within one gesture. */
+  let lastRouteKey = "";
+  let lastRouteAt = 0;
 
   const shouldRoute = (): boolean => layoutSyncBus.getActiveCount() > 1;
+
+  const once = (key: string): boolean => {
+    const now = Date.now();
+    if (key === lastRouteKey && now - lastRouteAt < 400) return false;
+    lastRouteKey = key;
+    lastRouteAt = now;
+    return true;
+  };
 
   const onPointer = (event: Event) => {
     if (disposed || !shouldRoute()) return;
@@ -175,14 +186,14 @@ export function mountTvLayersHeader(container: HTMLElement): () => void {
       // Pane 0: let the native dialog run. Other panes: open on the active widget.
       if (active === 0) return;
       stop(event);
-      layoutSyncBus.openSymbolSearchOnActive();
+      if (once(`sym:${active}`)) layoutSyncBus.openSymbolSearchOnActive();
       return;
     }
 
     if (isIndicatorsButton(btn)) {
       if (active === 0) return;
       stop(event);
-      layoutSyncBus.openIndicatorsOnActive();
+      if (once(`ind:${active}`)) layoutSyncBus.openIndicatorsOnActive();
       return;
     }
 
@@ -193,6 +204,7 @@ export function mountTvLayersHeader(container: HTMLElement): () => void {
     if (active === 0 || layoutSyncBus.getFlags().interval === true) return;
 
     stop(event);
+    if (!once(`tf:${active}:${interval}`)) return;
     applyIntervalToActive(interval);
     if (attachedDoc) {
       const st = layoutSyncBus.getPaneState(layoutSyncBus.getActivePane());
@@ -218,6 +230,7 @@ export function mountTvLayersHeader(container: HTMLElement): () => void {
     if (!interval) return;
 
     stop(event);
+    if (!once(`menu:${active}:${interval}`)) return;
     applyIntervalToActive(interval);
     if (attachedDoc) {
       const st = layoutSyncBus.getPaneState(layoutSyncBus.getActivePane());
@@ -225,12 +238,14 @@ export function mountTvLayersHeader(container: HTMLElement): () => void {
     }
   };
 
+  const EVENT_TYPES = ["pointerdown", "mousedown", "touchstart", "click"] as const;
+
   const detach = () => {
     if (!attachedDoc) return;
-    attachedDoc.removeEventListener("pointerdown", onPointer, true);
-    attachedDoc.removeEventListener("click", onPointer, true);
-    attachedDoc.removeEventListener("pointerdown", onMenuPointer, true);
-    attachedDoc.removeEventListener("click", onMenuPointer, true);
+    for (const type of EVENT_TYPES) {
+      attachedDoc.removeEventListener(type, onPointer, true);
+      attachedDoc.removeEventListener(type, onMenuPointer, true);
+    }
     attachedDoc = null;
   };
 
@@ -241,10 +256,11 @@ export function mountTvLayersHeader(container: HTMLElement): () => void {
     if (attachedDoc === doc) return true;
     detach();
     attachedDoc = doc;
-    doc.addEventListener("pointerdown", onPointer, true);
-    doc.addEventListener("click", onPointer, true);
-    doc.addEventListener("pointerdown", onMenuPointer, true);
-    doc.addEventListener("click", onMenuPointer, true);
+    // Capture on every pointer family — CL/React may handle mousedown before click.
+    for (const type of EVENT_TYPES) {
+      doc.addEventListener(type, onPointer, true);
+      doc.addEventListener(type, onMenuPointer, true);
+    }
 
     unsubPane?.();
     unsubPane = layoutSyncBus.subscribeActivePaneState((state) => {
