@@ -732,15 +732,27 @@ async def iran_gold_history(request: web.Request) -> web.Response:
     try:
         tick_coll = client["anil_gold"]["tick_1s"]
         hist_coll = client["anil_gold"]["price_history"]
-        rows = list(tick_coll.find(query, {field: 1, "ts": 1, "ts_unix": 1}).sort("ts", -1).limit(pull))
-        if not rows:
+        # Seconds: prefer dense tick_1s. Minutes+: prefer long price_history, splice recent ticks.
+        if step < 60:
+            rows = list(
+                tick_coll.find(query, {field: 1, "ts": 1, "ts_unix": 1}).sort("ts", -1).limit(pull)
+            )
+            if len(rows) < min(limit, 20):
+                older = list(hist_coll.find(query, {field: 1, "ts": 1}).sort("ts", -1).limit(pull))
+                rows.extend(older)
+                source_name = "anil_gold.tick_1s+price_history" if rows else "anil_gold.price_history"
+            if not rows:
+                rows = list(hist_coll.find(query, {field: 1, "ts": 1}).sort("ts", -1).limit(pull))
+                source_name = "anil_gold.price_history"
+        else:
             rows = list(hist_coll.find(query, {field: 1, "ts": 1}).sort("ts", -1).limit(pull))
             source_name = "anil_gold.price_history"
-        elif len(rows) < min(limit, 20):
-            # Merge older sparse history behind the dense window.
-            older = list(hist_coll.find(query, {field: 1, "ts": 1}).sort("ts", -1).limit(pull))
-            rows.extend(older)
-            source_name = "anil_gold.tick_1s+price_history"
+            recent = list(
+                tick_coll.find(query, {field: 1, "ts": 1, "ts_unix": 1}).sort("ts", -1).limit(min(2_000, pull))
+            )
+            if recent:
+                rows.extend(recent)
+                source_name = "anil_gold.price_history+tick_1s"
     except Exception as exc:
         LOG.warning("iran history mongo: %s", exc)
         return web.json_response({"detail": "mongo query failed"}, status=503)
