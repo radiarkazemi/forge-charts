@@ -733,19 +733,14 @@ async def iran_gold_history(request: web.Request) -> web.Response:
         tick_coll = client["anil_gold"]["tick_1s"]
         hist_coll = client["anil_gold"]["price_history"]
         rows = list(tick_coll.find(query, {field: 1, "ts": 1, "ts_unix": 1}).sort("ts", -1).limit(pull))
-        if len(rows) < min(limit, 20):
-            # Merge older sparse history behind the dense window.
-            older = list(hist_coll.find(query, {field: 1, "ts": 1}).sort("ts", -1).limit(pull))
-            seen = {id(r) for r in rows}
-            for doc in older:
-                rows.append(doc)
-            source_name = "anil_gold.tick_1s+price_history" if rows else "anil_gold.price_history"
-            if not rows:
-                rows = older
-                source_name = "anil_gold.price_history"
-        elif not rows:
+        if not rows:
             rows = list(hist_coll.find(query, {field: 1, "ts": 1}).sort("ts", -1).limit(pull))
             source_name = "anil_gold.price_history"
+        elif len(rows) < min(limit, 20):
+            # Merge older sparse history behind the dense window.
+            older = list(hist_coll.find(query, {field: 1, "ts": 1}).sort("ts", -1).limit(pull))
+            rows.extend(older)
+            source_name = "anil_gold.tick_1s+price_history"
     except Exception as exc:
         LOG.warning("iran history mongo: %s", exc)
         return web.json_response({"detail": "mongo query failed"}, status=503)
