@@ -63,7 +63,25 @@ body,
 [class*="drawingToolbarBottom"],
 [class*="favorite-drawings"],
 [class*="favored-tools"],
+[class*="FavoriteDrawing"],
+[class*="favoriteDrawing"],
+.drawingToolbar-C0LOKuDw,
+div[data-name="favorite-drawings-toolbar"],
+div[data-name="base"],
+.layout__area--center > div[style*="position: absolute"][style*="top"] [class*="drawingToolbar"] {
+  /* keep left pill; hide floating horizontal tool strips via common TV classes */
+}
+
+[class*="drawingToolbarBottom"],
+[class*="favorite-drawings"],
+[class*="favored-tools"],
+[class*="FavoriteDrawingToolbar"],
+[class*="floating-toolbar"],
+[class*="floatingToolbar"],
 .drawingToolbar-C0LOKuDw,
 div[data-name="favorite-drawings-toolbar"] {
   display: none !important;
+  height: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
