@@ -95,7 +95,17 @@ export function AppShell() {
     .toUpperCase() || "JD";
 
   const chartArea = (
-    <Box sx={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0, position: "relative" }}>
+    <Box
+      sx={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        minWidth: 0,
+        minHeight: 0,
+        height: "100%",
+        position: "relative",
+      }}
+    >
       <ChartWorkspace onCreateAlert={openAlertDialog} onOpenProfile={openProfileMenu} />
       {desktopSideDock ? (
         <SidePanel

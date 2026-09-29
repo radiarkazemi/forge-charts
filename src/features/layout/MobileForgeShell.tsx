@@ -473,14 +473,17 @@ export function MobileForgeShell({
         </IconButton>
       </Box>
 
-      {/* Chart */}
+      {/* Chart — must be a flex column so the TV iframe gets a real height. */}
       <Box
         sx={{
-          flex: 1,
-          minHeight: 0,
+          flex: "1 1 auto",
+          minHeight: 180,
           position: "relative",
+          display: "flex",
+          flexDirection: "column",
           bgcolor: MF.bg,
           borderBottom: `1px solid ${MF.border}`,
+          "& > *": { flex: 1, minHeight: 0, minWidth: 0 },
         }}
       >
         {children}
