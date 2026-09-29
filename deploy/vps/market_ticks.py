@@ -7,7 +7,8 @@ cp_fetcher's tvws helpers — pushes ticks as soon as TV emits `qsd`.
 Fallbacks (in parallel):
   - Mongo `last.1` poll (cp_fetcher live candle writer)
   - Germany Market Price API HTTP (crypto ~0.25s, forex ~1s throttle)
-  - Iran gold (آبشده / گرم ۱۸ / سکه) via TGJU + Anil Mongo/API @ 1s
+  - Iran gold (آبشده / گرم ۱۸ / سکه) via Faraz @ 1s
+    (Germany market-api `/gold/live/` proxies Faraz; VPS is CF-blocked from faraz.io)
 
 Client protocol:
   -> {"op":"subscribe","channel":"crypto:btcusdt"}
@@ -44,7 +45,10 @@ MONGO_POLL = float(os.environ.get("MARKET_TICKS_MONGO_POLL", "0.12"))
 IRAN_POLL = float(os.environ.get("MARKET_TICKS_IRAN_POLL", "1.0"))
 MONGO_URI = os.environ.get("MONGO_URI", "mongodb://127.0.0.1:27017/")
 ANIL_GOLD_API = os.environ.get("ANIL_GOLD_API", "http://127.0.0.1:8000/api/v1").rstrip("/")
-TGJU_URL = os.environ.get("TGJU_URL", "https://call1.tgju.org/ajax.json").strip()
+# Direct Faraz (often CF-blocked on Iran VPS). Prefer Germany market-api Faraz proxy.
+FARAZ_BASE = os.environ.get("FARAZ_BASE_URL", "https://faraz.io").rstrip("/")
+# Only accept Faraz-sourced quotes for iran:* (never TGJU).
+IRAN_FARAZ_ONLY = os.environ.get("MARKET_TICKS_IRAN_FARAZ_ONLY", "1") not in {"0", "false", "False"}
 TV_ENABLED = os.environ.get("MARKET_TICKS_TV", "1") not in {"0", "false", "False"}
 # If a channel got a TV/mongo tick within this window, skip Germany HTTP for it.
 GERMANY_SKIP_IF_FRESH_MS = float(os.environ.get("MARKET_TICKS_GERMANY_SKIP_MS", "800"))
@@ -63,7 +67,7 @@ LOCK = asyncio.Lock()
 SOURCE_PRIORITY = {"tv": 40, "iran": 30, "mongo": 20, "germany": 10, "cache": 0}
 SOURCE_HOLD_MS = {"tv": 1_200, "iran": 900, "mongo": 400, "germany": 250}
 
-# Iran gold fields → market-ticks channels (Anil / Faraz / TGJU).
+# Iran gold fields → market-ticks channels (Faraz only).
 # abshodeNaghdi (Faraz) ≈ آبشده نقدی / مثقال ۱۷
 IRAN_FIELDS: dict[str, str] = {
     "mesghal_17": "iran:abshode",
@@ -490,73 +494,124 @@ async def tv_quote_feeder() -> None:
         await asyncio.sleep(2.0)
 
 
-def _tgju_rial_to_toman(raw: Any) -> int:
-    if raw is None:
-        return 0
-    try:
-        n = int(round(float(str(raw).replace(",", "").replace("،", "").strip() or 0)))
-    except (TypeError, ValueError):
-        return 0
-    if n >= 10_000_000:
-        return int(round(n / 10.0))
-    return n
+def _is_faraz_source(src: str) -> bool:
+    s = (src or "").lower()
+    return "faraz" in s
 
 
-async def fetch_iran_quote_tgju(session: aiohttp.ClientSession) -> tuple[dict[str, float], str] | None:
-    """TGJU ajax.json — primary 1s path when Faraz is Cloudflare-blocked from the VPS."""
+def _quote_from_anil_shape(data: dict[str, Any], default_src: str) -> tuple[dict[str, float], str] | None:
+    g18 = float(data.get("price_18k_per_gram") or 0)
+    if g18 <= 0:
+        return None
+    src = str(data.get("source") or default_src)
+    if IRAN_FARAZ_ONLY and not _is_faraz_source(src):
+        return None
+    return (
+        {
+            "mesghal_17": float(data.get("mesghal_17") or data.get("mesghal") or 0),
+            "price_18k_per_gram": g18,
+            "price_24k_per_gram": float(data.get("price_24k_per_gram") or 0),
+            "coin_emami": float(data.get("coin_emami") or 0),
+            "coin_half": float(data.get("coin_half") or 0),
+            "coin_quarter": float(data.get("coin_quarter") or 0),
+            "ounce_usd": float(data.get("ounce_usd") or 0),
+        },
+        "faraz" if _is_faraz_source(src) else src,
+    )
+
+
+def _extract_faraz_price(entry: Any) -> float:
+    if entry is None:
+        return 0.0
+    if isinstance(entry, (int, float)):
+        return float(entry)
+    if isinstance(entry, dict):
+        for key in ("price", "close", "last", "value", "p"):
+            if entry.get(key) is not None:
+                try:
+                    return float(entry[key])
+                except (TypeError, ValueError):
+                    continue
+    return 0.0
+
+
+async def fetch_iran_quote_faraz_direct(session: aiohttp.ClientSession) -> tuple[dict[str, float], str] | None:
+    """Direct Faraz public market API (abshodeNaghdi → مثقال ۱۷ / آبشده نقدی)."""
+    symbols = [
+        "abshodeNaghdi",
+        "sekkeNewEstjt",
+        "nimSekkeEstjt",
+        "robSekkeEstjt",
+        "FOREXCOM_XAUUSD",
+    ]
     try:
         async with session.get(
-            TGJU_URL,
+            f"{FARAZ_BASE}/api/public/market/get-data",
+            params={
+                "symbolNames": json.dumps(symbols, separators=(",", ":")),
+                "cache": "false",
+            },
             timeout=aiohttp.ClientTimeout(total=2.5),
             headers={
-                "Accept": "application/json,text/plain,*/*",
+                "Accept": "application/json, text/plain, */*",
+                "Origin": FARAZ_BASE,
+                "Referer": f"{FARAZ_BASE}/markets/gold-currency",
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 ),
-                "Referer": "https://www.tgju.org/",
             },
         ) as resp:
             if resp.status != 200:
                 return None
-            data = await resp.json(content_type=None)
-        cur = (data or {}).get("current") or {}
-        if not isinstance(cur, dict):
+            raw = await resp.json(content_type=None)
+        if not isinstance(raw, dict):
             return None
-
-        def pick(key: str) -> int:
-            entry = cur.get(key) or {}
-            return _tgju_rial_to_toman(entry.get("p") if isinstance(entry, dict) else None)
-
-        g18 = pick("geram18")
-        if g18 <= 0:
+        mesghal = _extract_faraz_price(raw.get("abshodeNaghdi"))
+        if mesghal <= 0:
             return None
-        g24 = pick("geram24") or int(round(g18 * 999 / 750))
-        mesghal = pick("mesghal")
-        ons_raw = (cur.get("ons") or {}).get("p") if isinstance(cur.get("ons"), dict) else 0
-        try:
-            ounce = float(str(ons_raw or 0).replace(",", "") or 0)
-        except (TypeError, ValueError):
-            ounce = 0.0
+        # گرم ۱۸ = (مثقال ۱۷ × 750 / 705) / 4.608  (Anil / Faraz business formula)
+        g18 = int(round((mesghal * 750 / 705) / 4.608))
+        g24 = int(round(g18 * 999 / 750))
+        ounce = _extract_faraz_price(raw.get("FOREXCOM_XAUUSD"))
         return (
             {
-                "mesghal_17": float(mesghal),
+                "mesghal_17": float(int(round(mesghal))),
                 "price_18k_per_gram": float(g18),
                 "price_24k_per_gram": float(g24),
-                "coin_emami": float(pick("sekee") or pick("sekee_real")),
-                "coin_half": float(pick("nim")),
-                "coin_quarter": float(pick("rob")),
-                "ounce_usd": ounce,
+                "coin_emami": float(int(round(_extract_faraz_price(raw.get("sekkeNewEstjt"))))),
+                "coin_half": float(int(round(_extract_faraz_price(raw.get("nimSekkeEstjt"))))),
+                "coin_quarter": float(int(round(_extract_faraz_price(raw.get("robSekkeEstjt"))))),
+                "ounce_usd": float(ounce) if ounce else 0.0,
             },
-            "tgju",
+            "faraz",
         )
     except Exception as exc:
-        LOG.debug("tgju iran poll: %s", exc)
+        LOG.debug("faraz direct: %s", exc)
         return None
 
 
-async def fetch_iran_quote_anil(session: aiohttp.ClientSession) -> tuple[dict[str, float], str] | None:
-    """Anil in-process cache / DB snapshot (localhost) — fallback when TGJU blips."""
+async def fetch_iran_quote_faraz_proxy(session: aiohttp.ClientSession) -> tuple[dict[str, float], str] | None:
+    """Faraz via Germany market-api `/gold/live/` (reachable from Iran VPS)."""
+    try:
+        async with session.get(
+            f"{API_BASE}/gold/live/",
+            timeout=aiohttp.ClientTimeout(total=3.0),
+        ) as resp:
+            if resp.status != 200:
+                return None
+            data = await resp.json(content_type=None)
+        if not isinstance(data, dict):
+            return None
+        # Live endpoint should report source=faraz; reject anything else.
+        return _quote_from_anil_shape(data, "faraz")
+    except Exception as exc:
+        LOG.debug("faraz proxy (market-api gold/live): %s", exc)
+        return None
+
+
+async def fetch_iran_quote_anil_faraz(session: aiohttp.ClientSession) -> tuple[dict[str, float], str] | None:
+    """Anil cache only when it is still a Faraz quote."""
     try:
         async with session.get(
             f"{ANIL_GOLD_API}/gold-price/",
@@ -568,53 +623,43 @@ async def fetch_iran_quote_anil(session: aiohttp.ClientSession) -> tuple[dict[st
             data = await resp.json(content_type=None)
         if not isinstance(data, dict):
             return None
-        g18 = float(data.get("price_18k_per_gram") or 0)
-        if g18 <= 0:
-            return None
-        return (
-            {
-                "mesghal_17": float(data.get("mesghal_17") or data.get("mesghal") or 0),
-                "price_18k_per_gram": g18,
-                "price_24k_per_gram": float(data.get("price_24k_per_gram") or 0),
-                "coin_emami": float(data.get("coin_emami") or 0),
-                "coin_half": float(data.get("coin_half") or 0),
-                "coin_quarter": float(data.get("coin_quarter") or 0),
-                "ounce_usd": float(data.get("ounce_usd") or 0),
-            },
-            str(data.get("source") or "anil"),
-        )
+        return _quote_from_anil_shape(data, "anil")
     except Exception as exc:
-        LOG.debug("anil iran poll: %s", exc)
+        LOG.debug("anil faraz cache: %s", exc)
         return None
 
 
-async def fetch_iran_quote_mongo() -> tuple[dict[str, float], str] | None:
-    """Latest anil_gold.price_history row — durable fallback."""
+async def fetch_iran_quote_mongo_faraz() -> tuple[dict[str, float], str] | None:
+    """Latest Faraz row from anil_gold.price_history (ignore TGJU rows)."""
     client = mongo_client()
     if client is None:
         return None
     try:
-        doc = client["anil_gold"]["price_history"].find_one(sort=[("ts", -1)])
+        query: dict[str, Any] = {
+            "price_18k_per_gram": {"$gt": 0},
+            "source": {"$regex": "faraz", "$options": "i"},
+        }
+        doc = client["anil_gold"]["price_history"].find_one(query, sort=[("ts", -1)])
         if not doc:
             return None
-        g18 = float(doc.get("price_18k_per_gram") or 0)
-        if g18 <= 0:
-            return None
-        return (
-            {
-                "mesghal_17": float(doc.get("mesghal_17") or 0),
-                "price_18k_per_gram": g18,
-                "price_24k_per_gram": float(doc.get("price_24k_per_gram") or 0),
-                "coin_emami": float(doc.get("coin_emami") or 0),
-                "coin_half": float(doc.get("coin_half") or 0),
-                "coin_quarter": float(doc.get("coin_quarter") or 0),
-                "ounce_usd": float(doc.get("ounce_usd") or 0),
-            },
-            str(doc.get("source") or "mongo"),
-        )
+        return _quote_from_anil_shape(doc, "faraz")
     except Exception as exc:
-        LOG.debug("mongo iran poll: %s", exc)
+        LOG.debug("mongo faraz: %s", exc)
         return None
+
+
+async def fetch_iran_quote(session: aiohttp.ClientSession) -> tuple[dict[str, float], str] | None:
+    """Faraz-only quote resolution. Never TGJU."""
+    for fetcher in (
+        lambda: fetch_iran_quote_faraz_proxy(session),  # Germany → Faraz (reliable from VPS)
+        lambda: fetch_iran_quote_faraz_direct(session),  # direct faraz.io when unblocked
+        lambda: fetch_iran_quote_anil_faraz(session),
+        fetch_iran_quote_mongo_faraz,
+    ):
+        quote_src = await fetcher()
+        if quote_src:
+            return quote_src
+    return None
 
 
 def persist_iran_tick_1s(quote: dict[str, float], src_name: str, ts: int) -> None:
@@ -638,21 +683,17 @@ def persist_iran_tick_1s(quote: dict[str, float], src_name: str, ts: int) -> Non
 
 
 async def poll_iran_gold(session: aiohttp.ClientSession) -> None:
-    """Push Iran gold ticks every IRAN_POLL seconds for subscribed iran:* channels.
+    """Push Iran gold ticks every IRAN_POLL seconds (Faraz only).
 
     Always force-broadcast so 1S charts keep a forming bar even when the quote
-    is flat between TGJU updates. Also warm-poll + persist 1s ticks continuously
+    is flat between Faraz updates. Also warm-poll + persist 1s ticks continuously
     so history densifies even before a browser subscribes.
     """
     while True:
         try:
             async with LOCK:
                 channels = [c for c, sockets in SUBS.items() if c.startswith("iran:") and sockets]
-            quote_src = await fetch_iran_quote_tgju(session)
-            if not quote_src:
-                quote_src = await fetch_iran_quote_anil(session)
-            if not quote_src:
-                quote_src = await fetch_iran_quote_mongo()
+            quote_src = await fetch_iran_quote(session)
             if quote_src:
                 quote, src_name = quote_src
                 ts = int(time.time())
@@ -803,15 +844,11 @@ async def iran_gold_history(request: web.Request) -> web.Response:
 
 
 async def iran_gold_quote(request: web.Request) -> web.Response:
-    """Latest Iran gold quote snapshot for all fields (HTTP fallback)."""
+    """Latest Iran gold quote snapshot (Faraz only)."""
     session: aiohttp.ClientSession = request.app["session"]
-    quote_src = await fetch_iran_quote_tgju(session)
+    quote_src = await fetch_iran_quote(session)
     if not quote_src:
-        quote_src = await fetch_iran_quote_anil(session)
-    if not quote_src:
-        quote_src = await fetch_iran_quote_mongo()
-    if not quote_src:
-        return web.json_response({"detail": "iran gold unavailable"}, status=503)
+        return web.json_response({"detail": "faraz gold unavailable"}, status=503)
     quote, src = quote_src
     return web.json_response(
         {

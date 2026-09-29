@@ -12,11 +12,11 @@ import type { MarketDataProvider, Unsubscribe } from "@/application";
 import { buildUrl, fetchJson } from "../http/fetch-json";
 
 /**
- * Iran domestic gold (Anil / TGJU / Faraz):
+ * Iran domestic gold from Faraz (آبشده نقدی / گرم ۱۸ / سکه):
  *   آبشده نقدی (مثقال ۱۷), گرم ۱۸/۲۴, سکه امامی / نیم / ربع, انس
  *
- * History: VPS `/iran-gold/history` ← Mongo `anil_gold.price_history`
- * Realtime: VPS `/market-ticks` channels `iran:*` polled every 1s
+ * History: VPS `/iran-gold/history` ← Mongo `anil_gold.tick_1s` + Faraz snapshots
+ * Realtime: VPS `/market-ticks` `iran:*` — Faraz via Germany market-api @ 1s
  */
 
 const HISTORY_BASE = "/iran-gold/history";

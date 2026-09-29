@@ -52,7 +52,7 @@ const SEEDS: readonly Seed[] = [
   ["XAGUSD", "Silver Spot / U.S. Dollar", "FXPRO", "commodity", 3],
   ["USOIL", "WTI Crude Oil", "TVC", "commodity", 2],
   ["SPX", "S&P 500", "SP", "index", 2],
-  // Iran domestic gold — Anil Mongo / TGJU / Faraz (آبشده نقدی, گرم ۱۸, سکه‌ها)
+  // Iran domestic gold — Faraz (آبشده نقدی / abshodeNaghdi, گرم ۱۸, سکه‌ها)
   ["ABSHODE", "آبشده نقدی (مثقال ۱۷)", "IRAN", "commodity", 0],
   ["G18", "گرم طلا ۱۸ عیار", "IRAN", "commodity", 0],
   ["G24", "طلای ۲۴ عیار", "IRAN", "commodity", 0],
