@@ -721,7 +721,9 @@ async def iran_gold_history(request: web.Request) -> web.Response:
     before = int(float(before_raw)) if before_raw not in (None, "") else None
 
     # Prefer dense 1s ticks; fall back to Anil price_history (~3–9s snapshots).
-    pull = min(50_000, max(limit * (4 if step > 1 else 2), limit))
+    # Minute+ bars need many snapshots per candle (~step/9 docs each).
+    docs_per_bar = max(2, step // 5) if step >= 60 else 2
+    pull = min(80_000, max(limit * docs_per_bar, limit * 4, 500))
     query: dict[str, Any] = {field: {"$gt": 0}}
     if before is not None:
         from datetime import datetime, timezone
