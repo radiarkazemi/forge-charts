@@ -7,10 +7,12 @@ cp_fetcher's tvws helpers — pushes ticks as soon as TV emits `qsd`.
 Fallbacks (in parallel):
   - Mongo `last.1` poll (cp_fetcher live candle writer)
   - Germany Market Price API HTTP (crypto ~0.25s, forex ~1s throttle)
+  - Iran gold (آبشده / گرم ۱۸ / سکه) via TGJU + Anil Mongo/API @ 1s
 
 Client protocol:
   -> {"op":"subscribe","channel":"crypto:btcusdt"}
   -> {"op":"subscribe","channel":"forex:xauusd:FXPRO"}
+  -> {"op":"subscribe","channel":"iran:abshode"}
   <- {"type":"tick","channel":"...","price":123.4,"ts":1710000000,"volume":0,"src":"tv"}
 """
 
@@ -39,7 +41,10 @@ PORT = int(os.environ.get("MARKET_TICKS_PORT", "8015"))
 CRYPTO_POLL = float(os.environ.get("MARKET_TICKS_CRYPTO_POLL", "0.25"))
 FOREX_POLL = float(os.environ.get("MARKET_TICKS_FOREX_POLL", "1.0"))
 MONGO_POLL = float(os.environ.get("MARKET_TICKS_MONGO_POLL", "0.12"))
+IRAN_POLL = float(os.environ.get("MARKET_TICKS_IRAN_POLL", "1.0"))
 MONGO_URI = os.environ.get("MONGO_URI", "mongodb://127.0.0.1:27017/")
+ANIL_GOLD_API = os.environ.get("ANIL_GOLD_API", "http://127.0.0.1:8000/api/v1").rstrip("/")
+TGJU_URL = os.environ.get("TGJU_URL", "https://call1.tgju.org/ajax.json").strip()
 TV_ENABLED = os.environ.get("MARKET_TICKS_TV", "1") not in {"0", "false", "False"}
 # If a channel got a TV/mongo tick within this window, skip Germany HTTP for it.
 GERMANY_SKIP_IF_FRESH_MS = float(os.environ.get("MARKET_TICKS_GERMANY_SKIP_MS", "800"))
@@ -55,8 +60,49 @@ LAST_SRC: dict[str, str] = {}
 TV_WANTED: set[str] = set()
 LOCK = asyncio.Lock()
 # Higher wins. Lower-priority sources cannot clobber a fresh higher-priority tick.
-SOURCE_PRIORITY = {"tv": 40, "mongo": 20, "germany": 10, "cache": 0}
-SOURCE_HOLD_MS = {"tv": 1_200, "mongo": 400, "germany": 250}
+SOURCE_PRIORITY = {"tv": 40, "iran": 30, "mongo": 20, "germany": 10, "cache": 0}
+SOURCE_HOLD_MS = {"tv": 1_200, "iran": 900, "mongo": 400, "germany": 250}
+
+# Iran gold fields → market-ticks channels (Anil / Faraz / TGJU).
+# abshodeNaghdi (Faraz) ≈ آبشده نقدی / مثقال ۱۷
+IRAN_FIELDS: dict[str, str] = {
+    "mesghal_17": "iran:abshode",
+    "price_18k_per_gram": "iran:g18",
+    "price_24k_per_gram": "iran:g24",
+    "coin_emami": "iran:sekke",
+    "coin_half": "iran:nim",
+    "coin_quarter": "iran:rob",
+    "ounce_usd": "iran:ons",
+}
+IRAN_FIELD_BY_CHANNEL = {v: k for k, v in IRAN_FIELDS.items()}
+# Aliases so clients can subscribe with friendlier names.
+IRAN_ALIASES: dict[str, str] = {
+    "iran:mesghal": "iran:abshode",
+    "iran:mesghal17": "iran:abshode",
+    "iran:abshodenaghdi": "iran:abshode",
+    "iran:gram18": "iran:g18",
+    "iran:18k": "iran:g18",
+    "iran:gram24": "iran:g24",
+    "iran:24k": "iran:g24",
+    "iran:emami": "iran:sekke",
+    "iran:sekke_emami": "iran:sekke",
+    "iran:half": "iran:nim",
+    "iran:quarter": "iran:rob",
+    "iran:ounce": "iran:ons",
+}
+_MONGO_CLIENT: Any = None
+
+
+def mongo_client() -> Any:
+    global _MONGO_CLIENT
+    if _MONGO_CLIENT is not None:
+        return _MONGO_CLIENT
+    try:
+        from pymongo import MongoClient
+    except Exception:
+        return None
+    _MONGO_CLIENT = MongoClient(MONGO_URI, serverSelectionTimeoutMS=3000, maxPoolSize=8)
+    return _MONGO_CLIENT
 
 # channel prefix -> TradingView symbol
 CHANNEL_TO_TV: dict[str, str] = {
@@ -123,6 +169,8 @@ def normalize_channel(raw: str) -> str | None:
         return channel
     if channel.startswith("crypto:"):
         return f"crypto:{channel.split(':', 1)[1].lower()}"
+    if channel.startswith("iran:"):
+        return IRAN_ALIASES.get(channel, channel if channel in IRAN_FIELD_BY_CHANNEL else None)
     return None
 
 
@@ -148,10 +196,19 @@ def channels_for_tv(tv_symbol: str) -> list[str]:
     return mapped
 
 
-async def broadcast(channel: str, price: float, ts: int, volume: float = 0.0, src: str = "") -> None:
+async def broadcast(
+    channel: str,
+    price: float,
+    ts: int,
+    volume: float = 0.0,
+    src: str = "",
+    *,
+    force: bool = False,
+) -> None:
     now_ms = time.monotonic() * 1000
     prev = LAST.get(channel)
-    if prev is not None and abs(prev - price) < 1e-12:
+    same = prev is not None and abs(prev - price) < 1e-12
+    if same and not force:
         # Same price — refresh freshness only for equal-or-higher priority sources.
         prev_src = LAST_SRC.get(channel, "")
         if SOURCE_PRIORITY.get(src, 0) >= SOURCE_PRIORITY.get(prev_src, 0):
@@ -433,6 +490,330 @@ async def tv_quote_feeder() -> None:
         await asyncio.sleep(2.0)
 
 
+def _tgju_rial_to_toman(raw: Any) -> int:
+    if raw is None:
+        return 0
+    try:
+        n = int(round(float(str(raw).replace(",", "").replace("،", "").strip() or 0)))
+    except (TypeError, ValueError):
+        return 0
+    if n >= 10_000_000:
+        return int(round(n / 10.0))
+    return n
+
+
+async def fetch_iran_quote_tgju(session: aiohttp.ClientSession) -> tuple[dict[str, float], str] | None:
+    """TGJU ajax.json — primary 1s path when Faraz is Cloudflare-blocked from the VPS."""
+    try:
+        async with session.get(
+            TGJU_URL,
+            timeout=aiohttp.ClientTimeout(total=2.5),
+            headers={
+                "Accept": "application/json,text/plain,*/*",
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                ),
+                "Referer": "https://www.tgju.org/",
+            },
+        ) as resp:
+            if resp.status != 200:
+                return None
+            data = await resp.json(content_type=None)
+        cur = (data or {}).get("current") or {}
+        if not isinstance(cur, dict):
+            return None
+
+        def pick(key: str) -> int:
+            entry = cur.get(key) or {}
+            return _tgju_rial_to_toman(entry.get("p") if isinstance(entry, dict) else None)
+
+        g18 = pick("geram18")
+        if g18 <= 0:
+            return None
+        g24 = pick("geram24") or int(round(g18 * 999 / 750))
+        mesghal = pick("mesghal")
+        ons_raw = (cur.get("ons") or {}).get("p") if isinstance(cur.get("ons"), dict) else 0
+        try:
+            ounce = float(str(ons_raw or 0).replace(",", "") or 0)
+        except (TypeError, ValueError):
+            ounce = 0.0
+        return (
+            {
+                "mesghal_17": float(mesghal),
+                "price_18k_per_gram": float(g18),
+                "price_24k_per_gram": float(g24),
+                "coin_emami": float(pick("sekee") or pick("sekee_real")),
+                "coin_half": float(pick("nim")),
+                "coin_quarter": float(pick("rob")),
+                "ounce_usd": ounce,
+            },
+            "tgju",
+        )
+    except Exception as exc:
+        LOG.debug("tgju iran poll: %s", exc)
+        return None
+
+
+async def fetch_iran_quote_anil(session: aiohttp.ClientSession) -> tuple[dict[str, float], str] | None:
+    """Anil in-process cache / DB snapshot (localhost) — fallback when TGJU blips."""
+    try:
+        async with session.get(
+            f"{ANIL_GOLD_API}/gold-price/",
+            params={"auto": "0"},
+            timeout=aiohttp.ClientTimeout(total=1.5),
+        ) as resp:
+            if resp.status != 200:
+                return None
+            data = await resp.json(content_type=None)
+        if not isinstance(data, dict):
+            return None
+        g18 = float(data.get("price_18k_per_gram") or 0)
+        if g18 <= 0:
+            return None
+        return (
+            {
+                "mesghal_17": float(data.get("mesghal_17") or data.get("mesghal") or 0),
+                "price_18k_per_gram": g18,
+                "price_24k_per_gram": float(data.get("price_24k_per_gram") or 0),
+                "coin_emami": float(data.get("coin_emami") or 0),
+                "coin_half": float(data.get("coin_half") or 0),
+                "coin_quarter": float(data.get("coin_quarter") or 0),
+                "ounce_usd": float(data.get("ounce_usd") or 0),
+            },
+            str(data.get("source") or "anil"),
+        )
+    except Exception as exc:
+        LOG.debug("anil iran poll: %s", exc)
+        return None
+
+
+async def fetch_iran_quote_mongo() -> tuple[dict[str, float], str] | None:
+    """Latest anil_gold.price_history row — durable fallback."""
+    client = mongo_client()
+    if client is None:
+        return None
+    try:
+        doc = client["anil_gold"]["price_history"].find_one(sort=[("ts", -1)])
+        if not doc:
+            return None
+        g18 = float(doc.get("price_18k_per_gram") or 0)
+        if g18 <= 0:
+            return None
+        return (
+            {
+                "mesghal_17": float(doc.get("mesghal_17") or 0),
+                "price_18k_per_gram": g18,
+                "price_24k_per_gram": float(doc.get("price_24k_per_gram") or 0),
+                "coin_emami": float(doc.get("coin_emami") or 0),
+                "coin_half": float(doc.get("coin_half") or 0),
+                "coin_quarter": float(doc.get("coin_quarter") or 0),
+                "ounce_usd": float(doc.get("ounce_usd") or 0),
+            },
+            str(doc.get("source") or "mongo"),
+        )
+    except Exception as exc:
+        LOG.debug("mongo iran poll: %s", exc)
+        return None
+
+
+def persist_iran_tick_1s(quote: dict[str, float], src_name: str, ts: int) -> None:
+    """Store 1s snapshots for chart history (separate from Anil's sparse price_history)."""
+    client = mongo_client()
+    if client is None:
+        return
+    try:
+        from datetime import datetime, timezone
+
+        client["anil_gold"]["tick_1s"].insert_one(
+            {
+                **{k: float(v) for k, v in quote.items() if float(v or 0) > 0},
+                "source": src_name,
+                "ts": datetime.fromtimestamp(ts, tz=timezone.utc),
+                "ts_unix": ts,
+            }
+        )
+    except Exception as exc:
+        LOG.debug("iran tick_1s persist: %s", exc)
+
+
+async def poll_iran_gold(session: aiohttp.ClientSession) -> None:
+    """Push Iran gold ticks every IRAN_POLL seconds for subscribed iran:* channels.
+
+    Always force-broadcast so 1S charts keep a forming bar even when the quote
+    is flat between TGJU updates. Also warm-poll + persist 1s ticks continuously
+    so history densifies even before a browser subscribes.
+    """
+    while True:
+        try:
+            async with LOCK:
+                channels = [c for c, sockets in SUBS.items() if c.startswith("iran:") and sockets]
+            quote_src = await fetch_iran_quote_tgju(session)
+            if not quote_src:
+                quote_src = await fetch_iran_quote_anil(session)
+            if not quote_src:
+                quote_src = await fetch_iran_quote_mongo()
+            if quote_src:
+                quote, src_name = quote_src
+                ts = int(time.time())
+                src = f"iran:{src_name}"
+                persist_iran_tick_1s(quote, src_name, ts)
+                # WS-broadcast only when subscribed; persist always for 1S history.
+                for channel in channels:
+                    field = IRAN_FIELD_BY_CHANNEL.get(channel)
+                    if not field:
+                        continue
+                    price = float(quote.get(field) or 0)
+                    if price <= 0:
+                        continue
+                    await broadcast(channel, price, ts, 0.0, src=src, force=True)
+        except Exception as exc:
+            LOG.debug("iran poll: %s", exc)
+        await asyncio.sleep(IRAN_POLL)
+
+
+def _parse_step_seconds(interval: str) -> int:
+    raw = (interval or "1").strip().upper()
+    if raw.endswith("S") and raw[:-1].isdigit():
+        return max(1, int(raw[:-1] or 1))
+    if raw.endswith("D") and (not raw[:-1] or raw[:-1].isdigit()):
+        return max(1, int(raw[:-1] or 1)) * 86_400
+    if raw.endswith("W") and (not raw[:-1] or raw[:-1].isdigit()):
+        return max(1, int(raw[:-1] or 1)) * 604_800
+    if raw.isdigit():
+        return max(1, int(raw)) * 60
+    return 60
+
+
+async def iran_gold_history(request: web.Request) -> web.Response:
+    """OHLC from anil_gold.price_history for iran:* symbols.
+
+    Query: symbol=ABSHODE|G18|… (or channel iran:abshode), interval=1S|1|5|15|60|1D,
+    limit, before (unix seconds exclusive).
+    """
+    client = mongo_client()
+    if client is None:
+        return web.json_response({"detail": "pymongo unavailable"}, status=503)
+
+    raw_symbol = str(request.query.get("symbol") or request.query.get("channel") or "G18").strip()
+    channel = normalize_channel(raw_symbol if ":" in raw_symbol else f"iran:{raw_symbol.lower()}")
+    if not channel:
+        # ticker aliases used by the chart client
+        ticker_map = {
+            "ABSHODE": "iran:abshode",
+            "MESGHAL17": "iran:abshode",
+            "G18": "iran:g18",
+            "G24": "iran:g24",
+            "SEKKE": "iran:sekke",
+            "SEKKE_EMAMI": "iran:sekke",
+            "NIM": "iran:nim",
+            "ROB": "iran:rob",
+            "ONS": "iran:ons",
+        }
+        channel = ticker_map.get(raw_symbol.upper())
+    if not channel or channel not in IRAN_FIELD_BY_CHANNEL:
+        return web.json_response({"detail": f"unknown iran symbol {raw_symbol}"}, status=400)
+
+    field = IRAN_FIELD_BY_CHANNEL[channel]
+    step = _parse_step_seconds(str(request.query.get("interval") or "1"))
+    limit = min(20_000, max(1, int(request.query.get("limit") or 500)))
+    before_raw = request.query.get("before")
+    before = int(float(before_raw)) if before_raw not in (None, "") else None
+
+    # Prefer dense 1s ticks; fall back to Anil price_history (~3–9s snapshots).
+    pull = min(50_000, max(limit * (4 if step > 1 else 2), limit))
+    query: dict[str, Any] = {field: {"$gt": 0}}
+    if before is not None:
+        from datetime import datetime, timezone
+
+        query["ts"] = {"$lt": datetime.fromtimestamp(before, tz=timezone.utc)}
+
+    source_name = "anil_gold.tick_1s"
+    try:
+        tick_coll = client["anil_gold"]["tick_1s"]
+        hist_coll = client["anil_gold"]["price_history"]
+        rows = list(tick_coll.find(query, {field: 1, "ts": 1, "ts_unix": 1}).sort("ts", -1).limit(pull))
+        if len(rows) < min(limit, 20):
+            # Merge older sparse history behind the dense window.
+            older = list(hist_coll.find(query, {field: 1, "ts": 1}).sort("ts", -1).limit(pull))
+            seen = {id(r) for r in rows}
+            for doc in older:
+                rows.append(doc)
+            source_name = "anil_gold.tick_1s+price_history" if rows else "anil_gold.price_history"
+            if not rows:
+                rows = older
+                source_name = "anil_gold.price_history"
+        elif not rows:
+            rows = list(hist_coll.find(query, {field: 1, "ts": 1}).sort("ts", -1).limit(pull))
+            source_name = "anil_gold.price_history"
+    except Exception as exc:
+        LOG.warning("iran history mongo: %s", exc)
+        return web.json_response({"detail": "mongo query failed"}, status=503)
+
+    buckets: dict[int, dict[str, float]] = {}
+    for doc in reversed(rows):
+        ts_raw = doc.get("ts_unix") or doc.get("ts")
+        if ts_raw is None:
+            continue
+        if hasattr(ts_raw, "timestamp"):
+            ts = int(ts_raw.timestamp())
+        else:
+            ts = parse_updated_at(ts_raw)
+        try:
+            price = float(doc.get(field))
+        except (TypeError, ValueError):
+            continue
+        if price <= 0:
+            continue
+        t0 = ts - (ts % step)
+        bar = buckets.get(t0)
+        if bar is None:
+            buckets[t0] = {"t": t0, "o": price, "h": price, "l": price, "c": price, "v": 1}
+        else:
+            bar["h"] = max(bar["h"], price)
+            bar["l"] = min(bar["l"], price)
+            bar["c"] = price
+            bar["v"] += 1
+
+    ordered = sorted(buckets.values(), key=lambda b: b["t"])
+    if before is not None:
+        ordered = [b for b in ordered if b["t"] < before]
+    ordered = ordered[-limit:]
+    bars = [[int(b["t"]), b["o"], b["h"], b["l"], b["c"], b["v"]] for b in ordered]
+    return web.json_response(
+        {
+            "symbol": channel,
+            "field": field,
+            "interval": str(request.query.get("interval") or "1"),
+            "step": step,
+            "count": len(bars),
+            "bars": bars,
+            "source": source_name,
+        }
+    )
+
+
+async def iran_gold_quote(request: web.Request) -> web.Response:
+    """Latest Iran gold quote snapshot for all fields (HTTP fallback)."""
+    session: aiohttp.ClientSession = request.app["session"]
+    quote_src = await fetch_iran_quote_tgju(session)
+    if not quote_src:
+        quote_src = await fetch_iran_quote_anil(session)
+    if not quote_src:
+        quote_src = await fetch_iran_quote_mongo()
+    if not quote_src:
+        return web.json_response({"detail": "iran gold unavailable"}, status=503)
+    quote, src = quote_src
+    return web.json_response(
+        {
+            "source": src,
+            "ts": int(time.time()),
+            "prices": quote,
+            "channels": {IRAN_FIELDS[k]: quote[k] for k in IRAN_FIELDS if quote.get(k)},
+        }
+    )
+
+
 async def ws_handler(request: web.Request) -> web.WebSocketResponse:
     ws = web.WebSocketResponse(heartbeat=20)
     await ws.prepare(request)
@@ -490,6 +871,7 @@ async def health(_request: web.Request) -> web.Response:
             "channels": {k: len(v) for k, v in SUBS.items()},
             "tv_wanted": sorted(TV_WANTED),
             "tv_enabled": TV_ENABLED,
+            "iran_poll": IRAN_POLL,
             "last_tick_age_ms": {
                 k: int(time.monotonic() * 1000 - LAST_TICK_MS[k]) for k in LAST_TICK_MS
             },
@@ -506,6 +888,7 @@ async def start_background(app: web.Application) -> None:
         asyncio.create_task(poll_mongo()),
         asyncio.create_task(poll_crypto(session)),
         asyncio.create_task(poll_forex(session)),
+        asyncio.create_task(poll_iran_gold(session)),
     ]
 
 
@@ -521,17 +904,20 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     app = web.Application()
     app.router.add_get("/market-ticks", ws_handler)
+    app.router.add_get("/iran-gold/history", iran_gold_history)
+    app.router.add_get("/iran-gold/quote", iran_gold_quote)
     app.router.add_get("/health", health)
     app.on_startup.append(start_background)
     app.on_cleanup.append(cleanup)
     LOG.info(
-        "market-ticks on %s:%s tv=%s crypto_poll=%.2f forex_poll=%.2f mongo_poll=%.2f → %s",
+        "market-ticks on %s:%s tv=%s crypto_poll=%.2f forex_poll=%.2f mongo_poll=%.2f iran_poll=%.2f → %s",
         HOST,
         PORT,
         TV_ENABLED,
         CRYPTO_POLL,
         FOREX_POLL,
         MONGO_POLL,
+        IRAN_POLL,
         API_BASE,
     )
     web.run_app(app, host=HOST, port=PORT, print=None)
