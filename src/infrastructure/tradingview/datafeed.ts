@@ -1,4 +1,4 @@
-import { normalizeTicker, parseInterval, SYMBOL_TYPE_LABELS, type Bar, type SymbolInfo } from "@/domain";
+import { normalizeTicker, parseInterval, isMarketSessionOpen, SYMBOL_TYPE_LABELS, type Bar, type SymbolInfo } from "@/domain";
 import { createStore, type MarketDataService, type Store, type SymbolRepository, type Unsubscribe } from "@/application";
 import type {
   DatafeedConfiguration,
@@ -16,7 +16,36 @@ import type {
   Timezone,
 } from "./types";
 
-export const SUPPORTED_RESOLUTIONS = ["1", "5", "15", "30", "60", "240", "1D", "1W", "1M"] as ResolutionString[];
+/** Full TradingView resolution set (seconds → months). */
+export const SUPPORTED_RESOLUTIONS = [
+  "1S",
+  "5S",
+  "10S",
+  "15S",
+  "30S",
+  "45S",
+  "1",
+  "2",
+  "3",
+  "5",
+  "10",
+  "15",
+  "30",
+  "45",
+  "60",
+  "120",
+  "180",
+  "240",
+  "360",
+  "480",
+  "720",
+  "1D",
+  "1W",
+  "1M",
+] as ResolutionString[];
+
+const SECONDS_MULTIPLIERS = ["1", "5", "10", "15", "30", "45"];
+const INTRADAY_MULTIPLIERS = ["1", "2", "3", "5", "10", "15", "30", "45", "60", "120", "180", "240", "360", "480", "720"];
 
 export interface DataSourceInfo {
   readonly ticker: string;
@@ -25,12 +54,38 @@ export interface DataSourceInfo {
 }
 
 function toTvBar(bar: Bar) {
-  return { time: bar.time * 1000, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume };
+  // Library crashes with RangeError: Invalid time value if `time` is NaN/non-finite.
+  const timeSec = Number(bar.time);
+  if (!Number.isFinite(timeSec) || timeSec <= 0) {
+    throw new Error(`Invalid bar time: ${String(bar.time)}`);
+  }
+  const rawVol = Number(bar.volume);
+  let volume = Number.isFinite(rawVol) && rawVol > 0 ? rawVol : 0;
+  // FX / some CFDs omit volume — synthesize tick volume so the Volume pane is usable.
+  if (volume <= 0) {
+    const range = Math.abs(bar.high - bar.low);
+    const body = Math.abs(bar.close - bar.open);
+    const proxy = Math.round((range * 4 + body * 2) * 1e4);
+    volume = Math.max(1, proxy);
+  }
+  return {
+    time: timeSec * 1000,
+    open: bar.open,
+    high: bar.high,
+    low: bar.low,
+    close: bar.close,
+    volume,
+  };
 }
 
 function stripExchange(symbolName: string): string {
   const idx = symbolName.lastIndexOf(":");
   return idx >= 0 ? symbolName.slice(idx + 1) : symbolName;
+}
+
+function parseExchangePrefix(symbolName: string): string | undefined {
+  const idx = symbolName.lastIndexOf(":");
+  return idx >= 0 ? symbolName.slice(0, idx) : undefined;
 }
 
 /**
@@ -44,10 +99,90 @@ export class TradingViewDatafeed implements IBasicDataFeed {
 
   private readonly subscriptions = new Map<string, Unsubscribe>();
 
+  /** When set, history past this unix-second is hidden and live ticks are muted. */
+  private replayCutoffSec: number | null = null;
+  /** Advancing clock for candle countdown during demo/replay (unix sec). */
+  private replayClockSec: number | null = null;
+  private replayActive = false;
+  private replayOnTick: SubscribeBarsCallback | null = null;
+  /** Prefetched bars for replay/demo — served from memory so past cutoffs don't re-fetch live-only OHLC. */
+  private replayBuffer: Bar[] | null = null;
+
   constructor(
     private readonly marketData: MarketDataService,
     private readonly symbols: SymbolRepository,
   ) {}
+
+  /** Enable Bar Replay truncation (mute live, filter getBars). */
+  beginReplay(): void {
+    this.replayActive = true;
+    this.replayCutoffSec = null;
+    this.replayClockSec = null;
+    this.replayBuffer = null;
+  }
+
+  /** Hide bars with time (unix sec) strictly after cutoff. Also drives getServerTime fallback. */
+  setReplayCutoff(cutoffSec: number | null): void {
+    this.replayCutoffSec = cutoffSec;
+    if (cutoffSec != null && this.replayClockSec == null) {
+      this.replayClockSec = cutoffSec;
+    }
+  }
+
+  /**
+   * Wall-clock for countdown during demo/replay. Should advance within the
+   * forming bar’s period (open … open+barSec) so TV countdown ticks down.
+   */
+  setReplayClock(clockSec: number | null): void {
+    this.replayClockSec = clockSec;
+  }
+
+  /** Attach the prefetched stepping buffer so getBars can serve history at any past cutoff. */
+  setReplayBuffer(bars: readonly Bar[]): void {
+    this.replayBuffer = bars.length > 0 ? [...bars] : null;
+  }
+
+  getReplayCutoff(): number | null {
+    return this.replayCutoffSec;
+  }
+
+  isReplayActive(): boolean {
+    return this.replayActive;
+  }
+
+  /** Push one synthetic realtime bar while live feed is muted. */
+  pushReplayBar(bar: Bar): void {
+    if (!this.replayOnTick) return;
+    try {
+      this.replayOnTick(toTvBar(bar));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  endReplay(): void {
+    this.replayActive = false;
+    this.replayCutoffSec = null;
+    this.replayClockSec = null;
+    this.replayBuffer = null;
+  }
+
+  /** Prefetch a deep history buffer for stepping (before cutoff is applied). */
+  async fetchReplayBuffer(
+    ticker: string,
+    resolution: string,
+    countBack = 5_000,
+  ): Promise<readonly Bar[]> {
+    const symbol = this.symbols.findByTicker(normalizeTicker(stripExchange(ticker)));
+    if (!symbol) return [];
+    const to = Math.floor(Date.now() / 1000) + 60;
+    const { bars } = await this.marketData.fetchHistory(symbol, resolution, {
+      from: 0,
+      to,
+      countBack,
+    });
+    return bars;
+  }
 
   onReady(callback: OnReadyCallback): void {
     const exchanges = [...new Set(this.symbols.all().map((s) => s.exchange))].sort();
@@ -67,15 +202,26 @@ export class TradingViewDatafeed implements IBasicDataFeed {
 
   searchSymbols(userInput: string, exchange: string, symbolType: string, onResult: SearchSymbolsCallback): void {
     const type = symbolType as SymbolInfo["type"] | "";
+    const exchangeNeedle = exchange.trim().toUpperCase();
     const results = this.symbols
       .search(userInput, type)
-      .filter((s) => !exchange || s.exchange === exchange)
-      .map((s) => ({ symbol: s.ticker, ticker: s.ticker, description: s.name, exchange: s.exchange, type: s.type }));
+      .filter((s) => !exchangeNeedle || s.exchange.toUpperCase() === exchangeNeedle)
+      .map((s) => ({
+        symbol: s.ticker,
+        full_name: `${s.exchange}:${s.ticker}`,
+        ticker: `${s.exchange}:${s.ticker}`,
+        description: s.name,
+        exchange: s.exchange,
+        type: s.type,
+      }));
     onResult(results);
   }
 
   resolveSymbol(symbolName: string, onResolve: ResolveCallback, onError: DatafeedErrorCallback): void {
-    const symbol = this.symbols.findByTicker(stripExchange(symbolName));
+    const exchange = parseExchangePrefix(symbolName);
+    const ticker = stripExchange(symbolName);
+    const symbol =
+      (exchange ? this.symbols.findByTicker(ticker, exchange) : undefined) ?? this.symbols.findByTicker(ticker);
     if (!symbol) {
       setTimeout(() => onError(`Unknown symbol: ${symbolName}`), 0);
       return;
@@ -92,21 +238,75 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   ): Promise<void> {
     const symbol = this.requireSymbol(symbolInfo);
     try {
+      const cutoff = this.replayCutoffSec;
+      const cutoffOn = cutoff != null && Number.isFinite(cutoff);
+
+      // Prefer the prefetched replay buffer — providers often only return the
+      // latest window, so re-fetching with to=pastCutoff yields empty history.
+      if (this.replayActive && this.replayBuffer && this.replayBuffer.length > 0) {
+        const end = cutoffOn ? cutoff! : Number.POSITIVE_INFINITY;
+        const countBack = Math.max(periodParams.countBack || 300, 1);
+        const upToCutoff = this.replayBuffer.filter((b) => Number(b.time) <= end);
+
+        let slice: Bar[];
+        if (periodParams.firstDataRequest || periodParams.from > end) {
+          // First paint or live-window request: fill chart with bars ending at cutoff.
+          slice = upToCutoff.slice(-countBack);
+        } else {
+          const right = Math.min(periodParams.to, end);
+          slice = upToCutoff.filter(
+            (b) => Number(b.time) >= periodParams.from && Number(b.time) <= right,
+          );
+          if (slice.length === 0) {
+            const older = upToCutoff.filter((b) => Number(b.time) < periodParams.from);
+            if (older.length === 0) {
+              onResult([], { noData: true });
+              return;
+            }
+            slice = older.slice(-countBack);
+          }
+        }
+
+        if (periodParams.firstDataRequest) {
+          this.source.set({ ticker: symbol.ticker, providerId: "replay-buffer", isSynthetic: false });
+        }
+        if (slice.length === 0) {
+          onResult([], { noData: true });
+          return;
+        }
+        onResult(slice.map(toTvBar), { noData: false });
+        return;
+      }
+
+      let from = periodParams.from;
+      let to = periodParams.to;
+      let countBack = periodParams.countBack;
+      if (cutoffOn) {
+        if (from > cutoff!) {
+          to = cutoff! + 1;
+          from = 0;
+          countBack = Math.max(countBack || 300, 500);
+        } else {
+          to = Math.min(to, cutoff! + 1);
+        }
+      }
+
       const { bars, providerId, isSynthetic } = await this.marketData.fetchHistory(symbol, resolution, {
-        from: periodParams.from,
-        to: periodParams.to,
-        countBack: periodParams.countBack,
+        from,
+        to,
+        countBack,
       });
 
       if (periodParams.firstDataRequest) {
         this.source.set({ ticker: symbol.ticker, providerId, isSynthetic });
       }
 
-      if (bars.length === 0) {
+      const filtered = cutoffOn ? bars.filter((b) => Number(b.time) <= cutoff!) : bars;
+      if (filtered.length === 0) {
         onResult([], { noData: true });
         return;
       }
-      onResult(bars.map(toTvBar), { noData: false });
+      onResult(filtered.map(toTvBar), { noData: false });
     } catch (error) {
       onError(error instanceof Error ? error.message : String(error));
     }
@@ -120,8 +320,22 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   ): void {
     this.unsubscribeBars(listenerGuid);
     const symbol = this.requireSymbol(symbolInfo);
-    const unsubscribe = this.marketData.subscribe(symbol, resolution, (bar) => onTick(toTvBar(bar)));
-    this.subscriptions.set(listenerGuid, unsubscribe);
+
+    // Always keep the library callback so pushReplayBar can feed stepped candles.
+    this.replayOnTick = onTick;
+
+    const unsubscribe = this.marketData.subscribe(symbol, resolution, (bar) => {
+      if (this.replayActive) return; // muted during Bar Replay
+      try {
+        onTick(toTvBar(bar));
+      } catch {
+        /* drop corrupt realtime bars instead of crashing the widget */
+      }
+    });
+    this.subscriptions.set(listenerGuid, () => {
+      unsubscribe();
+      if (this.replayOnTick === onTick) this.replayOnTick = null;
+    });
   }
 
   unsubscribeBars(listenerGuid: string): void {
@@ -130,6 +344,14 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   }
 
   getServerTime(callback: ServerTimeCallback): void {
+    // Demo/replay: use the advancing replay clock so candle countdown works.
+    if (this.replayActive) {
+      const clock = this.replayClockSec ?? this.replayCutoffSec;
+      if (clock != null && Number.isFinite(clock)) {
+        callback(Math.floor(clock));
+        return;
+      }
+    }
     callback(Math.floor(Date.now() / 1000));
   }
 
@@ -142,21 +364,22 @@ export class TradingViewDatafeed implements IBasicDataFeed {
 
   private requireSymbol(symbolInfo: LibrarySymbolInfo): SymbolInfo {
     const ticker = normalizeTicker(stripExchange(symbolInfo.ticker ?? symbolInfo.name));
-    const symbol = this.symbols.findByTicker(ticker);
+    const exchange = symbolInfo.exchange || parseExchangePrefix(symbolInfo.ticker ?? symbolInfo.name);
+    const symbol =
+      (exchange ? this.symbols.findByTicker(ticker, exchange) : undefined) ?? this.symbols.findByTicker(ticker);
     if (!symbol) throw new Error(`Unknown symbol: ${ticker}`);
     return symbol;
   }
 
   private toLibrarySymbolInfo(symbol: SymbolInfo): LibrarySymbolInfo {
     const native = this.marketData.describe(symbol).nativeIntervals;
-    const intradayMultipliers = native
-      .filter((iv) => parseInterval(iv).unit === "minutes")
-      .map((iv) => String(parseInterval(iv).count))
-      .sort((a, b) => Number(a) - Number(b));
+    const hasSeconds = native.some((iv) => parseInterval(iv).unit === "seconds");
+    const hasIntraday = native.some((iv) => parseInterval(iv).unit === "minutes");
+    const sessionOpen = isMarketSessionOpen(symbol);
 
     return {
       name: symbol.ticker,
-      ticker: symbol.ticker,
+      ticker: `${symbol.exchange}:${symbol.ticker}`,
       description: symbol.name,
       type: symbol.type,
       session: symbol.session,
@@ -166,17 +389,23 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       format: "price",
       minmov: 1,
       pricescale: 10 ** symbol.pricePrecision,
-      has_intraday: intradayMultipliers.length > 0,
-      intraday_multipliers: intradayMultipliers,
+      has_seconds: hasSeconds,
+      seconds_multipliers: hasSeconds ? SECONDS_MULTIPLIERS : [],
+      has_intraday: hasIntraday,
+      intraday_multipliers: hasIntraday ? INTRADAY_MULTIPLIERS : [],
       has_daily: true,
       daily_multipliers: ["1"],
       has_weekly_and_monthly: true,
       weekly_multipliers: ["1"],
       monthly_multipliers: ["1"],
+      // Do not invent empty candles when the feed is quiet / market closed.
+      has_empty_bars: false,
       supported_resolutions: SUPPORTED_RESOLUTIONS,
       volume_precision: symbol.type === "crypto" ? 3 : 0,
       visible_plots_set: "ohlcv",
-      data_status: "streaming",
+      // Demo/replay must stay "streaming" so candle countdown runs; otherwise
+      // endofday freezes the timer when the real FX session is closed.
+      data_status: this.replayActive || sessionOpen ? "streaming" : "endofday",
     };
   }
 }

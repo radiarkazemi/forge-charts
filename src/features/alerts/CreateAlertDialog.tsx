@@ -8,6 +8,8 @@ import DialogTitle from "@mui/material/DialogTitle";
 import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
+import useMediaQuery from "@mui/material/useMediaQuery";
+import { useTheme } from "@mui/material/styles";
 import { useServices } from "@/app/use-services";
 import { ALERT_CONDITION_LABELS, type AlertCondition, type SymbolInfo } from "@/domain";
 
@@ -19,8 +21,10 @@ interface CreateAlertDialogProps {
 const CONDITIONS = Object.keys(ALERT_CONDITION_LABELS) as AlertCondition[];
 
 export function CreateAlertDialog({ open, onClose }: CreateAlertDialogProps) {
+  const theme = useTheme();
+  const fullScreen = useMediaQuery(theme.breakpoints.down("md"));
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs" fullScreen={fullScreen}>
       {/* The form mounts fresh on every open, so its initial state is always current. */}
       <CreateAlertForm onClose={onClose} />
     </Dialog>

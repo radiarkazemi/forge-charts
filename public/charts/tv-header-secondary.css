@@ -1,0 +1,17 @@
+/* Secondary layout panes: hide Charting Library header — original nav stays on pane 0. */
+.tv-header,
+.layout__area--top,
+[class*="header-chart-panel"] {
+  display: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* Give the canvas the full pane height under the shared original navbar. */
+.layout__area--center {
+  top: 0 !important;
+}

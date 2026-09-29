@@ -25,8 +25,14 @@ export function createAppTheme(mode: ThemeMode): Theme {
     components: {
       MuiCssBaseline: {
         styleOverrides: {
-          "html, body, #root": { height: "100%", margin: 0 },
-          body: { overflow: "hidden" },
+          "html, body, #root": {
+            height: "100%",
+            margin: 0,
+            // Mobile browsers: fill the visual viewport (not clipped by URL bar).
+            minHeight: "100dvh",
+          },
+          body: { overflow: "hidden", overscrollBehavior: "none", touchAction: "manipulation" },
+          "#root": { display: "flex", flexDirection: "column", minHeight: "100dvh", height: "100dvh" },
         },
       },
       MuiAppBar: {

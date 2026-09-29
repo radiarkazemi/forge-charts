@@ -1,22 +1,30 @@
 import { useEffect, useRef } from "react";
 import { useTheme } from "@mui/material/styles";
-import type { AlertService } from "@/application";
+import { createStore, type AlertService } from "@/application";
 import type { EntityId } from "@/infrastructure/tradingview";
 import { useStore } from "@/shared/hooks/useStore";
-import type { ChartController } from "./chart-controller";
+import type { ChartController, ChartState } from "./chart-controller";
+
+const IDLE_STATE = createStore<ChartState>({
+  symbol: "",
+  interval: "15",
+  ready: false,
+  error: null,
+});
 
 /**
  * Mirrors the active alerts for the charted symbol as locked horizontal lines.
  * Lines are re-created whenever the alert set or the symbol changes.
+ * Pass `null` on secondary multi-chart panes (alerts only draw on the primary).
  */
-export function useChartAlertLines(controller: ChartController, alerts: AlertService): void {
+export function useChartAlertLines(controller: ChartController | null, alerts: AlertService): void {
   const theme = useTheme();
-  const { symbol, ready } = useStore(controller.state);
+  const { symbol, ready } = useStore(controller?.state ?? IDLE_STATE);
   const all = useStore(alerts.alerts);
   const drawn = useRef(new Map<string, EntityId>());
 
   useEffect(() => {
-    if (!ready) return;
+    if (!controller || !ready) return;
     let cancelled = false;
 
     const wanted = all.filter((a) => a.ticker === symbol && a.status === "active");

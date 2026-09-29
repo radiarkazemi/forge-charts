@@ -1,6 +1,7 @@
 import {
   intervalSeconds,
   parseInterval,
+  isMarketSessionOpen,
   type Bar,
   type BarRange,
   type Interval,
@@ -17,10 +18,10 @@ const LIVE_POLL_MS = 5_000;
 const DAY = 86_400;
 
 const YAHOO_BY_TICKER: Readonly<Record<string, string>> = {
-  XAUUSD: "GC=F",
+  // Gold (XAUUSD / GC1!) is owned by Germany FOREXCOM/FXPRO — do not map to GC=F
+  // or watchlist prices drift ~$40 from the broker series.
   XAGUSD: "SI=F",
   USOIL: "CL=F",
-  "GC1!": "GC=F",
   "CL1!": "CL=F",
   "ES1!": "ES=F",
   "NQ1!": "NQ=F",
@@ -67,7 +68,55 @@ const YAHOO_INTERVALS: ReadonlyArray<{ interval: Interval; yahoo: string; maxLoo
   { interval: "1M", yahoo: "1mo", maxLookbackSec: Infinity },
 ];
 
-const NATIVE_INTERVALS: readonly Interval[] = YAHOO_INTERVALS.map((i) => i.interval);
+/**
+ * Multiples of a native Yahoo interval that we aggregate client-side
+ * (Yahoo has no 2h/4h/3D chart endpoints).
+ */
+const AGGREGATE_FROM: ReadonlyArray<{ interval: Interval; parent: Interval; group: number }> = [
+  { interval: "120", parent: "60", group: 2 },
+  { interval: "180", parent: "60", group: 3 },
+  { interval: "240", parent: "60", group: 4 },
+  { interval: "360", parent: "60", group: 6 },
+  { interval: "480", parent: "60", group: 8 },
+  { interval: "720", parent: "60", group: 12 },
+  { interval: "3D", parent: "1D", group: 3 },
+];
+
+const NATIVE_INTERVALS: readonly Interval[] = [
+  ...YAHOO_INTERVALS.map((i) => i.interval),
+  ...AGGREGATE_FROM.map((i) => i.interval),
+];
+
+function alignTime(tsSec: number, step: number): number {
+  return Math.floor(tsSec / step) * step;
+}
+
+/** Aggregate lower-TF bars into `stepSec` candles (standard OHLCV rollup). */
+function aggregateBars(bars: readonly Bar[], stepSec: number): Bar[] {
+  if (stepSec <= 1 || bars.length === 0) return [...bars];
+  const out: Bar[] = [];
+  let cur: Bar | null = null;
+  let bucket = -1;
+  for (const bar of bars) {
+    const start = alignTime(bar.time, stepSec);
+    if (!cur || start !== bucket) {
+      if (cur) out.push(cur);
+      bucket = start;
+      cur = { time: start, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume };
+    } else {
+      cur = {
+        time: start,
+        open: cur.open,
+        high: Math.max(cur.high, bar.high),
+        low: Math.min(cur.low, bar.low),
+        close: bar.close,
+        volume: cur.volume + bar.volume,
+      };
+    }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
 
 interface ChartQuote {
   open?: (number | null)[];
@@ -128,7 +177,8 @@ export class YahooProvider implements MarketDataProvider {
   readonly isSynthetic = false;
 
   supports(symbol: SymbolInfo, interval: Interval): boolean {
-    return symbol.ticker in YAHOO_BY_TICKER && this.spec(interval) !== null;
+    if (!(symbol.ticker in YAHOO_BY_TICKER)) return false;
+    return this.spec(interval) !== null || this.aggregatePlan(interval) !== null;
   }
 
   nativeIntervals(): readonly Interval[] {
@@ -136,6 +186,17 @@ export class YahooProvider implements MarketDataProvider {
   }
 
   async fetchBars(symbol: SymbolInfo, interval: Interval, range: BarRange): Promise<Bar[]> {
+    const plan = this.aggregatePlan(interval);
+    if (plan) {
+      // Fetch denser parent bars, then roll up (e.g. 60m → 4h for AAPL).
+      const parentBars = await this.fetchBars(symbol, plan.parent, {
+        ...range,
+        countBack: Math.max(range.countBack * plan.group, range.countBack + plan.group),
+      });
+      const step = intervalSeconds(interval);
+      return aggregateBars(parentBars, step).filter((bar) => bar.time < range.to);
+    }
+
     const spec = this.spec(interval);
     if (!spec) return [];
 
@@ -165,11 +226,21 @@ export class YahooProvider implements MarketDataProvider {
 
   subscribeBars(symbol: SymbolInfo, interval: Interval, onBar: (bar: Bar) => void): Unsubscribe {
     const step = intervalSeconds(interval);
+    let lastTime = -1;
     return startPolling(async () => {
+      if (!isMarketSessionOpen(symbol)) return;
       const to = Math.floor(Date.now() / 1000) + step;
       const bars = await this.fetchBars(symbol, interval, { from: to - step * 4, to, countBack: 3 });
       const last = bars.at(-1);
-      if (last) onBar(last);
+      if (!last) return;
+      // Do not invent new periods when Yahoo has no fresh bar.
+      if (lastTime >= 0 && last.time > lastTime) {
+        // allow roll only if bar time is not far in the future / wall-clock empty
+        const nowBucket = Math.floor(Date.now() / 1000 / step) * step;
+        if (last.time > nowBucket) return;
+      }
+      lastTime = last.time;
+      onBar(last);
     }, LIVE_POLL_MS);
   }
 
@@ -206,6 +277,10 @@ export class YahooProvider implements MarketDataProvider {
       }),
     );
     return settled.flatMap((r) => (r.status === "fulfilled" && r.value ? [r.value] : []));
+  }
+
+  private aggregatePlan(interval: Interval): (typeof AGGREGATE_FROM)[number] | null {
+    return AGGREGATE_FROM.find((p) => p.interval === interval) ?? null;
   }
 
   private spec(interval: Interval): (typeof YAHOO_INTERVALS)[number] | null {

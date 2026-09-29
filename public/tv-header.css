@@ -1,0 +1,72 @@
+/* TradingView-style header + left-toolbar polish injected into the chart iframe. */
+
+.tv-header {
+  border-bottom: 1px solid rgba(120, 123, 134, 0.25) !important;
+}
+
+/* Keep custom avatar/trade/publish buttons compact and TV-like */
+.forge-header-avatar {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: 0 6px 0 8px;
+  border-radius: 50%;
+  border: none;
+  background: #9c27b0;
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  position: relative;
+}
+
+.forge-header-avatar__badge {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #f23645;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.forge-header-publish {
+  font-weight: 700 !important;
+}
+
+/* Leave room for touch targets on phones; denser header + toolbar */
+@media (max-width: 900px) {
+  .tv-header {
+    min-height: 38px !important;
+    max-height: 42px !important;
+  }
+
+  /* Drawing toolbar icons: larger hit area on touch when Draw expands it */
+  .layout__area--left .tv-group {
+    min-width: 40px;
+  }
+
+  /* Tighter symbol / interval controls so more of the chart is visible */
+  .tv-header .js-button-text,
+  .tv-header .apply-common-tooltip {
+    font-size: 12px !important;
+  }
+
+  /* Keep zoom / move buttons clear of the price axis on narrow screens */
+  .chart-controls-bar {
+    bottom: 4px !important;
+  }
+
+  /* Prefer a leaner legend on phones */
+  .legend-source-item {
+    font-size: 11px !important;
+  }
+}

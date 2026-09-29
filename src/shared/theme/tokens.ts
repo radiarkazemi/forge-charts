@@ -45,10 +45,11 @@ export const TOKENS: Readonly<Record<ThemeMode, ThemeTokens>> = {
     textMuted: "#6a6d78",
     grid: "rgba(224, 227, 235, 0.8)",
     accent: "#2962ff",
+    // Visible on white pane (TV-style teal/red). White-on-white made candles disappear.
     up: "#089981",
     down: "#f23645",
-    volumeUp: "rgba(8, 153, 129, 0.5)",
-    volumeDown: "rgba(242, 54, 69, 0.5)",
+    volumeUp: "rgba(8, 153, 129, 0.45)",
+    volumeDown: "rgba(242, 54, 69, 0.45)",
     crosshair: "#9598a1",
   },
 };

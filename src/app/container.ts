@@ -13,6 +13,7 @@ import {
   BinanceProvider,
   BrowserNotifier,
   CpFetcherProvider,
+  GermanyMarketProvider,
   generateId,
   LocalSaveLoadAdapter,
   LocalStorageAdapter,
@@ -23,6 +24,8 @@ import {
   type IExternalSaveLoadAdapter,
 } from "@/infrastructure";
 import { ChartController } from "@/features/chart/chart-controller";
+import { BarReplayController } from "@/features/chart/bar-replay/bar-replay-controller";
+import { DemoSpaceController, DemoTradingService } from "@/features/demo-trading";
 import { readConfig, type AppConfig } from "./config";
 
 /** Everything the UI layer may depend on, wired once at startup. */
@@ -36,6 +39,9 @@ export interface Services {
   readonly alerts: AlertService;
   readonly settings: SettingsService;
   readonly chart: ChartController;
+  readonly barReplay: BarReplayController;
+  readonly demoTrading: DemoTradingService;
+  readonly demoSpace: DemoSpaceController;
   readonly datafeed: TradingViewDatafeed;
   readonly saveLoadAdapter: IExternalSaveLoadAdapter;
   /** Tear down timers and subscriptions (tests / HMR). */
@@ -43,10 +49,11 @@ export interface Services {
 }
 
 function buildProviders(config: AppConfig): MarketDataProvider[] {
-  const providers: MarketDataProvider[] = [];
+  // Germany Market Price API first — BINANCE + FOREXCOM/FXPRO (XAU) real OHLC.
+  const providers: MarketDataProvider[] = [new GermanyMarketProvider()];
   if (config.cpFetcherEnabled) providers.push(new CpFetcherProvider());
+  // Direct Binance is often geo-blocked from the VPS; Yahoo is delayed fallback.
   providers.push(new BinanceProvider(), new YahooProvider());
-  // Synthetic data is the last resort so the chart is never empty.
   providers.push(new SyntheticProvider());
   return providers;
 }
@@ -62,12 +69,15 @@ export function createServices(config: AppConfig = readConfig()): Services {
   const providers = buildProviders(config);
 
   const marketData = new MarketDataService(providers);
-  const quotes = new QuoteService(providers, { refreshMs: 10_000 });
+  const quotes = new QuoteService(providers, { refreshMs: 2_000 });
   const alerts = new AlertService({ storage, symbols, notifier, generateId });
   const settings = new SettingsService(storage);
 
   const { lastSymbol, lastInterval } = settings.settings.get();
   const chart = new ChartController(lastSymbol, lastInterval);
+  const barReplay = new BarReplayController();
+  const demoTrading = new DemoTradingService(storage);
+  const demoSpace = new DemoSpaceController();
   const datafeed = new TradingViewDatafeed(marketData, symbols);
   const saveLoadAdapter = new LocalSaveLoadAdapter(storage);
 
@@ -76,10 +86,12 @@ export function createServices(config: AppConfig = readConfig()): Services {
   // Quotes feed alert evaluation.
   disposers.push(quotes.quotes.subscribe(() => alerts.evaluate(quotes.quotes.get())));
 
-  // Quote polling covers the watchlist, every alerted ticker and the charted symbol.
+  // Quote polling covers the watchlist, every alerted ticker and every chart pane symbol.
   const syncTrackedSymbols = () => {
+    const { watchlist, paneSymbols } = settings.settings.get();
     const tickers = new Set<string>([
-      ...settings.settings.get().watchlist,
+      ...(Array.isArray(watchlist) ? watchlist : []),
+      ...(Array.isArray(paneSymbols) ? paneSymbols : []),
       ...alerts.alerts.get().map((a) => a.ticker),
       chart.state.get().symbol,
     ]);
@@ -110,11 +122,18 @@ export function createServices(config: AppConfig = readConfig()): Services {
     alerts,
     settings,
     chart,
+    barReplay,
+    demoTrading,
+    demoSpace,
     datafeed,
     saveLoadAdapter,
     dispose: () => {
       quotes.stop();
       datafeed.dispose();
+      void barReplay.exit();
+      barReplay.detach();
+      void demoSpace.deactivate();
+      demoSpace.detach();
       for (const dispose of disposers) dispose();
     },
   };
