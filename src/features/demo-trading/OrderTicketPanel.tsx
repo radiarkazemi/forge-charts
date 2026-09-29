@@ -6,6 +6,7 @@ import TextField from "@mui/material/TextField";
 import CloseIcon from "@mui/icons-material/Close";
 import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
+import { formatDemoPrice } from "./types";
 
 const FONT = '"Trebuchet MS","Segoe UI",Tahoma,sans-serif';
 
@@ -22,7 +23,7 @@ export function OrderTicketPanel({ mobile = false }: OrderTicketPanelProps) {
   const snap = useStore(demoTrading.state);
   const symbol = useStore(chart.state, (s) => s.symbol);
   const quote = useStore(quotes.quotes, (q) => q[symbol]);
-  const mid = snap.space.lastPrice ?? quote?.price ?? null;
+  const mid = demoTrading.midForSymbol(symbol, quote?.price ?? null);
   const metrics = demoTrading.ticketMetrics(mid);
   const q = demoTrading.quotes(mid);
 
@@ -131,6 +132,7 @@ export function OrderTicketPanel({ mobile = false }: OrderTicketPanelProps) {
         <SideQuote
           label="Sell"
           price={q?.bid}
+          tickSize={snap.instrument.tickSize}
           active={sellActive}
           activeBg="#f23645"
           idleColor="#f23645"
@@ -149,11 +151,12 @@ export function OrderTicketPanel({ mobile = false }: OrderTicketPanelProps) {
             borderRight: "1px solid #2a2e39",
           }}
         >
-          {(q?.spreadPoints ?? snap.instrument.spreadPoints).toFixed(1)}
+          {(q?.spreadPoints ?? snap.instrument.spreadPoints).toLocaleString("en-US")}
         </Box>
         <SideQuote
           label="Buy"
           price={q?.ask}
+          tickSize={snap.instrument.tickSize}
           active={!sellActive}
           activeBg="#2962ff"
           idleColor="#2962ff"
@@ -294,6 +297,7 @@ function TopTab({ label, active, disabled }: { label: string; active?: boolean; 
 function SideQuote({
   label,
   price,
+  tickSize,
   active,
   activeBg,
   idleColor,
@@ -301,6 +305,7 @@ function SideQuote({
 }: {
   label: string;
   price?: number;
+  tickSize: number;
   active: boolean;
   activeBg: string;
   idleColor: string;
@@ -318,8 +323,16 @@ function SideQuote({
       }}
     >
       <Box sx={{ color: active ? "#fff" : idleColor, fontWeight: 600, fontSize: 11, lineHeight: 1.2 }}>{label}</Box>
-      <Box sx={{ fontWeight: 700, fontSize: 16, color: active ? "#fff" : "#d1d4dc", lineHeight: 1.25 }}>
-        {price?.toFixed(2) ?? "—"}
+      <Box
+        sx={{
+          fontWeight: 700,
+          fontSize: tickSize >= 1 ? 13 : 16,
+          color: active ? "#fff" : "#d1d4dc",
+          lineHeight: 1.25,
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {formatDemoPrice(price, tickSize)}
       </Box>
     </Box>
   );

@@ -56,7 +56,7 @@ export function DemoTradingDock({ mobile = false }: DemoTradingDockProps) {
   const [activateOpen, setActivateOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
 
-  const mid = snap.space.lastPrice ?? quote?.price ?? null;
+  const mid = demoTrading.midForSymbol(symbol, quote?.price ?? null);
   const acct = demoTrading.activeAccount();
   const openPositions = snap.positions.filter((p) => p.status === "open" && p.accountId === acct.id);
   const workingOrders = snap.orders.filter((o) => o.status === "working" && o.accountId === acct.id);

@@ -1,7 +1,9 @@
 import { createStore, type KeyValueStorage, type Store } from "@/application";
 import {
+  bareDemoTicker,
   bidAskFromMid,
   DEFAULT_XAU_INSTRUMENT,
+  demoInstrumentFor,
   markPriceForSide,
   requiredMargin,
   roundToTick,
@@ -289,18 +291,54 @@ export class DemoTradingService {
     });
   }
 
+  /**
+   * Chart ticker changed — drop stale mark from the previous symbol and swap
+   * instrument specs (XAU ticks must not stick on Iran IRR gold).
+   */
+  onChartSymbol(symbol: string): void {
+    const bare = bareDemoTicker(symbol);
+    const s = this.state.get();
+    if (s.space.active) return;
+    if (!bare) return;
+    if (s.instrument.symbol === bare && s.space.lastPrice != null) return;
+    const instrument = this.instrumentFor(bare, s.instrument);
+    const tickerChanged = s.instrument.symbol !== bare;
+    this.patch({
+      instrument: tickerChanged
+        ? { ...instrument, leverage: this.activeAccount().leverage }
+        : s.instrument,
+      space: tickerChanged ? { ...s.space, lastPrice: null } : s.space,
+    });
+  }
+
   /** Update mark price (live quote or demo-space bar close). Evaluates TP/SL + working orders. */
   onMarkPrice(symbol: string, mid: number): void {
+    const bare = bareDemoTicker(symbol);
     const s = this.state.get();
-    if (s.space.active && s.space.symbol && s.space.symbol !== symbol) return;
-    const instrument = this.instrumentFor(symbol, s.instrument);
+    if (s.space.active && s.space.symbol && bareDemoTicker(s.space.symbol) !== bare) return;
+    if (!Number.isFinite(mid) || mid <= 0) return;
+    const switched = s.instrument.symbol !== bare;
+    const instrument = switched
+      ? { ...this.instrumentFor(bare, s.instrument), leverage: this.activeAccount().leverage }
+      : s.instrument;
     this.patch({
       space: { ...s.space, lastPrice: mid },
-      instrument: s.instrument.symbol === symbol ? s.instrument : instrument,
+      instrument,
     });
     this.recalcEquity(mid);
-    this.evaluateExits(symbol, mid);
-    this.evaluateWorkingOrders(symbol, mid);
+    this.evaluateExits(bare, mid);
+    this.evaluateWorkingOrders(bare, mid);
+  }
+
+  /** Mid for the charted symbol — never reuse another ticker’s lastPrice. */
+  midForSymbol(symbol: string, quotePrice?: number | null): number | null {
+    const bare = bareDemoTicker(symbol);
+    const s = this.state.get();
+    if (quotePrice != null && Number.isFinite(quotePrice) && quotePrice > 0) return quotePrice;
+    if (s.instrument.symbol === bare && s.space.lastPrice != null && s.space.lastPrice > 0) {
+      return s.space.lastPrice;
+    }
+    return null;
   }
 
   quotes(mid: number | null): { bid: number; ask: number; spreadPoints: number } | null {
@@ -830,8 +868,7 @@ export class DemoTradingService {
   }
 
   private instrumentFor(symbol: string, base: DemoInstrument): DemoInstrument {
-    const bare = symbol.includes(":") ? symbol.slice(symbol.lastIndexOf(":") + 1) : symbol;
-    return { ...base, symbol: bare };
+    return demoInstrumentFor(symbol, base);
   }
 
   private patch(partial: Partial<DemoTradingSnapshot>): void {
