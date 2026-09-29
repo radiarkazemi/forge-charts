@@ -158,17 +158,24 @@ export class SyntheticProvider implements MarketDataProvider {
 
   async fetchQuotes(symbols: readonly SymbolInfo[]): Promise<Quote[]> {
     const now = Math.floor(Date.now() / 1000);
-    return symbols.map((symbol) => {
-      const last = this.barAt(symbol, "1D", alignToInterval(now, "1D"));
-      const prev = this.barAt(symbol, "1D", alignToInterval(now, "1D") - 86_400);
-      return {
-        ticker: symbol.ticker,
-        price: last.close,
-        changePercent: ((last.close - prev.close) / prev.close) * 100,
-        updatedAt: now,
-        synthetic: true,
-      };
-    });
+    // Never invent quotes for Iran gold — demo ~100 bases were wiping Faraz IRR mids
+    // on the Sell/Buy band whenever `/iran-gold/quote` lagged a poll.
+    return symbols
+      .filter((symbol) => {
+        const ex = symbol.exchange.toUpperCase();
+        return ex !== "IRAN" && ex !== "TGJU" && ex !== "FARAZ";
+      })
+      .map((symbol) => {
+        const last = this.barAt(symbol, "1D", alignToInterval(now, "1D"));
+        const prev = this.barAt(symbol, "1D", alignToInterval(now, "1D") - 86_400);
+        return {
+          ticker: symbol.ticker,
+          price: last.close,
+          changePercent: ((last.close - prev.close) / prev.close) * 100,
+          updatedAt: now,
+          synthetic: true,
+        };
+      });
   }
 
   /* ── internals ─────────────────────────────────────────────────────── */
