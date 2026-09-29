@@ -693,7 +693,7 @@ export class ChartController {
     }
   }
 
-  /** Ensure left drawing toolbar starts collapsed (phones). */
+  /** Ensure left drawing toolbar starts collapsed. */
   ensureDrawingToolbarCollapsed(): void {
     try {
       const chart = this.activeChart() as
@@ -703,6 +703,23 @@ export class ChartController {
         | null;
       if (!chart?.getCheckableActionState) return;
       if (chart.getCheckableActionState("drawingToolbarAction")) {
+        chart.executeActionById("drawingToolbarAction");
+      }
+    } catch {
+      /* chart not ready */
+    }
+  }
+
+  /** Ensure left drawing toolbar is visible (Forge mobile floating pill). */
+  ensureDrawingToolbarOpen(): void {
+    try {
+      const chart = this.activeChart() as
+        | (IChartWidgetApi & {
+            getCheckableActionState?: (id: string) => boolean;
+          })
+        | null;
+      if (!chart?.getCheckableActionState) return;
+      if (!chart.getCheckableActionState("drawingToolbarAction")) {
         chart.executeActionById("drawingToolbarAction");
       }
     } catch {

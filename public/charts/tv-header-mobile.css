@@ -1,6 +1,6 @@
 /*
- * TradingView mobile chart shell:
- * hide the desktop top toolbar; legend + plot fill the widget;
+ * Forge mobile chart shell:
+ * hide the desktop top toolbar; plot fills the middle card of MobileForgeShell;
  * drawing toolbar floats as a compact left pill when Draw is on.
  */
 
@@ -23,33 +23,43 @@
   top: 0 !important;
 }
 
-/* Keep the legend readable like TV mobile (symbol + price on the plot). */
+/* Softer legend — symbol chrome lives in Forge mobile header. */
 .legend-source-item,
 .sourcesWrapper-l31H9iuA,
 .legendWrapper-l31H9iuA {
-  font-size: 12px !important;
+  font-size: 11px !important;
+  opacity: 0.92;
 }
 
 .chart-controls-bar {
   display: none !important;
 }
 
+html,
+body,
+.chart-page {
+  background: #0b1220 !important;
+}
+
 /* Floating left drawing toolbar — compact pill against the left edge. */
 .layout__area--left {
-  top: 48px !important;
+  top: 12px !important;
   bottom: auto !important;
   height: auto !important;
+  left: 6px !important;
 }
 
 .layout__area--left .tv-group,
 .drawingToolbar-g3SlJJk1,
 [class*="drawingToolbar"] {
-  border-radius: 8px !important;
+  border-radius: 14px !important;
   overflow: hidden !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45) !important;
+  background: rgba(18, 26, 43, 0.92) !important;
+  backdrop-filter: blur(8px);
 }
 
-/* Hide the horizontal “favorite drawings” strip — TV mobile uses the left pill only. */
+/* Hide the horizontal “favorite drawings” strip — Forge mobile uses the left pill. */
 [class*="drawingToolbarBottom"],
 [class*="favorite-drawings"],
 [class*="favored-tools"],
