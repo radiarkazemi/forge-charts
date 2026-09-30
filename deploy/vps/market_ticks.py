@@ -47,6 +47,11 @@ MONGO_URI = os.environ.get("MONGO_URI", "mongodb://127.0.0.1:27017/")
 ANIL_GOLD_API = os.environ.get("ANIL_GOLD_API", "http://127.0.0.1:8000/api/v1").rstrip("/")
 # Direct Faraz (often CF-blocked on Iran VPS). Prefer Germany market-api Faraz proxy.
 FARAZ_BASE = os.environ.get("FARAZ_BASE_URL", "https://faraz.io").rstrip("/")
+# Germany relay for Faraz trading-view chart-history (multi-year D/W/M).
+FARAZ_HISTORY_PROXY = os.environ.get(
+    "FARAZ_HISTORY_PROXY",
+    "http://2.28.37.51:8091",
+).rstrip("/")
 # Only accept Faraz-sourced quotes for iran:* (never TGJU).
 IRAN_FARAZ_ONLY = os.environ.get("MARKET_TICKS_IRAN_FARAZ_ONLY", "1") not in {"0", "false", "False"}
 TV_ENABLED = os.environ.get("MARKET_TICKS_TV", "1") not in {"0", "false", "False"}
@@ -796,68 +801,91 @@ def _transform_faraz_ohlc(channel: str, o: float, h: float, l: float, c: float) 
     return oo, max(oo, hh, ll, cc), min(oo, hh, ll, cc), cc
 
 
+def _parse_faraz_history_payload(
+    data: dict[str, Any],
+    faraz_sym: str,
+    channel: str,
+) -> list[dict[str, float]]:
+    entry = data.get(faraz_sym) if isinstance(data, dict) else None
+    if not isinstance(entry, dict):
+        return []
+    ts_list = entry.get("t") or []
+    o_list = entry.get("o") or []
+    h_list = entry.get("h") or []
+    l_list = entry.get("l") or []
+    c_list = entry.get("c") or []
+    v_list = entry.get("v") or []
+    out: list[dict[str, float]] = []
+    for i, t_raw in enumerate(ts_list):
+        try:
+            t = int(t_raw)
+            o = float(o_list[i])
+            h = float(h_list[i])
+            l = float(l_list[i])
+            c = float(c_list[i])
+            v = float(v_list[i]) if i < len(v_list) else 0.0
+        except (IndexError, TypeError, ValueError):
+            continue
+        transformed = _transform_faraz_ohlc(channel, o, h, l, c)
+        if not transformed:
+            continue
+        oo, hh, ll, cc = transformed
+        if cc <= 0:
+            continue
+        out.append({"t": t, "o": oo, "h": hh, "l": ll, "c": cc, "v": v})
+    return out
+
+
 async def fetch_faraz_chart_history(
     session: aiohttp.ClientSession,
     channel: str,
     resolution: str,
 ) -> list[dict[str, float]]:
-    """Deep OHLC from Faraz `/api/public/trading-view/chart-history` (1D/1W/1M)."""
+    """Deep OHLC from Faraz chart-history (1D/1W/1M).
+
+    Prefer Germany relay (`FARAZ_HISTORY_PROXY`) — Iran VPS is CF-blocked from faraz.io.
+    """
     faraz_sym = IRAN_FARAZ_HISTORY_SYMBOL.get(channel)
     if not faraz_sym:
         return []
-    try:
-        async with session.get(
-            f"{FARAZ_BASE}/api/public/trading-view/chart-history",
-            params={
-                "symbolNames": json.dumps([faraz_sym], separators=(",", ":")),
-                "resolution": resolution,
-                "cache": "true",
-            },
-            timeout=aiohttp.ClientTimeout(total=20),
-            headers={
-                "Accept": "application/json",
-                "Origin": FARAZ_BASE,
-                "Referer": f"{FARAZ_BASE}/markets/gold-currency/{faraz_sym}",
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                ),
-            },
-        ) as resp:
-            if resp.status != 200:
-                return []
-            data = await resp.json(content_type=None)
-        entry = data.get(faraz_sym) if isinstance(data, dict) else None
-        if not isinstance(entry, dict):
-            return []
-        ts_list = entry.get("t") or []
-        o_list = entry.get("o") or []
-        h_list = entry.get("h") or []
-        l_list = entry.get("l") or []
-        c_list = entry.get("c") or []
-        v_list = entry.get("v") or []
-        out: list[dict[str, float]] = []
-        for i, t_raw in enumerate(ts_list):
-            try:
-                t = int(t_raw)
-                o = float(o_list[i])
-                h = float(h_list[i])
-                l = float(l_list[i])
-                c = float(c_list[i])
-                v = float(v_list[i]) if i < len(v_list) else 0.0
-            except (IndexError, TypeError, ValueError):
+    params = {
+        "symbolNames": json.dumps([faraz_sym], separators=(",", ":")),
+        "symbol": faraz_sym,
+        "resolution": resolution,
+        "cache": "true",
+    }
+    headers = {
+        "Accept": "application/json",
+        "Origin": FARAZ_BASE,
+        "Referer": f"{FARAZ_BASE}/markets/gold-currency/{faraz_sym}",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+    }
+    urls = [
+        f"{FARAZ_HISTORY_PROXY}/faraz/chart-history",
+        f"{FARAZ_BASE}/api/public/trading-view/chart-history",
+    ]
+    for url in urls:
+        try:
+            async with session.get(
+                url,
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=25),
+                headers=headers,
+            ) as resp:
+                if resp.status != 200:
+                    continue
+                data = await resp.json(content_type=None)
+            if not isinstance(data, dict) or data.get("detail"):
                 continue
-            transformed = _transform_faraz_ohlc(channel, o, h, l, c)
-            if not transformed:
-                continue
-            oo, hh, ll, cc = transformed
-            if cc <= 0:
-                continue
-            out.append({"t": t, "o": oo, "h": hh, "l": ll, "c": cc, "v": v})
-        return out
-    except Exception as exc:
-        LOG.debug("faraz chart-history %s %s: %s", channel, resolution, exc)
-        return []
+            bars = _parse_faraz_history_payload(data, faraz_sym, channel)
+            if bars:
+                return bars
+        except Exception as exc:
+            LOG.debug("faraz chart-history %s %s via %s: %s", channel, resolution, url, exc)
+    return []
 
 
 def _bucket_price_rows(rows: list[dict[str, Any]], field: str, step: int) -> dict[int, dict[str, float]]:
