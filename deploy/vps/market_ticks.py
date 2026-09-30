@@ -139,12 +139,12 @@ IRAN_ALIASES: dict[str, str] = {
     "iran:quarter": "iran:rob",
     "iran:ounce": "iran:ons",
 }
-# cp_fetcher-style history depths (bars).
+# cp_fetcher-style history depths (bars) — raised for Faraz customer max-countback stores.
 IRAN_HISTORY_DEPTH = {
-    "seconds": 20_000,
-    "1m": 20_000,
-    "5m": 10_000,
-    "default": 5_000,
+    "seconds": 50_000,
+    "1m": 50_000,
+    "5m": 40_000,
+    "default": 20_000,
 }
 _MONGO_CLIENT: Any = None
 
@@ -1160,25 +1160,45 @@ async def fetch_faraz_customer_history(
     return []
 
 
+def _faraz_step_seconds(resolution: str) -> int:
+    raw = (resolution or "").strip()
+    if raw.endswith("S") and raw[:-1].isdigit():
+        return max(1, int(raw[:-1] or 1))
+    if raw.upper() in {"1D", "D"}:
+        return 86_400
+    if raw.upper() in {"1W", "W"}:
+        return 604_800
+    if raw.upper() == "1M":
+        return 30 * 86_400
+    if raw.isdigit():
+        return max(1, int(raw)) * 60
+    return 60
+
+
 async def fetch_faraz_customer_history_all(
     session: aiohttp.ClientSession,
     channel: str,
     resolution: str,
+    *,
+    max_pages: int = 8,
 ) -> list[dict[str, float]]:
     """Page customer history backward with max countback until Faraz has no more."""
     if _FARAZ_CUSTOMER_AUTH_OK is False:
         return []
     cap = _faraz_countback_cap(resolution)
+    step = _faraz_step_seconds(resolution)
     merged: dict[int, dict[str, float]] = {}
-    to_ts = int(time.time()) + 86_400
+    to_ts = int(time.time()) + step
     first = True
-    for _ in range(40):
+    for _ in range(max(1, max_pages)):
+        from_ts = max(0, to_ts - step * cap - step)
         batch = await fetch_faraz_customer_history(
             session,
             channel,
             resolution,
             countback=cap,
             to_ts=to_ts,
+            from_ts=from_ts,
             first=first,
         )
         first = False
@@ -1188,7 +1208,6 @@ async def fetch_faraz_customer_history_all(
             merged[int(bar["t"])] = bar
         earliest = min(int(b["t"]) for b in batch)
         if len(batch) < max(2, cap // 20):
-            # Short page ⇒ likely exhausted.
             break
         new_to = earliest - 1
         if new_to >= to_ts:
@@ -1427,10 +1446,74 @@ async def iran_gold_history(request: web.Request) -> web.Response:
 
     sources: list[str] = []
     buckets: dict[int, dict[str, float]] = {}
-
-    # 1) Faraz customer/public history (native symbols, max countback when authed).
     faraz_res = _faraz_resolution_for_step(step)
-    if faraz_res:
+
+    def _ingest_bar(bar: dict[str, float], *, exact: bool) -> None:
+        t0 = int(bar["t"]) - (int(bar["t"]) % step)
+        if exact:
+            buckets[t0] = {
+                "t": t0,
+                "o": bar["o"],
+                "h": bar["h"],
+                "l": bar["l"],
+                "c": bar["c"],
+                "v": bar.get("v", 0),
+            }
+            return
+        price = float(bar["c"])
+        existing = buckets.get(t0)
+        if existing is None:
+            buckets[t0] = {"t": t0, "o": price, "h": price, "l": price, "c": price, "v": 1}
+        else:
+            existing["h"] = max(existing["h"], price)
+            existing["l"] = min(existing["l"], price)
+            existing["c"] = price
+            existing["v"] += 1
+
+    exact_faraz = bool(
+        faraz_res
+        and (
+            step == _parse_step_seconds(faraz_res)
+            or (faraz_res == "1M" and step >= 30 * 86_400)
+            or (faraz_res == "1W" and step == 604_800)
+            or (faraz_res == "1D" and step == 86_400)
+        )
+    )
+
+    # 1) Serve bootstrapped Mongo first (fast path — avoid blocking on Faraz).
+    if client is not None and faraz_res:
+        try:
+            fq: dict[str, Any] = {"channel": channel, "c": {"$gt": 0}, "resolution": faraz_res}
+            if before is not None:
+                fq["t"] = {"$lt": before}
+            stored = list(
+                client["anil_gold"]["faraz_ohlc"]
+                .find(fq)
+                .sort("t", -1)
+                .limit(min(max(limit * 4, limit), 80_000))
+            )
+            if stored:
+                sources.append("anil_gold.faraz_ohlc")
+                for doc in reversed(stored):
+                    try:
+                        _ingest_bar(
+                            {
+                                "t": int(doc["t"]),
+                                "o": float(doc["o"]),
+                                "h": float(doc["h"]),
+                                "l": float(doc["l"]),
+                                "c": float(doc["c"]),
+                                "v": float(doc.get("v") or 0),
+                            },
+                            exact=exact_faraz,
+                        )
+                    except (KeyError, TypeError, ValueError):
+                        continue
+        except Exception as exc:
+            LOG.debug("faraz_ohlc read: %s", exc)
+
+    # 2) Live Faraz only when local store is thin (bootstrap / cold start).
+    if faraz_res and len(buckets) < max(50, min(limit, 500) // 2):
         faraz_bars = await fetch_faraz_chart_history(session, channel, faraz_res)
         if faraz_bars:
             sources.append(f"faraz:{faraz_res}")
@@ -1442,69 +1525,10 @@ async def iran_gold_history(request: web.Request) -> web.Response:
                 src="faraz-live",
             )
             for bar in faraz_bars:
-                t0 = int(bar["t"]) - (int(bar["t"]) % step)
-                # When Faraz resolution matches step, keep OHLC; when aggregating
-                # (e.g. requesting 1W from 1D feed), rebuild from closes.
-                if step == _parse_step_seconds(faraz_res) or (
-                    faraz_res == "1M" and step >= 30 * 86_400
-                ) or (faraz_res == "1W" and step == 604_800) or (faraz_res == "1D" and step == 86_400):
-                    buckets[t0] = {
-                        "t": t0,
-                        "o": bar["o"],
-                        "h": bar["h"],
-                        "l": bar["l"],
-                        "c": bar["c"],
-                        "v": bar.get("v", 0),
-                    }
-                else:
-                    price = float(bar["c"])
-                    existing = buckets.get(t0)
-                    if existing is None:
-                        buckets[t0] = {"t": t0, "o": price, "h": price, "l": price, "c": price, "v": 1}
-                    else:
-                        existing["h"] = max(existing["h"], price)
-                        existing["l"] = min(existing["l"], price)
-                        existing["c"] = price
-                        existing["v"] += 1
+                _ingest_bar(bar, exact=exact_faraz)
 
-    # 2) Mongo — bootstrapped faraz_ohlc + dense ticks + parents (cp-style).
+    # 3) Mongo — dense ticks + parents (cp-style) for recent forming bars.
     if client is not None:
-        try:
-            fq: dict[str, Any] = {"channel": channel, "c": {"$gt": 0}}
-            if faraz_res:
-                fq["resolution"] = faraz_res
-            if before is not None:
-                fq["t"] = {"$lt": before}
-            stored = list(
-                client["anil_gold"]["faraz_ohlc"]
-                .find(fq)
-                .sort("t", -1)
-                .limit(min(limit * 4, 40_000))
-            )
-            if stored:
-                sources.append("anil_gold.faraz_ohlc")
-                for doc in reversed(stored):
-                    try:
-                        t0 = int(doc["t"]) - (int(doc["t"]) % step)
-                        o = float(doc["o"])
-                        h = float(doc["h"])
-                        l = float(doc["l"])
-                        c = float(doc["c"])
-                        v = float(doc.get("v") or 0)
-                    except (KeyError, TypeError, ValueError):
-                        continue
-                    if c <= 0:
-                        continue
-                    existing = buckets.get(t0)
-                    if existing is None:
-                        buckets[t0] = {"t": t0, "o": o, "h": h, "l": l, "c": c, "v": v}
-                    else:
-                        existing["h"] = max(existing["h"], h)
-                        existing["l"] = min(existing["l"], l)
-                        existing["c"] = c
-                        existing["v"] += v
-        except Exception as exc:
-            LOG.debug("faraz_ohlc read: %s", exc)
         docs_per_bar = max(2, step // 5) if step >= 60 else 2
         pull = min(120_000, max(limit * docs_per_bar, limit * 4, 500))
         query: dict[str, Any] = {field: {"$gt": 0}}
