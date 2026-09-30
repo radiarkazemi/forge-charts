@@ -783,6 +783,24 @@ def _parse_step_seconds(interval: str) -> int:
     return 60
 
 
+# Faraz 1h/4h (and other hour-based intraday) bars are aligned to Asia/Tehran
+# local clock (UTC+03:30), not UTC epoch boundaries. UTC flooring shifts every
+# bar by 30 minutes and lets ohlc_1h/tick overlays smash Faraz OHLC.
+IRAN_TZ_OFFSET_SEC = 3 * 3600 + 1800
+
+
+def _align_iran_bar_time(ts: int, step: int) -> int:
+    """Bucket start for Iran gold — Tehran grid for hour+ intraday, else UTC."""
+    ts_i = int(ts)
+    step_i = int(step)
+    if step_i <= 0:
+        return ts_i
+    if 3600 <= step_i < 86_400:
+        shifted = ts_i + IRAN_TZ_OFFSET_SEC
+        return (shifted - (shifted % step_i)) - IRAN_TZ_OFFSET_SEC
+    return ts_i - (ts_i % step_i)
+
+
 def _iran_history_limit(step: int, requested: int) -> int:
     if step < 60:
         cap = IRAN_HISTORY_DEPTH["seconds"]
@@ -1361,7 +1379,7 @@ def _bucket_price_rows(rows: list[dict[str, Any]], field: str, step: int) -> dic
             continue
         if price <= 0:
             continue
-        t0 = ts - (ts % step)
+        t0 = _align_iran_bar_time(ts, step)
         bar = buckets.get(t0)
         if bar is None:
             buckets[t0] = {"t": t0, "o": price, "h": price, "l": price, "c": price, "v": 1}
@@ -1459,7 +1477,8 @@ def _load_iran_history_mongo(
     )
 
     def ingest(bar: dict[str, float], *, exact: bool) -> None:
-        t0 = int(bar["t"]) - (int(bar["t"]) % step)
+        # Exact Faraz rows keep native session timestamps (Tehran 1h/4h grid).
+        t0 = int(bar["t"]) if exact else _align_iran_bar_time(int(bar["t"]), step)
         if exact:
             buckets[t0] = {
                 "t": t0,
@@ -1470,15 +1489,51 @@ def _load_iran_history_mongo(
                 "v": bar.get("v", 0),
             }
             return
-        price = float(bar["c"])
+        # Aggregate lower-TF / tick closes into OHLC for the target step.
         existing = buckets.get(t0)
+        o = float(bar.get("o", bar["c"]))
+        h = float(bar.get("h", bar["c"]))
+        l = float(bar.get("l", bar["c"]))
+        c = float(bar["c"])
+        v = float(bar.get("v") or 1)
         if existing is None:
-            buckets[t0] = {"t": t0, "o": price, "h": price, "l": price, "c": price, "v": 1}
+            buckets[t0] = {"t": t0, "o": o, "h": h, "l": l, "c": c, "v": v}
         else:
-            existing["h"] = max(existing["h"], price)
-            existing["l"] = min(existing["l"], price)
-            existing["c"] = price
-            existing["v"] += 1
+            existing["h"] = max(existing["h"], h)
+            existing["l"] = min(existing["l"], l)
+            existing["c"] = c
+            existing["v"] += v
+
+    def _merge_tick_into_forming(rows: list[dict[str, Any]]) -> None:
+        """Update only the current/latest Faraz bar from live ticks — never rewrite history."""
+        if not rows:
+            return
+        latest_t = max(buckets) if buckets else None
+        for doc in reversed(rows):
+            ts_raw = doc.get("ts_unix") or doc.get("ts")
+            if ts_raw is None:
+                continue
+            if hasattr(ts_raw, "timestamp"):
+                ts = int(ts_raw.timestamp())
+            else:
+                ts = parse_updated_at(ts_raw)
+            try:
+                price = float(doc.get(field))
+            except (TypeError, ValueError):
+                continue
+            if price <= 0:
+                continue
+            t0 = _align_iran_bar_time(ts, step)
+            if latest_t is not None and t0 < latest_t:
+                continue
+            existing = buckets.get(t0)
+            if existing is None:
+                buckets[t0] = {"t": t0, "o": price, "h": price, "l": price, "c": price, "v": 1}
+            else:
+                existing["h"] = max(existing["h"], price)
+                existing["l"] = min(existing["l"], price)
+                existing["c"] = price
+                existing["v"] += 1
 
     try:
         if faraz_res:
@@ -1509,7 +1564,11 @@ def _load_iran_history_mongo(
                     except (KeyError, TypeError, ValueError):
                         continue
 
-        # Recent forming bars from parents / ticks (keep pull modest).
+        # When native Faraz history is present for this exact resolution, do NOT
+        # overlay ohlc_1h/1m parents (they used UTC buckets and smash 1h/4h OHLC).
+        # Only fold recent ticks into the forming bar.
+        faraz_exact_ready = exact_faraz and len(buckets) >= min(limit, 50)
+
         docs_per_bar = max(2, step // 5) if step >= 60 else 2
         pull = min(20_000, max(limit * docs_per_bar, limit * 2, 500))
         query: dict[str, Any] = {field: {"$gt": 0}}
@@ -1526,6 +1585,15 @@ def _load_iran_history_mongo(
             )
             if rows:
                 sources.append("anil_gold.tick_1s")
+        elif faraz_exact_ready:
+            recent = list(
+                tick_coll.find(query, {field: 1, "ts": 1, "ts_unix": 1})
+                .sort("ts", -1)
+                .limit(min(2_000, pull))
+            )
+            if recent:
+                sources.append("anil_gold.tick_1s")
+                _merge_tick_into_forming(recent)
         else:
             parent_coll = None
             if step >= 86_400:
@@ -1556,7 +1624,7 @@ def _load_iran_history_mongo(
                                     "c": float(doc["c"]),
                                     "v": float(doc.get("v") or 0),
                                 },
-                                exact=(step <= 60) or exact_faraz,
+                                exact=(step <= 60),
                             )
                         except (KeyError, TypeError, ValueError):
                             continue
@@ -1575,16 +1643,30 @@ def _load_iran_history_mongo(
                     sources.append("anil_gold.price_history")
 
         if rows:
-            mongo_buckets = _bucket_price_rows(rows, field, step)
-            for t0, bar in mongo_buckets.items():
+            # Bucket ticks with Tehran-aware alignment for hour+ steps.
+            for doc in reversed(rows):
+                ts_raw = doc.get("ts_unix") or doc.get("ts")
+                if ts_raw is None:
+                    continue
+                if hasattr(ts_raw, "timestamp"):
+                    ts = int(ts_raw.timestamp())
+                else:
+                    ts = parse_updated_at(ts_raw)
+                try:
+                    price = float(doc.get(field))
+                except (TypeError, ValueError):
+                    continue
+                if price <= 0:
+                    continue
+                t0 = _align_iran_bar_time(ts, step)
                 existing = buckets.get(t0)
                 if existing is None:
-                    buckets[t0] = bar
+                    buckets[t0] = {"t": t0, "o": price, "h": price, "l": price, "c": price, "v": 1}
                 else:
-                    existing["h"] = max(existing["h"], bar["h"])
-                    existing["l"] = min(existing["l"], bar["l"])
-                    existing["c"] = bar["c"]
-                    existing["v"] += bar["v"]
+                    existing["h"] = max(existing["h"], price)
+                    existing["l"] = min(existing["l"], price)
+                    existing["c"] = price
+                    existing["v"] += 1
     except Exception as exc:
         LOG.warning("iran history mongo: %s", exc)
     return buckets, sources
@@ -1633,8 +1715,8 @@ async def iran_gold_history(request: web.Request) -> web.Response:
         faraz_res,
     )
 
-    # Live Faraz only when local store is thin (cold start).
-    if faraz_res and len(buckets) < max(50, min(limit, 500) // 2):
+    # Live Faraz only on cold start — never refetch when Mongo already has depth.
+    if faraz_res and len(buckets) < min(limit, 50):
         faraz_bars = await fetch_faraz_chart_history(session, channel, faraz_res)
         if faraz_bars:
             sources.append(f"faraz:{faraz_res}")
@@ -1649,7 +1731,7 @@ async def iran_gold_history(request: web.Request) -> web.Response:
                 faraz_res == "1M" and step >= 30 * 86_400
             ) or (faraz_res == "1W" and step == 604_800) or (faraz_res == "1D" and step == 86_400)
             for bar in faraz_bars:
-                t0 = int(bar["t"]) - (int(bar["t"]) % step)
+                t0 = int(bar["t"]) if exact else _align_iran_bar_time(int(bar["t"]), step)
                 if exact:
                     buckets[t0] = {
                         "t": t0,

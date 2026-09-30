@@ -75,11 +75,21 @@ function routeFor(symbol: SymbolInfo): IranRoute | null {
   return ROUTES[symbol.ticker.toUpperCase()] ?? null;
 }
 
+/** Asia/Tehran UTC+03:30 — Faraz 1h/4h bars use this session grid, not UTC. */
+const IRAN_TZ_OFFSET_SEC = 3 * 3600 + 1800;
+
 function alignTime(tsSec: number, step: number): number {
   if (!Number.isFinite(tsSec) || !Number.isFinite(step) || step <= 0) {
     return Number.isFinite(tsSec) ? Math.floor(tsSec) : Math.floor(Date.now() / 1000);
   }
-  return tsSec - (tsSec % step);
+  const ts = Math.floor(tsSec);
+  const s = Math.floor(step);
+  // Hour+ intraday: keep Faraz/Tehran bucket starts (…:30 UTC).
+  if (s >= 3600 && s < 86_400) {
+    const shifted = ts + IRAN_TZ_OFFSET_SEC;
+    return shifted - (shifted % s) - IRAN_TZ_OFFSET_SEC;
+  }
+  return ts - (ts % s);
 }
 
 function applyTick(current: Bar | null, price: number, tsSec: number, step: number): Bar {
