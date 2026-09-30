@@ -13,14 +13,15 @@ import { buildUrl, fetchJson } from "../http/fetch-json";
 import { targetHistoryDepth } from "./cp-chart-history";
 
 /**
- * Iran domestic gold from Faraz (آبشده نقدی 1 / گرم ۱۸ / سکه):
- *   آبشده نقدی 1 (abshodeNaghdi), گرم ۱۸/۲۴, سکه امامی / نیم / ربع, انس
+ * Iran domestic gold from Faraz (native symbols):
+ *   آبشده نقدی 1 (abshodeNaghdi), گرم ۱۸ (geramTalaHejdah), طلای ۲۴ (tala24Estjt),
+ *   سکه امامی / نیم / ربع, انس
  *
  * History: VPS `/iran-gold/history`
- *   - Faraz trading-view chart-history for 1D / 1W / 1M (multi-year)
- *   - Mongo `anil_gold.tick_1s` + `price_history` + materialized ohlc_1m/1h/1d
- * Realtime: VPS `/market-ticks` `iran:*` — same WS tick relay as cp_fetcher crypto/FX
- *   (Faraz via Germany market-api @ ~1s, force-broadcast forming bars)
+ *   - Faraz customer `/trading-view/history` (max countback) when session set
+ *   - Public chart-history fallback for 1D / 1W / 1M
+ *   - Mongo `anil_gold.faraz_ohlc` + `tick_1s` + `ohlc_1m/1h/1d` (bootstrap + realtime append)
+ * Realtime: VPS `/market-ticks` `iran:*` — Faraz live ticks appended onto saved history
  */
 
 const HISTORY_BASE = "/iran-gold/history";

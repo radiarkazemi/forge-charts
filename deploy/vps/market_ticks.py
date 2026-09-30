@@ -47,16 +47,30 @@ MONGO_URI = os.environ.get("MONGO_URI", "mongodb://127.0.0.1:27017/")
 ANIL_GOLD_API = os.environ.get("ANIL_GOLD_API", "http://127.0.0.1:8000/api/v1").rstrip("/")
 # Direct Faraz (often CF-blocked on Iran VPS). Prefer Germany market-api Faraz proxy.
 FARAZ_BASE = os.environ.get("FARAZ_BASE_URL", "https://faraz.io").rstrip("/")
-# Germany relay for Faraz trading-view chart-history (multi-year D/W/M).
+# Germany relay for Faraz trading-view chart-history + customer history.
 FARAZ_HISTORY_PROXY = os.environ.get(
     "FARAZ_HISTORY_PROXY",
     "http://2.28.37.51:8091",
 ).rstrip("/")
+# Cookie / token for Faraz customer trading-view history (deep countback).
+FARAZ_COOKIE = os.environ.get("FARAZ_COOKIE", "").strip()
+FARAZ_USER_ID = os.environ.get("FARAZ_USER_ID", "").strip()
+FARAZ_TOKEN = os.environ.get("FARAZ_TOKEN", "").strip()
+FARAZ_ADJUST_TYPE = int(os.environ.get("FARAZ_ADJUST_TYPE", "2"))
+# Faraz client caps: <1m → 1000, else 10000.
+FARAZ_COUNTBACK_MAX = int(os.environ.get("FARAZ_COUNTBACK_MAX", "10000"))
+FARAZ_COUNTBACK_MAX_SUBMIN = int(os.environ.get("FARAZ_COUNTBACK_MAX_SUBMIN", "1000"))
 # Only accept Faraz-sourced quotes for iran:* (never TGJU).
 IRAN_FARAZ_ONLY = os.environ.get("MARKET_TICKS_IRAN_FARAZ_ONLY", "1") not in {"0", "false", "False"}
 TV_ENABLED = os.environ.get("MARKET_TICKS_TV", "1") not in {"0", "false", "False"}
 # If a channel got a TV/mongo tick within this window, skip Germany HTTP for it.
 GERMANY_SKIP_IF_FRESH_MS = float(os.environ.get("MARKET_TICKS_GERMANY_SKIP_MS", "800"))
+# Bootstrap Faraz customer/public history once per process, then append realtime.
+IRAN_HISTORY_BOOTSTRAP = os.environ.get("MARKET_TICKS_IRAN_BOOTSTRAP", "1") not in {
+    "0",
+    "false",
+    "False",
+}
 
 # channel -> set of WebSocketResponse
 SUBS: dict[str, set[web.WebSocketResponse]] = {}
@@ -74,6 +88,7 @@ SOURCE_HOLD_MS = {"tv": 1_200, "iran": 900, "mongo": 400, "germany": 250}
 
 # Iran gold fields → market-ticks channels (Faraz only).
 # Faraz `abshodeNaghdi` = آبشده نقدی 1 (نقدی تهران). نقدی 2 = abshodeNaghdiShanbei.
+# G18 = geramTalaHejdah (گرم طلای ۱۸ عیار) — native Faraz symbol, not derived.
 IRAN_FIELDS: dict[str, str] = {
     "mesghal_17": "iran:abshode",
     "price_18k_per_gram": "iran:g18",
@@ -84,16 +99,29 @@ IRAN_FIELDS: dict[str, str] = {
     "ounce_usd": "iran:ons",
 }
 IRAN_FIELD_BY_CHANNEL = {v: k for k, v in IRAN_FIELDS.items()}
-# Faraz trading-view chart-history symbol per channel (G18/G24 derived from abshode).
+# Native Faraz trading-view symbols (customer + public history).
 IRAN_FARAZ_HISTORY_SYMBOL: dict[str, str] = {
     "iran:abshode": "abshodeNaghdi",
-    "iran:g18": "abshodeNaghdi",
-    "iran:g24": "abshodeNaghdi",
+    "iran:g18": "geramTalaHejdah",
+    "iran:g24": "tala24Estjt",
     "iran:sekke": "sekkeNewEstjt",
     "iran:nim": "nimSekkeEstjt",
     "iran:rob": "robSekkeEstjt",
     "iran:ons": "FOREXCOM_XAUUSD",
 }
+# Resolutions to bootstrap once from Faraz customer history (max countback).
+IRAN_BOOTSTRAP_RESOLUTIONS = (
+    "1",
+    "5",
+    "15",
+    "60",
+    "240",
+    "1D",
+    "1W",
+    "1M",
+)
+_IRAN_BOOTSTRAP_DONE: set[str] = set()
+_FARAZ_CUSTOMER_AUTH_OK: bool | None = None
 # Aliases so clients can subscribe with friendlier names.
 IRAN_ALIASES: dict[str, str] = {
     "iran:mesghal": "iran:abshode",
@@ -560,9 +588,11 @@ def _extract_faraz_price(entry: Any) -> float:
 
 
 async def fetch_iran_quote_faraz_direct(session: aiohttp.ClientSession) -> tuple[dict[str, float], str] | None:
-    """Direct Faraz public market API (abshodeNaghdi → مثقال ۱۷ / آبشده نقدی)."""
+    """Direct Faraz public market API — native symbols (geramTalaHejdah, abshodeNaghdi, …)."""
     symbols = [
         "abshodeNaghdi",
+        "geramTalaHejdah",
+        "tala24Estjt",
         "sekkeNewEstjt",
         "nimSekkeEstjt",
         "robSekkeEstjt",
@@ -592,17 +622,21 @@ async def fetch_iran_quote_faraz_direct(session: aiohttp.ClientSession) -> tuple
         if not isinstance(raw, dict):
             return None
         mesghal = _extract_faraz_price(raw.get("abshodeNaghdi"))
-        if mesghal <= 0:
+        g18 = _extract_faraz_price(raw.get("geramTalaHejdah"))
+        g24 = _extract_faraz_price(raw.get("tala24Estjt"))
+        # Fallback only if native G18 missing — keep abshode usable.
+        if g18 <= 0 and mesghal > 0:
+            g18 = float(int(round((mesghal * 750 / 705) / 4.608)))
+        if g24 <= 0 and g18 > 0:
+            g24 = float(int(round(g18 * 999 / 750)))
+        if mesghal <= 0 and g18 <= 0:
             return None
-        # گرم ۱۸ = (مثقال ۱۷ × 750 / 705) / 4.608  (Anil / Faraz business formula)
-        g18 = int(round((mesghal * 750 / 705) / 4.608))
-        g24 = int(round(g18 * 999 / 750))
         ounce = _extract_faraz_price(raw.get("FOREXCOM_XAUUSD"))
         return (
             {
-                "mesghal_17": float(int(round(mesghal))),
-                "price_18k_per_gram": float(g18),
-                "price_24k_per_gram": float(g24),
+                "mesghal_17": float(int(round(mesghal))) if mesghal > 0 else 0.0,
+                "price_18k_per_gram": float(int(round(g18))) if g18 > 0 else 0.0,
+                "price_24k_per_gram": float(int(round(g24))) if g24 > 0 else 0.0,
                 "coin_emami": float(int(round(_extract_faraz_price(raw.get("sekkeNewEstjt"))))),
                 "coin_half": float(int(round(_extract_faraz_price(raw.get("nimSekkeEstjt"))))),
                 "coin_quarter": float(int(round(_extract_faraz_price(raw.get("robSekkeEstjt"))))),
@@ -721,6 +755,7 @@ async def poll_iran_gold(session: aiohttp.ClientSession) -> None:
                 ts = int(time.time())
                 src = f"iran:{src_name}"
                 persist_iran_tick_1s(quote, src_name, ts)
+                append_realtime_ohlc(quote, src_name, ts)
                 # Warm LAST + push to any live WS subscribers (cp_fetcher-style).
                 for field, channel in IRAN_FIELDS.items():
                     price = float(quote.get(field) or 0)
@@ -761,54 +796,58 @@ def _iran_history_limit(step: int, requested: int) -> int:
 
 
 def _faraz_resolution_for_step(step: int) -> str | None:
-    """Faraz public chart-history only serves 1D / 1W / 1M cleanly."""
+    """Best Faraz resolution for a chart step (customer history supports minutes)."""
     if step >= 30 * 86_400:
         return "1M"
     if step >= 7 * 86_400:
         return "1W"
     if step >= 86_400:
         return "1D"
+    if step >= 14_400:
+        return "240"
+    if step >= 3600:
+        return "60"
+    if step >= 900:
+        return "15"
+    if step >= 300:
+        return "5"
+    if step >= 60:
+        return "1"
     return None
 
 
-def _mesghal_to_g18(mesghal: float) -> float:
-    if mesghal <= 0:
-        return 0.0
-    return float(int(round((mesghal * 750 / 705) / 4.608)))
+def _faraz_countback_cap(resolution: str) -> int:
+    """Match Faraz SPA: sub-minute → 1000, else 10000."""
+    raw = (resolution or "").strip()
+    if raw.endswith("S") and raw[:-1].isdigit():
+        return FARAZ_COUNTBACK_MAX_SUBMIN
+    return FARAZ_COUNTBACK_MAX
 
 
-def _mesghal_to_g24(mesghal: float) -> float:
-    g18 = _mesghal_to_g18(mesghal)
-    if g18 <= 0:
-        return 0.0
-    return float(int(round(g18 * 999 / 750)))
+def _faraz_auth_headers(faraz_sym: str = "") -> dict[str, str]:
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Origin": FARAZ_BASE,
+        "Referer": (
+            f"{FARAZ_BASE}/dashboard?s={faraz_sym}" if faraz_sym else f"{FARAZ_BASE}/dashboard"
+        ),
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+    }
+    if FARAZ_COOKIE:
+        headers["Cookie"] = FARAZ_COOKIE
+    if FARAZ_USER_ID:
+        headers["UserId"] = FARAZ_USER_ID
+    if FARAZ_TOKEN:
+        headers["Authorization"] = f"Bearer {FARAZ_TOKEN}"
+        headers["X-Auth-Token"] = FARAZ_TOKEN
+    return headers
 
 
-def _transform_faraz_ohlc(channel: str, o: float, h: float, l: float, c: float) -> tuple[float, float, float, float] | None:
-    """Map Faraz abshode/coin OHLC onto the chart channel’s price scale."""
-    if channel in ("iran:abshode", "iran:sekke", "iran:nim", "iran:rob", "iran:ons"):
-        return o, h, l, c
-    if channel == "iran:g18":
-        vals = [_mesghal_to_g18(x) for x in (o, h, l, c)]
-    elif channel == "iran:g24":
-        vals = [_mesghal_to_g24(x) for x in (o, h, l, c)]
-    else:
-        return None
-    if any(v <= 0 for v in vals):
-        return None
-    # After nonlinear transform, re-order high/low.
-    oo, hh, ll, cc = vals
-    return oo, max(oo, hh, ll, cc), min(oo, hh, ll, cc), cc
-
-
-def _parse_faraz_history_payload(
-    data: dict[str, Any],
-    faraz_sym: str,
-    channel: str,
-) -> list[dict[str, float]]:
-    entry = data.get(faraz_sym) if isinstance(data, dict) else None
-    if not isinstance(entry, dict):
-        return []
+def _bars_from_tv_columns(entry: dict[str, Any]) -> list[dict[str, float]]:
+    """Parse Faraz column OHLC (`t/o/h/l/c/v`) — times may be sec or ms."""
     ts_list = entry.get("t") or []
     o_list = entry.get("o") or []
     h_list = entry.get("h") or []
@@ -819,6 +858,8 @@ def _parse_faraz_history_payload(
     for i, t_raw in enumerate(ts_list):
         try:
             t = int(t_raw)
+            if t > 1e12:
+                t //= 1000
             o = float(o_list[i])
             h = float(h_list[i])
             l = float(l_list[i])
@@ -826,14 +867,334 @@ def _parse_faraz_history_payload(
             v = float(v_list[i]) if i < len(v_list) else 0.0
         except (IndexError, TypeError, ValueError):
             continue
-        transformed = _transform_faraz_ohlc(channel, o, h, l, c)
-        if not transformed:
+        if c <= 0:
             continue
-        oo, hh, ll, cc = transformed
-        if cc <= 0:
-            continue
-        out.append({"t": t, "o": oo, "h": hh, "l": ll, "c": cc, "v": v})
+        out.append({"t": t, "o": o, "h": h, "l": l, "c": c, "v": v})
     return out
+
+
+def _bars_from_candle_list(rows: list[Any]) -> list[dict[str, float]]:
+    out: list[dict[str, float]] = []
+    for row in rows:
+        try:
+            if isinstance(row, dict):
+                t = int(row.get("time") or row.get("t") or 0)
+                if t > 1e12:
+                    t //= 1000
+                o = float(row.get("open") if row.get("open") is not None else row.get("o"))
+                h = float(row.get("high") if row.get("high") is not None else row.get("h"))
+                l = float(row.get("low") if row.get("low") is not None else row.get("l"))
+                c = float(row.get("close") if row.get("close") is not None else row.get("c"))
+                v = float(row.get("volume") if row.get("volume") is not None else row.get("v") or 0)
+            elif isinstance(row, (list, tuple)) and len(row) >= 5:
+                t = int(row[0])
+                if t > 1e12:
+                    t //= 1000
+                o, h, l, c = float(row[1]), float(row[2]), float(row[3]), float(row[4])
+                v = float(row[5]) if len(row) > 5 else 0.0
+            else:
+                continue
+        except (TypeError, ValueError):
+            continue
+        if t <= 0 or c <= 0:
+            continue
+        out.append({"t": t, "o": o, "h": h, "l": l, "c": c, "v": v})
+    return out
+
+
+def _parse_faraz_history_payload(
+    data: Any,
+    faraz_sym: str,
+    channel: str = "",
+) -> list[dict[str, float]]:
+    """Accept public chart-history dict, customer `{result:…}`, or candle list."""
+    del channel  # native symbols — no price-scale transform
+    if isinstance(data, list):
+        return _bars_from_candle_list(data)
+    if not isinstance(data, dict):
+        return []
+    if data.get("detail") or data.get("success") is False:
+        return []
+    result = data.get("result")
+    if isinstance(result, dict) and (result.get("t") is not None):
+        return _bars_from_tv_columns(result)
+    if isinstance(result, list):
+        return _bars_from_candle_list(result)
+    entry = data.get(faraz_sym)
+    if isinstance(entry, dict) and (entry.get("t") is not None):
+        return _bars_from_tv_columns(entry)
+    if isinstance(data.get("t"), list):
+        return _bars_from_tv_columns(data)
+    return []
+
+
+def _ohlc_coll_for_resolution(resolution: str) -> str | None:
+    raw = (resolution or "").strip()
+    if raw == "1":
+        return "ohlc_1m"
+    if raw == "60":
+        return "ohlc_1h"
+    if raw.upper() in {"1D", "D"}:
+        return "ohlc_1d"
+    return None
+
+
+def persist_faraz_bars(
+    channel: str,
+    resolution: str,
+    bars: list[dict[str, float]],
+    *,
+    src: str = "faraz",
+) -> int:
+    """Upsert Faraz OHLC into Mongo (once-per-symbol history base)."""
+    if not bars:
+        return 0
+    client = mongo_client()
+    if client is None:
+        return 0
+    try:
+        from datetime import datetime, timezone
+
+        faraz_sym = IRAN_FARAZ_HISTORY_SYMBOL.get(channel, "")
+        field = IRAN_FIELD_BY_CHANNEL.get(channel, "")
+        now = datetime.now(tz=timezone.utc)
+        written = 0
+        # Canonical deep store — every resolution.
+        base = client["anil_gold"]["faraz_ohlc"]
+        for bar in bars:
+            t = int(bar["t"])
+            base.update_one(
+                {"channel": channel, "resolution": resolution, "t": t},
+                {
+                    "$set": {
+                        "channel": channel,
+                        "faraz_symbol": faraz_sym,
+                        "field": field,
+                        "resolution": resolution,
+                        "t": t,
+                        "o": float(bar["o"]),
+                        "h": float(bar["h"]),
+                        "l": float(bar["l"]),
+                        "c": float(bar["c"]),
+                        "v": float(bar.get("v") or 0),
+                        "src": src,
+                        "updated_at": now,
+                    }
+                },
+                upsert=True,
+            )
+            written += 1
+        base.create_index(
+            [("channel", 1), ("resolution", 1), ("t", -1)],
+            background=True,
+        )
+        # Also mirror into cp-style parent collections for 1m/1h/1d.
+        parent = _ohlc_coll_for_resolution(resolution)
+        if parent:
+            coll = client["anil_gold"][parent]
+            for bar in bars:
+                t = int(bar["t"])
+                coll.update_one(
+                    {"channel": channel, "t": t},
+                    {
+                        "$set": {
+                            "channel": channel,
+                            "field": field,
+                            "t": t,
+                            "o": float(bar["o"]),
+                            "h": float(bar["h"]),
+                            "l": float(bar["l"]),
+                            "c": float(bar["c"]),
+                            "v": float(bar.get("v") or 0),
+                            "src": src,
+                            "updated_at": now,
+                        }
+                    },
+                    upsert=True,
+                )
+            coll.create_index([("channel", 1), ("t", -1)], background=True)
+        return written
+    except Exception as exc:
+        LOG.warning("persist faraz bars %s %s: %s", channel, resolution, exc)
+        return 0
+
+
+def append_realtime_ohlc(quote: dict[str, float], src_name: str, ts: int) -> None:
+    """Fold each live Faraz tick into forming 1m/1h/1d candles (cp_fetcher-style)."""
+    client = mongo_client()
+    if client is None:
+        return
+    try:
+        from datetime import datetime, timezone
+
+        now = datetime.now(tz=timezone.utc)
+        for field, channel in IRAN_FIELDS.items():
+            price = float(quote.get(field) or 0)
+            if price <= 0:
+                continue
+            for step, coll_name in ((60, "ohlc_1m"), (3600, "ohlc_1h"), (86_400, "ohlc_1d")):
+                t0 = ts - (ts % step)
+                coll = client["anil_gold"][coll_name]
+                existing = coll.find_one({"channel": channel, "t": t0})
+                if existing is None:
+                    coll.update_one(
+                        {"channel": channel, "t": t0},
+                        {
+                            "$set": {
+                                "channel": channel,
+                                "field": field,
+                                "t": t0,
+                                "o": price,
+                                "h": price,
+                                "l": price,
+                                "c": price,
+                                "v": 1,
+                                "src": src_name,
+                                "updated_at": now,
+                            }
+                        },
+                        upsert=True,
+                    )
+                else:
+                    coll.update_one(
+                        {"channel": channel, "t": t0},
+                        {
+                            "$set": {
+                                "c": price,
+                                "src": src_name,
+                                "updated_at": now,
+                            },
+                            "$max": {"h": price},
+                            "$min": {"l": price},
+                            "$inc": {"v": 1},
+                        },
+                    )
+    except Exception as exc:
+        LOG.debug("append realtime ohlc: %s", exc)
+
+
+async def fetch_faraz_customer_history(
+    session: aiohttp.ClientSession,
+    channel: str,
+    resolution: str,
+    *,
+    countback: int | None = None,
+    to_ts: int | None = None,
+    from_ts: int | None = None,
+    first: bool = True,
+) -> list[dict[str, float]]:
+    """Faraz `/api/customer/trading-view/history` with max countback (via Germany proxy)."""
+    global _FARAZ_CUSTOMER_AUTH_OK
+    if _FARAZ_CUSTOMER_AUTH_OK is False:
+        return []
+    faraz_sym = IRAN_FARAZ_HISTORY_SYMBOL.get(channel)
+    if not faraz_sym:
+        return []
+    now = int(time.time())
+    to_val = int(to_ts if to_ts is not None else now + 86_400)
+    # Wide window; Faraz uses countback as the real limiter.
+    from_val = int(from_ts if from_ts is not None else max(0, to_val - 20 * 365 * 86_400))
+    cap = _faraz_countback_cap(resolution)
+    cb = min(cap, max(1, int(countback if countback is not None else cap)))
+    params = {
+        "symbolName": faraz_sym,
+        "symbol": faraz_sym,
+        "resolution": resolution,
+        "from": str(from_val),
+        "to": str(to_val),
+        "countback": str(cb),
+        "firstDataRequest": "true" if first else "false",
+        "latest": "false",
+        "adjustType": str(FARAZ_ADJUST_TYPE),
+        "json": "true",
+    }
+    headers = _faraz_auth_headers(faraz_sym)
+    urls = [
+        f"{FARAZ_HISTORY_PROXY}/faraz/tv-history",
+        f"{FARAZ_BASE}/api/customer/trading-view/history",
+    ]
+    saw_auth_error = False
+    for url in urls:
+        try:
+            async with session.get(
+                url,
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=60),
+                headers=headers,
+            ) as resp:
+                if resp.status in (401, 403):
+                    saw_auth_error = True
+                    LOG.debug(
+                        "faraz customer history %s %s via %s → %s",
+                        channel,
+                        resolution,
+                        url,
+                        resp.status,
+                    )
+                    continue
+                if resp.status != 200:
+                    LOG.debug(
+                        "faraz customer history %s %s via %s → %s",
+                        channel,
+                        resolution,
+                        url,
+                        resp.status,
+                    )
+                    continue
+                data = await resp.json(content_type=None)
+            if isinstance(data, dict) and data.get("success") is False:
+                saw_auth_error = True
+                continue
+            bars = _parse_faraz_history_payload(data, faraz_sym, channel)
+            if bars:
+                _FARAZ_CUSTOMER_AUTH_OK = True
+                return bars
+        except Exception as exc:
+            LOG.debug("faraz customer history %s %s via %s: %s", channel, resolution, url, exc)
+    if saw_auth_error and _FARAZ_CUSTOMER_AUTH_OK is not True:
+        _FARAZ_CUSTOMER_AUTH_OK = False
+        LOG.warning(
+            "faraz customer history unauthorized — set FARAZ_COOKIE (or FARAZ_TOKEN) "
+            "on Germany faraz-history-proxy / market-ticks for deep countback"
+        )
+    return []
+
+
+async def fetch_faraz_customer_history_all(
+    session: aiohttp.ClientSession,
+    channel: str,
+    resolution: str,
+) -> list[dict[str, float]]:
+    """Page customer history backward with max countback until Faraz has no more."""
+    if _FARAZ_CUSTOMER_AUTH_OK is False:
+        return []
+    cap = _faraz_countback_cap(resolution)
+    merged: dict[int, dict[str, float]] = {}
+    to_ts = int(time.time()) + 86_400
+    first = True
+    for _ in range(40):
+        batch = await fetch_faraz_customer_history(
+            session,
+            channel,
+            resolution,
+            countback=cap,
+            to_ts=to_ts,
+            first=first,
+        )
+        first = False
+        if not batch:
+            break
+        for bar in batch:
+            merged[int(bar["t"])] = bar
+        earliest = min(int(b["t"]) for b in batch)
+        if len(batch) < max(2, cap // 20):
+            # Short page ⇒ likely exhausted.
+            break
+        new_to = earliest - 1
+        if new_to >= to_ts:
+            break
+        to_ts = new_to
+    return [merged[t] for t in sorted(merged)]
 
 
 async def fetch_faraz_chart_history(
@@ -841,12 +1202,27 @@ async def fetch_faraz_chart_history(
     channel: str,
     resolution: str,
 ) -> list[dict[str, float]]:
-    """Deep OHLC from Faraz chart-history (1D/1W/1M).
+    """OHLC from Faraz — prefer customer history (max countback), else public chart-history.
 
     Prefer Germany relay (`FARAZ_HISTORY_PROXY`) — Iran VPS is CF-blocked from faraz.io.
     """
     faraz_sym = IRAN_FARAZ_HISTORY_SYMBOL.get(channel)
     if not faraz_sym:
+        return []
+
+    # 1) Customer trading-view history — one max-countback page (proxy may hold session).
+    customer = await fetch_faraz_customer_history(
+        session,
+        channel,
+        resolution,
+        countback=_faraz_countback_cap(resolution),
+        first=True,
+    )
+    if customer:
+        return customer
+
+    # 2) Public chart-history (D/W/M only, ~200 bars).
+    if resolution not in {"1D", "1W", "1M"}:
         return []
     params = {
         "symbolNames": json.dumps([faraz_sym], separators=(",", ":")),
@@ -878,14 +1254,62 @@ async def fetch_faraz_chart_history(
                 if resp.status != 200:
                     continue
                 data = await resp.json(content_type=None)
-            if not isinstance(data, dict) or data.get("detail"):
-                continue
             bars = _parse_faraz_history_payload(data, faraz_sym, channel)
             if bars:
                 return bars
         except Exception as exc:
             LOG.debug("faraz chart-history %s %s via %s: %s", channel, resolution, url, exc)
     return []
+
+
+async def bootstrap_faraz_history(session: aiohttp.ClientSession) -> None:
+    """Fetch max-countback history once per symbol/resolution and persist to Mongo."""
+    if not IRAN_HISTORY_BOOTSTRAP:
+        return
+    for channel in IRAN_FARAZ_HISTORY_SYMBOL:
+        for resolution in IRAN_BOOTSTRAP_RESOLUTIONS:
+            key = f"{channel}|{resolution}"
+            if key in _IRAN_BOOTSTRAP_DONE:
+                continue
+            try:
+                # Prefer full paged customer history; fall back to public D/W/M.
+                bars = await fetch_faraz_customer_history_all(session, channel, resolution)
+                if not bars:
+                    bars = await fetch_faraz_chart_history(session, channel, resolution)
+                if not bars:
+                    if resolution in {"1D", "1W", "1M"}:
+                        _IRAN_BOOTSTRAP_DONE.add(key)
+                    continue
+                n = await asyncio.to_thread(
+                    persist_faraz_bars,
+                    channel,
+                    resolution,
+                    bars,
+                    src="faraz-bootstrap",
+                )
+                _IRAN_BOOTSTRAP_DONE.add(key)
+                LOG.info(
+                    "faraz bootstrap %s %s bars=%s persisted=%s symbol=%s",
+                    channel,
+                    resolution,
+                    len(bars),
+                    n,
+                    IRAN_FARAZ_HISTORY_SYMBOL.get(channel),
+                )
+            except Exception as exc:
+                LOG.warning("faraz bootstrap %s %s: %s", channel, resolution, exc)
+            await asyncio.sleep(0.15)
+
+
+async def poll_iran_bootstrap(session: aiohttp.ClientSession) -> None:
+    """Run history bootstrap shortly after start, then daily refresh."""
+    await asyncio.sleep(2.0)
+    while True:
+        try:
+            await bootstrap_faraz_history(session)
+        except Exception as exc:
+            LOG.warning("iran bootstrap loop: %s", exc)
+        await asyncio.sleep(86_400.0)
 
 
 def _bucket_price_rows(rows: list[dict[str, Any]], field: str, step: int) -> dict[int, dict[str, float]]:
@@ -1004,12 +1428,19 @@ async def iran_gold_history(request: web.Request) -> web.Response:
     sources: list[str] = []
     buckets: dict[int, dict[str, float]] = {}
 
-    # 1) Faraz multi-year D/W/M (آبشده نقدی 1 / سکه‌ها).
+    # 1) Faraz customer/public history (native symbols, max countback when authed).
     faraz_res = _faraz_resolution_for_step(step)
     if faraz_res:
         faraz_bars = await fetch_faraz_chart_history(session, channel, faraz_res)
         if faraz_bars:
             sources.append(f"faraz:{faraz_res}")
+            await asyncio.to_thread(
+                persist_faraz_bars,
+                channel,
+                faraz_res,
+                faraz_bars,
+                src="faraz-live",
+            )
             for bar in faraz_bars:
                 t0 = int(bar["t"]) - (int(bar["t"]) % step)
                 # When Faraz resolution matches step, keep OHLC; when aggregating
@@ -1036,8 +1467,44 @@ async def iran_gold_history(request: web.Request) -> web.Response:
                         existing["c"] = price
                         existing["v"] += 1
 
-    # 2) Mongo — dense ticks + Anil snapshots + materialized parents (cp-style).
+    # 2) Mongo — bootstrapped faraz_ohlc + dense ticks + parents (cp-style).
     if client is not None:
+        try:
+            fq: dict[str, Any] = {"channel": channel, "c": {"$gt": 0}}
+            if faraz_res:
+                fq["resolution"] = faraz_res
+            if before is not None:
+                fq["t"] = {"$lt": before}
+            stored = list(
+                client["anil_gold"]["faraz_ohlc"]
+                .find(fq)
+                .sort("t", -1)
+                .limit(min(limit * 4, 40_000))
+            )
+            if stored:
+                sources.append("anil_gold.faraz_ohlc")
+                for doc in reversed(stored):
+                    try:
+                        t0 = int(doc["t"]) - (int(doc["t"]) % step)
+                        o = float(doc["o"])
+                        h = float(doc["h"])
+                        l = float(doc["l"])
+                        c = float(doc["c"])
+                        v = float(doc.get("v") or 0)
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    if c <= 0:
+                        continue
+                    existing = buckets.get(t0)
+                    if existing is None:
+                        buckets[t0] = {"t": t0, "o": o, "h": h, "l": l, "c": c, "v": v}
+                    else:
+                        existing["h"] = max(existing["h"], h)
+                        existing["l"] = min(existing["l"], l)
+                        existing["c"] = c
+                        existing["v"] += v
+        except Exception as exc:
+            LOG.debug("faraz_ohlc read: %s", exc)
         docs_per_bar = max(2, step // 5) if step >= 60 else 2
         pull = min(120_000, max(limit * docs_per_bar, limit * 4, 500))
         query: dict[str, Any] = {field: {"$gt": 0}}
@@ -1236,6 +1703,7 @@ async def start_background(app: web.Application) -> None:
         asyncio.create_task(poll_forex(session)),
         asyncio.create_task(poll_iran_gold(session)),
         asyncio.create_task(poll_iran_materialize()),
+        asyncio.create_task(poll_iran_bootstrap(session)),
     ]
 
 
