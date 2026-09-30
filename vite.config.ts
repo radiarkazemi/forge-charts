@@ -6,6 +6,7 @@ function buildProxy(env: Record<string, string>): Record<string, ProxyOptions> {
   const cpTarget = env.VITE_CP_FETCHER_TARGET || "http://185.222.163.116/crypto-api";
   const marketTarget = env.VITE_MARKET_API_TARGET || "http://185.222.163.116/market-api";
   const chartTarget = env.VITE_CP_CHART_TARGET || "http://185.222.163.116/crypto-chart";
+  const vpsOrigin = env.VITE_VPS_ORIGIN || "http://185.222.163.116";
   const cpKey = env.CP_FETCHER_API_KEY || env.MARKET_API_KEY || "";
 
   return {
@@ -36,6 +37,16 @@ function buildProxy(env: Record<string, string>): Record<string, ProxyOptions> {
       changeOrigin: true,
       rewrite: (path) => path.replace(/^\/api\/yahoo/, ""),
       headers: { "User-Agent": "Mozilla/5.0 ForgeCharts" },
+    },
+    // Iran gold history/quote + tick WS (market_ticks.py on VPS :8015)
+    "/iran-gold": {
+      target: vpsOrigin,
+      changeOrigin: true,
+    },
+    "/market-ticks": {
+      target: vpsOrigin,
+      changeOrigin: true,
+      ws: true,
     },
   };
 }

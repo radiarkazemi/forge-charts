@@ -109,6 +109,76 @@ export const DEFAULT_XAU_INSTRUMENT: DemoInstrument = {
   maxLot: 100,
 };
 
+/** Iran domestic gold (IRR) — Faraz آبشده / گرم ۱۸ / سکه. */
+export const DEFAULT_IRAN_GOLD_INSTRUMENT: DemoInstrument = {
+  symbol: "G18",
+  tickSize: 1,
+  /** Total spread in ticks (IRR). ~20k IRR is a small retail-style spread on ~25M گرم. */
+  spreadPoints: 20_000,
+  contractSize: 1,
+  leverage: 100,
+  minLot: 0.01,
+  lotStep: 0.01,
+  maxLot: 100,
+};
+
+const IRAN_GOLD_TICKERS = new Set([
+  "ABSHODE",
+  "MESGHAL17",
+  "G18",
+  "G24",
+  "SEKKE",
+  "SEKKE_EMAMI",
+  "NIM",
+  "ROB",
+  "ONS",
+]);
+
+export function bareDemoTicker(symbol: string): string {
+  return symbol.includes(":") ? symbol.slice(symbol.lastIndexOf(":") + 1) : symbol;
+}
+
+export function isIranGoldTicker(symbol: string): boolean {
+  return IRAN_GOLD_TICKERS.has(bareDemoTicker(symbol).toUpperCase());
+}
+
+/** Resolve demo instrument specs for the charted ticker (keeps leverage from `base`). */
+export function demoInstrumentFor(symbol: string, base: DemoInstrument): DemoInstrument {
+  const bare = bareDemoTicker(symbol);
+  const upper = bare.toUpperCase();
+  if (IRAN_GOLD_TICKERS.has(upper)) {
+    const tickSize = upper === "ONS" ? 0.01 : DEFAULT_IRAN_GOLD_INSTRUMENT.tickSize;
+    const spreadPoints =
+      upper === "ONS" ? 6 : DEFAULT_IRAN_GOLD_INSTRUMENT.spreadPoints;
+    return {
+      ...DEFAULT_IRAN_GOLD_INSTRUMENT,
+      symbol: bare,
+      tickSize,
+      spreadPoints,
+      leverage: base.leverage > 0 ? base.leverage : DEFAULT_IRAN_GOLD_INSTRUMENT.leverage,
+    };
+  }
+  if (upper === "XAUUSD" || upper.startsWith("XAU")) {
+    return {
+      ...DEFAULT_XAU_INSTRUMENT,
+      symbol: bare,
+      leverage: base.leverage > 0 ? base.leverage : DEFAULT_XAU_INSTRUMENT.leverage,
+      spreadPoints: base.spreadPoints > 0 ? base.spreadPoints : DEFAULT_XAU_INSTRUMENT.spreadPoints,
+    };
+  }
+  return { ...base, symbol: bare };
+}
+
+/** Format bid/ask for the trade band (IRR integers vs FX decimals). */
+export function formatDemoPrice(n: number | undefined | null, tickSize = 0.01): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  const digits = tickSize >= 1 ? 0 : tickSize >= 0.01 ? 2 : 5;
+  return n.toLocaleString("en-US", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
 export function bidAskFromMid(
   mid: number,
   instrument: DemoInstrument,

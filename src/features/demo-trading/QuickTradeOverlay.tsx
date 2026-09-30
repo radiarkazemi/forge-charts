@@ -5,6 +5,7 @@ import type { CSSProperties, ChangeEvent } from "react";
 import { useEffect, useState, type RefObject } from "react";
 import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
+import { formatDemoPrice } from "./types";
 
 /** Height of the legend band reserved for Sell/Buy (TV broker slot). */
 const TRADE_BAND_PX = 36;
@@ -39,8 +40,9 @@ export function QuickTradeOverlay({
   const symbol = useStore(chart.state, (s) => s.symbol);
   const ready = useStore(chart.state, (s) => s.ready);
   const quote = useStore(quotes.quotes, (q) => q[symbol]);
-  const mid = snap.space.lastPrice ?? quote?.price ?? null;
+  const mid = demoTrading.midForSymbol(symbol, quote?.price ?? null);
   const q = demoTrading.quotes(mid);
+  const tickSize = snap.instrument.tickSize;
   const [anchor, setAnchor] = useState<Anchor | null>(null);
   const [qtyDraft, setQtyDraft] = useState(String(snap.qty));
 
@@ -111,7 +113,7 @@ export function QuickTradeOverlay({
     border: 0,
     cursor: "pointer",
     height: 32,
-    minWidth: 72,
+    minWidth: tickSize >= 1 ? 96 : 72,
     padding: "2px 8px",
     borderRadius: 3,
     color: "#fff",
@@ -122,6 +124,7 @@ export function QuickTradeOverlay({
     flexDirection: "column",
     justifyContent: "center",
     boxShadow: "0 1px 2px rgba(0,0,0,0.35)",
+    fontVariantNumeric: "tabular-nums",
   };
 
   return (
@@ -140,7 +143,7 @@ export function QuickTradeOverlay({
       data-testid="forge-chart-trade"
     >
       <button type="button" onClick={() => openTicket("sell")} style={{ ...btn, background: "#f23645" }}>
-        <span style={{ fontWeight: 700, fontSize: 12 }}>{formatPrice(q?.bid)}</span>
+        <span style={{ fontWeight: 700, fontSize: 12 }}>{formatDemoPrice(q?.bid, tickSize)}</span>
         <span style={{ fontWeight: 600, fontSize: 9, letterSpacing: 0.3 }}>SELL</span>
       </button>
       <Box
@@ -178,16 +181,11 @@ export function QuickTradeOverlay({
         }}
       />
       <button type="button" onClick={() => openTicket("buy")} style={{ ...btn, background: "#2962ff" }}>
-        <span style={{ fontWeight: 700, fontSize: 12 }}>{formatPrice(q?.ask)}</span>
+        <span style={{ fontWeight: 700, fontSize: 12 }}>{formatDemoPrice(q?.ask, tickSize)}</span>
         <span style={{ fontWeight: 600, fontSize: 9, letterSpacing: 0.3 }}>BUY</span>
       </button>
     </Box>
   );
-}
-
-function formatPrice(n: number | undefined): string {
-  if (n == null || !Number.isFinite(n)) return "—";
-  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function chartDocs(): Document[] {

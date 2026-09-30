@@ -52,7 +52,17 @@ const SEEDS: readonly Seed[] = [
   ["XAGUSD", "Silver Spot / U.S. Dollar", "FXPRO", "commodity", 3],
   ["USOIL", "WTI Crude Oil", "TVC", "commodity", 2],
   ["SPX", "S&P 500", "SP", "index", 2],
+  // Iran domestic gold — Faraz (آبشده نقدی 1 = abshodeNaghdi, گرم ۱۸, سکه‌ها)
+  ["ABSHODE", "آبشده نقدی 1", "IRAN", "commodity", 0],
+  ["G18", "گرم طلا ۱۸ عیار", "IRAN", "commodity", 0],
+  ["G24", "طلای ۲۴ عیار", "IRAN", "commodity", 0],
+  ["SEKKE", "سکه امامی", "IRAN", "commodity", 0],
+  ["NIM", "نیم سکه", "IRAN", "commodity", 0],
+  ["ROB", "ربع سکه", "IRAN", "commodity", 0],
+  ["ONS", "انس جهانی (بازار ایران)", "IRAN", "commodity", 2],
 ];
+
+const TEHRAN = "Asia/Tehran";
 
 function sessionFor(type: SymbolType): { session: string; timezone: string } {
   switch (type) {
@@ -73,7 +83,12 @@ function sessionFor(type: SymbolType): { session: string; timezone: string } {
 }
 
 function toSymbol([ticker, name, exchange, type, pricePrecision]: Seed): SymbolInfo {
-  return { ticker, name, exchange, type, pricePrecision, ...sessionFor(type) };
+  const base = { ticker, name, exchange, type, pricePrecision, ...sessionFor(type) };
+  // Iran gold quotes stream continuously from TGJU/Anil — keep session open for 1S ticks.
+  if (exchange.toUpperCase() === "IRAN" || exchange.toUpperCase() === "TGJU") {
+    return { ...base, session: SESSION_24X7, timezone: TEHRAN };
+  }
+  return base;
 }
 
 /** In-memory reference data. Swap for an API-backed repository without touching callers. */

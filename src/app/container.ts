@@ -14,6 +14,7 @@ import {
   BrowserNotifier,
   CpFetcherProvider,
   GermanyMarketProvider,
+  IranGoldProvider,
   generateId,
   LocalSaveLoadAdapter,
   LocalStorageAdapter,
@@ -49,8 +50,8 @@ export interface Services {
 }
 
 function buildProviders(config: AppConfig): MarketDataProvider[] {
-  // Germany Market Price API first — BINANCE + FOREXCOM/FXPRO (XAU) real OHLC.
-  const providers: MarketDataProvider[] = [new GermanyMarketProvider()];
+  // Iran domestic gold (آبشده / گرم ۱۸ / سکه) before international feeds.
+  const providers: MarketDataProvider[] = [new IranGoldProvider(), new GermanyMarketProvider()];
   if (config.cpFetcherEnabled) providers.push(new CpFetcherProvider());
   // Direct Binance is often geo-blocked from the VPS; Yahoo is delayed fallback.
   providers.push(new BinanceProvider(), new YahooProvider());

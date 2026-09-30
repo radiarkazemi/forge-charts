@@ -27,7 +27,7 @@ export function TradeLinesOverlay({
   const ready = useStore(chart.state, (s) => s.ready);
   const symbol = useStore(chart.state, (s) => s.symbol);
   const quote = useStore(quotes.quotes, (q) => q[symbol]);
-  const mid = snap.space.lastPrice ?? quote?.price ?? null;
+  const mid = demoTrading.midForSymbol(symbol, quote?.price ?? null);
   const [chips, setChips] = useState<ChipLayout[]>([]);
 
   useEffect(() => {

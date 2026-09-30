@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
 import type { EntityId, IPositionLineAdapter, IOrderLineAdapter } from "@/infrastructure/tradingview";
-import { formatUsd, markPriceForSide, unrealizedPnl } from "./types";
+import { formatUsd, isIranGoldTicker, markPriceForSide, unrealizedPnl } from "./types";
 
 type NativeBundle = {
   mode: "native";
@@ -43,7 +43,12 @@ export function useDemoChartLines(enabled = true): void {
   const orderModeRef = useRef<"native" | "shape" | null>(null);
   const nativeOkRef = useRef<boolean | null>(null);
   const midRef = useRef<number | null>(null);
-  midRef.current = snap.space.lastPrice ?? quote?.price ?? null;
+  midRef.current = demoTrading.midForSymbol(symbol, quote?.price ?? null);
+
+  useEffect(() => {
+    if (!enabled) return;
+    demoTrading.onChartSymbol(symbol);
+  }, [demoTrading, enabled, symbol]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -51,6 +56,57 @@ export function useDemoChartLines(enabled = true): void {
     if (quote?.price == null) return;
     demoTrading.onMarkPrice(symbol, quote.price);
   }, [demoTrading, enabled, quote?.price, snap.space.active, symbol]);
+
+  // Iran gold: keep mark glued to Faraz even if the quote book lags a poll cycle.
+  useEffect(() => {
+    if (!enabled || snap.space.active || !isIranGoldTicker(symbol)) return;
+    let cancelled = false;
+    const pull = () => {
+      void fetch("/iran-gold/quote")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((q: { prices?: Record<string, number>; channels?: Record<string, number> } | null) => {
+          if (cancelled || !q) return;
+          const upper = symbol.includes(":")
+            ? symbol.slice(symbol.lastIndexOf(":") + 1).toUpperCase()
+            : symbol.toUpperCase();
+          const fieldByTicker: Record<string, string> = {
+            ABSHODE: "mesghal_17",
+            MESGHAL17: "mesghal_17",
+            G18: "price_18k_per_gram",
+            G24: "price_24k_per_gram",
+            SEKKE: "coin_emami",
+            SEKKE_EMAMI: "coin_emami",
+            NIM: "coin_half",
+            ROB: "coin_quarter",
+            ONS: "ounce_usd",
+          };
+          const channelByTicker: Record<string, string> = {
+            ABSHODE: "iran:abshode",
+            MESGHAL17: "iran:abshode",
+            G18: "iran:g18",
+            G24: "iran:g24",
+            SEKKE: "iran:sekke",
+            SEKKE_EMAMI: "iran:sekke",
+            NIM: "iran:nim",
+            ROB: "iran:rob",
+            ONS: "iran:ons",
+          };
+          const field = fieldByTicker[upper];
+          const channel = channelByTicker[upper];
+          const price = Number(
+            (field && q.prices?.[field]) || (channel && q.channels?.[channel]) || 0,
+          );
+          if (price > 0) demoTrading.onMarkPrice(symbol, price);
+        })
+        .catch(() => undefined);
+    };
+    pull();
+    const id = window.setInterval(pull, 1_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [demoTrading, enabled, snap.space.active, symbol]);
 
   useEffect(() => {
     if (!enabled || !ready) return;
