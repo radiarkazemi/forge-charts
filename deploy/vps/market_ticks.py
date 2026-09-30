@@ -1411,12 +1411,168 @@ async def poll_iran_materialize() -> None:
         await asyncio.sleep(30.0)
 
 
+def _load_iran_history_mongo(
+    channel: str,
+    field: str,
+    step: int,
+    limit: int,
+    before: int | None,
+    faraz_res: str | None,
+) -> tuple[dict[int, dict[str, float]], list[str]]:
+    """Sync Mongo reads for iran history (run via asyncio.to_thread)."""
+    client = mongo_client()
+    sources: list[str] = []
+    buckets: dict[int, dict[str, float]] = {}
+    if client is None:
+        return buckets, sources
+
+    exact_faraz = bool(
+        faraz_res
+        and (
+            step == _parse_step_seconds(faraz_res)
+            or (faraz_res == "1M" and step >= 30 * 86_400)
+            or (faraz_res == "1W" and step == 604_800)
+            or (faraz_res == "1D" and step == 86_400)
+        )
+    )
+
+    def ingest(bar: dict[str, float], *, exact: bool) -> None:
+        t0 = int(bar["t"]) - (int(bar["t"]) % step)
+        if exact:
+            buckets[t0] = {
+                "t": t0,
+                "o": bar["o"],
+                "h": bar["h"],
+                "l": bar["l"],
+                "c": bar["c"],
+                "v": bar.get("v", 0),
+            }
+            return
+        price = float(bar["c"])
+        existing = buckets.get(t0)
+        if existing is None:
+            buckets[t0] = {"t": t0, "o": price, "h": price, "l": price, "c": price, "v": 1}
+        else:
+            existing["h"] = max(existing["h"], price)
+            existing["l"] = min(existing["l"], price)
+            existing["c"] = price
+            existing["v"] += 1
+
+    try:
+        if faraz_res:
+            fq: dict[str, Any] = {"channel": channel, "c": {"$gt": 0}, "resolution": faraz_res}
+            if before is not None:
+                fq["t"] = {"$lt": before}
+            stored = list(
+                client["anil_gold"]["faraz_ohlc"]
+                .find(fq, {"t": 1, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1})
+                .sort("t", -1)
+                .limit(min(limit, 50_000))
+            )
+            if stored:
+                sources.append("anil_gold.faraz_ohlc")
+                for doc in reversed(stored):
+                    try:
+                        ingest(
+                            {
+                                "t": int(doc["t"]),
+                                "o": float(doc["o"]),
+                                "h": float(doc["h"]),
+                                "l": float(doc["l"]),
+                                "c": float(doc["c"]),
+                                "v": float(doc.get("v") or 0),
+                            },
+                            exact=exact_faraz,
+                        )
+                    except (KeyError, TypeError, ValueError):
+                        continue
+
+        # Recent forming bars from parents / ticks (keep pull modest).
+        docs_per_bar = max(2, step // 5) if step >= 60 else 2
+        pull = min(20_000, max(limit * docs_per_bar, limit * 2, 500))
+        query: dict[str, Any] = {field: {"$gt": 0}}
+        if before is not None:
+            from datetime import datetime, timezone
+
+            query["ts"] = {"$lt": datetime.fromtimestamp(before, tz=timezone.utc)}
+        tick_coll = client["anil_gold"]["tick_1s"]
+        hist_coll = client["anil_gold"]["price_history"]
+        rows: list[dict[str, Any]] = []
+        if step < 60:
+            rows = list(
+                tick_coll.find(query, {field: 1, "ts": 1, "ts_unix": 1}).sort("ts", -1).limit(pull)
+            )
+            if rows:
+                sources.append("anil_gold.tick_1s")
+        else:
+            parent_coll = None
+            if step >= 86_400:
+                parent_coll = client["anil_gold"]["ohlc_1d"]
+            elif step >= 3600 and step % 3600 == 0:
+                parent_coll = client["anil_gold"]["ohlc_1h"]
+            elif step >= 60 and step % 60 == 0:
+                parent_coll = client["anil_gold"]["ohlc_1m"]
+            if parent_coll is not None:
+                pq: dict[str, Any] = {"channel": channel, "c": {"$gt": 0}}
+                if before is not None:
+                    pq["t"] = {"$lt": before}
+                parents = list(
+                    parent_coll.find(pq, {"t": 1, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1})
+                    .sort("t", -1)
+                    .limit(min(limit, 20_000))
+                )
+                if parents:
+                    sources.append(parent_coll.name)
+                    for doc in reversed(parents):
+                        try:
+                            ingest(
+                                {
+                                    "t": int(doc["t"]),
+                                    "o": float(doc["o"]),
+                                    "h": float(doc["h"]),
+                                    "l": float(doc["l"]),
+                                    "c": float(doc["c"]),
+                                    "v": float(doc.get("v") or 0),
+                                },
+                                exact=(step <= 60) or exact_faraz,
+                            )
+                        except (KeyError, TypeError, ValueError):
+                            continue
+            recent = list(
+                tick_coll.find(query, {field: 1, "ts": 1, "ts_unix": 1})
+                .sort("ts", -1)
+                .limit(min(4_000, pull))
+            )
+            if recent:
+                rows.extend(recent)
+                sources.append("anil_gold.tick_1s")
+            if len(buckets) < min(limit, 200):
+                hist_rows = list(hist_coll.find(query, {field: 1, "ts": 1}).sort("ts", -1).limit(pull))
+                if hist_rows:
+                    rows.extend(hist_rows)
+                    sources.append("anil_gold.price_history")
+
+        if rows:
+            mongo_buckets = _bucket_price_rows(rows, field, step)
+            for t0, bar in mongo_buckets.items():
+                existing = buckets.get(t0)
+                if existing is None:
+                    buckets[t0] = bar
+                else:
+                    existing["h"] = max(existing["h"], bar["h"])
+                    existing["l"] = min(existing["l"], bar["l"])
+                    existing["c"] = bar["c"]
+                    existing["v"] += bar["v"]
+    except Exception as exc:
+        LOG.warning("iran history mongo: %s", exc)
+    return buckets, sources
+
+
 async def iran_gold_history(request: web.Request) -> web.Response:
-    """OHLC for iran:* — Faraz deep D/W/M + Mongo tick_1s/price_history/ohlc_* (cp depths).
+    """OHLC for iran:* — Mongo faraz_ohlc first, optional Faraz fill-in.
 
     Query: symbol=ABSHODE|G18|…, interval=1S|1|5|15|60|1D|1W|1M, limit, before.
     """
-    client = mongo_client()
     session: aiohttp.ClientSession = request.app["session"]
 
     raw_symbol = str(request.query.get("symbol") or request.query.get("channel") or "G18").strip()
@@ -1443,76 +1599,19 @@ async def iran_gold_history(request: web.Request) -> web.Response:
     limit = _iran_history_limit(step, int(request.query.get("limit") or 500))
     before_raw = request.query.get("before")
     before = int(float(before_raw)) if before_raw not in (None, "") else None
-
-    sources: list[str] = []
-    buckets: dict[int, dict[str, float]] = {}
     faraz_res = _faraz_resolution_for_step(step)
 
-    def _ingest_bar(bar: dict[str, float], *, exact: bool) -> None:
-        t0 = int(bar["t"]) - (int(bar["t"]) % step)
-        if exact:
-            buckets[t0] = {
-                "t": t0,
-                "o": bar["o"],
-                "h": bar["h"],
-                "l": bar["l"],
-                "c": bar["c"],
-                "v": bar.get("v", 0),
-            }
-            return
-        price = float(bar["c"])
-        existing = buckets.get(t0)
-        if existing is None:
-            buckets[t0] = {"t": t0, "o": price, "h": price, "l": price, "c": price, "v": 1}
-        else:
-            existing["h"] = max(existing["h"], price)
-            existing["l"] = min(existing["l"], price)
-            existing["c"] = price
-            existing["v"] += 1
-
-    exact_faraz = bool(
-        faraz_res
-        and (
-            step == _parse_step_seconds(faraz_res)
-            or (faraz_res == "1M" and step >= 30 * 86_400)
-            or (faraz_res == "1W" and step == 604_800)
-            or (faraz_res == "1D" and step == 86_400)
-        )
+    buckets, sources = await asyncio.to_thread(
+        _load_iran_history_mongo,
+        channel,
+        field,
+        step,
+        limit,
+        before,
+        faraz_res,
     )
 
-    # 1) Serve bootstrapped Mongo first (fast path — avoid blocking on Faraz).
-    if client is not None and faraz_res:
-        try:
-            fq: dict[str, Any] = {"channel": channel, "c": {"$gt": 0}, "resolution": faraz_res}
-            if before is not None:
-                fq["t"] = {"$lt": before}
-            stored = list(
-                client["anil_gold"]["faraz_ohlc"]
-                .find(fq)
-                .sort("t", -1)
-                .limit(min(max(limit * 4, limit), 80_000))
-            )
-            if stored:
-                sources.append("anil_gold.faraz_ohlc")
-                for doc in reversed(stored):
-                    try:
-                        _ingest_bar(
-                            {
-                                "t": int(doc["t"]),
-                                "o": float(doc["o"]),
-                                "h": float(doc["h"]),
-                                "l": float(doc["l"]),
-                                "c": float(doc["c"]),
-                                "v": float(doc.get("v") or 0),
-                            },
-                            exact=exact_faraz,
-                        )
-                    except (KeyError, TypeError, ValueError):
-                        continue
-        except Exception as exc:
-            LOG.debug("faraz_ohlc read: %s", exc)
-
-    # 2) Live Faraz only when local store is thin (bootstrap / cold start).
+    # Live Faraz only when local store is thin (cold start).
     if faraz_res and len(buckets) < max(50, min(limit, 500) // 2):
         faraz_bars = await fetch_faraz_chart_history(session, channel, faraz_res)
         if faraz_bars:
@@ -1524,96 +1623,32 @@ async def iran_gold_history(request: web.Request) -> web.Response:
                 faraz_bars,
                 src="faraz-live",
             )
+            exact = step == _parse_step_seconds(faraz_res) or (
+                faraz_res == "1M" and step >= 30 * 86_400
+            ) or (faraz_res == "1W" and step == 604_800) or (faraz_res == "1D" and step == 86_400)
             for bar in faraz_bars:
-                _ingest_bar(bar, exact=exact_faraz)
-
-    # 3) Mongo — dense ticks + parents (cp-style) for recent forming bars.
-    if client is not None:
-        docs_per_bar = max(2, step // 5) if step >= 60 else 2
-        pull = min(120_000, max(limit * docs_per_bar, limit * 4, 500))
-        query: dict[str, Any] = {field: {"$gt": 0}}
-        if before is not None:
-            from datetime import datetime, timezone
-
-            query["ts"] = {"$lt": datetime.fromtimestamp(before, tz=timezone.utc)}
-        try:
-            tick_coll = client["anil_gold"]["tick_1s"]
-            hist_coll = client["anil_gold"]["price_history"]
-            rows: list[dict[str, Any]] = []
-            if step < 60:
-                rows = list(
-                    tick_coll.find(query, {field: 1, "ts": 1, "ts_unix": 1}).sort("ts", -1).limit(pull)
-                )
-                sources.append("anil_gold.tick_1s")
-                if len(rows) < min(limit, 20):
-                    rows.extend(list(hist_coll.find(query, {field: 1, "ts": 1}).sort("ts", -1).limit(pull)))
-                    sources.append("anil_gold.price_history")
-            else:
-                # Prefer materialized parent candles when present.
-                parent_coll = None
-                if step >= 86_400:
-                    parent_coll = client["anil_gold"]["ohlc_1d"]
-                elif step >= 3600 and step % 3600 == 0:
-                    parent_coll = client["anil_gold"]["ohlc_1h"]
-                elif step >= 60 and step % 60 == 0:
-                    parent_coll = client["anil_gold"]["ohlc_1m"]
-                if parent_coll is not None:
-                    pq: dict[str, Any] = {"channel": channel, "c": {"$gt": 0}}
-                    if before is not None:
-                        pq["t"] = {"$lt": before}
-                    parents = list(parent_coll.find(pq).sort("t", -1).limit(min(limit * 4, 40_000)))
-                    if parents:
-                        sources.append(parent_coll.name)
-                        for doc in reversed(parents):
-                            try:
-                                t0 = int(doc["t"]) - (int(doc["t"]) % step)
-                                o = float(doc["o"])
-                                h = float(doc["h"])
-                                l = float(doc["l"])
-                                c = float(doc["c"])
-                                v = float(doc.get("v") or 0)
-                            except (KeyError, TypeError, ValueError):
-                                continue
-                            existing = buckets.get(t0)
-                            if existing is None:
-                                buckets[t0] = {"t": t0, "o": o, "h": h, "l": l, "c": c, "v": v}
-                            else:
-                                # Merge parent into coarser TF.
-                                if step > 60:
-                                    existing["h"] = max(existing["h"], h)
-                                    existing["l"] = min(existing["l"], l)
-                                    existing["c"] = c
-                                    existing["v"] += v
-                                else:
-                                    buckets[t0] = {"t": t0, "o": o, "h": h, "l": l, "c": c, "v": v}
-
-                rows = list(hist_coll.find(query, {field: 1, "ts": 1}).sort("ts", -1).limit(pull))
-                sources.append("anil_gold.price_history")
-                recent = list(
-                    tick_coll.find(query, {field: 1, "ts": 1, "ts_unix": 1})
-                    .sort("ts", -1)
-                    .limit(min(8_000, pull))
-                )
-                if recent:
-                    rows.extend(recent)
-                    sources.append("anil_gold.tick_1s")
-
-            mongo_buckets = _bucket_price_rows(rows, field, step)
-            for t0, bar in mongo_buckets.items():
-                existing = buckets.get(t0)
-                if existing is None:
-                    buckets[t0] = bar
+                t0 = int(bar["t"]) - (int(bar["t"]) % step)
+                if exact:
+                    buckets[t0] = {
+                        "t": t0,
+                        "o": bar["o"],
+                        "h": bar["h"],
+                        "l": bar["l"],
+                        "c": bar["c"],
+                        "v": bar.get("v", 0),
+                    }
                 else:
-                    # Prefer denser mongo for recent overlapping buckets.
-                    existing["h"] = max(existing["h"], bar["h"])
-                    existing["l"] = min(existing["l"], bar["l"])
-                    existing["c"] = bar["c"]
-                    existing["v"] += bar["v"]
-        except Exception as exc:
-            LOG.warning("iran history mongo: %s", exc)
-            if not buckets:
-                return web.json_response({"detail": "mongo query failed"}, status=503)
-    elif not buckets:
+                    price = float(bar["c"])
+                    existing = buckets.get(t0)
+                    if existing is None:
+                        buckets[t0] = {"t": t0, "o": price, "h": price, "l": price, "c": price, "v": 1}
+                    else:
+                        existing["h"] = max(existing["h"], price)
+                        existing["l"] = min(existing["l"], price)
+                        existing["c"] = price
+                        existing["v"] += 1
+
+    if not buckets and mongo_client() is None:
         return web.json_response({"detail": "pymongo unavailable"}, status=503)
 
     ordered = sorted(buckets.values(), key=lambda b: b["t"])
