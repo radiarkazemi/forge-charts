@@ -955,65 +955,73 @@ def persist_faraz_bars(
     try:
         from datetime import datetime, timezone
 
+        from pymongo import UpdateOne
+
         faraz_sym = IRAN_FARAZ_HISTORY_SYMBOL.get(channel, "")
         field = IRAN_FIELD_BY_CHANNEL.get(channel, "")
         now = datetime.now(tz=timezone.utc)
-        written = 0
         # Canonical deep store — every resolution.
         base = client["anil_gold"]["faraz_ohlc"]
+        base_ops: list[UpdateOne] = []
+        parent_ops: list[UpdateOne] = []
+        parent = _ohlc_coll_for_resolution(resolution)
         for bar in bars:
             t = int(bar["t"])
-            base.update_one(
-                {"channel": channel, "resolution": resolution, "t": t},
-                {
-                    "$set": {
-                        "channel": channel,
-                        "faraz_symbol": faraz_sym,
-                        "field": field,
-                        "resolution": resolution,
-                        "t": t,
-                        "o": float(bar["o"]),
-                        "h": float(bar["h"]),
-                        "l": float(bar["l"]),
-                        "c": float(bar["c"]),
-                        "v": float(bar.get("v") or 0),
-                        "src": src,
-                        "updated_at": now,
-                    }
-                },
-                upsert=True,
+            payload = {
+                "channel": channel,
+                "faraz_symbol": faraz_sym,
+                "field": field,
+                "resolution": resolution,
+                "t": t,
+                "o": float(bar["o"]),
+                "h": float(bar["h"]),
+                "l": float(bar["l"]),
+                "c": float(bar["c"]),
+                "v": float(bar.get("v") or 0),
+                "src": src,
+                "updated_at": now,
+            }
+            base_ops.append(
+                UpdateOne(
+                    {"channel": channel, "resolution": resolution, "t": t},
+                    {"$set": payload},
+                    upsert=True,
+                )
             )
-            written += 1
+            if parent:
+                parent_ops.append(
+                    UpdateOne(
+                        {"channel": channel, "t": t},
+                        {
+                            "$set": {
+                                "channel": channel,
+                                "field": field,
+                                "t": t,
+                                "o": payload["o"],
+                                "h": payload["h"],
+                                "l": payload["l"],
+                                "c": payload["c"],
+                                "v": payload["v"],
+                                "src": src,
+                                "updated_at": now,
+                            }
+                        },
+                        upsert=True,
+                    )
+                )
+        batch = 1000
+        for i in range(0, len(base_ops), batch):
+            base.bulk_write(base_ops[i : i + batch], ordered=False)
         base.create_index(
             [("channel", 1), ("resolution", 1), ("t", -1)],
             background=True,
         )
-        # Also mirror into cp-style parent collections for 1m/1h/1d.
-        parent = _ohlc_coll_for_resolution(resolution)
-        if parent:
+        if parent and parent_ops:
             coll = client["anil_gold"][parent]
-            for bar in bars:
-                t = int(bar["t"])
-                coll.update_one(
-                    {"channel": channel, "t": t},
-                    {
-                        "$set": {
-                            "channel": channel,
-                            "field": field,
-                            "t": t,
-                            "o": float(bar["o"]),
-                            "h": float(bar["h"]),
-                            "l": float(bar["l"]),
-                            "c": float(bar["c"]),
-                            "v": float(bar.get("v") or 0),
-                            "src": src,
-                            "updated_at": now,
-                        }
-                    },
-                    upsert=True,
-                )
+            for i in range(0, len(parent_ops), batch):
+                coll.bulk_write(parent_ops[i : i + batch], ordered=False)
             coll.create_index([("channel", 1), ("t", -1)], background=True)
-        return written
+        return len(base_ops)
     except Exception as exc:
         LOG.warning("persist faraz bars %s %s: %s", channel, resolution, exc)
         return 0
@@ -1285,6 +1293,12 @@ async def bootstrap_faraz_history(session: aiohttp.ClientSession) -> None:
     """Fetch max-countback history once per symbol/resolution and persist to Mongo."""
     if not IRAN_HISTORY_BOOTSTRAP:
         return
+    LOG.info(
+        "faraz bootstrap start symbols=%s resolutions=%s cookie=%s",
+        len(IRAN_FARAZ_HISTORY_SYMBOL),
+        len(IRAN_BOOTSTRAP_RESOLUTIONS),
+        bool(FARAZ_COOKIE or FARAZ_TOKEN),
+    )
     for channel in IRAN_FARAZ_HISTORY_SYMBOL:
         for resolution in IRAN_BOOTSTRAP_RESOLUTIONS:
             key = f"{channel}|{resolution}"
@@ -1367,6 +1381,8 @@ def materialize_iran_ohlc_bases() -> None:
     try:
         from datetime import datetime, timezone
 
+        from pymongo import UpdateOne
+
         tick_coll = client["anil_gold"]["tick_1s"]
         now = int(time.time())
         # Keep ~3 days of dense ticks for 1m materialization each pass.
@@ -1374,29 +1390,35 @@ def materialize_iran_ohlc_bases() -> None:
         rows = list(tick_coll.find({"ts": {"$gte": since}}).sort("ts", 1).limit(200_000))
         if not rows:
             return
+        now_dt = datetime.now(tz=timezone.utc)
         for step, coll_name in ((60, "ohlc_1m"), (3600, "ohlc_1h"), (86_400, "ohlc_1d")):
             coll = client["anil_gold"][coll_name]
+            ops: list[UpdateOne] = []
             for field, channel in IRAN_FIELDS.items():
                 buckets = _bucket_price_rows(rows, field, step)
                 for t0, bar in buckets.items():
-                    coll.update_one(
-                        {"channel": channel, "t": int(t0)},
-                        {
-                            "$set": {
-                                "channel": channel,
-                                "field": field,
-                                "t": int(t0),
-                                "o": bar["o"],
-                                "h": bar["h"],
-                                "l": bar["l"],
-                                "c": bar["c"],
-                                "v": bar["v"],
-                                "src": "faraz",
-                                "updated_at": datetime.now(tz=timezone.utc),
-                            }
-                        },
-                        upsert=True,
+                    ops.append(
+                        UpdateOne(
+                            {"channel": channel, "t": int(t0)},
+                            {
+                                "$set": {
+                                    "channel": channel,
+                                    "field": field,
+                                    "t": int(t0),
+                                    "o": bar["o"],
+                                    "h": bar["h"],
+                                    "l": bar["l"],
+                                    "c": bar["c"],
+                                    "v": bar["v"],
+                                    "src": "faraz",
+                                    "updated_at": now_dt,
+                                }
+                            },
+                            upsert=True,
+                        )
                     )
+            for i in range(0, len(ops), 1000):
+                coll.bulk_write(ops[i : i + 1000], ordered=False)
             coll.create_index([("channel", 1), ("t", -1)], background=True)
     except Exception as exc:
         LOG.debug("iran ohlc materialize: %s", exc)
