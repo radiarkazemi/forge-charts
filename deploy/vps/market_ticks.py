@@ -122,6 +122,8 @@ IRAN_BOOTSTRAP_RESOLUTIONS = (
 )
 _IRAN_BOOTSTRAP_DONE: set[str] = set()
 _FARAZ_CUSTOMER_AUTH_OK: bool | None = None
+# channel|resolution -> monotonic time of last live/tail merge into response path
+_FARAZ_HISTORY_LIVE_AT: dict[str, float] = {}
 # Aliases so clients can subscribe with friendlier names.
 IRAN_ALIASES: dict[str, str] = {
     "iran:mesghal": "iran:abshode",
@@ -1045,8 +1047,18 @@ def persist_faraz_bars(
         return 0
 
 
+# Resolutions updated on every live Faraz tick (keeps faraz_ohlc from going stale).
+_IRAN_LIVE_RES_STEPS: tuple[tuple[str, int], ...] = (
+    ("1", 60),
+    ("5", 300),
+    ("15", 900),
+    ("60", 3600),
+    ("240", 14_400),
+)
+
+
 def append_realtime_ohlc(quote: dict[str, float], src_name: str, ts: int) -> None:
-    """Fold each live Faraz tick into forming 1m/1h/1d candles (cp_fetcher-style)."""
+    """Fold each live Faraz tick into forming candles + faraz_ohlc (all live TFs)."""
     client = mongo_client()
     if client is None:
         return
@@ -1054,14 +1066,20 @@ def append_realtime_ohlc(quote: dict[str, float], src_name: str, ts: int) -> Non
         from datetime import datetime, timezone
 
         now = datetime.now(tz=timezone.utc)
+        now_ts = int(time.time())
         for field, channel in IRAN_FIELDS.items():
             price = float(quote.get(field) or 0)
             if price <= 0:
                 continue
+            faraz_sym = IRAN_FARAZ_HISTORY_SYMBOL.get(channel, "")
+            # Parent cp-style collections — only the forming bucket (never rewrite closed bars).
             for step, coll_name in ((60, "ohlc_1m"), (3600, "ohlc_1h"), (86_400, "ohlc_1d")):
-                t0 = ts - (ts % step)
+                wall_t = _align_iran_bar_time(now_ts, step)
+                t0 = _align_iran_bar_time(ts, step)
+                if t0 != wall_t:
+                    continue
                 coll = client["anil_gold"][coll_name]
-                existing = coll.find_one({"channel": channel, "t": t0})
+                existing = coll.find_one({"channel": channel, "t": t0}, {"_id": 1})
                 if existing is None:
                     coll.update_one(
                         {"channel": channel, "t": t0},
@@ -1084,6 +1102,53 @@ def append_realtime_ohlc(quote: dict[str, float], src_name: str, ts: int) -> Non
                 else:
                     coll.update_one(
                         {"channel": channel, "t": t0},
+                        {
+                            "$set": {
+                                "c": price,
+                                "src": src_name,
+                                "updated_at": now,
+                            },
+                            "$max": {"h": price},
+                            "$min": {"l": price},
+                            "$inc": {"v": 1},
+                        },
+                    )
+            # Canonical Faraz store — forming bucket only. Closed minutes are owned by
+            # Faraz customer history (tail/live refresh); ticks must not reshape them.
+            base = client["anil_gold"]["faraz_ohlc"]
+            for resolution, step in _IRAN_LIVE_RES_STEPS:
+                wall_t = _align_iran_bar_time(now_ts, step)
+                t0 = _align_iran_bar_time(ts, step)
+                if t0 != wall_t:
+                    continue
+                existing = base.find_one(
+                    {"channel": channel, "resolution": resolution, "t": t0},
+                    {"_id": 1},
+                )
+                if existing is None:
+                    base.update_one(
+                        {"channel": channel, "resolution": resolution, "t": t0},
+                        {
+                            "$set": {
+                                "channel": channel,
+                                "faraz_symbol": faraz_sym,
+                                "field": field,
+                                "resolution": resolution,
+                                "t": t0,
+                                "o": price,
+                                "h": price,
+                                "l": price,
+                                "c": price,
+                                "v": 1,
+                                "src": src_name,
+                                "updated_at": now,
+                            }
+                        },
+                        upsert=True,
+                    )
+                else:
+                    base.update_one(
+                        {"channel": channel, "resolution": resolution, "t": t0},
                         {
                             "$set": {
                                 "c": price,
@@ -1363,6 +1428,68 @@ async def poll_iran_bootstrap(session: aiohttp.ClientSession) -> None:
         await asyncio.sleep(86_400.0)
 
 
+async def refresh_faraz_recent_tail(session: aiohttp.ClientSession) -> None:
+    """Pull recent customer history so 1m/5m/… stay aligned with Faraz OHLC."""
+    # Prioritize liquid gold symbols + 1m (largest visual impact when store lags).
+    channels = (
+        "iran:g18",
+        "iran:abshode",
+        "iran:g24",
+        "iran:sekke",
+        "iran:nim",
+        "iran:rob",
+        "iran:ons",
+    )
+    specs: tuple[tuple[str, int], ...] = (
+        ("1", 3_000),
+        ("5", 1_500),
+        ("15", 1_000),
+        ("60", 500),
+        ("240", 500),
+    )
+    for resolution, countback in specs:
+        for channel in channels:
+            if channel not in IRAN_FARAZ_HISTORY_SYMBOL:
+                continue
+            try:
+                bars = await fetch_faraz_customer_history(
+                    session,
+                    channel,
+                    resolution,
+                    countback=countback,
+                )
+                if not bars:
+                    continue
+                n = await asyncio.to_thread(
+                    persist_faraz_bars,
+                    channel,
+                    resolution,
+                    bars,
+                    src="faraz-tail",
+                )
+                LOG.info(
+                    "faraz tail %s %s bars=%s persisted=%s",
+                    channel,
+                    resolution,
+                    len(bars),
+                    n,
+                )
+            except Exception as exc:
+                LOG.warning("faraz tail %s %s: %s", channel, resolution, exc)
+            await asyncio.sleep(0.15)
+
+
+async def poll_iran_faraz_tail(session: aiohttp.ClientSession) -> None:
+    """Keep the recent Faraz OHLC tail fresh (fixes 1m freeze after bootstrap)."""
+    await asyncio.sleep(3.0)
+    while True:
+        try:
+            await refresh_faraz_recent_tail(session)
+        except Exception as exc:
+            LOG.warning("iran faraz tail loop: %s", exc)
+        await asyncio.sleep(90.0)
+
+
 def _bucket_price_rows(rows: list[dict[str, Any]], field: str, step: int) -> dict[int, dict[str, float]]:
     buckets: dict[int, dict[str, float]] = {}
     for doc in reversed(rows):
@@ -1505,10 +1632,11 @@ def _load_iran_history_mongo(
             existing["v"] += v
 
     def _merge_tick_into_forming(rows: list[dict[str, Any]]) -> None:
-        """Update only the current/latest Faraz bar from live ticks — never rewrite history."""
+        """Update only the wall-clock forming bar — never invent a long tick-only tail."""
         if not rows:
             return
-        latest_t = max(buckets) if buckets else None
+        wall_t = _align_iran_bar_time(int(time.time()), step)
+        # Allow at most the current bucket (and keep existing Faraz bars untouched).
         for doc in reversed(rows):
             ts_raw = doc.get("ts_unix") or doc.get("ts")
             if ts_raw is None:
@@ -1524,7 +1652,7 @@ def _load_iran_history_mongo(
             if price <= 0:
                 continue
             t0 = _align_iran_bar_time(ts, step)
-            if latest_t is not None and t0 < latest_t:
+            if t0 != wall_t:
                 continue
             existing = buckets.get(t0)
             if existing is None:
@@ -1715,21 +1843,58 @@ async def iran_gold_history(request: web.Request) -> web.Response:
         faraz_res,
     )
 
-    # Live Faraz only on cold start — never refetch when Mongo already has depth.
+    exact = bool(
+        faraz_res
+        and (
+            step == _parse_step_seconds(faraz_res)
+            or (faraz_res == "1M" and step >= 30 * 86_400)
+            or (faraz_res == "1W" and step == 604_800)
+            or (faraz_res == "1D" and step == 86_400)
+        )
+    )
+    # Refresh from Faraz when store is empty, tip is stale, OR a lone realtime
+    # tick sits after a multi-hour hole (append_realtime makes tip look "fresh").
+    need_live = False
     if faraz_res and len(buckets) < min(limit, 50):
-        faraz_bars = await fetch_faraz_chart_history(session, channel, faraz_res)
-        if faraz_bars:
-            sources.append(f"faraz:{faraz_res}")
-            await asyncio.to_thread(
-                persist_faraz_bars,
+        need_live = True
+    elif faraz_res and exact and buckets and before is None:
+        ordered_t = sorted(buckets)
+        latest = ordered_t[-1]
+        now_i = int(time.time())
+        if now_i - latest > max(step * 3, 180):
+            need_live = True
+        else:
+            # A continuous realtime tip can hide a multi-hour hole behind it.
+            # Scan the recent window for any gap >> step.
+            gap_lim = max(step * 5, 600)
+            scan = ordered_t[-min(len(ordered_t), max(80, 7200 // max(step, 1))) :]
+            for i in range(1, len(scan)):
+                if scan[i] - scan[i - 1] > gap_lim:
+                    need_live = True
+                    break
+        # Sub-15m: refresh from Faraz at least every ~45s so OHLC matches Faraz
+        # (tick-formed opens/highs drift within a minute).
+        if not need_live and step <= 900:
+            live_key = f"{channel}|{faraz_res}"
+            if time.monotonic() - _FARAZ_HISTORY_LIVE_AT.get(live_key, 0.0) > 45.0:
+                need_live = True
+
+    if faraz_res and need_live:
+        # Prefer a recent customer page for intraday; chart-history for D/W/M fallback.
+        # Keep countback modest so /iran-gold/history stays snappy; tail poll fills depth.
+        if exact and step < 86_400:
+            cb = 500 if step <= 60 else 400 if step <= 900 else 300
+            faraz_bars = await fetch_faraz_customer_history(
+                session,
                 channel,
                 faraz_res,
-                faraz_bars,
-                src="faraz-live",
+                countback=min(_faraz_countback_cap(faraz_res), cb),
             )
-            exact = step == _parse_step_seconds(faraz_res) or (
-                faraz_res == "1M" and step >= 30 * 86_400
-            ) or (faraz_res == "1W" and step == 604_800) or (faraz_res == "1D" and step == 86_400)
+        else:
+            faraz_bars = await fetch_faraz_chart_history(session, channel, faraz_res)
+        if faraz_bars:
+            sources.append(f"faraz:{faraz_res}")
+            _FARAZ_HISTORY_LIVE_AT[f"{channel}|{faraz_res}"] = time.monotonic()
             for bar in faraz_bars:
                 t0 = int(bar["t"]) if exact else _align_iran_bar_time(int(bar["t"]), step)
                 if exact:
@@ -1751,6 +1916,16 @@ async def iran_gold_history(request: web.Request) -> web.Response:
                         existing["l"] = min(existing["l"], price)
                         existing["c"] = price
                         existing["v"] += 1
+            # Persist off the request path so charts are not blocked by Mongo bulk writes.
+            asyncio.create_task(
+                asyncio.to_thread(
+                    persist_faraz_bars,
+                    channel,
+                    faraz_res,
+                    faraz_bars,
+                    src="faraz-live",
+                )
+            )
 
     if not buckets and mongo_client() is None:
         return web.json_response({"detail": "pymongo unavailable"}, status=503)
@@ -1867,6 +2042,7 @@ async def start_background(app: web.Application) -> None:
         asyncio.create_task(poll_iran_gold(session)),
         asyncio.create_task(poll_iran_materialize()),
         asyncio.create_task(poll_iran_bootstrap(session)),
+        asyncio.create_task(poll_iran_faraz_tail(session)),
     ]
 
 
