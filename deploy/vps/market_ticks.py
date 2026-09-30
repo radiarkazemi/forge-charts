@@ -68,7 +68,7 @@ SOURCE_PRIORITY = {"tv": 40, "iran": 30, "mongo": 20, "germany": 10, "cache": 0}
 SOURCE_HOLD_MS = {"tv": 1_200, "iran": 900, "mongo": 400, "germany": 250}
 
 # Iran gold fields → market-ticks channels (Faraz only).
-# abshodeNaghdi (Faraz) ≈ آبشده نقدی / مثقال ۱۷
+# Faraz `abshodeNaghdi` = آبشده نقدی 1 (نقدی تهران). نقدی 2 = abshodeNaghdiShanbei.
 IRAN_FIELDS: dict[str, str] = {
     "mesghal_17": "iran:abshode",
     "price_18k_per_gram": "iran:g18",
@@ -79,11 +79,23 @@ IRAN_FIELDS: dict[str, str] = {
     "ounce_usd": "iran:ons",
 }
 IRAN_FIELD_BY_CHANNEL = {v: k for k, v in IRAN_FIELDS.items()}
+# Faraz trading-view chart-history symbol per channel (G18/G24 derived from abshode).
+IRAN_FARAZ_HISTORY_SYMBOL: dict[str, str] = {
+    "iran:abshode": "abshodeNaghdi",
+    "iran:g18": "abshodeNaghdi",
+    "iran:g24": "abshodeNaghdi",
+    "iran:sekke": "sekkeNewEstjt",
+    "iran:nim": "nimSekkeEstjt",
+    "iran:rob": "robSekkeEstjt",
+    "iran:ons": "FOREXCOM_XAUUSD",
+}
 # Aliases so clients can subscribe with friendlier names.
 IRAN_ALIASES: dict[str, str] = {
     "iran:mesghal": "iran:abshode",
     "iran:mesghal17": "iran:abshode",
     "iran:abshodenaghdi": "iran:abshode",
+    "iran:abshode1": "iran:abshode",
+    "iran:abshodenaghdi1": "iran:abshode",
     "iran:gram18": "iran:g18",
     "iran:18k": "iran:g18",
     "iran:gram24": "iran:g24",
@@ -93,6 +105,13 @@ IRAN_ALIASES: dict[str, str] = {
     "iran:half": "iran:nim",
     "iran:quarter": "iran:rob",
     "iran:ounce": "iran:ons",
+}
+# cp_fetcher-style history depths (bars).
+IRAN_HISTORY_DEPTH = {
+    "seconds": 20_000,
+    "1m": 20_000,
+    "5m": 10_000,
+    "default": 5_000,
 }
 _MONGO_CLIENT: Any = None
 
@@ -685,25 +704,20 @@ def persist_iran_tick_1s(quote: dict[str, float], src_name: str, ts: int) -> Non
 async def poll_iran_gold(session: aiohttp.ClientSession) -> None:
     """Push Iran gold ticks every IRAN_POLL seconds (Faraz only).
 
-    Always force-broadcast so 1S charts keep a forming bar even when the quote
-    is flat between Faraz updates. Also warm-poll + persist 1s ticks continuously
-    so history densifies even before a browser subscribes.
+    Mirrors cp_fetcher realtime: continuous poll → persist → force WS ticks.
+    Always updates LAST for every iran:* channel (cache replay on subscribe)
+    and force-broadcasts to live subscribers so 1S forming bars never stall.
     """
     while True:
         try:
-            async with LOCK:
-                channels = [c for c, sockets in SUBS.items() if c.startswith("iran:") and sockets]
             quote_src = await fetch_iran_quote(session)
             if quote_src:
                 quote, src_name = quote_src
                 ts = int(time.time())
                 src = f"iran:{src_name}"
                 persist_iran_tick_1s(quote, src_name, ts)
-                # WS-broadcast only when subscribed; persist always for 1S history.
-                for channel in channels:
-                    field = IRAN_FIELD_BY_CHANNEL.get(channel)
-                    if not field:
-                        continue
+                # Warm LAST + push to any live WS subscribers (cp_fetcher-style).
+                for field, channel in IRAN_FIELDS.items():
                     price = float(quote.get(field) or 0)
                     if price <= 0:
                         continue
@@ -721,85 +735,132 @@ def _parse_step_seconds(interval: str) -> int:
         return max(1, int(raw[:-1] or 1)) * 86_400
     if raw.endswith("W") and (not raw[:-1] or raw[:-1].isdigit()):
         return max(1, int(raw[:-1] or 1)) * 604_800
+    # Month (TradingView `1M`) — approx 30d. Must be before bare-digit minutes.
+    if raw.endswith("M") and (not raw[:-1] or raw[:-1].isdigit()) and not raw.endswith("SM"):
+        return max(1, int(raw[:-1] or 1)) * 30 * 86_400
     if raw.isdigit():
         return max(1, int(raw)) * 60
     return 60
 
 
-async def iran_gold_history(request: web.Request) -> web.Response:
-    """OHLC from anil_gold.price_history for iran:* symbols.
+def _iran_history_limit(step: int, requested: int) -> int:
+    if step < 60:
+        cap = IRAN_HISTORY_DEPTH["seconds"]
+    elif step == 60:
+        cap = IRAN_HISTORY_DEPTH["1m"]
+    elif step == 300:
+        cap = IRAN_HISTORY_DEPTH["5m"]
+    else:
+        cap = IRAN_HISTORY_DEPTH["default"]
+    return min(cap, max(1, requested))
 
-    Query: symbol=ABSHODE|G18|… (or channel iran:abshode), interval=1S|1|5|15|60|1D,
-    limit, before (unix seconds exclusive).
-    """
-    client = mongo_client()
-    if client is None:
-        return web.json_response({"detail": "pymongo unavailable"}, status=503)
 
-    raw_symbol = str(request.query.get("symbol") or request.query.get("channel") or "G18").strip()
-    channel = normalize_channel(raw_symbol if ":" in raw_symbol else f"iran:{raw_symbol.lower()}")
-    if not channel:
-        # ticker aliases used by the chart client
-        ticker_map = {
-            "ABSHODE": "iran:abshode",
-            "MESGHAL17": "iran:abshode",
-            "G18": "iran:g18",
-            "G24": "iran:g24",
-            "SEKKE": "iran:sekke",
-            "SEKKE_EMAMI": "iran:sekke",
-            "NIM": "iran:nim",
-            "ROB": "iran:rob",
-            "ONS": "iran:ons",
-        }
-        channel = ticker_map.get(raw_symbol.upper())
-    if not channel or channel not in IRAN_FIELD_BY_CHANNEL:
-        return web.json_response({"detail": f"unknown iran symbol {raw_symbol}"}, status=400)
+def _faraz_resolution_for_step(step: int) -> str | None:
+    """Faraz public chart-history only serves 1D / 1W / 1M cleanly."""
+    if step >= 30 * 86_400:
+        return "1M"
+    if step >= 7 * 86_400:
+        return "1W"
+    if step >= 86_400:
+        return "1D"
+    return None
 
-    field = IRAN_FIELD_BY_CHANNEL[channel]
-    step = _parse_step_seconds(str(request.query.get("interval") or "1"))
-    limit = min(20_000, max(1, int(request.query.get("limit") or 500)))
-    before_raw = request.query.get("before")
-    before = int(float(before_raw)) if before_raw not in (None, "") else None
 
-    # Prefer dense 1s ticks; fall back to Anil price_history (~3–9s snapshots).
-    # Minute+ bars need many snapshots per candle (~step/9 docs each).
-    docs_per_bar = max(2, step // 5) if step >= 60 else 2
-    pull = min(80_000, max(limit * docs_per_bar, limit * 4, 500))
-    query: dict[str, Any] = {field: {"$gt": 0}}
-    if before is not None:
-        from datetime import datetime, timezone
+def _mesghal_to_g18(mesghal: float) -> float:
+    if mesghal <= 0:
+        return 0.0
+    return float(int(round((mesghal * 750 / 705) / 4.608)))
 
-        query["ts"] = {"$lt": datetime.fromtimestamp(before, tz=timezone.utc)}
 
-    source_name = "anil_gold.tick_1s"
+def _mesghal_to_g24(mesghal: float) -> float:
+    g18 = _mesghal_to_g18(mesghal)
+    if g18 <= 0:
+        return 0.0
+    return float(int(round(g18 * 999 / 750)))
+
+
+def _transform_faraz_ohlc(channel: str, o: float, h: float, l: float, c: float) -> tuple[float, float, float, float] | None:
+    """Map Faraz abshode/coin OHLC onto the chart channel’s price scale."""
+    if channel in ("iran:abshode", "iran:sekke", "iran:nim", "iran:rob", "iran:ons"):
+        return o, h, l, c
+    if channel == "iran:g18":
+        vals = [_mesghal_to_g18(x) for x in (o, h, l, c)]
+    elif channel == "iran:g24":
+        vals = [_mesghal_to_g24(x) for x in (o, h, l, c)]
+    else:
+        return None
+    if any(v <= 0 for v in vals):
+        return None
+    # After nonlinear transform, re-order high/low.
+    oo, hh, ll, cc = vals
+    return oo, max(oo, hh, ll, cc), min(oo, hh, ll, cc), cc
+
+
+async def fetch_faraz_chart_history(
+    session: aiohttp.ClientSession,
+    channel: str,
+    resolution: str,
+) -> list[dict[str, float]]:
+    """Deep OHLC from Faraz `/api/public/trading-view/chart-history` (1D/1W/1M)."""
+    faraz_sym = IRAN_FARAZ_HISTORY_SYMBOL.get(channel)
+    if not faraz_sym:
+        return []
     try:
-        tick_coll = client["anil_gold"]["tick_1s"]
-        hist_coll = client["anil_gold"]["price_history"]
-        # Seconds: prefer dense tick_1s. Minutes+: prefer long price_history, splice recent ticks.
-        if step < 60:
-            rows = list(
-                tick_coll.find(query, {field: 1, "ts": 1, "ts_unix": 1}).sort("ts", -1).limit(pull)
-            )
-            if len(rows) < min(limit, 20):
-                older = list(hist_coll.find(query, {field: 1, "ts": 1}).sort("ts", -1).limit(pull))
-                rows.extend(older)
-                source_name = "anil_gold.tick_1s+price_history" if rows else "anil_gold.price_history"
-            if not rows:
-                rows = list(hist_coll.find(query, {field: 1, "ts": 1}).sort("ts", -1).limit(pull))
-                source_name = "anil_gold.price_history"
-        else:
-            rows = list(hist_coll.find(query, {field: 1, "ts": 1}).sort("ts", -1).limit(pull))
-            source_name = "anil_gold.price_history"
-            recent = list(
-                tick_coll.find(query, {field: 1, "ts": 1, "ts_unix": 1}).sort("ts", -1).limit(min(2_000, pull))
-            )
-            if recent:
-                rows.extend(recent)
-                source_name = "anil_gold.price_history+tick_1s"
+        async with session.get(
+            f"{FARAZ_BASE}/api/public/trading-view/chart-history",
+            params={
+                "symbolNames": json.dumps([faraz_sym], separators=(",", ":")),
+                "resolution": resolution,
+                "cache": "true",
+            },
+            timeout=aiohttp.ClientTimeout(total=20),
+            headers={
+                "Accept": "application/json",
+                "Origin": FARAZ_BASE,
+                "Referer": f"{FARAZ_BASE}/markets/gold-currency/{faraz_sym}",
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                ),
+            },
+        ) as resp:
+            if resp.status != 200:
+                return []
+            data = await resp.json(content_type=None)
+        entry = data.get(faraz_sym) if isinstance(data, dict) else None
+        if not isinstance(entry, dict):
+            return []
+        ts_list = entry.get("t") or []
+        o_list = entry.get("o") or []
+        h_list = entry.get("h") or []
+        l_list = entry.get("l") or []
+        c_list = entry.get("c") or []
+        v_list = entry.get("v") or []
+        out: list[dict[str, float]] = []
+        for i, t_raw in enumerate(ts_list):
+            try:
+                t = int(t_raw)
+                o = float(o_list[i])
+                h = float(h_list[i])
+                l = float(l_list[i])
+                c = float(c_list[i])
+                v = float(v_list[i]) if i < len(v_list) else 0.0
+            except (IndexError, TypeError, ValueError):
+                continue
+            transformed = _transform_faraz_ohlc(channel, o, h, l, c)
+            if not transformed:
+                continue
+            oo, hh, ll, cc = transformed
+            if cc <= 0:
+                continue
+            out.append({"t": t, "o": oo, "h": hh, "l": ll, "c": cc, "v": v})
+        return out
     except Exception as exc:
-        LOG.warning("iran history mongo: %s", exc)
-        return web.json_response({"detail": "mongo query failed"}, status=503)
+        LOG.debug("faraz chart-history %s %s: %s", channel, resolution, exc)
+        return []
 
+
+def _bucket_price_rows(rows: list[dict[str, Any]], field: str, step: int) -> dict[int, dict[str, float]]:
     buckets: dict[int, dict[str, float]] = {}
     for doc in reversed(rows):
         ts_raw = doc.get("ts_unix") or doc.get("ts")
@@ -824,6 +885,217 @@ async def iran_gold_history(request: web.Request) -> web.Response:
             bar["l"] = min(bar["l"], price)
             bar["c"] = price
             bar["v"] += 1
+    return buckets
+
+
+def materialize_iran_ohlc_bases() -> None:
+    """Bucket recent tick_1s into 1m/1h/1d collections (cp_fetcher-style parents)."""
+    client = mongo_client()
+    if client is None:
+        return
+    try:
+        from datetime import datetime, timezone
+
+        tick_coll = client["anil_gold"]["tick_1s"]
+        now = int(time.time())
+        # Keep ~3 days of dense ticks for 1m materialization each pass.
+        since = datetime.fromtimestamp(now - 3 * 86_400, tz=timezone.utc)
+        rows = list(tick_coll.find({"ts": {"$gte": since}}).sort("ts", 1).limit(200_000))
+        if not rows:
+            return
+        for step, coll_name in ((60, "ohlc_1m"), (3600, "ohlc_1h"), (86_400, "ohlc_1d")):
+            coll = client["anil_gold"][coll_name]
+            for field, channel in IRAN_FIELDS.items():
+                buckets = _bucket_price_rows(rows, field, step)
+                for t0, bar in buckets.items():
+                    coll.update_one(
+                        {"channel": channel, "t": int(t0)},
+                        {
+                            "$set": {
+                                "channel": channel,
+                                "field": field,
+                                "t": int(t0),
+                                "o": bar["o"],
+                                "h": bar["h"],
+                                "l": bar["l"],
+                                "c": bar["c"],
+                                "v": bar["v"],
+                                "src": "faraz",
+                                "updated_at": datetime.now(tz=timezone.utc),
+                            }
+                        },
+                        upsert=True,
+                    )
+            coll.create_index([("channel", 1), ("t", -1)], background=True)
+    except Exception as exc:
+        LOG.debug("iran ohlc materialize: %s", exc)
+
+
+async def poll_iran_materialize() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(materialize_iran_ohlc_bases)
+        except Exception as exc:
+            LOG.debug("iran materialize loop: %s", exc)
+        await asyncio.sleep(30.0)
+
+
+async def iran_gold_history(request: web.Request) -> web.Response:
+    """OHLC for iran:* — Faraz deep D/W/M + Mongo tick_1s/price_history/ohlc_* (cp depths).
+
+    Query: symbol=ABSHODE|G18|…, interval=1S|1|5|15|60|1D|1W|1M, limit, before.
+    """
+    client = mongo_client()
+    session: aiohttp.ClientSession = request.app["session"]
+
+    raw_symbol = str(request.query.get("symbol") or request.query.get("channel") or "G18").strip()
+    channel = normalize_channel(raw_symbol if ":" in raw_symbol else f"iran:{raw_symbol.lower()}")
+    if not channel:
+        ticker_map = {
+            "ABSHODE": "iran:abshode",
+            "MESGHAL17": "iran:abshode",
+            "G18": "iran:g18",
+            "G24": "iran:g24",
+            "SEKKE": "iran:sekke",
+            "SEKKE_EMAMI": "iran:sekke",
+            "NIM": "iran:nim",
+            "ROB": "iran:rob",
+            "ONS": "iran:ons",
+        }
+        channel = ticker_map.get(raw_symbol.upper())
+    if not channel or channel not in IRAN_FIELD_BY_CHANNEL:
+        return web.json_response({"detail": f"unknown iran symbol {raw_symbol}"}, status=400)
+
+    field = IRAN_FIELD_BY_CHANNEL[channel]
+    interval_raw = str(request.query.get("interval") or "1")
+    step = _parse_step_seconds(interval_raw)
+    limit = _iran_history_limit(step, int(request.query.get("limit") or 500))
+    before_raw = request.query.get("before")
+    before = int(float(before_raw)) if before_raw not in (None, "") else None
+
+    sources: list[str] = []
+    buckets: dict[int, dict[str, float]] = {}
+
+    # 1) Faraz multi-year D/W/M (آبشده نقدی 1 / سکه‌ها).
+    faraz_res = _faraz_resolution_for_step(step)
+    if faraz_res:
+        faraz_bars = await fetch_faraz_chart_history(session, channel, faraz_res)
+        if faraz_bars:
+            sources.append(f"faraz:{faraz_res}")
+            for bar in faraz_bars:
+                t0 = int(bar["t"]) - (int(bar["t"]) % step)
+                # When Faraz resolution matches step, keep OHLC; when aggregating
+                # (e.g. requesting 1W from 1D feed), rebuild from closes.
+                if step == _parse_step_seconds(faraz_res) or (
+                    faraz_res == "1M" and step >= 30 * 86_400
+                ) or (faraz_res == "1W" and step == 604_800) or (faraz_res == "1D" and step == 86_400):
+                    buckets[t0] = {
+                        "t": t0,
+                        "o": bar["o"],
+                        "h": bar["h"],
+                        "l": bar["l"],
+                        "c": bar["c"],
+                        "v": bar.get("v", 0),
+                    }
+                else:
+                    price = float(bar["c"])
+                    existing = buckets.get(t0)
+                    if existing is None:
+                        buckets[t0] = {"t": t0, "o": price, "h": price, "l": price, "c": price, "v": 1}
+                    else:
+                        existing["h"] = max(existing["h"], price)
+                        existing["l"] = min(existing["l"], price)
+                        existing["c"] = price
+                        existing["v"] += 1
+
+    # 2) Mongo — dense ticks + Anil snapshots + materialized parents (cp-style).
+    if client is not None:
+        docs_per_bar = max(2, step // 5) if step >= 60 else 2
+        pull = min(120_000, max(limit * docs_per_bar, limit * 4, 500))
+        query: dict[str, Any] = {field: {"$gt": 0}}
+        if before is not None:
+            from datetime import datetime, timezone
+
+            query["ts"] = {"$lt": datetime.fromtimestamp(before, tz=timezone.utc)}
+        try:
+            tick_coll = client["anil_gold"]["tick_1s"]
+            hist_coll = client["anil_gold"]["price_history"]
+            rows: list[dict[str, Any]] = []
+            if step < 60:
+                rows = list(
+                    tick_coll.find(query, {field: 1, "ts": 1, "ts_unix": 1}).sort("ts", -1).limit(pull)
+                )
+                sources.append("anil_gold.tick_1s")
+                if len(rows) < min(limit, 20):
+                    rows.extend(list(hist_coll.find(query, {field: 1, "ts": 1}).sort("ts", -1).limit(pull)))
+                    sources.append("anil_gold.price_history")
+            else:
+                # Prefer materialized parent candles when present.
+                parent_coll = None
+                if step >= 86_400:
+                    parent_coll = client["anil_gold"]["ohlc_1d"]
+                elif step >= 3600 and step % 3600 == 0:
+                    parent_coll = client["anil_gold"]["ohlc_1h"]
+                elif step >= 60 and step % 60 == 0:
+                    parent_coll = client["anil_gold"]["ohlc_1m"]
+                if parent_coll is not None:
+                    pq: dict[str, Any] = {"channel": channel, "c": {"$gt": 0}}
+                    if before is not None:
+                        pq["t"] = {"$lt": before}
+                    parents = list(parent_coll.find(pq).sort("t", -1).limit(min(limit * 4, 40_000)))
+                    if parents:
+                        sources.append(parent_coll.name)
+                        for doc in reversed(parents):
+                            try:
+                                t0 = int(doc["t"]) - (int(doc["t"]) % step)
+                                o = float(doc["o"])
+                                h = float(doc["h"])
+                                l = float(doc["l"])
+                                c = float(doc["c"])
+                                v = float(doc.get("v") or 0)
+                            except (KeyError, TypeError, ValueError):
+                                continue
+                            existing = buckets.get(t0)
+                            if existing is None:
+                                buckets[t0] = {"t": t0, "o": o, "h": h, "l": l, "c": c, "v": v}
+                            else:
+                                # Merge parent into coarser TF.
+                                if step > 60:
+                                    existing["h"] = max(existing["h"], h)
+                                    existing["l"] = min(existing["l"], l)
+                                    existing["c"] = c
+                                    existing["v"] += v
+                                else:
+                                    buckets[t0] = {"t": t0, "o": o, "h": h, "l": l, "c": c, "v": v}
+
+                rows = list(hist_coll.find(query, {field: 1, "ts": 1}).sort("ts", -1).limit(pull))
+                sources.append("anil_gold.price_history")
+                recent = list(
+                    tick_coll.find(query, {field: 1, "ts": 1, "ts_unix": 1})
+                    .sort("ts", -1)
+                    .limit(min(8_000, pull))
+                )
+                if recent:
+                    rows.extend(recent)
+                    sources.append("anil_gold.tick_1s")
+
+            mongo_buckets = _bucket_price_rows(rows, field, step)
+            for t0, bar in mongo_buckets.items():
+                existing = buckets.get(t0)
+                if existing is None:
+                    buckets[t0] = bar
+                else:
+                    # Prefer denser mongo for recent overlapping buckets.
+                    existing["h"] = max(existing["h"], bar["h"])
+                    existing["l"] = min(existing["l"], bar["l"])
+                    existing["c"] = bar["c"]
+                    existing["v"] += bar["v"]
+        except Exception as exc:
+            LOG.warning("iran history mongo: %s", exc)
+            if not buckets:
+                return web.json_response({"detail": "mongo query failed"}, status=503)
+    elif not buckets:
+        return web.json_response({"detail": "pymongo unavailable"}, status=503)
 
     ordered = sorted(buckets.values(), key=lambda b: b["t"])
     if before is not None:
@@ -834,11 +1106,11 @@ async def iran_gold_history(request: web.Request) -> web.Response:
         {
             "symbol": channel,
             "field": field,
-            "interval": str(request.query.get("interval") or "1"),
+            "interval": interval_raw,
             "step": step,
             "count": len(bars),
             "bars": bars,
-            "source": source_name,
+            "source": "+".join(dict.fromkeys(sources)) or "empty",
         }
     )
 
@@ -935,6 +1207,7 @@ async def start_background(app: web.Application) -> None:
         asyncio.create_task(poll_crypto(session)),
         asyncio.create_task(poll_forex(session)),
         asyncio.create_task(poll_iran_gold(session)),
+        asyncio.create_task(poll_iran_materialize()),
     ]
 
 

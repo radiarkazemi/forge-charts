@@ -10,18 +10,22 @@ import {
 } from "@/domain";
 import type { MarketDataProvider, Unsubscribe } from "@/application";
 import { buildUrl, fetchJson } from "../http/fetch-json";
+import { targetHistoryDepth } from "./cp-chart-history";
 
 /**
- * Iran domestic gold from Faraz (آبشده نقدی / گرم ۱۸ / سکه):
- *   آبشده نقدی (مثقال ۱۷), گرم ۱۸/۲۴, سکه امامی / نیم / ربع, انس
+ * Iran domestic gold from Faraz (آبشده نقدی 1 / گرم ۱۸ / سکه):
+ *   آبشده نقدی 1 (abshodeNaghdi), گرم ۱۸/۲۴, سکه امامی / نیم / ربع, انس
  *
- * History: VPS `/iran-gold/history` ← Mongo `anil_gold.tick_1s` + Faraz snapshots
- * Realtime: VPS `/market-ticks` `iran:*` — Faraz via Germany market-api @ 1s
+ * History: VPS `/iran-gold/history`
+ *   - Faraz trading-view chart-history for 1D / 1W / 1M (multi-year)
+ *   - Mongo `anil_gold.tick_1s` + `price_history` + materialized ohlc_1m/1h/1d
+ * Realtime: VPS `/market-ticks` `iran:*` — same WS tick relay as cp_fetcher crypto/FX
+ *   (Faraz via Germany market-api @ ~1s, force-broadcast forming bars)
  */
 
 const HISTORY_BASE = "/iran-gold/history";
 const QUOTE_BASE = "/iran-gold/quote";
-const REQUEST_TIMEOUT_MS = 15_000;
+const REQUEST_TIMEOUT_MS = 45_000;
 
 export const IRAN_NATIVE_INTERVALS: readonly Interval[] = [
   "1S",
@@ -43,6 +47,7 @@ export const IRAN_NATIVE_INTERVALS: readonly Interval[] = [
   "240",
   "1D",
   "1W",
+  "1M",
 ];
 
 type IranRoute = {
@@ -111,6 +116,7 @@ interface HistoryResponse {
   bars?: unknown[];
   detail?: string;
   count?: number;
+  source?: string;
 }
 
 interface QuoteResponse {
@@ -185,7 +191,7 @@ export class IranGoldProvider implements MarketDataProvider {
     const { unit, count } = parseInterval(interval);
     if (unit === "seconds") return count >= 1 && count <= 45;
     if (unit === "minutes") return count >= 1 && count <= 720;
-    if (unit === "days" || unit === "weeks") return count >= 1;
+    if (unit === "days" || unit === "weeks" || unit === "months") return count >= 1;
     return false;
   }
 
@@ -197,7 +203,9 @@ export class IranGoldProvider implements MarketDataProvider {
     const route = routeFor(symbol);
     if (!route) throw new Error(`iran-gold: unsupported ${symbol.ticker}`);
     const step = intervalSeconds(interval);
-    const limit = Math.min(10_000, Math.max(50, range.countBack + 40));
+    // Same depth targets as cp_fetcher chart history (1m=20k, 5m=10k, else 5k).
+    const target = targetHistoryDepth(interval);
+    const limit = Math.min(target, Math.max(range.countBack + 100, 2_000));
     const json = await fetchJson<HistoryResponse>(
       buildUrl(HISTORY_BASE, {
         symbol: route.ticker,
@@ -214,7 +222,6 @@ export class IranGoldProvider implements MarketDataProvider {
       .filter((b) => b.time < range.to)
       .sort((a, b) => a.time - b.time);
     if (!bars.length) return [];
-    // Ensure bar open times are aligned (server already buckets, but be safe).
     const aligned = bars.map((b) => ({ ...b, time: alignTime(b.time, step) }));
     const byTime = new Map<number, Bar>();
     for (const b of aligned) byTime.set(b.time, b);
@@ -246,6 +253,8 @@ export class IranGoldProvider implements MarketDataProvider {
       const nowSec = Math.floor(Date.now() / 1000);
       let ts = tsSec;
       if (ts > nowSec + 1) ts = nowSec;
+      const maxAgeSec = Math.max(45, step * 3);
+      if (nowSec - ts > maxAgeSec) return;
       lastTickMs = Date.now();
       if (!readyForTicks) {
         pending.push({ price, tsSec: ts });
@@ -255,6 +264,7 @@ export class IranGoldProvider implements MarketDataProvider {
       emit(applyTick(current, price, ts, step));
     };
 
+    // Seed forming bar from deep history (Faraz D/W/M or Mongo), like cp_fetcher.
     void (async () => {
       try {
         const seed = await this.fetchBars(symbol, interval, {
@@ -289,7 +299,7 @@ export class IranGoldProvider implements MarketDataProvider {
       }
     })();
 
-    // Keep 1S… forming while the 1s iran poll is alive.
+    // Seconds: keep forming while the 1s Faraz→market-ticks poll is alive.
     if (parseInterval(interval).unit === "seconds" && typeof window !== "undefined") {
       const quietMs = Math.max(2_500, step * 2_500);
       const clock = window.setInterval(() => {
@@ -312,12 +322,13 @@ export class IranGoldProvider implements MarketDataProvider {
       disposers.push(() => clearInterval(clock));
     }
 
+    // Primary realtime path — same `/market-ticks` WS used by cp_fetcher crypto/FX.
     disposers.push(openMarketTicksSocket(route.channel, onTick));
 
-    // HTTP quote heartbeat if WS is quiet (dev / proxy gaps).
+    // HTTP quote heartbeat if WS is quiet (proxy gaps) — mirrors cp live poll fallback.
     if (typeof window !== "undefined") {
       const poll = window.setInterval(() => {
-        if (Date.now() - lastTickMs < 1_500) return;
+        if (Date.now() - lastTickMs < 1_200) return;
         void fetchJson<QuoteResponse>(QUOTE_BASE, { timeoutMs: 2_000 })
           .then((q) => {
             const price = Number(q.prices?.[route.field] ?? q.channels?.[route.channel] ?? 0);
