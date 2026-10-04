@@ -18,6 +18,10 @@ import {
 } from "./dealing-range";
 import { mountPositionToolIconPatcher } from "./position-tool-icons";
 import { mountHeaderToolbar, type HeaderToolbarApi } from "./header-toolbar";
+import {
+  mountSymbolSearchExchangeReset,
+  purgeStickySymbolSearchFilters,
+} from "./symbol-search-defaults";
 
 export interface TradingViewWidgetDeps {
   readonly controller: ChartController;
@@ -153,10 +157,12 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
     let readyTimer = 0;
     let unmountDealingRange: (() => void) | null = null;
     let unmountPositionIcons: (() => void) | null = null;
+    let unmountSymbolSearchReset: (() => void) | null = null;
     const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches;
     const autosaveKey = isPrimary ? AUTOSAVE_KEY : `${AUTOSAVE_KEY}.pane.${paneIndex}`;
 
     seedDealingRangeTemplate(storage);
+    purgeStickySymbolSearchFilters();
 
     const mount = (Widget: WidgetConstructor, savedState: object | undefined) => {
       try {
@@ -240,6 +246,8 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         });
         unmountPositionIcons?.();
         unmountPositionIcons = mountPositionToolIconPatcher(container);
+        unmountSymbolSearchReset?.();
+        unmountSymbolSearchReset = mountSymbolSearchExchangeReset(container);
         if (isPrimary) {
           widget.subscribe("onAutoSaveNeeded", () => widget?.save((state) => storage.set(autosaveKey, state)));
         }
@@ -308,6 +316,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
       window.clearTimeout(readyTimer);
       unmountDealingRange?.();
       unmountPositionIcons?.();
+      unmountSymbolSearchReset?.();
       controller.detach();
       try {
         widget?.remove();

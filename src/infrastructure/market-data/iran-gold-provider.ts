@@ -113,7 +113,8 @@ function applyTick(current: Bar | null, price: number, tsSec: number, step: numb
 function parsePackedBar(row: unknown): Bar | null {
   if (!Array.isArray(row) || row.length < 5) return null;
   const nums = row.map(Number);
-  const time = nums[0]!;
+  let time = nums[0]!;
+  if (time > 1e12) time = Math.floor(time / 1000);
   const open = nums[1]!;
   const high = nums[2]!;
   const low = nums[3]!;
@@ -227,10 +228,11 @@ export class IranGoldProvider implements MarketDataProvider {
       { timeoutMs: REQUEST_TIMEOUT_MS },
     );
     if (json.detail) throw new Error(json.detail);
+    const before = range.to > 0 ? range.to : Number.POSITIVE_INFINITY;
     const bars = (json.bars ?? [])
       .map(parsePackedBar)
       .filter((b): b is Bar => b !== null)
-      .filter((b) => b.time < range.to)
+      .filter((b) => b.time < before)
       .sort((a, b) => a.time - b.time);
     if (!bars.length) return [];
     const aligned = bars.map((b) => ({ ...b, time: alignTime(b.time, step) }));

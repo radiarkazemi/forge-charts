@@ -82,13 +82,14 @@ export async function fetchCpChartHistory(
   const limit = Math.min(target, Math.max(range.countBack + 100, 2_000));
 
   // Pass TV interval so the server can resolve parent+group (and still accept explicit group).
+  const before = range.to > 0 ? range.to : Number.POSITIVE_INFINITY;
   const url = buildUrl(CHART_HISTORY_BASE, {
     symbol: apiSymbol.toLowerCase(),
     interval,
     timeframe: plan.timeframe,
     group: plan.group,
     limit,
-    before: range.to,
+    before: range.to > 0 ? range.to : undefined,
   });
 
   const json = await fetchJson<ChartHistoryResponse>(url, { timeoutMs: REQUEST_TIMEOUT_MS });
@@ -97,7 +98,7 @@ export async function fetchCpChartHistory(
   const bars = (json.bars ?? [])
     .map(parsePackedBar)
     .filter((b): b is Bar => b !== null)
-    .filter((b) => b.time < range.to)
+    .filter((b) => b.time < before)
     .sort((a, b) => a.time - b.time);
 
   if (!bars.length) return [];

@@ -1,7 +1,7 @@
 /**
- * Watches the Indicators “Dealing Ranges” study and paints Orca-detected
- * dealing-range boxes/lines onto the chart (CL custom studies cannot draw
- * rectangles as plots).
+ * Watches the Indicators “Dealing Ranges” study and paints ICT dealing-range
+ * boxes (HH→LL + BOS after LL / LL→HH + BOS after HH). CL custom studies
+ * cannot draw rectangles as plots, so shapes are created here.
  *
  * Critical: do NOT subscribe to onAutoSaveNeeded — creating shapes fires
  * autosave, which would force-repaint forever and freeze the chart.
@@ -47,6 +47,7 @@ function defaultOpts(): DealingRangesOptions {
     pivotRight: DEALING_RANGES_DEFAULTS.pivotRight,
     extendBars: DEALING_RANGES_DEFAULTS.extendBars,
     breakOnWick: DEALING_RANGES_DEFAULTS.breakOnWick,
+    minRangePct: DEALING_RANGES_DEFAULTS.minRangePct,
   };
 }
 
@@ -113,6 +114,7 @@ export function useDealingRangesStudy(enabled = true): void {
           pivotRight: Math.max(1, Math.floor(num("pivotRight", DEALING_RANGES_DEFAULTS.pivotRight))),
           extendBars: Math.max(1, Math.floor(num("extendBars", DEALING_RANGES_DEFAULTS.extendBars))),
           breakOnWick: bool("breakOnWick", DEALING_RANGES_DEFAULTS.breakOnWick),
+          minRangePct: Math.max(0.05, num("minRangePct", DEALING_RANGES_DEFAULTS.minRangePct)),
         };
       } catch {
         return null;
@@ -123,11 +125,11 @@ export function useDealingRangesStudy(enabled = true): void {
       try {
         const studies = widget.activeChart()?.getAllStudies() ?? [];
         return studies
-          .filter((s) => {
+          .filter((s: { name?: string; id?: string | EntityId }) => {
             const name = `${s.name ?? ""} ${s.id ?? ""}`;
             return /dealing\s*ranges/i.test(name) || /DealingRanges@/i.test(name);
           })
-          .map((s) => s.id as EntityId);
+          .map((s: { id?: string | EntityId }) => s.id as EntityId);
       } catch {
         return [];
       }
@@ -190,7 +192,7 @@ export function useDealingRangesStudy(enabled = true): void {
         const ids =
           cmds.length === 0
             ? ([] as EntityId[])
-            : await paintOrcaOnChart(api, cmds);
+            : await paintOrcaOnChart(api, cmds, { ownerStudyId: studyId });
         if (cancelled || myGen !== genRef.current) {
           for (const id of ids) {
             try {
@@ -256,18 +258,29 @@ export function useDealingRangesStudy(enabled = true): void {
           return;
         }
       }
-      if (/create|remove|price_scale|properties/i.test(eventType) || eventType === "") {
+      // Do not treat empty/unknown events as create — that retriggers exportData
+      // while shapes paint and freezes the chart (candles look like they never load).
+      if (/^(create|remove|price_scale|properties)/i.test(eventType)) {
         scheduleRepaint();
       }
     };
 
     const onStudyProperties = (...args: unknown[]) => {
       const id = String(args[0] ?? "");
+      if (!id) return;
       const ours = findStudyIds().some((s) => String(s) === id);
-      if (ours || !id) scheduleRepaint();
+      if (ours) scheduleRepaint();
     };
 
-    void repaint(true);
+    const kickoff = () => {
+      void repaint(true);
+    };
+    try {
+      widget.activeChart()?.dataReady(kickoff);
+    } catch {
+      kickoff();
+    }
+    const kickoffTimer = window.setTimeout(kickoff, 1_200);
 
     const poll = window.setInterval(() => {
       if (cancelled || busyRef.current) return;
@@ -297,6 +310,7 @@ export function useDealingRangesStudy(enabled = true): void {
       cancelled = true;
       genRef.current += 1;
       window.clearTimeout(studyTimer);
+      window.clearTimeout(kickoffTimer);
       window.clearInterval(poll);
       try {
         widget.unsubscribe("study_event", onStudyEvent as never);

@@ -639,7 +639,9 @@ export class GermanyMarketProvider implements MarketDataProvider {
     // Exclusive `to`: bars at/after `to` belong to already-loaded pages.
     // Return [] (noData) — do NOT throw, or synthetic would invent fake history
     // and TradingView would keep paging forever.
-    const filtered = bars.filter((b) => b.time < range.to).sort((a, b) => a.time - b.time);
+    // `to <= 0` means “latest window” (TV first request sometimes sends 0).
+    const before = range.to > 0 ? range.to : Number.POSITIVE_INFINITY;
+    const filtered = bars.filter((b) => b.time < before).sort((a, b) => a.time - b.time);
     if (!filtered.length) return [];
     return filtered.slice(-Math.max(range.countBack, 1));
   }

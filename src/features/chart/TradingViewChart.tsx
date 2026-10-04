@@ -242,7 +242,8 @@ export function TradingViewChart({
 
   useChartAlertLines(isPrimary ? controller : null, alerts);
   useDemoChartLines(isPrimary);
-  useDealingRangesStudy(isPrimary);
+  // Must run on every pane — header Indicators can migrate the study off pane 0.
+  useDealingRangesStudy(true);
 
   const showReplayToolbar = isPrimary && (replayActive || forceReplayUi);
 
