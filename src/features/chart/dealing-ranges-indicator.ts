@@ -138,13 +138,19 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
     constructor: function (this: {
       main?: (ctx: unknown, input: (i: number) => unknown) => unknown;
       _context?: unknown;
+      _lastClose?: number;
     }) {
       this.main = function (ctx: unknown) {
         this._context = ctx;
-        // Must return a finite price — NaN on a linked price study collapses
-        // the scale and makes the main series candles vanish.
-        // Invisible (transparency 100); real drawings come from useDealingRangesStudy.
-        return [PineJS.Std.close(this._context)];
+        // Must return a finite price — NaN/0 on a linked price study collapses
+        // the scale and makes the main series candles vanish (looks like “no data”).
+        const raw = Number(PineJS.Std.close(this._context));
+        const na =
+          (PineJS.Std as { na?: (v: number) => boolean }).na?.(raw) ?? !Number.isFinite(raw);
+        const v = !na && Number.isFinite(raw) ? raw : (this._lastClose ?? raw);
+        if (Number.isFinite(v) && v !== 0) this._lastClose = v;
+        const out = Number.isFinite(this._lastClose) ? this._lastClose! : 1;
+        return [out];
       };
     } as never,
   };

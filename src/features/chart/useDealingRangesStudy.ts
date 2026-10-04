@@ -258,18 +258,29 @@ export function useDealingRangesStudy(enabled = true): void {
           return;
         }
       }
-      if (/create|remove|price_scale|properties/i.test(eventType) || eventType === "") {
+      // Do not treat empty/unknown events as create — that retriggers exportData
+      // while shapes paint and freezes the chart (candles look like they never load).
+      if (/^(create|remove|price_scale|properties)/i.test(eventType)) {
         scheduleRepaint();
       }
     };
 
     const onStudyProperties = (...args: unknown[]) => {
       const id = String(args[0] ?? "");
+      if (!id) return;
       const ours = findStudyIds().some((s) => String(s) === id);
-      if (ours || !id) scheduleRepaint();
+      if (ours) scheduleRepaint();
     };
 
-    void repaint(true);
+    const kickoff = () => {
+      void repaint(true);
+    };
+    try {
+      widget.activeChart()?.dataReady(kickoff);
+    } catch {
+      kickoff();
+    }
+    const kickoffTimer = window.setTimeout(kickoff, 1_200);
 
     const poll = window.setInterval(() => {
       if (cancelled || busyRef.current) return;
@@ -299,6 +310,7 @@ export function useDealingRangesStudy(enabled = true): void {
       cancelled = true;
       genRef.current += 1;
       window.clearTimeout(studyTimer);
+      window.clearTimeout(kickoffTimer);
       window.clearInterval(poll);
       try {
         widget.unsubscribe("study_event", onStudyEvent as never);

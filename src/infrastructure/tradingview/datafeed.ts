@@ -78,6 +78,12 @@ function toTvBar(bar: Bar) {
   };
 }
 
+/** Charting Library timestamps are unix seconds; some builds send ms or 0. */
+function asUnixSec(value: number, fallback: number): number {
+  if (!Number.isFinite(value) || value <= 0) return fallback;
+  return value > 1e12 ? Math.floor(value / 1000) : Math.floor(value);
+}
+
 function stripExchange(symbolName: string): string {
   const idx = symbolName.lastIndexOf(":");
   return idx >= 0 ? symbolName.slice(idx + 1) : symbolName;
@@ -278,8 +284,9 @@ export class TradingViewDatafeed implements IBasicDataFeed {
         return;
       }
 
-      let from = periodParams.from;
-      let to = periodParams.to;
+      const nowSec = Math.floor(Date.now() / 1000);
+      let from = asUnixSec(periodParams.from, 0);
+      let to = asUnixSec(periodParams.to, nowSec + 60);
       let countBack = periodParams.countBack;
       if (cutoffOn) {
         if (from > cutoff!) {
