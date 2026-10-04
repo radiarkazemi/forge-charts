@@ -11,15 +11,19 @@ export const DEALING_RANGES_STUDY_ID = "DealingRanges@tv-basicstudies-1";
 
 /** Default study inputs (order matches metainfo.inputs). */
 export const DEALING_RANGES_DEFAULTS = {
+  /** Keep few major DRs — high counts flood micro HH→LL noise. */
   maxRanges: 3,
   lookbackDays: 60,
   fromDate: "",
   toDate: "",
   showFibs: true,
-  pivotLeft: 1,
-  pivotRight: 1,
+  /** Wider pivots ≈ swings you would mark by hand. */
+  pivotLeft: 3,
+  pivotRight: 3,
   extendBars: 8,
   breakOnWick: false,
+  /** Ignore tiny legs (percent of mid-price). Gold ~0.4% ≈ major structure. */
+  minRangePct: 0.4,
 } as const;
 
 // Charting Library passes PineJS into custom_indicators_getter; we only need Std.close.
@@ -87,7 +91,7 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
         },
         {
           id: "showFibs",
-          name: "Show 0.618 / 0.786",
+          name: "Show 0.618 / 0.786 (Premium / EQ / Discount always on)",
           defval: DEALING_RANGES_DEFAULTS.showFibs,
           type: "bool",
         },
@@ -97,7 +101,7 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
           defval: DEALING_RANGES_DEFAULTS.pivotLeft,
           type: "integer",
           min: 1,
-          max: 10,
+          max: 30,
         },
         {
           id: "pivotRight",
@@ -105,7 +109,7 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
           defval: DEALING_RANGES_DEFAULTS.pivotRight,
           type: "integer",
           min: 1,
-          max: 10,
+          max: 30,
         },
         {
           id: "extendBars",
@@ -120,6 +124,14 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
           name: "Break on wick",
           defval: DEALING_RANGES_DEFAULTS.breakOnWick,
           type: "bool",
+        },
+        {
+          id: "minRangePct",
+          name: "Min range size (% of price)",
+          defval: DEALING_RANGES_DEFAULTS.minRangePct,
+          type: "float",
+          min: 0.05,
+          max: 20,
         },
       ],
     } as never,

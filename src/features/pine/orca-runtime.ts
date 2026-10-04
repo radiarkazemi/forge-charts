@@ -49,6 +49,11 @@ export interface OrcaInputs {
   readonly toTimeSec: number | null;
   /** When true, skip BOS/MSS lines and setup dots — ranges only. */
   readonly rangesOnly: boolean;
+  /**
+   * Minimum HH↔LL height as % of mid-price. Used by ICT study path to drop
+   * micro swings that would never be drawn by hand (0 = keep all).
+   */
+  readonly minRangePct: number;
 }
 
 const DEFAULTS: OrcaInputs = {
@@ -79,6 +84,7 @@ const DEFAULTS: OrcaInputs = {
   fromTimeSec: null,
   toTimeSec: null,
   rangesOnly: false,
+  minRangePct: 0,
 };
 
 /** Detect the published Orca script (or a close fork). */
@@ -155,6 +161,7 @@ export function parseOrcaInputs(code: string): OrcaInputs {
     fromTimeSec: null,
     toTimeSec: null,
     rangesOnly: false,
+    minRangePct: DEFAULTS.minRangePct,
   };
 }
 
@@ -562,6 +569,8 @@ export interface DealingRangesOptions {
   readonly pivotRight: number;
   readonly extendBars: number;
   readonly breakOnWick: boolean;
+  /** Drop micro legs smaller than this % of mid-price (matches hand-drawn DRs). */
+  readonly minRangePct: number;
 }
 
 /** Build Orca inputs for the Indicators “Dealing Ranges” study. */
@@ -584,6 +593,7 @@ export function dealingRangesInputs(opts: DealingRangesOptions, nowSec = Math.fl
     rangesOnly: true,
     onlySetupCircles: true,
     showOrangeCircles: false,
+    minRangePct: Math.max(0.05, opts.minRangePct),
   };
 }
 
@@ -628,6 +638,16 @@ interface PendingLeg {
   readonly secondBar: number;
 }
 
+/** True when HH↔LL height is large enough to count as a hand-drawn DR. */
+function rangeMeetsMinPct(topP: number, botP: number, minRangePct: number): boolean {
+  const rng = topP - botP;
+  if (!(rng > 0)) return false;
+  if (!(minRangePct > 0)) return true;
+  const mid = (topP + botP) / 2;
+  if (!(mid > 0)) return false;
+  return (rng / mid) * 100 >= minRangePct;
+}
+
 function paintIctRange(
   bars: readonly OrcaBar[],
   inputs: OrcaInputs,
@@ -636,30 +656,70 @@ function paintIctRange(
   startBar: number,
   endBar: number,
   color: string,
-  bullish: boolean,
+  /** Bar of the first extreme (HH for bearish leg, LL for bullish). */
+  firstBar: number,
+  firstPrice: number,
+  /** Bar of the second extreme (LL for bearish leg, HH for bullish). */
+  secondBar: number,
+  secondPrice: number,
 ): DrawCmd[] {
   const x1 = Math.min(startBar, endBar);
   const x2 = Math.min(bars.length - 1, Math.max(startBar, endBar) + inputs.drAhead);
   const mid = (topP + botP) / 2;
   const rng = topP - botP;
   if (!(rng > 0)) return [];
-  // Fib from range high (1.0 Premium) down to range low (0 Discount), same as manual tool.
+  // Same language as the Fib “Dealing Range” tool: Premium at high, Discount at low.
   const y618 = topP - rng * 0.618;
   const y786 = topP - rng * 0.786;
   const t1 = bars[x1]!.time;
   const t2 = bars[x2]!.time;
+  const fBar = Math.max(0, Math.min(bars.length - 1, firstBar));
+  const sBar = Math.max(0, Math.min(bars.length - 1, secondBar));
   const cmds: DrawCmd[] = [
     { kind: "rect", t1, p1: topP, t2, p2: botP, color, fill: color },
+    // Diagonal HH→LL / LL→HH (structure of the dealing range).
+    {
+      kind: "line",
+      t1: bars[fBar]!.time,
+      p1: firstPrice,
+      t2: bars[sBar]!.time,
+      p2: secondPrice,
+      color: "#9E9E9E",
+      width: 1,
+      style: "dashed",
+    },
+    {
+      kind: "line",
+      t1,
+      p1: topP,
+      t2,
+      p2: topP,
+      color: "#ef5350",
+      width: 1,
+      style: "solid",
+      text: "Premium",
+    },
     {
       kind: "line",
       t1,
       p1: mid,
       t2,
       p2: mid,
-      color: inputs.midlineColor,
+      color: "#ff9800",
       width: inputs.midlineWidth,
       style: "dashed",
-      text: bullish ? "EQ (bull DR)" : "EQ (bear DR)",
+      text: "EQ",
+    },
+    {
+      kind: "line",
+      t1,
+      p1: botP,
+      t2,
+      p2: botP,
+      color: "#26a69a",
+      width: 1,
+      style: "solid",
+      text: "Discount",
     },
   ];
   if (inputs.showDrFibs) {
@@ -711,6 +771,11 @@ export function computeIctDealingRanges(bars: readonly OrcaBar[], inputs: OrcaIn
     if (bosBar <= pending.secondBar) return;
     const topP = Math.max(pending.firstPrice, pending.secondPrice);
     const botP = Math.min(pending.firstPrice, pending.secondPrice);
+    // Drop micro legs — same filter as when the HH↔LL candidate was formed.
+    if (!rangeMeetsMinPct(topP, botP, inputs.minRangePct)) {
+      pending = null;
+      return;
+    }
     const topBar = pending.firstPrice >= pending.secondPrice ? pending.firstBar : pending.secondBar;
     const botBar = pending.firstPrice < pending.secondPrice ? pending.firstBar : pending.secondBar;
     const bullish = pending.side === 1;
@@ -723,7 +788,10 @@ export function computeIctDealingRanges(bars: readonly OrcaBar[], inputs: OrcaIn
       Math.min(topBar, botBar),
       Math.max(topBar, botBar, bosBar),
       color,
-      bullish,
+      pending.firstBar,
+      pending.firstPrice,
+      pending.secondBar,
+      pending.secondPrice,
     );
     if (cmds.length) completed.push(cmds);
     pending = null;
@@ -736,8 +804,8 @@ export function computeIctDealingRanges(bars: readonly OrcaBar[], inputs: OrcaIn
 
     if (ph != null) {
       const shBar = i - inputs.right;
-      // New HH starts / refreshes a bearish-leg anchor (HH → later LL).
-      if (!pending) {
+      // Keep the highest HH (hand-drawn majors); do not demote to a pullback high.
+      if (!pending && (anchorHigh == null || ph >= anchorHigh)) {
         anchorHigh = ph;
         anchorHighBar = shBar;
       }
@@ -749,24 +817,27 @@ export function computeIctDealingRanges(bars: readonly OrcaBar[], inputs: OrcaIn
         shBar > anchorLowBar &&
         ph > anchorLow
       ) {
-        pending = {
-          side: 1,
-          firstPrice: anchorLow,
-          firstBar: anchorLowBar,
-          secondPrice: ph,
-          secondBar: shBar,
-        };
-        anchorLow = null;
-        anchorLowBar = null;
-        anchorHigh = null;
-        anchorHighBar = null;
+        if (rangeMeetsMinPct(ph, anchorLow, inputs.minRangePct)) {
+          pending = {
+            side: 1,
+            firstPrice: anchorLow,
+            firstBar: anchorLowBar,
+            secondPrice: ph,
+            secondBar: shBar,
+          };
+          anchorLow = null;
+          anchorLowBar = null;
+          anchorHigh = null;
+          anchorHighBar = null;
+        }
+        // Else: keep LL anchor; ignore this shallow HH and wait for a larger swing.
       }
     }
 
     if (pl != null) {
       const slBar = i - inputs.right;
-      // New LL starts / refreshes a bullish-leg anchor (LL → later HH).
-      if (!pending) {
+      // Keep the lowest LL (hand-drawn majors); do not promote a higher pullback low.
+      if (!pending && (anchorLow == null || pl <= anchorLow)) {
         anchorLow = pl;
         anchorLowBar = slBar;
       }
@@ -778,17 +849,20 @@ export function computeIctDealingRanges(bars: readonly OrcaBar[], inputs: OrcaIn
         slBar > anchorHighBar &&
         pl < anchorHigh
       ) {
-        pending = {
-          side: -1,
-          firstPrice: anchorHigh,
-          firstBar: anchorHighBar,
-          secondPrice: pl,
-          secondBar: slBar,
-        };
-        anchorHigh = null;
-        anchorHighBar = null;
-        anchorLow = null;
-        anchorLowBar = null;
+        if (rangeMeetsMinPct(anchorHigh, pl, inputs.minRangePct)) {
+          pending = {
+            side: -1,
+            firstPrice: anchorHigh,
+            firstBar: anchorHighBar,
+            secondPrice: pl,
+            secondBar: slBar,
+          };
+          anchorHigh = null;
+          anchorHighBar = null;
+          anchorLow = null;
+          anchorLowBar = null;
+        }
+        // Else: keep HH anchor; ignore this shallow LL and wait for a deeper discount.
       }
     }
 
@@ -868,6 +942,7 @@ export async function paintOrcaOnChart(
     } as const;
     try {
       if (cmd.kind === "line" && cmd.t2 != null && cmd.p2 != null) {
+        const label = (cmd.text ?? "").trim();
         const id = await chart.createMultipointShape(
           [
             { time: cmd.t1 as never, price: cmd.p1 },
@@ -880,7 +955,12 @@ export async function paintOrcaOnChart(
               linecolor: stroke,
               linewidth: cmd.width ?? 1,
               linestyle: linestyleMap[cmd.style ?? "solid"],
-              showLabel: false,
+              showLabel: label.length > 0,
+              text: label,
+              textcolor: stroke,
+              fontsize: 11,
+              horzLabelsAlign: "left",
+              vertLabelsAlign: "middle",
             },
           },
         );

@@ -47,6 +47,7 @@ function defaultOpts(): DealingRangesOptions {
     pivotRight: DEALING_RANGES_DEFAULTS.pivotRight,
     extendBars: DEALING_RANGES_DEFAULTS.extendBars,
     breakOnWick: DEALING_RANGES_DEFAULTS.breakOnWick,
+    minRangePct: DEALING_RANGES_DEFAULTS.minRangePct,
   };
 }
 
@@ -113,6 +114,7 @@ export function useDealingRangesStudy(enabled = true): void {
           pivotRight: Math.max(1, Math.floor(num("pivotRight", DEALING_RANGES_DEFAULTS.pivotRight))),
           extendBars: Math.max(1, Math.floor(num("extendBars", DEALING_RANGES_DEFAULTS.extendBars))),
           breakOnWick: bool("breakOnWick", DEALING_RANGES_DEFAULTS.breakOnWick),
+          minRangePct: Math.max(0.05, num("minRangePct", DEALING_RANGES_DEFAULTS.minRangePct)),
         };
       } catch {
         return null;
