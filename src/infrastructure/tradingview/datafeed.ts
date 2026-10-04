@@ -1,5 +1,6 @@
 import { normalizeTicker, parseInterval, isMarketSessionOpen, SYMBOL_TYPE_LABELS, type Bar, type SymbolInfo } from "@/domain";
 import { createStore, type MarketDataService, type Store, type SymbolRepository, type Unsubscribe } from "@/application";
+import { EXCHANGE_PRIORITY } from "@/infrastructure/symbols/static-symbol-repository";
 import type {
   DatafeedConfiguration,
   DatafeedErrorCallback,
@@ -15,6 +16,9 @@ import type {
   SubscribeBarsCallback,
   Timezone,
 } from "./types";
+
+/** Tiny Yahoo demo venues — sticky chips here make Symbol Search look empty. */
+const SPARSE_EXCHANGE_FILTERS = new Set(["NASDAQ", "NYSE", "AMEX", "SP"]);
 
 /** Full TradingView resolution set (seconds → months). */
 export const SUPPORTED_RESOLUTIONS = [
@@ -191,10 +195,22 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   }
 
   onReady(callback: OnReadyCallback): void {
-    const exchanges = [...new Set(this.symbols.all().map((s) => s.exchange))].sort();
+    const present = [...new Set(this.symbols.all().map((s) => s.exchange))];
+    const priority = EXCHANGE_PRIORITY as readonly string[];
+    present.sort((a, b) => {
+      const ia = priority.indexOf(a);
+      const ib = priority.indexOf(b);
+      const ra = ia >= 0 ? ia : priority.length;
+      const rb = ib >= 0 ? ib : priority.length;
+      return ra - rb || a.localeCompare(b);
+    });
     const configuration: DatafeedConfiguration = {
       supported_resolutions: SUPPORTED_RESOLUTIONS,
-      exchanges: [{ value: "", name: "All exchanges", desc: "" }, ...exchanges.map((e) => ({ value: e, name: e, desc: e }))],
+      // Empty value first — default chip must be All exchanges (not NASDAQ).
+      exchanges: [
+        { value: "", name: "All exchanges", desc: "" },
+        ...present.map((e) => ({ value: e, name: e, desc: e })),
+      ],
       symbols_types: [
         { name: "All types", value: "" },
         ...Object.entries(SYMBOL_TYPE_LABELS).map(([value, name]) => ({ name, value })),
@@ -209,17 +225,25 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   searchSymbols(userInput: string, exchange: string, symbolType: string, onResult: SearchSymbolsCallback): void {
     const type = symbolType as SymbolInfo["type"] | "";
     const exchangeNeedle = exchange.trim().toUpperCase();
-    const results = this.symbols
+    const query = userInput.trim();
+    // Sticky NASDAQ (etc.) with an empty query used to hide Iran/FX/crypto — treat as All.
+    const applyExchange =
+      Boolean(exchangeNeedle) && !(SPARSE_EXCHANGE_FILTERS.has(exchangeNeedle) && query.length === 0);
+    let matched = this.symbols
       .search(userInput, type)
-      .filter((s) => !exchangeNeedle || s.exchange.toUpperCase() === exchangeNeedle)
-      .map((s) => ({
-        symbol: s.ticker,
-        full_name: `${s.exchange}:${s.ticker}`,
-        ticker: `${s.exchange}:${s.ticker}`,
-        description: s.name,
-        exchange: s.exchange,
-        type: s.type,
-      }));
+      .filter((s) => !applyExchange || s.exchange.toUpperCase() === exchangeNeedle);
+    // If a real venue filter somehow yields nothing, fall back to unfiltered type search.
+    if (matched.length === 0 && exchangeNeedle) {
+      matched = this.symbols.search(userInput, type);
+    }
+    const results = matched.map((s) => ({
+      symbol: s.ticker,
+      full_name: `${s.exchange}:${s.ticker}`,
+      ticker: `${s.exchange}:${s.ticker}`,
+      description: s.name,
+      exchange: s.exchange,
+      type: s.type,
+    }));
     onResult(results);
   }
 

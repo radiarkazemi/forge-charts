@@ -6,7 +6,32 @@ const UTC = "Etc/UTC";
 
 type Seed = [ticker: string, name: string, exchange: string, type: SymbolType, precision: number];
 
+/**
+ * Featured first — empty Symbol Search should surface live Forge markets
+ * (Iran gold, XAU, majors) before sparse Yahoo demo equities.
+ */
 const SEEDS: readonly Seed[] = [
+  // Iran domestic gold — Faraz
+  ["ABSHODE", "آبشده نقدی 1", "IRAN", "commodity", 0],
+  ["G18", "گرم طلا ۱۸ عیار", "IRAN", "commodity", 0],
+  ["G24", "طلای ۲۴ عیار", "IRAN", "commodity", 0],
+  ["SEKKE", "سکه امامی", "IRAN", "commodity", 0],
+  ["NIM", "نیم سکه", "IRAN", "commodity", 0],
+  ["ROB", "ربع سکه", "IRAN", "commodity", 0],
+  ["ONS", "انس جهانی (بازار ایران)", "IRAN", "commodity", 2],
+  // Gold / FX
+  ["XAUUSD", "Gold Spot / U.S. Dollar", "FOREXCOM", "forex", 2],
+  ["XAUUSD", "Gold Spot / U.S. Dollar", "FXPRO", "forex", 2],
+  ["XAUUSD", "Gold Spot / U.S. Dollar (PAXG)", "BINANCE", "forex", 2],
+  ["GC1!", "Gold Futures", "FOREXCOM", "futures", 2],
+  ["EURUSD", "Euro / U.S. Dollar", "FOREXCOM", "forex", 5],
+  ["GBPUSD", "British Pound / U.S. Dollar", "FOREXCOM", "forex", 5],
+  ["USDJPY", "U.S. Dollar / Japanese Yen", "FOREXCOM", "forex", 3],
+  ["XAGUSD", "Silver Spot / U.S. Dollar", "FOREXCOM", "commodity", 3],
+  ["EURUSD", "Euro / U.S. Dollar", "FXPRO", "forex", 5],
+  ["GBPUSD", "British Pound / U.S. Dollar", "FXPRO", "forex", 5],
+  ["USDJPY", "U.S. Dollar / Japanese Yen", "FXPRO", "forex", 3],
+  ["XAGUSD", "Silver Spot / U.S. Dollar", "FXPRO", "commodity", 3],
   // BINANCE — Germany market-api universe
   ["BTCUSDT", "Bitcoin / Tether", "BINANCE", "crypto", 2],
   ["ETHUSDT", "Ethereum / Tether", "BINANCE", "crypto", 2],
@@ -31,36 +56,36 @@ const SEEDS: readonly Seed[] = [
   ["PAXGUSDT", "PAX Gold / Tether", "BINANCE", "crypto", 2],
   ["BTCUSD", "Bitcoin / U.S. Dollar", "BINANCE", "crypto", 2],
   ["ETHUSD", "Ethereum / U.S. Dollar", "BINANCE", "crypto", 2],
-  // Gold — FOREXCOM first so bare "XAUUSD" still resolves to spot CFD (not PAXG).
-  // Typed as forex so they show under the Forex filter in symbol search.
-  ["XAUUSD", "Gold Spot / U.S. Dollar", "FOREXCOM", "forex", 2],
-  ["XAUUSD", "Gold Spot / U.S. Dollar", "FXPRO", "forex", 2],
-  ["XAUUSD", "Gold Spot / U.S. Dollar (PAXG)", "BINANCE", "forex", 2],
-  ["GC1!", "Gold Futures", "FOREXCOM", "futures", 2],
-  // Broader (Yahoo fallback)
+  ["USOIL", "WTI Crude Oil", "TVC", "commodity", 2],
+  ["SPX", "S&P 500", "SP", "index", 2],
+  // Sparse Yahoo demo equities last (sticky NASDAQ chip used to hide everything else).
   ["AAPL", "Apple Inc.", "NASDAQ", "stock", 2],
   ["MSFT", "Microsoft Corporation", "NASDAQ", "stock", 2],
   ["NVDA", "NVIDIA Corporation", "NASDAQ", "stock", 2],
   ["TSLA", "Tesla, Inc.", "NASDAQ", "stock", 2],
-  ["EURUSD", "Euro / U.S. Dollar", "FOREXCOM", "forex", 5],
-  ["GBPUSD", "British Pound / U.S. Dollar", "FOREXCOM", "forex", 5],
-  ["USDJPY", "U.S. Dollar / Japanese Yen", "FOREXCOM", "forex", 3],
-  ["XAGUSD", "Silver Spot / U.S. Dollar", "FOREXCOM", "commodity", 3],
-  ["EURUSD", "Euro / U.S. Dollar", "FXPRO", "forex", 5],
-  ["GBPUSD", "British Pound / U.S. Dollar", "FXPRO", "forex", 5],
-  ["USDJPY", "U.S. Dollar / Japanese Yen", "FXPRO", "forex", 3],
-  ["XAGUSD", "Silver Spot / U.S. Dollar", "FXPRO", "commodity", 3],
-  ["USOIL", "WTI Crude Oil", "TVC", "commodity", 2],
-  ["SPX", "S&P 500", "SP", "index", 2],
-  // Iran domestic gold — Faraz (آبشده نقدی 1 = abshodeNaghdi, گرم ۱۸, سکه‌ها)
-  ["ABSHODE", "آبشده نقدی 1", "IRAN", "commodity", 0],
-  ["G18", "گرم طلا ۱۸ عیار", "IRAN", "commodity", 0],
-  ["G24", "طلای ۲۴ عیار", "IRAN", "commodity", 0],
-  ["SEKKE", "سکه امامی", "IRAN", "commodity", 0],
-  ["NIM", "نیم سکه", "IRAN", "commodity", 0],
-  ["ROB", "ربع سکه", "IRAN", "commodity", 0],
-  ["ONS", "انس جهانی (بازار ایران)", "IRAN", "commodity", 2],
 ];
+
+/** Prefer these venues in the Symbol Search exchange dropdown. */
+export const EXCHANGE_PRIORITY = ["IRAN", "FOREXCOM", "BINANCE", "FXPRO", "TVC", "SP", "NASDAQ"] as const;
+
+/** Empty-query ranking for Symbol Search (ticker upper-case). */
+const FEATURED_TICKERS = [
+  "ABSHODE",
+  "G18",
+  "SEKKE",
+  "XAUUSD",
+  "BTCUSDT",
+  "ETHUSDT",
+  "EURUSD",
+  "ONS",
+  "G24",
+  "NIM",
+  "ROB",
+  "PAXGUSDT",
+  "GBPUSD",
+  "USDJPY",
+  "XAGUSD",
+] as const;
 
 const TEHRAN = "Asia/Tehran";
 
@@ -91,6 +116,11 @@ function toSymbol([ticker, name, exchange, type, pricePrecision]: Seed): SymbolI
   return base;
 }
 
+function featuredRank(ticker: string): number {
+  const idx = (FEATURED_TICKERS as readonly string[]).indexOf(ticker.toUpperCase());
+  return idx >= 0 ? idx : FEATURED_TICKERS.length + 1;
+}
+
 /** In-memory reference data. Swap for an API-backed repository without touching callers. */
 export class StaticSymbolRepository implements SymbolRepository {
   private readonly symbols: readonly SymbolInfo[];
@@ -119,9 +149,20 @@ export class StaticSymbolRepository implements SymbolRepository {
     return this.symbols
       .filter((s) => symbolMatches(s, needle, type))
       .sort((a, b) => {
+        // Empty query: featured markets first (Iran / gold / crypto).
+        if (!needle) {
+          const fa = featuredRank(a.ticker);
+          const fb = featuredRank(b.ticker);
+          if (fa !== fb) return fa - fb;
+          return a.ticker.localeCompare(b.ticker) || a.exchange.localeCompare(b.exchange);
+        }
         const aStarts = a.ticker.toLowerCase().startsWith(needle) ? 0 : 1;
         const bStarts = b.ticker.toLowerCase().startsWith(needle) ? 0 : 1;
-        return aStarts - bStarts || a.ticker.localeCompare(b.ticker) || a.exchange.localeCompare(b.exchange);
+        if (aStarts !== bStarts) return aStarts - bStarts;
+        const fa = featuredRank(a.ticker);
+        const fb = featuredRank(b.ticker);
+        if (fa !== fb) return fa - fb;
+        return a.ticker.localeCompare(b.ticker) || a.exchange.localeCompare(b.exchange);
       });
   }
 }
