@@ -1,7 +1,7 @@
 /**
  * Charting Library custom study: “Dealing Ranges”.
  * Appears in Indicators. Plots are inert — boxes/lines are painted by
- * `useDealingRangesStudy` using the Orca MSS/setup-circle detector.
+ * `useDealingRangesStudy` using ICT HH→LL (BOS after LL) / LL→HH (BOS after HH).
  */
 
 import type { CustomIndicator } from "@/infrastructure/tradingview";
@@ -31,8 +31,9 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
       _metainfoVersion: 53,
       id: DEALING_RANGES_STUDY_ID as never,
       name: DEALING_RANGES_STUDY_NAME,
-      description: DEALING_RANGES_STUDY_NAME,
-      shortDescription: "Dealing Ranges",
+      description:
+        "ICT dealing ranges: HH→LL then BOS after LL (bearish), or LL→HH then BOS after HH (bullish).",
+      shortDescription: "ICT Dealing Ranges (HH→LL + BOS)",
       isCustomIndicator: true,
       is_price_study: true,
       linkedToSeries: true,

@@ -602,11 +602,228 @@ function parseDateEndSec(iso: string): number | null {
 }
 
 /**
- * Detect dealing ranges with Orca’s MSS/setup-circle model and keep up to
- * `maxRanges` inside the requested date window. Structure lines are omitted.
+ * ICT Dealing Range (Indicators study).
+ *
+ * Correct sequence (bearish leg — matches HH → LL → BOS):
+ *   1. Confirmed swing high (HH)
+ *   2. Later confirmed swing low (LL)
+ *   3. BOS after that LL (close/wick breaks the LL) → range HH→LL is valid
+ *
+ * Bullish mirror: LL → HH → BOS above HH → range LL→HH.
+ *
+ * Range is the container for premium / EQ / discount (0.5 mid + optional 0.618/0.786).
+ * This replaces the older Orca 4-circle pattern detector for the study path;
+ * `computeOrcaDraws` remains for pasted Orca Pine scripts.
  */
 export function computeDealingRanges(bars: readonly OrcaBar[], opts: DealingRangesOptions): DrawCmd[] {
-  return computeOrcaDraws(bars, dealingRangesInputs(opts));
+  return computeIctDealingRanges(bars, dealingRangesInputs(opts));
+}
+
+interface PendingLeg {
+  /** +1 = bullish leg (LL then HH); -1 = bearish leg (HH then LL). */
+  readonly side: 1 | -1;
+  readonly firstPrice: number;
+  readonly firstBar: number;
+  readonly secondPrice: number;
+  readonly secondBar: number;
+}
+
+function paintIctRange(
+  bars: readonly OrcaBar[],
+  inputs: OrcaInputs,
+  topP: number,
+  botP: number,
+  startBar: number,
+  endBar: number,
+  color: string,
+  bullish: boolean,
+): DrawCmd[] {
+  const x1 = Math.min(startBar, endBar);
+  const x2 = Math.min(bars.length - 1, Math.max(startBar, endBar) + inputs.drAhead);
+  const mid = (topP + botP) / 2;
+  const rng = topP - botP;
+  if (!(rng > 0)) return [];
+  // Fib from range high (1.0 Premium) down to range low (0 Discount), same as manual tool.
+  const y618 = topP - rng * 0.618;
+  const y786 = topP - rng * 0.786;
+  const t1 = bars[x1]!.time;
+  const t2 = bars[x2]!.time;
+  const cmds: DrawCmd[] = [
+    { kind: "rect", t1, p1: topP, t2, p2: botP, color, fill: color },
+    {
+      kind: "line",
+      t1,
+      p1: mid,
+      t2,
+      p2: mid,
+      color: inputs.midlineColor,
+      width: inputs.midlineWidth,
+      style: "dashed",
+      text: bullish ? "EQ (bull DR)" : "EQ (bear DR)",
+    },
+  ];
+  if (inputs.showDrFibs) {
+    cmds.push(
+      {
+        kind: "line",
+        t1,
+        p1: y618,
+        t2,
+        p2: y618,
+        color: inputs.drFib618Color,
+        width: 1,
+        style: "dotted",
+        text: "0.618",
+      },
+      {
+        kind: "line",
+        t1,
+        p1: y786,
+        t2,
+        p2: y786,
+        color: inputs.drFib786Color,
+        width: 1,
+        style: "dotted",
+        text: "0.786",
+      },
+    );
+  }
+  return cmds;
+}
+
+/** ICT HH↔LL dealing ranges confirmed by BOS after the second extreme. */
+export function computeIctDealingRanges(bars: readonly OrcaBar[], inputs: OrcaInputs): DrawCmd[] {
+  const out: DrawCmd[] = [];
+  if (bars.length < inputs.left + inputs.right + 5) return out;
+
+  // Anchor of an open leg waiting for the opposite extreme.
+  let anchorHigh: number | null = null;
+  let anchorHighBar: number | null = null;
+  let anchorLow: number | null = null;
+  let anchorLowBar: number | null = null;
+
+  // Completed HH→LL or LL→HH waiting for BOS after the second extreme.
+  let pending: PendingLeg | null = null;
+  const completed: DrawCmd[][] = [];
+
+  const confirmPending = (bosBar: number) => {
+    if (!pending) return;
+    if (bosBar <= pending.secondBar) return;
+    const topP = Math.max(pending.firstPrice, pending.secondPrice);
+    const botP = Math.min(pending.firstPrice, pending.secondPrice);
+    const topBar = pending.firstPrice >= pending.secondPrice ? pending.firstBar : pending.secondBar;
+    const botBar = pending.firstPrice < pending.secondPrice ? pending.firstBar : pending.secondBar;
+    const bullish = pending.side === 1;
+    const color = bullish ? inputs.bullishSetupCircleColor : inputs.bearishSetupCircleColor;
+    const cmds = paintIctRange(
+      bars,
+      inputs,
+      topP,
+      botP,
+      Math.min(topBar, botBar),
+      Math.max(topBar, botBar, bosBar),
+      color,
+      bullish,
+    );
+    if (cmds.length) completed.push(cmds);
+    pending = null;
+  };
+
+  for (let i = 0; i < bars.length; i += 1) {
+    const bar = bars[i]!;
+    const ph = pivotHigh(bars, i, inputs.left, inputs.right);
+    const pl = pivotLow(bars, i, inputs.left, inputs.right);
+
+    if (ph != null) {
+      const shBar = i - inputs.right;
+      // New HH starts / refreshes a bearish-leg anchor (HH → later LL).
+      if (!pending) {
+        anchorHigh = ph;
+        anchorHighBar = shBar;
+      }
+      // Bullish leg: LL already set → HH completes LL→HH candidate (wait for BOS after HH).
+      if (
+        !pending &&
+        anchorLow != null &&
+        anchorLowBar != null &&
+        shBar > anchorLowBar &&
+        ph > anchorLow
+      ) {
+        pending = {
+          side: 1,
+          firstPrice: anchorLow,
+          firstBar: anchorLowBar,
+          secondPrice: ph,
+          secondBar: shBar,
+        };
+        anchorLow = null;
+        anchorLowBar = null;
+        anchorHigh = null;
+        anchorHighBar = null;
+      }
+    }
+
+    if (pl != null) {
+      const slBar = i - inputs.right;
+      // New LL starts / refreshes a bullish-leg anchor (LL → later HH).
+      if (!pending) {
+        anchorLow = pl;
+        anchorLowBar = slBar;
+      }
+      // Bearish leg: HH already set → LL completes HH→LL candidate (wait for BOS after LL).
+      if (
+        !pending &&
+        anchorHigh != null &&
+        anchorHighBar != null &&
+        slBar > anchorHighBar &&
+        pl < anchorHigh
+      ) {
+        pending = {
+          side: -1,
+          firstPrice: anchorHigh,
+          firstBar: anchorHighBar,
+          secondPrice: pl,
+          secondBar: slBar,
+        };
+        anchorHigh = null;
+        anchorHighBar = null;
+        anchorLow = null;
+        anchorLowBar = null;
+      }
+    }
+
+    const useHigh = inputs.breakOnWick ? bar.high : bar.close;
+    const useLow = inputs.breakOnWick ? bar.low : bar.close;
+
+    // BOS after the second extreme: break THAT LL (bearish DR) or THAT HH (bullish DR).
+    if (pending && i > pending.secondBar) {
+      if (pending.side === -1 && useLow < pending.secondPrice) {
+        confirmPending(i);
+      } else if (pending.side === 1 && useHigh > pending.secondPrice) {
+        confirmPending(i);
+      }
+    }
+  }
+
+  const filtered = completed.filter((batch) => {
+    const t = batch[0]?.t1;
+    if (t == null) return false;
+    if (inputs.fromTimeSec != null && t < inputs.fromTimeSec) return false;
+    if (inputs.toTimeSec != null && t > inputs.toTimeSec) return false;
+    return true;
+  });
+  const maxN = Math.max(1, Math.floor(inputs.maxDealingRanges));
+  const kept = filtered.slice(-maxN);
+  if (kept.length > 0 && bars.length > 0) {
+    const lastT = bars[bars.length - 1]!.time;
+    const newest = kept[kept.length - 1]!;
+    for (const cmd of newest) {
+      if (cmd.t2 != null && cmd.t2 < lastT) {
+        (cmd as { t2: number }).t2 = lastT;
+      }
+    }
+  }
+  return kept.flat();
 }
 
 /** Charting Library color parser rejects rgba / 8-digit hex — normalize to #RRGGBB. */

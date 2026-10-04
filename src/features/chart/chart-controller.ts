@@ -621,8 +621,13 @@ export class ChartController {
     if (!chart) return null;
     try {
       const info = chart.getAllStudies().find((s) => String(s.id) === String(entityId));
-      const name = (info?.name || "").trim();
-      if (!name) return null;
+      // Custom indicators must be recreated with their metainfo id, not the
+      // friendly display name (createStudy("Dealing Ranges") fails silently).
+      const displayName = (info?.name || "").trim();
+      if (!displayName) return null;
+      const name = /dealing\s*ranges/i.test(displayName)
+        ? "DealingRanges@tv-basicstudies-1"
+        : displayName;
       const study = chart.getStudyById(entityId);
       const inputs: Record<string, unknown> = {};
       for (const item of study.getInputValues()) {
@@ -641,11 +646,19 @@ export class ChartController {
   createStudyFromSnapshot(name: string, inputs: Record<string, unknown>): void {
     const chart = this.activeChart();
     if (!chart) return;
-    try {
-      void chart.createStudy(name, false, false, inputs as never);
-    } catch {
-      /* study API unavailable */
-    }
+    const fallback =
+      name.includes("@")
+        ? (name.split("@")[0] ?? name)
+        : /dealing\s*ranges/i.test(name)
+          ? "DealingRanges@tv-basicstudies-1"
+          : null;
+    void chart
+      .createStudy(name, false, false, inputs as never)
+      .catch(() => {
+        if (!fallback || fallback === name) return null;
+        return chart.createStudy(fallback, false, false, inputs as never);
+      })
+      .catch(() => null);
   }
 
   /** Open the library Object Tree (layers) for drawings / studies. */

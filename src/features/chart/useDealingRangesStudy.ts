@@ -1,7 +1,7 @@
 /**
- * Watches the Indicators “Dealing Ranges” study and paints Orca-detected
- * dealing-range boxes/lines onto the chart (CL custom studies cannot draw
- * rectangles as plots).
+ * Watches the Indicators “Dealing Ranges” study and paints ICT dealing-range
+ * boxes (HH→LL + BOS after LL / LL→HH + BOS after HH). CL custom studies
+ * cannot draw rectangles as plots, so shapes are created here.
  *
  * Critical: do NOT subscribe to onAutoSaveNeeded — creating shapes fires
  * autosave, which would force-repaint forever and freeze the chart.
@@ -190,7 +190,7 @@ export function useDealingRangesStudy(enabled = true): void {
         const ids =
           cmds.length === 0
             ? ([] as EntityId[])
-            : await paintOrcaOnChart(api, cmds);
+            : await paintOrcaOnChart(api, cmds, { ownerStudyId: studyId });
         if (cancelled || myGen !== genRef.current) {
           for (const id of ids) {
             try {
