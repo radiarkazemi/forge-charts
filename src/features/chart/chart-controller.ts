@@ -620,7 +620,9 @@ export class ChartController {
     const chart = this.activeChart();
     if (!chart) return null;
     try {
-      const info = chart.getAllStudies().find((s) => String(s.id) === String(entityId));
+      const info = chart
+        .getAllStudies()
+        .find((s: { id?: string | EntityId; name?: string }) => String(s.id) === String(entityId));
       // Custom indicators must be recreated with their metainfo id, not the
       // friendly display name (createStudy("Dealing Ranges") fails silently).
       const displayName = (info?.name || "").trim();

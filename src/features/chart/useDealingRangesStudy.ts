@@ -123,11 +123,11 @@ export function useDealingRangesStudy(enabled = true): void {
       try {
         const studies = widget.activeChart()?.getAllStudies() ?? [];
         return studies
-          .filter((s) => {
+          .filter((s: { name?: string; id?: string | EntityId }) => {
             const name = `${s.name ?? ""} ${s.id ?? ""}`;
             return /dealing\s*ranges/i.test(name) || /DealingRanges@/i.test(name);
           })
-          .map((s) => s.id as EntityId);
+          .map((s: { id?: string | EntityId }) => s.id as EntityId);
       } catch {
         return [];
       }
