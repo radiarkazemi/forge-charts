@@ -629,7 +629,9 @@ export class ChartController {
       if (!displayName) return null;
       const name = /dealing\s*ranges/i.test(displayName)
         ? "DealingRanges@tv-basicstudies-1"
-        : displayName;
+        : /forge\s*structure\s*intelligence|forge\s*si/i.test(displayName)
+          ? "ForgeStructureIntelligence@tv-basicstudies-1"
+          : displayName;
       const study = chart.getStudyById(entityId);
       const inputs: Record<string, unknown> = {};
       for (const item of study.getInputValues()) {
@@ -653,7 +655,9 @@ export class ChartController {
         ? (name.split("@")[0] ?? name)
         : /dealing\s*ranges/i.test(name)
           ? "DealingRanges@tv-basicstudies-1"
-          : null;
+          : /forge\s*structure\s*intelligence|forge\s*si/i.test(name)
+            ? "ForgeStructureIntelligence@tv-basicstudies-1"
+            : null;
     void chart
       .createStudy(name, false, false, inputs as never)
       .catch(() => {

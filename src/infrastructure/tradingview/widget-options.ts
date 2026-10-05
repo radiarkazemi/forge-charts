@@ -12,6 +12,7 @@ import type {
   TimeFrameItem,
 } from "./types";
 import { createDealingRangesIndicator } from "@/features/chart/dealing-ranges-indicator";
+import { createStructureIntelligenceIndicator } from "@/features/chart/structure-intelligence-indicator";
 
 export interface WidgetOptionsInput {
   readonly container: HTMLElement;
@@ -294,6 +295,9 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
     client_id: "forge-charts",
     user_id: secondary ? `local-pane-${input.symbol}` : "local",
     custom_indicators_getter: (PineJS) =>
-      Promise.resolve([createDealingRangesIndicator(PineJS) as CustomIndicator]),
+      Promise.resolve([
+        createDealingRangesIndicator(PineJS) as CustomIndicator,
+        createStructureIntelligenceIndicator(PineJS) as CustomIndicator,
+      ]),
   };
 }
