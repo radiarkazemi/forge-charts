@@ -63,7 +63,7 @@ export const SI_DEFAULTS: SiInputs = {
   stopATR: 0.15,
   targetR: 3,
   maxStopATR: 5,
-  showPaths: true,
+  showPaths: false,
   showActive: true,
   showHistory: true,
   /** Keep history markers tiny — full zone boxes for every past setup clutter the chart. */
@@ -715,7 +715,7 @@ export function structureIntelligenceDrawCmds(
 
   // 1) Swing map — recent structure only, muted (not the main story).
   if (cfg.showPaths) {
-    const recent = result.swings.slice(-24);
+    const recent = result.swings.slice(-12);
     for (const seg of recent) {
       cmds.push({
         kind: "line",
