@@ -66,7 +66,8 @@ export const SI_DEFAULTS: SiInputs = {
   showPaths: true,
   showActive: true,
   showHistory: true,
-  historyLimit: 30,
+  /** Keep history markers tiny — full zone boxes for every past setup clutter the chart. */
+  historyLimit: 3,
   bullColor: "#00AE8B",
   bearColor: "#E74A5E",
   mintick: 0.01,
@@ -701,7 +702,7 @@ export function computeStructureIntelligence(
   return { snapshots, history, swings, last: lastSnap };
 }
 
-/** Convert engine output into CL draw commands (reuse Orca painter). */
+/** Convert engine output into clear CL drawings (active setup first, quiet history). */
 export function structureIntelligenceDrawCmds(
   result: SiResult,
   inputs: Partial<SiInputs> = {},
@@ -710,88 +711,67 @@ export function structureIntelligenceDrawCmds(
   const cfg = { ...SI_DEFAULTS, ...inputs };
   const cmds: DrawCmd[] = [];
   const endT = lastBarTime ?? result.last?.barTime ?? 0;
+  const active = result.last;
 
+  // 1) Swing map — recent structure only, muted (not the main story).
   if (cfg.showPaths) {
-    for (const seg of result.swings) {
+    const recent = result.swings.slice(-24);
+    for (const seg of recent) {
       cmds.push({
         kind: "line",
         t1: seg.t1,
         p1: seg.p1,
         t2: seg.t2,
         p2: seg.p2,
-        color: "#9E9E9E",
+        color: "#5B6575",
         width: 1,
         style: "solid",
       });
     }
   }
 
+  // 2) History — markers at confirmation only (no stacked zone boxes to live edge).
   if (cfg.showHistory) {
-    for (const ev of result.history) {
+    const lim = Math.max(0, Math.floor(cfg.historyLimit));
+    const hist = lim > 0 ? result.history.slice(-lim) : [];
+    for (const ev of hist) {
+      // Skip the live selected setup — it is drawn as the active zone below.
+      if (
+        active &&
+        active.id !== 0 &&
+        active.stage <= 3 &&
+        active.bornTime === ev.bornTime &&
+        active.dir === ev.dir
+      ) {
+        continue;
+      }
       const c = ev.dir === 1 ? cfg.bullColor : cfg.bearColor;
-      cmds.push({
-        kind: "rect",
-        t1: ev.bornTime,
-        p1: ev.zhi,
-        t2: endT,
-        p2: ev.zlo,
-        color: c,
-        fill: c,
-      });
-      cmds.push({
-        kind: "line",
-        t1: ev.time,
-        p1: ev.entry,
-        t2: endT,
-        p2: ev.entry,
-        color: c,
-        width: 1,
-        style: "solid",
-        text: ev.dir === 1 ? "BUY setup" : "SELL setup",
-      });
-      cmds.push({
-        kind: "line",
-        t1: ev.time,
-        p1: ev.stop,
-        t2: endT,
-        p2: ev.stop,
-        color: c,
-        width: 1,
-        style: "dashed",
-        text: "SL",
-      });
-      cmds.push({
-        kind: "line",
-        t1: ev.time,
-        p1: ev.target,
-        t2: endT,
-        p2: ev.target,
-        color: c,
-        width: 1,
-        style: "dotted",
-        text: `${cfg.targetR}R`,
-      });
+      const tag = ev.dir === 1 ? "BUY" : "SELL";
       cmds.push({
         kind: "dot",
         t1: ev.time,
-        p1: ev.dir === 1 ? ev.entry * 0.999 : ev.entry * 1.001,
+        p1: ev.entry,
         color: c,
-        text: `${ev.dir === 1 ? "BULL" : "BEAR"} ${siFamilyName(ev.family)}`,
+        text: `${tag} · ${siFamilyName(ev.family)}`,
       });
     }
   }
 
-  const active = result.last;
+  // 3) Active candidate — ONE zone + one status card (Pine: selected setup only).
   if (
     cfg.showActive &&
     active &&
     active.id !== 0 &&
+    active.stage >= 1 &&
     active.stage <= 3 &&
     active.zlo != null &&
     active.zhi != null &&
     active.bornTime != null
   ) {
-    const c = active.dir === 1 ? cfg.bullColor : cfg.bearColor;
+    const bull = active.dir === 1;
+    const c = bull ? cfg.bullColor : cfg.bearColor;
+    const side = bull ? "BULL" : "BEAR";
+
     cmds.push({
       kind: "rect",
       t1: active.bornTime,
@@ -801,6 +781,21 @@ export function structureIntelligenceDrawCmds(
       color: c,
       fill: c,
     });
+
+    // Midline of the reaction zone (EQ of the FVG/OB — not a fib stack).
+    const mid = (active.zlo + active.zhi) / 2;
+    cmds.push({
+      kind: "line",
+      t1: active.bornTime,
+      p1: mid,
+      t2: endT,
+      p2: mid,
+      color: c,
+      width: 1,
+      style: "dotted",
+      text: "Zone mid",
+    });
+
     if (active.stop != null) {
       cmds.push({
         kind: "line",
@@ -809,11 +804,38 @@ export function structureIntelligenceDrawCmds(
         t2: endT,
         p2: active.stop,
         color: c,
-        width: 1,
+        width: 2,
         style: "dashed",
-        text: "SL",
+        text: "Stop",
       });
     }
+
+    // Confirmed: show entry + projected target for the live setup only.
+    if (active.stage === 3 && active.entry != null && active.target != null) {
+      cmds.push({
+        kind: "line",
+        t1: active.bornTime,
+        p1: active.entry,
+        t2: endT,
+        p2: active.entry,
+        color: c,
+        width: 2,
+        style: "solid",
+        text: "Entry",
+      });
+      cmds.push({
+        kind: "line",
+        t1: active.bornTime,
+        p1: active.target,
+        t2: endT,
+        p2: active.target,
+        color: c,
+        width: 1,
+        style: "dotted",
+        text: `${cfg.targetR}R target`,
+      });
+    }
+
     if (active.level != null && active.levelTime != null) {
       cmds.push({
         kind: "line",
@@ -824,14 +846,16 @@ export function structureIntelligenceDrawCmds(
         color: c,
         width: 1,
         style: "dotted",
+        text: "Break level",
       });
     }
+
     cmds.push({
       kind: "dot",
       t1: endT,
-      p1: active.dir === 1 ? active.zhi : active.zlo,
+      p1: bull ? active.zhi : active.zlo,
       color: c,
-      text: `${active.dir === 1 ? "BULL" : "BEAR"} ${siFamilyName(active.family)} · ${siStageName(active.stage)} · ${active.score}/100 · ${siWhy(active.flags)}`,
+      text: `${side} · ${siFamilyName(active.family)} · ${siStageName(active.stage)} · ${active.score}/100 · ${siWhy(active.flags)}`,
     });
   }
 
