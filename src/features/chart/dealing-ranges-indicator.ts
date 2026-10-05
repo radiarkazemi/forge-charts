@@ -34,10 +34,10 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
     metainfo: {
       _metainfoVersion: 53,
       id: DEALING_RANGES_STUDY_ID as never,
+      // CL Indicators dialog shows `description` as the script title (not `name`).
       name: DEALING_RANGES_STUDY_NAME,
-      description:
-        "ICT dealing ranges: HH→LL then BOS after LL (bearish), or LL→HH then BOS after HH (bullish).",
-      shortDescription: "ICT Dealing Ranges (HH→LL + BOS)",
+      description: DEALING_RANGES_STUDY_NAME,
+      shortDescription: DEALING_RANGES_STUDY_NAME,
       isCustomIndicator: true,
       is_price_study: true,
       linkedToSeries: true,
