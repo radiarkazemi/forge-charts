@@ -90,6 +90,36 @@ else
 fi
 REMOTE
 
+echo "Ensuring nginx serves /charting_library/ from forge-web charts tree"
+"${SSH[@]}" "${USER}@${HOST}" bash -s <<'REMOTE'
+set -euo pipefail
+SNIP=/etc/nginx/snippets/forge-charting-library.conf
+cat > "$SNIP" <<'EOF'
+# Charting Library at /charting_library/ → /var/www/forge-web/charts/charting_library/
+location ^~ /charting_library/ {
+    root /var/www/forge-web/charts;
+    expires 7d;
+    add_header Cache-Control "public";
+    add_header X-Content-Type-Options nosniff always;
+}
+EOF
+for conf in /etc/nginx/sites-enabled/forgechart /etc/nginx/sites-enabled/forge-landing-8088; do
+  if [[ -f "$conf" ]] && ! grep -q 'forge-charting-library.conf' "$conf"; then
+    python3 - <<PY
+from pathlib import Path
+p = Path("$conf")
+text = p.read_text()
+needle = "include /etc/nginx/snippets/cp-fetcher-api.conf;"
+inc = "include /etc/nginx/snippets/forge-charting-library.conf;\n\n    "
+if "forge-charting-library.conf" not in text:
+    p.write_text(text.replace(needle, inc + needle))
+    print(f"patched {p}")
+PY
+  fi
+done
+nginx -t && systemctl reload nginx
+REMOTE
+
 echo "Done."
 echo "  https://forgechart.ir/charts/"
 echo "  http://${HOST}:8088/charts/"

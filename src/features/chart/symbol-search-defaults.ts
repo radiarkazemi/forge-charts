@@ -44,7 +44,6 @@ export function purgeStickySymbolSearchFilters(): void {
 }
 
 function isSymbolSearchDialog(root: ParentNode): boolean {
-  const title = root.querySelector?.("div,span,h2,h3");
   // Prefer explicit dialog chrome.
   const text = (root.textContent ?? "").slice(0, 400);
   return /Symbol Search/i.test(text) && /All types|All exchanges|SYMBOL/i.test(text);
