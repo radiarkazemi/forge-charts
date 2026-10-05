@@ -13,10 +13,13 @@ const SCRIPT_ID = "tradingview-charting-library";
 let pending: Promise<WidgetConstructor> | null = null;
 
 /**
- * Lazily injects `charting_library.standalone.js` from the static library
- * folder exactly once and resolves with the `widget` constructor. Keeping the
- * library outside the module graph lets Vite serve `bundles/` untouched, which
- * the library requires for its runtime chunks.
+ * Lazily injects `charting_library.js` from the static library folder exactly
+ * once and resolves with the `widget` constructor.
+ *
+ * Prefer `charting_library.js` over `charting_library.standalone.js`: the
+ * standalone UMD in CL v29.3 only assigns `TradingView.version` on `window`
+ * and never exposes `TradingView.widget` (blank chart / banner error).
+ * Keeping the library outside the Vite module graph leaves `bundles/` intact.
  */
 export function loadChartingLibrary(libraryPath: string): Promise<WidgetConstructor> {
   if (window.TradingView?.widget) return Promise.resolve(window.TradingView.widget);
@@ -44,7 +47,7 @@ export function loadChartingLibrary(libraryPath: string): Promise<WidgetConstruc
 
     if (!existing) {
       script.id = SCRIPT_ID;
-      script.src = `${libraryPath}charting_library.standalone.js`;
+      script.src = `${libraryPath}charting_library.js`;
       script.async = true;
       document.head.appendChild(script);
     }
