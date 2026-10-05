@@ -1,7 +1,7 @@
 /**
- * Watches the Indicators “Dealing Ranges” study and paints ICT dealing-range
- * boxes (HH→LL + BOS after LL / LL→HH + BOS after HH). CL custom studies
- * cannot draw rectangles as plots, so shapes are created here.
+ * Watches the Indicators “Dealing Ranges” study and paints Orca-detected
+ * dealing-range boxes/lines onto the chart (CL custom studies cannot draw
+ * rectangles as plots).
  *
  * Critical: do NOT subscribe to onAutoSaveNeeded — creating shapes fires
  * autosave, which would force-repaint forever and freeze the chart.
@@ -47,7 +47,6 @@ function defaultOpts(): DealingRangesOptions {
     pivotRight: DEALING_RANGES_DEFAULTS.pivotRight,
     extendBars: DEALING_RANGES_DEFAULTS.extendBars,
     breakOnWick: DEALING_RANGES_DEFAULTS.breakOnWick,
-    minRangePct: DEALING_RANGES_DEFAULTS.minRangePct,
   };
 }
 
@@ -114,7 +113,6 @@ export function useDealingRangesStudy(enabled = true): void {
           pivotRight: Math.max(1, Math.floor(num("pivotRight", DEALING_RANGES_DEFAULTS.pivotRight))),
           extendBars: Math.max(1, Math.floor(num("extendBars", DEALING_RANGES_DEFAULTS.extendBars))),
           breakOnWick: bool("breakOnWick", DEALING_RANGES_DEFAULTS.breakOnWick),
-          minRangePct: Math.max(0.05, num("minRangePct", DEALING_RANGES_DEFAULTS.minRangePct)),
         };
       } catch {
         return null;
