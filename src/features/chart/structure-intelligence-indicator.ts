@@ -89,9 +89,9 @@ export function createStructureIntelligenceIndicator(PineJS: {
         { id: "candidateLimit", name: "Candidate capacity", defval: SI_STUDY_DEFAULTS.candidateLimit, type: "integer", min: 4, max: 24 },
         { id: "targetR", name: "Projected target R", defval: SI_STUDY_DEFAULTS.targetR, type: "float", min: 1, max: 10 },
         { id: "showPaths", name: "Show minor swing map", defval: SI_STUDY_DEFAULTS.showPaths, type: "bool" },
-        { id: "showActive", name: "Show active zone", defval: SI_STUDY_DEFAULTS.showActive, type: "bool" },
-        { id: "showHistory", name: "Keep confirmed annotations", defval: SI_STUDY_DEFAULTS.showHistory, type: "bool" },
-        { id: "historyLimit", name: "Historical annotations", defval: SI_STUDY_DEFAULTS.historyLimit, type: "integer", min: 5, max: 60 },
+        { id: "showActive", name: "Show active zone only", defval: SI_STUDY_DEFAULTS.showActive, type: "bool" },
+        { id: "showHistory", name: "Mark past confirms (dots only)", defval: SI_STUDY_DEFAULTS.showHistory, type: "bool" },
+        { id: "historyLimit", name: "Past confirm markers", defval: SI_STUDY_DEFAULTS.historyLimit, type: "integer", min: 0, max: 20 },
       ],
     } as never,
     constructor: function (this: {
