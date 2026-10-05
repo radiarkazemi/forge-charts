@@ -13,6 +13,7 @@ import type { HeaderToolbarApi } from "./header-toolbar";
 import { layoutSyncBus } from "./layout-sync";
 import { useChartAlertLines } from "./useChartAlertLines";
 import { useDealingRangesStudy } from "./useDealingRangesStudy";
+import { useStructureIntelligenceStudy } from "./useStructureIntelligenceStudy";
 import { useTradingViewWidget } from "./useTradingViewWidget";
 import {
   QuickTradeOverlay,
@@ -232,6 +233,7 @@ export function TradingViewChart({
   useDemoChartLines(isPrimary);
   // Must run on every pane — header Indicators can migrate the study off pane 0.
   useDealingRangesStudy(true);
+  useStructureIntelligenceStudy(true);
 
   const showReplayToolbar = isPrimary && (replayActive || forceReplayUi);
 

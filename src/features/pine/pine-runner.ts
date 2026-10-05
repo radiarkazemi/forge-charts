@@ -78,6 +78,23 @@ export function resolvePineStudy(code: string): PineResolveResult {
     return { ok: true, kind: "orca", label: "Orca (BOS/MSS + dealing range)" };
   }
 
+  if (
+    /Forge Structure Intelligence/i.test(code) ||
+    /Forge SI v1/i.test(code) ||
+    /f_engine\s*\(\s*\)\s*=>/.test(code)
+  ) {
+    return {
+      ok: true,
+      kind: "study",
+      study: {
+        studyName: "ForgeStructureIntelligence@tv-basicstudies-1",
+        forceOverlay: true,
+        inputs: {},
+        label: "Forge Structure Intelligence v1",
+      },
+    };
+  }
+
   if (ADVANCED_PINE.test(body)) {
     return {
       ok: false,

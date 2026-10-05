@@ -1,0 +1,581 @@
+//@version=6
+indicator("Forge Structure Intelligence • Setup Engine v1", "Forge SI v1", overlay = true, max_boxes_count = 200, max_lines_count = 400, max_labels_count = 300, max_bars_back = 1000, dynamic_requests = true)
+
+// Rule-based structural recognition. Scores are NOT win probabilities.
+// All published signals use closed candles. Pivots become known rightBars later.
+// Families approximate the supplied schematic drawings; they are not visual AI.
+
+string G1 = "01 • Structure"
+int minorLen = input.int(3, "Minor swing confirmation bars", minval = 1, maxval = 15, group = G1)
+int majorLen = input.int(10, "Major swing confirmation bars", minval = 3, maxval = 40, group = G1)
+float swingATR = input.float(0.35, "Minimum swing separation / ATR", minval = 0, step = 0.05, group = G1)
+string breakMode = input.string("Close", "Structure break", options = ["Close", "Wick"], group = G1)
+int sweepLife = input.int(30, "Liquidity reclaim memory (bars)", minval = 2, maxval = 100, group = G1)
+float sweepATR = input.float(0.05, "Minimum liquidity overshoot / ATR", minval = 0, step = 0.01, group = G1)
+bool requireSweep = input.bool(false, "Require a reclaimed liquidity sweep", group = G1)
+bool requireOuter = input.bool(false, "Require major structure break before entry", group = G1)
+
+string G2 = "02 • Zones and confirmation"
+string zoneMode = input.string("FVG then OB", "Zone source", options = ["FVG then OB", "FVG only", "OB only"], group = G2)
+int zoneLookback = input.int(30, "Zone search window (bars)", minval = 3, maxval = 80, group = G2)
+float gapATR = input.float(0.08, "Minimum FVG size / ATR", minval = 0, step = 0.01, group = G2)
+float displacementATR = input.float(0.8, "Displacement body / ATR", minval = 0.1, step = 0.1, group = G2)
+string triggerMode = input.string("Micro break", "Retest confirmation", options = ["Micro break", "Rejection candle"], group = G2)
+int confirmWindow = input.int(8, "Maximum bars after latest zone touch", minval = 1, maxval = 30, group = G2)
+int minScore = input.int(65, "Minimum rule score for confirmation", minval = 50, maxval = 100, group = G2)
+int setupLife = input.int(100, "Pending setup expiry (bars)", minval = 10, maxval = 500, group = G2)
+int trackedLife = input.int(250, "Confirmed setup tracking expiry (bars)", minval = 10, maxval = 1000, group = G2)
+int candidateLimit = input.int(12, "Concurrent candidate capacity / timeframe", minval = 4, maxval = 24, group = G2)
+
+string G3 = "03 • Projection"
+float stopATR = input.float(0.15, "Swing invalidation buffer / ATR", minval = 0, step = 0.05, group = G3)
+float targetR = input.float(3.0, "Projected target R", minval = 1, maxval = 10, step = 0.25, group = G3)
+float maxStopATR = input.float(5.0, "Maximum entry-to-stop distance / ATR", minval = 0.5, maxval = 20, step = 0.5, group = G3)
+
+string G4 = "04 • Multi-timeframe"
+string tf1 = input.timeframe("1", "Scanner 1", group = G4)
+string tf2 = input.timeframe("5", "Scanner 2", group = G4)
+string tf3 = input.timeframe("15", "Scanner 3", group = G4)
+string tf4 = input.timeframe("60", "Scanner 4", group = G4)
+string tf5 = input.timeframe("240", "Scanner 5", group = G4)
+bool alignedAlerts = input.bool(false, "Alerts require a related higher-timeframe zone", group = G4)
+bool mtfAlerts = input.bool(true, "Include scanner confirmation alerts", group = G4)
+
+string G5 = "05 • Display"
+bool showDashboard = input.bool(true, "Show scanner dashboard", group = G5)
+bool showPaths = input.bool(true, "Show confirmed minor swing map", group = G5)
+bool showActive = input.bool(true, "Show selected active zone", group = G5)
+bool showHistory = input.bool(true, "Keep confirmed signal annotations", group = G5)
+int historyLimit = input.int(30, "Historical signal annotations", minval = 5, maxval = 60, group = G5)
+color bullColor = input.color(color.rgb(0, 174, 139), "Bullish", group = G5)
+color bearColor = input.color(color.rgb(231, 74, 94), "Bearish", group = G5)
+
+// Flags: 1 reclaimed sweep; 2 displacement; 4 outer break;
+// 8 FVG (otherwise candle-range OB candidate); 16 stepped structure;
+// 32 opposite internal break; 64 deep retest; 128 intervening liquidity crossed.
+type Setup
+    int id
+    int dir
+    int family
+    int stage
+    int score
+    int flags
+    int bornBar
+    int bornTime
+    int touchBar
+    int confirmBar
+    int anchorTime
+    int levelTime
+    float anchor
+    float level
+    float outer
+    float zlo
+    float zhi
+    float stop
+    float entry
+    float target
+
+// Stage: 1 awaiting retest; 2 touched; 3 confirmed;
+// 4 projected target reached; 5 stop crossed; 6 invalid;
+// 7 expired; 8 stop and target crossed on same candle (order unknown).
+f_has(int flags, int bit) =>
+    int(math.floor(flags / bit)) % 2 == 1
+
+f_add(int flags, int bit) =>
+    f_has(flags, bit) ? flags : flags + bit
+
+f_family(int family) =>
+    switch family
+        1 => "Reversal"
+        2 => "Sweep + reversal"
+        3 => "Stepped / deep"
+        4 => "Continuation"
+        5 => "Nested recovery"
+        => "—"
+
+f_stage(int stage) =>
+    switch stage
+        1 => "Await retest"
+        2 => "Zone touched"
+        3 => "CONFIRMED"
+        4 => "Target touched"
+        5 => "Stop crossed"
+        6 => "Invalid"
+        7 => "Expired"
+        8 => "Ambiguous bar"
+        => "No active setup"
+
+f_why(int flags) =>
+    string result = f_has(flags, 8) ? "FVG" : "OB candidate"
+    result += f_has(flags, 1) ? " • sweep" : ""
+    result += f_has(flags, 2) ? " • impulse" : ""
+    result += f_has(flags, 4) ? " • outer break" : ""
+    result += f_has(flags, 16) ? " • steps" : ""
+    result += f_has(flags, 32) ? " • nested" : ""
+    result += f_has(flags, 64) ? " • deep" : ""
+    result += f_has(flags, 128) ? " • retest liquidity" : ""
+    result
+
+f_score(int flags, bool reacted) =>
+    50 + (f_has(flags, 1) ? 15 : 0) + (f_has(flags, 2) ? 15 : 0) + (f_has(flags, 4) ? 10 : 0) + (reacted ? 10 : 0)
+
+// Search only candles that exist at the current bar. No synthetic ATR zones.
+// FVG: exact three-candle wick gap, still valid by CLOSE at selection.
+// OB candidate: most recent opposite candle after the anchor and before break.
+f_zone(int dir, int anchorTime, float atr) =>
+    float zl = na
+    float zh = na
+    bool isGap = false
+    if zoneMode != "OB only"
+        for i = 0 to zoneLookback
+            bool gap = dir == 1 ? low[i] > high[i + 2] : high[i] < low[i + 2]
+            float gl = dir == 1 ? high[i + 2] : high[i]
+            float gh = dir == 1 ? low[i] : low[i + 2]
+            bool valid = gap and not na(time[i + 2]) and time[i] >= anchorTime and gh - gl >= atr * gapATR
+            // Reject gaps closed through since formation; wick mitigation alone is allowed.
+            if valid and i > 0
+                for j = 0 to i - 1
+                    if (dir == 1 and close[j] < gl) or (dir == -1 and close[j] > gh)
+                        valid := false
+                        break
+            bool behind = dir == 1 ? gh < close : gl > close
+            if valid and behind and na(zl)
+                zl := gl
+                zh := gh
+                isGap := true
+                break
+    if na(zl) and zoneMode != "FVG only"
+        for i = 1 to zoneLookback
+            bool opposite = dir == 1 ? close[i] < open[i] : close[i] > open[i]
+            bool valid = opposite and not na(time[i]) and time[i] >= anchorTime
+            if valid
+                for j = 0 to i - 1
+                    if (dir == 1 and close[j] < low[i]) or (dir == -1 and close[j] > high[i])
+                        valid := false
+                        break
+            bool behind = dir == 1 ? high[i] < close : low[i] > close
+            if valid and behind and na(zl)
+                zl := low[i]
+                zh := high[i]
+                break
+    [zl, zh, isGap]
+
+f_engine() =>
+    var array<Setup> setups = array.new<Setup>()
+    var float h = na
+    var float l = na
+    var int ht = na
+    var int lt = na
+    var float majorH = na
+    var float majorL = na
+    var int trend = 0
+    var int upSteps = 0
+    var int downSteps = 0
+    var int bullSweepBar = na
+    var int bearSweepBar = na
+    var int lastBullBreak = na
+    var int lastBearBreak = na
+    var int usedHTime = na
+    var int usedLTime = na
+    float atr = ta.atr(14)
+    float ph = ta.pivothigh(high, minorLen, minorLen)
+    float pl = ta.pivotlow(low, minorLen, minorLen)
+    float mh = ta.pivothigh(high, majorLen, majorLen)
+    float ml = ta.pivotlow(low, majorLen, majorLen)
+    // Filtering uses ATR known on the pivot's bar, not today's later volatility.
+    if not na(ph) and (na(l) or ph - l >= nz(atr[minorLen], atr) * swingATR)
+        upSteps := not na(h) and ph > h ? upSteps + 1 : 0
+        h := ph
+        ht := time[minorLen]
+    if not na(pl) and (na(h) or h - pl >= nz(atr[minorLen], atr) * swingATR)
+        downSteps := not na(l) and pl < l ? downSteps + 1 : 0
+        l := pl
+        lt := time[minorLen]
+    if not na(mh)
+        majorH := mh
+    if not na(ml)
+        majorL := ml
+    int previousTrend = trend
+    if not na(majorH) and close > majorH
+        trend := 1
+    if not na(majorL) and close < majorL
+        trend := -1
+    if not na(l) and low < l - atr * sweepATR and close > l
+        bullSweepBar := bar_index
+    if not na(h) and high > h + atr * sweepATR and close < h
+        bearSweepBar := bar_index
+    float upProbe = breakMode == "Close" ? close : high
+    float dnProbe = breakMode == "Close" ? close : low
+    bool bullBreak = not na(h) and upProbe > h and upProbe[1] <= h and (na(usedHTime) or usedHTime != ht)
+    bool bearBreak = not na(l) and dnProbe < l and dnProbe[1] >= l and (na(usedLTime) or usedLTime != lt)
+    bool bullImpulse = close > open and math.abs(close - open) >= atr * displacementATR
+    bool bearImpulse = close < open and math.abs(close - open) >= atr * displacementATR
+    int eventId = 0
+    int eventDir = 0
+    int eventCount = 0
+    int eventScore = -1
+    float eventEntry = na
+    float eventStop = na
+    float eventTarget = na
+    int eventFamily = 0
+
+    // Existing candidates are updated BEFORE spawning today's new ones.
+    // A break candle cannot simultaneously count as its own retest.
+    if array.size(setups) > 0
+        for i = 0 to array.size(setups) - 1
+            Setup s = array.get(setups, i)
+            if s.stage <= 2
+                bool outerBroken = not na(s.outer) and (s.dir == 1 ? close > s.outer : close < s.outer)
+                if outerBroken
+                    s.flags := f_add(s.flags, 4)
+                bool dead = s.dir == 1 ? low <= s.stop or close < s.zlo : high >= s.stop or close > s.zhi
+                if dead
+                    s.stage := 6
+                else if bar_index - s.bornBar > setupLife
+                    s.stage := 7
+                else
+                    bool touch = high >= s.zlo and low <= s.zhi
+                    if touch and bar_index > s.bornBar
+                        s.stage := 2
+                        s.touchBar := bar_index
+                        float distance = math.max(math.abs(s.level - s.anchor), syminfo.mintick)
+                        float depth = s.dir == 1 ? (s.level - low) / distance : (high - s.level) / distance
+                        if depth >= 0.65
+                            s.flags := f_add(s.flags, 64)
+                            if f_has(s.flags, 16)
+                                s.family := 3
+                        bool crossedInternal = s.dir == 1 ? not na(l) and lt > s.bornTime and low < l and close > l : not na(h) and ht > s.bornTime and high > h and close < h
+                        if crossedInternal
+                            s.flags := f_add(s.flags, 128)
+                    bool recentTouch = s.stage == 2 and not na(s.touchBar) and bar_index - s.touchBar <= confirmWindow
+                    bool rejection = s.dir == 1 ? close > open and close > s.zhi : close < open and close < s.zlo
+                    bool microBreak = rejection and (s.dir == 1 ? close > high[1] : close < low[1])
+                    bool trigger = triggerMode == "Micro break" ? microBreak : rejection
+                    s.score := f_score(s.flags, false)
+                    int readyScore = f_score(s.flags, true)
+                    float risk = s.dir == 1 ? close - s.stop : s.stop - close
+                    bool quality = readyScore >= minScore and (not requireOuter or f_has(s.flags, 4)) and risk > syminfo.mintick and risk <= atr * maxStopATR
+                    if recentTouch and trigger and quality
+                        s.stage := 3
+                        s.score := readyScore
+                        s.entry := close
+                        s.target := close + s.dir * risk * targetR
+                        s.confirmBar := bar_index
+                        eventCount += 1
+                        if s.score > eventScore
+                            eventScore := s.score
+                            eventId := s.id
+                            eventDir := s.dir
+                            eventEntry := s.entry
+                            eventStop := s.stop
+                            eventTarget := s.target
+                            eventFamily := s.family
+                    else if s.stage == 2 and not recentTouch
+                        s.stage := 1
+                        s.touchBar := na
+            else if s.stage == 3 and bar_index > s.confirmBar
+                bool stopHit = s.dir == 1 ? low <= s.stop : high >= s.stop
+                bool targetHit = s.dir == 1 ? high >= s.target : low <= s.target
+                if stopHit and targetHit
+                    s.stage := 8
+                else if stopHit
+                    s.stage := 5
+                else if targetHit
+                    s.stage := 4
+                else if bar_index - s.confirmBar > trackedLife
+                    s.stage := 7
+
+    for dirIndex = 0 to 1
+        int dir = dirIndex == 0 ? 1 : -1
+        bool broken = dir == 1 ? bullBreak : bearBreak
+        if broken
+            int anchorTime = dir == 1 ? lt : ht
+            float anchor = dir == 1 ? l : h
+            int levelTime = dir == 1 ? ht : lt
+            float level = dir == 1 ? h : l
+            bool swept = dir == 1 ? not na(bullSweepBar) and bar_index - bullSweepBar <= sweepLife : not na(bearSweepBar) and bar_index - bearSweepBar <= sweepLife
+            bool impulse = dir == 1 ? bullImpulse : bearImpulse
+            bool stepped = dir == 1 ? upSteps >= 2 : downSteps >= 2
+            bool nested = dir == 1 ? not na(lastBearBreak) and bar_index - lastBearBreak <= sweepLife : not na(lastBullBreak) and bar_index - lastBullBreak <= sweepLife
+            bool reversal = previousTrend == -dir
+            float outer = dir == 1 ? majorH : majorL
+            bool outerBroken = not na(outer) and (dir == 1 ? close > outer : close < outer)
+            [zl, zh, gap] = f_zone(dir, anchorTime, atr)
+            bool duplicate = false
+            if array.size(setups) > 0
+                for i = 0 to array.size(setups) - 1
+                    Setup old = array.get(setups, i)
+                    if old.dir == dir and old.anchorTime == anchorTime and old.stage <= 3
+                        duplicate := true
+            if not na(anchor) and not na(zl) and not na(atr) and not duplicate and (not requireSweep or swept)
+                int flags = (swept ? 1 : 0) + (impulse ? 2 : 0) + (outerBroken ? 4 : 0) + (gap ? 8 : 0) + (stepped ? 16 : 0) + (nested ? 32 : 0)
+                int family = nested ? 5 : stepped ? 3 : swept ? 2 : reversal ? 1 : 4
+                float stop = dir == 1 ? math.min(anchor, zl) - atr * stopATR : math.max(anchor, zh) + atr * stopATR
+                // Bound memory. Reclaim a terminal slot first; otherwise skip this candidate.
+                // Live candidates are never evicted to manufacture a new signal.
+                if array.size(setups) >= candidateLimit
+                    int removeIndex = -1
+                    for i = 0 to array.size(setups) - 1
+                        if removeIndex == -1 and array.get(setups, i).stage > 3
+                            removeIndex := i
+                    if removeIndex >= 0
+                        array.remove(setups, removeIndex)
+                if array.size(setups) < candidateLimit
+                    int id = time * 2 + (dir == 1 ? 0 : 1)
+                    array.push(setups, Setup.new(id, dir, family, 1, f_score(flags, false), flags, bar_index, time, na, na, anchorTime, levelTime, anchor, level, outer, zl, zh, stop, na, na))
+            if dir == 1
+                usedHTime := ht
+                lastBullBreak := bar_index
+            else
+                usedLTime := lt
+                lastBearBreak := bar_index
+
+    // Snapshot selects a fresh confirmation first, otherwise strongest live setup.
+    // Old confirmed trades cannot hide a stronger new candidate forever.
+    int best = -1
+    float bestRank = -1
+    if array.size(setups) > 0
+        for i = 0 to array.size(setups) - 1
+            Setup s = array.get(setups, i)
+            float rank = s.id == eventId and eventId != 0 ? 10000 : s.stage <= 3 ? s.score + (s.stage == 2 ? 15 : s.stage == 3 ? 5 : 0) : 0
+            if rank > bestRank or (rank == bestRank and rank >= 0)
+                best := i
+                bestRank := rank
+    int sid = 0
+    int direction = 0
+    int family = 0
+    int stage = 0
+    int score = 0
+    int flags = 0
+    int bornTime = na
+    int anchorTime = na
+    int levelTime = na
+    float anchor = na
+    float level = na
+    float zl = na
+    float zh = na
+    float stop = na
+    float entry = na
+    float target = na
+    if best >= 0
+        Setup s = array.get(setups, best)
+        sid := s.id
+        direction := s.dir
+        family := s.family
+        stage := s.stage
+        score := s.score
+        flags := s.flags
+        bornTime := s.bornTime
+        anchorTime := s.anchorTime
+        levelTime := s.levelTime
+        anchor := s.anchor
+        level := s.level
+        zl := s.zlo
+        zh := s.zhi
+        stop := s.stop
+        entry := s.entry
+        target := s.target
+    [sid, direction, family, stage, score, flags, zl, zh, stop, entry, target, bornTime, time, eventDir, eventId, eventEntry, eventStop, eventTarget, eventCount, eventFamily, anchorTime, levelTime, anchor, level]
+
+// Return only previous, fully closed source-bar values. Every tuple element is offset.
+// Do not use barstate.isconfirmed inside request.security().
+f_closed() =>
+    [id, dir, fam, stage, score, flags, zl, zh, sl, en, tp, born, bt, ed, ei, ee, es, et, ec, ef, at, lt, ap, lp] = f_engine()
+    [id[1], dir[1], fam[1], stage[1], score[1], flags[1], zl[1], zh[1], sl[1], en[1], tp[1], born[1], bt[1], ed[1], ei[1], ee[1], es[1], et[1], ec[1], ef[1]]
+
+f_scan(string tf) =>
+    // Lower-TF request.security would miss intrabar events. Explicitly disable it.
+    if timeframe.in_seconds(tf) >= timeframe.in_seconds()
+        request.security(syminfo.tickerid, tf, f_closed(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+    else
+        [0, 0, 0, 0, 0, 0, float(na), float(na), float(na), float(na), float(na), int(na), int(na), 0, 0, float(na), float(na), float(na), 0, 0]
+
+[id0, d0, f0, st0, sc0, fl0, zl0, zh0, sl0, en0, tp0, born0, bt0, ed0, ei0, ee0, es0, et0, ec0, ef0, at0, lt0, ap0, lp0] = f_engine()
+[id1, d1, f1, st1, sc1, fl1, zl1, zh1, sl1, en1, tp1, born1, bt1, ed1, ei1, ee1, es1, et1, ec1, ef1] = f_scan(tf1)
+[id2, d2, f2, st2, sc2, fl2, zl2, zh2, sl2, en2, tp2, born2, bt2, ed2, ei2, ee2, es2, et2, ec2, ef2] = f_scan(tf2)
+[id3, d3, f3, st3, sc3, fl3, zl3, zh3, sl3, en3, tp3, born3, bt3, ed3, ei3, ee3, es3, et3, ec3, ef3] = f_scan(tf3)
+[id4, d4, f4, st4, sc4, fl4, zl4, zh4, sl4, en4, tp4, born4, bt4, ed4, ei4, ee4, es4, et4, ec4, ef4] = f_scan(tf4)
+[id5, d5, f5, st5, sc5, fl5, zl5, zh5, sl5, en5, tp5, born5, bt5, ed5, ei5, ee5, es5, et5, ec5, ef5] = f_scan(tf5)
+
+array<string> tfs = array.from(tf1, tf2, tf3, tf4, tf5)
+array<int> dirs = array.from(d1, d2, d3, d4, d5)
+array<int> stages = array.from(st1, st2, st3, st4, st5)
+array<int> families = array.from(f1, f2, f3, f4, f5)
+array<int> scores = array.from(sc1, sc2, sc3, sc4, sc5)
+array<int> flagsList = array.from(fl1, fl2, fl3, fl4, fl5)
+array<float> zoneLows = array.from(zl1, zl2, zl3, zl4, zl5)
+array<float> zoneHighs = array.from(zh1, zh2, zh3, zh4, zh5)
+array<int> births = array.from(born1, born2, born3, born4, born5)
+array<int> eventDirs = array.from(ed1, ed2, ed3, ed4, ed5)
+array<int> eventIds = array.from(ei1, ei2, ei3, ei4, ei5)
+array<float> eventEntries = array.from(ee1, ee2, ee3, ee4, ee5)
+array<float> eventStops = array.from(es1, es2, es3, es4, es5)
+array<float> eventTargets = array.from(et1, et2, et3, et4, et5)
+array<int> eventFamilies = array.from(ef1, ef2, ef3, ef4, ef5)
+array<int> eventCounts = array.from(ec1, ec2, ec3, ec4, ec5)
+
+// A related parent is an active higher-TF setup in the SAME direction whose zone
+// overlaps the child zone, or contains its entry, and whose birth precedes child.
+// This is contextual association, not proof the two are one identical pattern.
+f_related(int dir, float zl, float zh, float entry, int born, float childSeconds) =>
+    bool related = false
+    if dir != 0 and not na(born)
+        for i = 0 to 4
+            int pd = array.get(dirs, i)
+            int ps = array.get(stages, i)
+            float pzl = array.get(zoneLows, i)
+            float pzh = array.get(zoneHighs, i)
+            int pb = array.get(births, i)
+            bool higher = timeframe.in_seconds(array.get(tfs, i)) > childSeconds
+            bool overlap = not na(zl) and not na(pzl) and math.max(zl, pzl) <= math.min(zh, pzh)
+            bool inside = not na(entry) and not na(pzl) and entry >= pzl and entry <= pzh
+            if higher and pd == dir and ps >= 1 and ps <= 3 and not na(pb) and pb <= born and (overlap or inside)
+                related := true
+    related
+
+bool related0 = f_related(d0, zl0, zh0, en0, born0, timeframe.in_seconds())
+
+// Draw only closed chart-bar state. Active objects are reused, not recreated per tick.
+var box activeBox = na
+var line activeSL = na
+var line activeBreak = na
+var label activeNote = na
+if barstate.isconfirmed
+    if not na(activeBox)
+        box.delete(activeBox)
+    if not na(activeSL)
+        line.delete(activeSL)
+    if not na(activeBreak)
+        line.delete(activeBreak)
+    if not na(activeNote)
+        label.delete(activeNote)
+    activeBox := na
+    activeSL := na
+    activeBreak := na
+    activeNote := na
+    if showActive and id0 != 0 and st0 <= 3
+        color c = d0 == 1 ? bullColor : bearColor
+        activeBox := box.new(left = born0, top = zh0, right = time_close, bottom = zl0, xloc = xloc.bar_time, bgcolor = color.new(c, 88), border_color = color.new(c, 20))
+        activeSL := line.new(born0, sl0, time_close, sl0, xloc = xloc.bar_time, color = color.new(c, 45), style = line.style_dashed)
+        activeBreak := line.new(lt0, lp0, born0, lp0, xloc = xloc.bar_time, color = c, style = line.style_dotted)
+        string note = (d0 == 1 ? "BULL " : "BEAR ") + f_family(f0) + "\n" + f_stage(st0) + " • " + str.tostring(sc0) + "/100 rules\n" + f_why(fl0) + (related0 ? "\nRelated HTF zone" : "")
+        activeNote := label.new(time_close, d0 == 1 ? zh0 : zl0, note, xloc = xloc.bar_time, style = label.style_label_left, color = color.new(c, 15), textcolor = color.white, size = size.small)
+
+// The map shows confirmed minor swings, NOT future-perfect template tracing.
+var array<line> swingLines = array.new<line>()
+var float lastMapPrice = na
+var int lastMapTime = na
+var int lastMapDir = 0
+float mapH = ta.pivothigh(high, minorLen, minorLen)
+float mapL = ta.pivotlow(low, minorLen, minorLen)
+float mapATR = ta.atr(14)
+if showPaths and barstate.isconfirmed
+    for k = 0 to 1
+        float p = k == 0 ? mapH : mapL
+        int dir = k == 0 ? 1 : -1
+        int pt = time[minorLen]
+        bool bigEnough = na(lastMapPrice) or math.abs(p - lastMapPrice) >= nz(mapATR[minorLen], mapATR) * swingATR
+        if not na(p) and bigEnough
+            if lastMapDir == dir
+                bool moreExtreme = dir == 1 ? p > lastMapPrice : p < lastMapPrice
+                if moreExtreme
+                    lastMapPrice := p
+                    lastMapTime := pt
+                    if array.size(swingLines) > 0
+                        line tail = array.get(swingLines, array.size(swingLines) - 1)
+                        line.set_xy2(tail, pt, p)
+            else
+                if not na(lastMapPrice) and pt > lastMapTime
+                    line seg = line.new(lastMapTime, lastMapPrice, pt, p, xloc = xloc.bar_time, color = color.new(color.silver, 45), width = 1)
+                    array.push(swingLines, seg)
+                    if array.size(swingLines) > 100
+                        line.delete(array.shift(swingLines))
+                lastMapPrice := p
+                lastMapTime := pt
+                lastMapDir := dir
+
+var array<label> historyLabels = array.new<label>()
+var array<line> historyLines = array.new<line>()
+var array<box> historyBoxes = array.new<box>()
+if barstate.isconfirmed and ed0 != 0 and showHistory
+    color c = ed0 == 1 ? bullColor : bearColor
+    string txt = (ed0 == 1 ? "BUY setup" : "SELL setup") + " • " + f_family(ef0) + "\nE " + str.tostring(ee0, format.mintick) + " | SL " + str.tostring(es0, format.mintick) + "\n" + str.tostring(targetR) + "R projection " + str.tostring(et0, format.mintick) + "\n" + f_why(fl0) + (ec0 > 1 ? "\nGrouped confirmations: " + str.tostring(ec0) : "")
+    array.push(historyLabels, label.new(bar_index, ed0 == 1 ? low : high, txt, style = ed0 == 1 ? label.style_label_up : label.style_label_down, color = c, textcolor = color.white, size = size.small))
+    array.push(historyLines, line.new(time, ee0, time_close, ee0, xloc = xloc.bar_time, color = c))
+    array.push(historyLines, line.new(time, es0, time_close, es0, xloc = xloc.bar_time, color = color.new(c, 35), style = line.style_dashed))
+    array.push(historyLines, line.new(time, et0, time_close, et0, xloc = xloc.bar_time, color = c, style = line.style_dotted))
+    array.push(historyBoxes, box.new(born0, zh0, time_close, zl0, xloc = xloc.bar_time, bgcolor = color.new(c, 94), border_color = color.new(c, 65)))
+    if array.size(historyLabels) > historyLimit
+        label.delete(array.shift(historyLabels))
+        box.delete(array.shift(historyBoxes))
+        for k = 0 to 2
+            line.delete(array.shift(historyLines))
+
+plotshape(barstate.isconfirmed and ed0 == 1, "Bullish confirmation", shape.triangleup, location.belowbar, bullColor, size = size.small)
+plotshape(barstate.isconfirmed and ed0 == -1, "Bearish confirmation", shape.triangledown, location.abovebar, bearColor, size = size.small)
+
+var table panel = table.new(position.top_right, 6, 8, border_width = 1, border_color = color.rgb(50, 61, 78))
+if barstate.islast and showDashboard
+    color bg = color.rgb(20, 27, 39)
+    color muted = color.rgb(170, 182, 200)
+    table.cell(panel, 0, 0, "FORGE SI", text_color = color.white, bgcolor = bg)
+    table.cell(panel, 1, 0, "Direction", text_color = muted, bgcolor = bg)
+    table.cell(panel, 2, 0, "Family", text_color = muted, bgcolor = bg)
+    table.cell(panel, 3, 0, "Stage", text_color = muted, bgcolor = bg)
+    table.cell(panel, 4, 0, "Rules", text_color = muted, bgcolor = bg)
+    table.cell(panel, 5, 0, "HTF link", text_color = muted, bgcolor = bg)
+    for i = 0 to 4
+        string tf = array.get(tfs, i)
+        bool enabled = timeframe.in_seconds(tf) >= timeframe.in_seconds()
+        int dir = array.get(dirs, i)
+        int stage = array.get(stages, i)
+        bool related = f_related(dir, array.get(zoneLows, i), array.get(zoneHighs, i), float(na), array.get(births, i), timeframe.in_seconds(tf))
+        color c = dir == 1 ? bullColor : dir == -1 ? bearColor : muted
+        table.cell(panel, 0, i + 1, tf, text_color = color.white, bgcolor = bg)
+        table.cell(panel, 1, i + 1, enabled ? dir == 1 ? "BULL" : dir == -1 ? "BEAR" : "—" : "Disabled", text_color = c, bgcolor = bg)
+        table.cell(panel, 2, i + 1, enabled ? f_family(array.get(families, i)) : "Lower TF", text_color = muted, bgcolor = bg)
+        table.cell(panel, 3, i + 1, enabled ? f_stage(stage) : "Use smaller chart", text_color = c, bgcolor = bg)
+        table.cell(panel, 4, i + 1, enabled and dir != 0 ? str.tostring(array.get(scores, i)) + "/100" : "—", text_color = muted, bgcolor = bg)
+        table.cell(panel, 5, i + 1, related ? "Related" : "—", text_color = related ? bullColor : muted, bgcolor = bg)
+    table.cell(panel, 0, 6, "CLOSED", text_color = muted, bgcolor = bg)
+    table.cell(panel, 1, 6, "Pivot delay", text_color = muted, bgcolor = bg)
+    table.cell(panel, 2, 6, str.tostring(minorLen) + " bars", text_color = muted, bgcolor = bg)
+    table.cell(panel, 3, 6, "Target = projection", text_color = muted, bgcolor = bg)
+    table.cell(panel, 4, 6, "Not win %", text_color = muted, bgcolor = bg)
+    table.cell(panel, 5, 6, "v1.0", text_color = muted, bgcolor = bg)
+    table.cell(panel, 0, 7, "CHART", text_color = color.white, bgcolor = bg)
+    table.cell(panel, 1, 7, timeframe.period, text_color = muted, bgcolor = bg)
+    table.cell(panel, 2, 7, "Signals at close", text_color = muted, bgcolor = bg)
+    table.cell(panel, 3, 7, "MTF: prior bar", text_color = muted, bgcolor = bg)
+    table.cell(panel, 4, 7, "Max " + str.tostring(candidateLimit), text_color = muted, bgcolor = bg)
+    table.cell(panel, 5, 7, "per TF", text_color = muted, bgcolor = bg)
+
+// Keep deduplication in chart context, after the closed-bar scanner request.
+var array<int> sentIds = array.new<int>(5, 0)
+string message = ""
+bool confirmedChart = barstate.isconfirmed and ed0 != 0 and (not alignedAlerts or related0)
+if confirmedChart
+    message := "FORGE SI | " + syminfo.ticker + " | TF " + timeframe.period + " | " + (ed0 == 1 ? "BULL" : "BEAR") + " " + f_family(ef0) + " | Entry " + str.tostring(ee0, format.mintick) + " | SL " + str.tostring(es0, format.mintick) + " | Projection " + str.tostring(et0, format.mintick) + " | " + f_why(fl0)
+if barstate.isconfirmed
+    for i = 0 to 4
+        int eventId = array.get(eventIds, i)
+        int eventDir = array.get(eventDirs, i)
+        string tf = array.get(tfs, i)
+        bool fresh = eventDir != 0 and eventId != 0 and eventId != array.get(sentIds, i)
+        if fresh
+            // Mark observed even when filtered, so it does not alert much later.
+            array.set(sentIds, i, eventId)
+            bool sameAsChart = timeframe.in_seconds(tf) == timeframe.in_seconds()
+            bool duplicateTF = false
+            if i > 0
+                for j = 0 to i - 1
+                    if timeframe.in_seconds(tf) == timeframe.in_seconds(array.get(tfs, j))
+                        duplicateTF := true
+            bool related = f_related(eventDir, array.get(zoneLows, i), array.get(zoneHighs, i), array.get(eventEntries, i), array.get(births, i), timeframe.in_seconds(tf))
+            if mtfAlerts and not sameAsChart and not duplicateTF and (not alignedAlerts or related)
+                string part = "FORGE SI | " + syminfo.ticker + " | TF " + tf + " | " + (eventDir == 1 ? "BULL" : "BEAR") + " " + f_family(array.get(eventFamilies, i)) + " | Entry " + str.tostring(array.get(eventEntries, i), format.mintick) + " | SL " + str.tostring(array.get(eventStops, i), format.mintick) + " | Projection " + str.tostring(array.get(eventTargets, i), format.mintick) + " | " + f_why(array.get(flagsList, i))
+                message += (str.length(message) > 0 ? "\n" : "") + part
+    if str.length(message) > 0
+        alert(message, alert.freq_once_per_bar_close)
+alertcondition(confirmedChart and ed0 == 1, "Chart bullish setup confirmed", "Forge SI: bullish chart setup confirmed. Use Any alert() function call for prices and MTF alerts.")
+alertcondition(confirmedChart and ed0 == -1, "Chart bearish setup confirmed", "Forge SI: bearish chart setup confirmed. Use Any alert() function call for prices and MTF alerts.")
