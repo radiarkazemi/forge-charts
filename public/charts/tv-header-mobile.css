@@ -1,7 +1,8 @@
 /*
- * Forge mobile chart shell:
- * hide the desktop top toolbar; plot fills the middle card of MobileForgeShell;
- * drawing toolbar floats as a compact left pill when Draw is on.
+ * TradingView mobile chart shell:
+ * hide the desktop top toolbar; legend + plot fill the widget;
+ * drawing toolbar floats as a compact left pill when Draw is on
+ * (starts collapsed — same as the TV mobile app).
  */
 
 .tv-header,
@@ -23,12 +24,11 @@
   top: 0 !important;
 }
 
-/* Softer legend — symbol chrome lives in Forge mobile header. */
+/* Keep the legend readable like TV mobile (symbol + OHLC on the plot). */
 .legend-source-item,
 .sourcesWrapper-l31H9iuA,
 .legendWrapper-l31H9iuA {
-  font-size: 11px !important;
-  opacity: 0.92;
+  font-size: 12px !important;
 }
 
 .chart-controls-bar {
@@ -38,40 +38,26 @@
 html,
 body,
 .chart-page {
-  background: #0b1220 !important;
+  background: #131722 !important;
 }
 
 /* Floating left drawing toolbar — compact pill against the left edge. */
 .layout__area--left {
-  top: 12px !important;
+  top: 48px !important;
   bottom: auto !important;
   height: auto !important;
-  left: 6px !important;
+  left: 4px !important;
 }
 
 .layout__area--left .tv-group,
 .drawingToolbar-g3SlJJk1,
 [class*="drawingToolbar"] {
-  border-radius: 14px !important;
+  border-radius: 8px !important;
   overflow: hidden !important;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45) !important;
-  background: rgba(18, 26, 43, 0.92) !important;
-  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) !important;
 }
 
-/* Hide the horizontal “favorite drawings” strip — Forge mobile uses the left pill. */
-[class*="drawingToolbarBottom"],
-[class*="favorite-drawings"],
-[class*="favored-tools"],
-[class*="FavoriteDrawing"],
-[class*="favoriteDrawing"],
-.drawingToolbar-C0LOKuDw,
-div[data-name="favorite-drawings-toolbar"],
-div[data-name="base"],
-.layout__area--center > div[style*="position: absolute"][style*="top"] [class*="drawingToolbar"] {
-  /* keep left pill; hide floating horizontal tool strips via common TV classes */
-}
-
+/* Hide the horizontal “favorite drawings” strip — TV mobile uses the left pill. */
 [class*="drawingToolbarBottom"],
 [class*="favorite-drawings"],
 [class*="favored-tools"],

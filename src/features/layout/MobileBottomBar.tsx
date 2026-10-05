@@ -1,3 +1,4 @@
+import Badge from "@mui/material/Badge";
 import Box from "@mui/material/Box";
 import ButtonBase from "@mui/material/ButtonBase";
 import Drawer from "@mui/material/Drawer";
@@ -10,6 +11,7 @@ import { useStore } from "@/shared/hooks/useStore";
 import { MOBILE_APP_NAV_HEIGHT, MOBILE_CHART_BAR_HEIGHT } from "./mobile-chrome";
 
 const QUICK_IV: ReadonlyArray<{ readonly value: Interval; readonly label: string }> = [
+  { value: "1S", label: "1s" },
   { value: "1", label: "1m" },
   { value: "5", label: "5m" },
   { value: "15", label: "15m" },
@@ -18,12 +20,14 @@ const QUICK_IV: ReadonlyArray<{ readonly value: Interval; readonly label: string
   { value: "240", label: "4H" },
   { value: "1D", label: "D" },
   { value: "1W", label: "W" },
+  { value: "1M", label: "M" },
 ];
 
 const BAR_BG = "#131722";
 const BAR_BORDER = "#2a2e39";
 const IDLE = "#d1d4dc";
 const ACTIVE = "#2962FF";
+const MUTED = "#787b86";
 
 interface MobileBottomBarProps {
   readonly onCreateAlert: () => void;
@@ -58,6 +62,14 @@ const TradeIcon = strokeIcon("M8 11.5h12M16.5 8 20 11.5 16.5 15M20 16.5H8M11.5 2
 const AlertsIcon = strokeIcon("M14 6.5a6 6 0 0 1 6 6v3.5l1.5 2H6.5l1.5-2V12.5a6 6 0 0 1 6-6zM12 22h4");
 const MenuIcon = strokeIcon("M7 9h14M7 14h14M7 19h14");
 
+function formatPrice(price: number | undefined, precision = 2): string {
+  if (price == null || !Number.isFinite(price)) return "";
+  return price.toLocaleString(undefined, {
+    minimumFractionDigits: Math.min(precision, 5),
+    maximumFractionDigits: Math.min(Math.max(precision, 2), 5),
+  });
+}
+
 /**
  * TradingView mobile chrome:
  * 1) Chart tools bar — Symbol · Interval · Draw · Indicators · More
@@ -69,24 +81,36 @@ export function MobileBottomBar({
   onOpenTrade,
   onOpenAlerts,
 }: MobileBottomBarProps) {
-  const { chart, settings } = useServices();
+  const { chart, settings, quotes, alerts } = useServices();
   const symbol = useStore(chart.state, (s) => s.symbol);
   const interval = useStore(chart.state, (s) => s.interval);
+  const sidePanel = useStore(settings.settings, (s) => s.sidePanel);
+  const quote = useStore(quotes.quotes, (book) => book[symbol]);
+  const alertCount = useStore(alerts.alerts, (list) => list.filter((a) => a.status === "active").length);
   const [ivOpen, setIvOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [drawOpen, setDrawOpen] = useState(false);
 
   const bare = symbol.includes(":") ? symbol.slice(symbol.lastIndexOf(":") + 1) : symbol;
   const ivLabel =
     QUICK_IV.find((x) => x.value === interval)?.label ??
-    (interval === "1D" ? "D" : interval === "1W" ? "W" : `${interval}m`);
+    (interval === "1D" ? "D" : interval === "1W" ? "W" : interval === "1M" ? "M" : `${interval}`);
+  const priceLabel = formatPrice(quote?.price);
+  const change = quote?.changePercent;
+  const changeColor =
+    change == null || !Number.isFinite(change) ? MUTED : change > 0 ? "#26a69a" : change < 0 ? "#ef5350" : MUTED;
 
   const chartActions = [
     {
       key: "draw",
       label: "Draw",
       Icon: DrawIcon,
-      onClick: () => chart.toggleDrawingToolbar(),
+      active: drawOpen,
+      onClick: () => {
+        chart.toggleDrawingToolbar();
+        setDrawOpen((v) => !v);
+      },
     },
     {
       key: "indicators",
@@ -104,11 +128,44 @@ export function MobileBottomBar({
   ] as const;
 
   const appTabs = [
-    { key: "watchlist", label: "Watchlist", Icon: WatchlistIcon, onClick: onOpenWatchlist, active: false },
-    { key: "chart", label: "Chart", Icon: ChartIcon, onClick: () => undefined, active: true },
-    { key: "trade", label: "Trade", Icon: TradeIcon, onClick: onOpenTrade, active: false },
-    { key: "alerts", label: "Alerts", Icon: AlertsIcon, onClick: onOpenAlerts, active: false },
-    { key: "menu", label: "Menu", Icon: MenuIcon, onClick: () => setMenuOpen(true), active: menuOpen },
+    {
+      key: "watchlist",
+      label: "Watchlist",
+      Icon: WatchlistIcon,
+      onClick: onOpenWatchlist,
+      active: sidePanel === "watchlist",
+    },
+    {
+      key: "chart",
+      label: "Chart",
+      Icon: ChartIcon,
+      onClick: () => {
+        if (sidePanel) settings.setSidePanel(null);
+      },
+      active: !sidePanel && !menuOpen,
+    },
+    {
+      key: "trade",
+      label: "Trade",
+      Icon: TradeIcon,
+      onClick: onOpenTrade,
+      active: false,
+    },
+    {
+      key: "alerts",
+      label: "Alerts",
+      Icon: AlertsIcon,
+      onClick: onOpenAlerts,
+      active: sidePanel === "alerts",
+      badge: alertCount,
+    },
+    {
+      key: "menu",
+      label: "Menu",
+      Icon: MenuIcon,
+      onClick: () => setMenuOpen(true),
+      active: menuOpen,
+    },
   ] as const;
 
   return (
@@ -130,7 +187,7 @@ export function MobileBottomBar({
             alignItems: "center",
             height: MOBILE_CHART_BAR_HEIGHT,
             px: 1,
-            gap: 0.5,
+            gap: 0.25,
             borderBottom: `1px solid ${BAR_BORDER}`,
           }}
         >
@@ -143,7 +200,7 @@ export function MobileBottomBar({
               px: 0.75,
               py: 0.5,
               borderRadius: "6px",
-              maxWidth: "42%",
+              maxWidth: priceLabel ? "34%" : "42%",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
@@ -152,6 +209,24 @@ export function MobileBottomBar({
           >
             {bare.length > 10 ? `${bare.slice(0, 9)}…` : bare}
           </ButtonBase>
+          {priceLabel ? (
+            <Box
+              component="span"
+              sx={{
+                color: changeColor,
+                fontWeight: 700,
+                fontSize: 12,
+                fontVariantNumeric: "tabular-nums",
+                px: 0.25,
+                maxWidth: "28%",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {priceLabel}
+            </Box>
+          ) : null}
           <ButtonBase
             onClick={() => setIvOpen(true)}
             sx={{
@@ -211,7 +286,26 @@ export function MobileBottomBar({
                 "&:active": { bgcolor: "rgba(209,212,220,0.06)" },
               }}
             >
-              <tab.Icon sx={{ fontSize: 24, color: "inherit" }} />
+              {"badge" in tab && tab.badge ? (
+                <Badge
+                  badgeContent={tab.badge}
+                  color="error"
+                  overlap="circular"
+                  sx={{
+                    "& .MuiBadge-badge": {
+                      fontSize: 9,
+                      height: 14,
+                      minWidth: 14,
+                      top: 2,
+                      right: -2,
+                    },
+                  }}
+                >
+                  <tab.Icon sx={{ fontSize: 24, color: "inherit" }} />
+                </Badge>
+              ) : (
+                <tab.Icon sx={{ fontSize: 24, color: "inherit" }} />
+              )}
               <Box
                 component="span"
                 sx={{
@@ -306,11 +400,16 @@ export function MobileBottomBar({
           {(
             [
               { label: "Alert", run: onCreateAlert },
+              { label: "Compare", run: () => chart.openSymbolSearch() },
               { label: "Object tree", run: () => chart.openObjectTree() },
               { label: "Undo", run: () => chart.undo() },
               { label: "Redo", run: () => chart.redo() },
               { label: "Snapshot", run: () => chart.takeScreenshot() },
               { label: "Settings", run: () => chart.openChartProperties() },
+              {
+                label: "Replay",
+                run: () => window.dispatchEvent(new Event("forge:enter-bar-replay")),
+              },
             ] as const
           ).map((action) => (
             <ButtonBase
@@ -365,6 +464,10 @@ export function MobileBottomBar({
               {
                 label: "Create alert",
                 run: onCreateAlert,
+              },
+              {
+                label: "Pine Editor",
+                run: () => settings.toggleSidePanel("pine"),
               },
               {
                 label: "Chart settings",
