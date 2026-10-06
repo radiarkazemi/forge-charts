@@ -1,9 +1,9 @@
 /**
- * Backtest Forge Structure Intelligence confirmed entries on XAUUSD history.
+ * Focused SI backtest on the working timeframes: XAUUSD 5m and 1m.
  * Usage: node scripts/backtest-structure-intelligence.mjs
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25,11 +25,7 @@ const bundle = spawnSync(
 );
 if (bundle.status !== 0) process.exit(bundle.status ?? 1);
 
-const {
-  computeStructureIntelligence,
-  siFamilyName,
-  siWhy,
-} = await import("/tmp/si-runtime.mjs");
+const { computeStructureIntelligence, siFamilyName, siWhy } = await import("/tmp/si-runtime.mjs");
 
 function loadPacked(path) {
   const raw = JSON.parse(readFileSync(path, "utf8"));
@@ -110,15 +106,13 @@ function resolveTrade(bars, ev) {
   const before = (h) => h != null && (hitStop == null || h < hitStop);
   return {
     first,
-    hit1,
-    hit2,
-    hit3,
-    hitStop,
     risk,
     mfeR: risk > 0 ? mfe / risk : 0,
     win1: before(hit1),
     win2: before(hit2),
     win3: before(hit3),
+    barsTo1: hit1 != null ? hit1 - ev.bar : null,
+    barsToStop: hitStop != null ? hitStop - ev.bar : null,
   };
 }
 
@@ -126,96 +120,97 @@ function summarize(label, bars, opts) {
   const result = computeStructureIntelligence(bars, opts);
   const trades = result.history.map((ev) => {
     const res = resolveTrade(bars, ev);
-    const chase = ev.dir === 1 ? ev.entry - ev.zhi : ev.zlo - ev.entry;
     return {
-      ...ev,
-      ...res,
-      chase,
-      familyName: siFamilyName(ev.family),
+      t: iso(ev.time),
+      dir: ev.dir === 1 ? "BUY" : "SELL",
+      fam: siFamilyName(ev.family),
       why: siWhy(ev.flags),
+      first: res.first,
+      win1: res.win1,
+      win2: res.win2,
+      win3: res.win3,
+      entry: +ev.entry.toFixed(2),
+      stop: +ev.stop.toFixed(2),
+      risk: +res.risk.toFixed(2),
+      mfeR: +res.mfeR.toFixed(2),
+      barsTo1: res.barsTo1,
+      barsToStop: res.barsToStop,
     };
   });
   const n = trades.length;
-  const count = (k) => trades.filter((t) => t.first === k).length;
+  const pct = (x) => (n ? ((100 * x) / n).toFixed(1) : "0");
   const fam = {};
   for (const t of trades) {
-    fam[t.familyName] ??= { n: 0, t3: 0, r1: 0, stop: 0 };
-    fam[t.familyName].n += 1;
-    if (t.win3) fam[t.familyName].t3 += 1;
-    if (t.win1) fam[t.familyName].r1 += 1;
-    if (t.first === "stop") fam[t.familyName].stop += 1;
+    fam[t.fam] ??= { n: 0, r1: 0, r2: 0, r3: 0, sl: 0 };
+    fam[t.fam].n += 1;
+    if (t.win1) fam[t.fam].r1 += 1;
+    if (t.win2) fam[t.fam].r2 += 1;
+    if (t.win3) fam[t.fam].r3 += 1;
+    if (t.first === "stop") fam[t.fam].sl += 1;
   }
-  const pct = (x) => (n ? ((100 * x) / n).toFixed(1) : "0");
   return {
     label,
     bars: bars.length,
+    from: bars.length ? iso(bars[0].time) : null,
+    to: bars.length ? iso(bars.at(-1).time) : null,
     confirms: n,
-    target3: count("target3"),
-    stop: count("stop"),
-    ambiguous: count("ambiguous"),
-    expired: count("expired") + count("open"),
-    r1BeforeStop: trades.filter((t) => t.win1).length,
-    r2BeforeStop: trades.filter((t) => t.win2).length,
-    r3BeforeStop: trades.filter((t) => t.win3).length,
-    win3: pct(trades.filter((t) => t.win3).length),
     win1: pct(trades.filter((t) => t.win1).length),
     win2: pct(trades.filter((t) => t.win2).length),
-    stopPct: pct(count("stop")),
+    win3: pct(trades.filter((t) => t.win3).length),
+    stopPct: pct(trades.filter((t) => t.first === "stop").length),
+    expired: trades.filter((t) => t.first === "expired" || t.first === "open").length,
     avgMfeR: n ? (trades.reduce((a, t) => a + t.mfeR, 0) / n).toFixed(2) : "0",
     families: fam,
-    trades: trades.map((t) => ({
-      t: iso(t.time),
-      dir: t.dir === 1 ? "BUY" : "SELL",
-      fam: t.familyName,
-      first: t.first,
-      win1: t.win1,
-      win3: t.win3,
-      entry: t.entry.toFixed(2),
-      stop: t.stop.toFixed(2),
-      why: t.why,
-    })),
+    trades,
   };
 }
 
 const m1 = loadPacked("/tmp/xauusd-1m.json");
-const m5 = aggregate(m1, 300);
-const m15file = loadPacked("/tmp/xauusd-15.json");
-const m15 = m15file.length > 200 ? m15file : aggregate(m1, 900);
+const m5file = existsSync("/tmp/xauusd-5m.json") ? loadPacked("/tmp/xauusd-5m.json") : [];
+const m5 = m5file.length > 200 ? m5file : aggregate(m1, 300);
 
 const variants = [
-  { name: "defaults (current)", opts: { historyLimit: 5000 } },
-  { name: "FVG only", opts: { historyLimit: 5000, zoneMode: "FVG only" } },
+  { name: "defaults", opts: { historyLimit: 5000 } },
   { name: "minScore 75", opts: { historyLimit: 5000, minScore: 75 } },
   { name: "require sweep", opts: { historyLimit: 5000, requireSweep: true } },
+  { name: "require outer", opts: { historyLimit: 5000, requireOuter: true } },
 ];
 
 const report = {
   generatedAt: new Date().toISOString(),
-  span1m: [iso(m1[0].time), iso(m1.at(-1).time)],
+  focus: ["5m", "1m"],
   n1m: m1.length,
   n5: m5.length,
-  n15: m15.length,
+  span1m: [iso(m1[0].time), iso(m1.at(-1).time)],
   sets: [],
 };
 
+function printSet(s, listTrades) {
+  console.log(
+    `\n${s.label}\n  bars=${s.bars}  ${s.from} → ${s.to}\n  n=${s.confirms}  1R=${s.win1}%  2R=${s.win2}%  3R=${s.win3}%  SL=${s.stopPct}%  exp=${s.expired}  mfe=${s.avgMfeR}R`,
+  );
+  console.log("  families", JSON.stringify(s.families));
+  if (listTrades) {
+    for (const t of s.trades) {
+      const mark = t.win3 ? "3R" : t.win1 ? "1R" : t.first === "stop" ? "SL" : t.first;
+      console.log(
+        `    ${t.t} ${t.dir.padEnd(4)} ${t.fam.padEnd(18)} ${mark.padEnd(6)} entry=${t.entry} sl=${t.stop} mfe=${t.mfeR}  ${t.why}`,
+      );
+    }
+  }
+}
+
 for (const tf of [
-  { name: "XAUUSD 15m", bars: m15 },
   { name: "XAUUSD 5m", bars: m5 },
-  { name: "XAUUSD 1m", bars: m1.slice(-15000) },
+  { name: "XAUUSD 1m", bars: m1 },
 ]) {
   for (const v of variants) {
     const s = summarize(`${tf.name} · ${v.name}`, tf.bars, v.opts);
     report.sets.push(s);
-    console.log(
-      `${s.label.padEnd(52)} n=${String(s.confirms).padStart(4)}  3R=${s.win3}%  2R=${s.win2}%  1R=${s.win1}%  SL=${s.stopPct}%  mfe=${s.avgMfeR}R`,
-    );
-    if (v.name === "defaults (current)") {
-      console.log("  families", JSON.stringify(s.families));
-    }
+    printSet(s, v.name === "defaults");
   }
-  console.log("---");
 }
 
-writeFileSync("/tmp/si-backtest.json", JSON.stringify(report, null, 2));
-writeFileSync("/opt/cursor/artifacts/si-backtest.json", JSON.stringify(report, null, 2));
-console.log("wrote /tmp/si-backtest.json");
+writeFileSync("/tmp/si-backtest-5m-1m.json", JSON.stringify(report, null, 2));
+writeFileSync("/opt/cursor/artifacts/si-backtest-5m-1m.json", JSON.stringify(report, null, 2));
+console.log("\nwrote /tmp/si-backtest-5m-1m.json");
