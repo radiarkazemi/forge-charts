@@ -74,8 +74,8 @@ export const SI_DEFAULTS: SiInputs = {
   showPaths: false,
   showActive: true,
   showHistory: true,
-  /** Keep history markers tiny — full zone boxes for every past setup clutter the chart. */
-  historyLimit: 3,
+  /** How many confirmed setups to keep on the chart (frozen boxes, not live-edge stacks). */
+  historyLimit: 8,
   nestedLife: 8,
   requireFvg: true,
   requireImpulseOrSweep: true,
@@ -792,7 +792,7 @@ export function structureIntelligenceDrawCmds(
     }
   }
 
-  // 2) History — markers at confirmation only (no stacked zone boxes to live edge).
+  // 2) Past confirms — frozen zone from break → fill (does not extend to the live bar).
   if (cfg.showHistory) {
     const lim = Math.max(0, Math.floor(cfg.historyLimit));
     const hist = lim > 0 ? result.history.slice(-lim) : [];
@@ -809,6 +809,37 @@ export function structureIntelligenceDrawCmds(
       }
       const c = ev.dir === 1 ? cfg.bullColor : cfg.bearColor;
       const tag = ev.dir === 1 ? "BUY" : "SELL";
+      const t1 = ev.bornTime;
+      const t2 = ev.time > t1 ? ev.time : t1;
+      cmds.push({
+        kind: "rect",
+        t1,
+        p1: ev.zhi,
+        t2,
+        p2: ev.zlo,
+        color: c,
+        fill: c,
+      });
+      cmds.push({
+        kind: "line",
+        t1,
+        p1: ev.stop,
+        t2,
+        p2: ev.stop,
+        color: c,
+        width: 1,
+        style: "dashed",
+      });
+      cmds.push({
+        kind: "line",
+        t1,
+        p1: ev.entry,
+        t2,
+        p2: ev.entry,
+        color: c,
+        width: 1,
+        style: "solid",
+      });
       cmds.push({
         kind: "dot",
         t1: ev.time,
