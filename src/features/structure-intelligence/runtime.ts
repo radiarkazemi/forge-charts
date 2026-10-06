@@ -44,20 +44,32 @@ export interface SiInputs {
   readonly requireImpulseOrSweep: boolean;
   /** Confirm only on the first visit to the zone (later tests are weaker). */
   readonly firstTouchOnly: boolean;
+  /** Skip nested / 2-candle reclaim of the opposite break. */
+  readonly skipNested: boolean;
+  /** Only trade with the major trend (no small counter-trend flips). */
+  readonly withTrend: boolean;
+  /** Require the break candle itself to be a displacement body. */
+  readonly requireImpulse: boolean;
+  /** Minimum POI stop distance in price (XAUUSD 0.01 lot ≈ $1 per 1.00). */
+  readonly minRisk: number;
+  /** Maximum POI stop distance in price (keep 0.01-lot loss ≤ this). */
+  readonly maxRisk: number;
+  /** Minimum |break − anchor| so the impulse is not a 2-candle blip. */
+  readonly minSwing: number;
   readonly bullColor: string;
   readonly bearColor: string;
   readonly mintick: number;
 }
 
 export const SI_DEFAULTS: SiInputs = {
-  minorLen: 3,
+  minorLen: 4,
   majorLen: 10,
-  swingATR: 0.35,
+  swingATR: 0.5,
   breakOnWick: false,
   sweepLife: 30,
   sweepATR: 0.05,
   requireSweep: false,
-  requireOuter: false,
+  requireOuter: true,
   zoneMode: "FVG then OB",
   zoneLookback: 30,
   gapATR: 0.08,
@@ -80,6 +92,12 @@ export const SI_DEFAULTS: SiInputs = {
   requireFvg: true,
   requireImpulseOrSweep: true,
   firstTouchOnly: true,
+  skipNested: true,
+  withTrend: true,
+  requireImpulse: true,
+  minRisk: 7,
+  maxRisk: 10,
+  minSwing: 12,
   bullColor: "#00AE8B",
   bearColor: "#E74A5E",
   mintick: 0.01,
@@ -490,16 +508,23 @@ export function computeStructureIntelligence(
           const fill = s.dir === 1 ? s.zhi : s.zlo;
           const risk = Math.abs(fill - s.stop);
           const fvgOk = !inputs.requireFvg || hasFlag(s.flags, 8);
-          const impulseOk =
-            !inputs.requireImpulseOrSweep || hasFlag(s.flags, 2) || hasFlag(s.flags, 1);
+          const impulseOk = inputs.requireImpulse
+            ? hasFlag(s.flags, 2)
+            : !inputs.requireImpulseOrSweep || hasFlag(s.flags, 2) || hasFlag(s.flags, 1);
           const firstTouchOk = !inputs.firstTouchOnly || s.touches <= 1;
           const piercedStop = s.dir === 1 ? bar.low <= s.stop : bar.high >= s.stop;
+          const nestedOk = !inputs.skipNested || s.family !== 5;
+          const swingOk = Math.abs(s.level - s.anchor) >= inputs.minSwing;
+          const dollarOk = risk >= inputs.minRisk && risk <= inputs.maxRisk;
           const quality =
             readyScore >= inputs.minScore &&
             (!inputs.requireOuter || hasFlag(s.flags, 4)) &&
             fvgOk &&
             impulseOk &&
             firstTouchOk &&
+            nestedOk &&
+            swingOk &&
+            dollarOk &&
             !piercedStop &&
             risk > inputs.mintick &&
             risk <= atr * inputs.maxStopATR;
@@ -579,7 +604,14 @@ export function computeStructureIntelligence(
           break;
         }
       }
-      if (zone && !duplicate && (!inputs.requireSweep || swept)) {
+      if (
+        zone &&
+        !duplicate &&
+        (!inputs.requireSweep || swept) &&
+        (!inputs.skipNested || !nested) &&
+        (!inputs.withTrend || previousTrend === 0 || previousTrend === dir || outerBroken) &&
+        Math.abs(level - anchor) >= inputs.minSwing
+      ) {
         const flags =
           (swept ? 1 : 0) +
           (impulse ? 2 : 0) +
@@ -588,40 +620,54 @@ export function computeStructureIntelligence(
           (stepped ? 16 : 0) +
           (nested ? 32 : 0);
         const family = nested ? 5 : stepped ? 3 : swept ? 2 : reversal ? 1 : 4;
+        // Clean trend only: stepped continuation or with-trend continuation.
+        // Skip sweep-reversals and 2-candle counter-trend flips.
+        if (family !== 3 && family !== 4) {
+          /* skip */
+        } else {
         // POI invalidation: just beyond the far zone edge (not the swing — that
         // made 1R ≈ the whole impulse and hid ~70% zone-hold success).
-        const stop =
+        const fillPx = dir === 1 ? zone.zhi : zone.zlo;
+        const zoneStop =
           dir === 1
             ? zone.zlo - atr * inputs.stopATR
             : zone.zhi + atr * inputs.stopATR;
-        if (setups.length >= inputs.candidateLimit) {
-          const removeIndex = setups.findIndex((s) => s.stage > 3);
-          if (removeIndex >= 0) setups.splice(removeIndex, 1);
+        // Size the stop so 0.01-lot gold is ~$minRisk–$maxRisk (3R ≥ ~$20, SL ≤ ~$10).
+        const sizedStop =
+          dir === 1 ? fillPx - inputs.minRisk : fillPx + inputs.minRisk;
+        const stop = dir === 1 ? Math.min(zoneStop, sizedStop) : Math.max(zoneStop, sizedStop);
+        const risk0 = Math.abs(fillPx - stop);
+        if (risk0 >= inputs.minRisk - 1e-8 && risk0 <= inputs.maxRisk + 1e-8) {
+          if (setups.length >= inputs.candidateLimit) {
+            const removeIndex = setups.findIndex((s) => s.stage > 3);
+            if (removeIndex >= 0) setups.splice(removeIndex, 1);
+          }
+          if (setups.length < inputs.candidateLimit) {
+            setups.push({
+              id: bar.time * 2 + (dir === 1 ? 0 : 1),
+              dir,
+              family,
+              stage: 1,
+              score: scoreFlags(flags, false),
+              flags,
+              bornBar: i,
+              bornTime: bar.time,
+              touchBar: null,
+              touches: 0,
+              confirmBar: null,
+              anchorTime,
+              levelTime,
+              anchor,
+              level,
+              outer,
+              zlo: zone.zlo,
+              zhi: zone.zhi,
+              stop,
+              entry: null,
+              target: null,
+            });
+          }
         }
-        if (setups.length < inputs.candidateLimit) {
-          setups.push({
-            id: bar.time * 2 + (dir === 1 ? 0 : 1),
-            dir,
-            family,
-            stage: 1,
-            score: scoreFlags(flags, false),
-            flags,
-            bornBar: i,
-            bornTime: bar.time,
-            touchBar: null,
-            touches: 0,
-            confirmBar: null,
-            anchorTime,
-            levelTime,
-            anchor,
-            level,
-            outer,
-            zlo: zone.zlo,
-            zhi: zone.zhi,
-            stop,
-            entry: null,
-            target: null,
-          });
         }
       }
       if (dir === 1) {
@@ -845,7 +891,7 @@ export function structureIntelligenceDrawCmds(
         t1: ev.time,
         p1: ev.entry,
         color: c,
-        text: `${tag} · POI · ${siFamilyName(ev.family)}`,
+        text: `${tag} · 1:3 · ${siFamilyName(ev.family)}`,
       });
     }
   }
@@ -943,12 +989,15 @@ export function structureIntelligenceDrawCmds(
       });
     }
 
+    const fill = active.entry ?? (bull ? active.zhi : active.zlo);
+    const sl =
+      active.stop != null && fill != null ? Math.abs(fill - active.stop) : 0;
     cmds.push({
       kind: "dot",
       t1: endT,
       p1: bull ? active.zhi : active.zlo,
       color: c,
-      text: `${side} · POI · ${siFamilyName(active.family)} · ${siStageName(active.stage)} · ${active.score}/100 · ${siWhy(active.flags)}`,
+      text: `${side} · 1:3 · ${siFamilyName(active.family)} · ${siStageName(active.stage)} · SL ${sl.toFixed(1)} → ${cfg.targetR}R`,
     });
   }
 
