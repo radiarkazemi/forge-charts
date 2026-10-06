@@ -814,7 +814,7 @@ export function structureIntelligenceDrawCmds(
         t1: ev.time,
         p1: ev.entry,
         color: c,
-        text: `${tag} · ${siFamilyName(ev.family)}`,
+        text: `${tag} · POI · ${siFamilyName(ev.family)}`,
       });
     }
   }
@@ -917,7 +917,7 @@ export function structureIntelligenceDrawCmds(
       t1: endT,
       p1: bull ? active.zhi : active.zlo,
       color: c,
-      text: `${side} · ${siFamilyName(active.family)} · ${siStageName(active.stage)} · ${active.score}/100 · ${siWhy(active.flags)}`,
+      text: `${side} · POI · ${siFamilyName(active.family)} · ${siStageName(active.stage)} · ${active.score}/100 · ${siWhy(active.flags)}`,
     });
   }
 
