@@ -18,7 +18,7 @@ export const SI_STUDY_DEFAULTS = {
   requireSweep: SI_DEFAULTS.requireSweep,
   requireOuter: SI_DEFAULTS.requireOuter,
   zoneMode: 0, // 0 FVG then OB, 1 FVG only, 2 OB only
-  triggerMode: 0, // 0 Micro break, 1 Rejection candle
+  triggerMode: 1, // 0 Micro break, 1 Rejection candle — in-zone rejection is the fill
   minScore: SI_DEFAULTS.minScore,
   candidateLimit: SI_DEFAULTS.candidateLimit,
   targetR: SI_DEFAULTS.targetR,

@@ -36,6 +36,14 @@ export interface SiInputs {
   readonly showActive: boolean;
   readonly showHistory: boolean;
   readonly historyLimit: number;
+  /** Bars after an opposite break that still count as nested recovery (not sweepLife). */
+  readonly nestedLife: number;
+  /** Confirm only FVG reaction zones (skip weak candle-range OBs). */
+  readonly requireFvg: boolean;
+  /** Confirm only if the break had displacement or a reclaimed sweep. */
+  readonly requireImpulseOrSweep: boolean;
+  /** Confirm only on the first visit to the zone (later tests are weaker). */
+  readonly firstTouchOnly: boolean;
   readonly bullColor: string;
   readonly bearColor: string;
   readonly mintick: number;
@@ -54,7 +62,7 @@ export const SI_DEFAULTS: SiInputs = {
   zoneLookback: 30,
   gapATR: 0.08,
   displacementATR: 0.8,
-  triggerMode: "Micro break",
+  triggerMode: "Rejection candle",
   confirmWindow: 8,
   minScore: 65,
   setupLife: 100,
@@ -68,6 +76,10 @@ export const SI_DEFAULTS: SiInputs = {
   showHistory: true,
   /** Keep history markers tiny — full zone boxes for every past setup clutter the chart. */
   historyLimit: 3,
+  nestedLife: 8,
+  requireFvg: true,
+  requireImpulseOrSweep: true,
+  firstTouchOnly: true,
   bullColor: "#00AE8B",
   bearColor: "#E74A5E",
   mintick: 0.01,
@@ -83,6 +95,7 @@ interface Setup {
   bornBar: number;
   bornTime: number;
   touchBar: number | null;
+  touches: number;
   confirmBar: number | null;
   anchorTime: number;
   levelTime: number;
@@ -222,25 +235,22 @@ function scoreFlags(flags: number, reacted: boolean): number {
   );
 }
 
-function atrAt(bars: readonly SiBar[], i: number, period = 14): number {
-  if (i <= 0) return Math.max(bars[0]!.high - bars[0]!.low, 1e-8);
-  const start = Math.max(1, i - period + 1);
-  let trSum = 0;
-  let n = 0;
-  for (let j = start; j <= i; j += 1) {
-    const b = bars[j]!;
-    const prev = bars[j - 1]!;
-    const tr = Math.max(b.high - b.low, Math.abs(b.high - prev.close), Math.abs(b.low - prev.close));
-    trSum += tr;
-    n += 1;
-  }
-  return n > 0 ? trSum / n : Math.max(bars[i]!.high - bars[i]!.low, 1e-8);
-}
-
-/** Wilder-ish ATR series for pivot filter at lag. */
+/** Wilder ATR(14) — matches Pine `ta.atr(14)`. */
 function atrSeries(bars: readonly SiBar[], period = 14): number[] {
   const out = new Array<number>(bars.length);
-  for (let i = 0; i < bars.length; i += 1) out[i] = atrAt(bars, i, period);
+  if (bars.length === 0) return out;
+  out[0] = Math.max(bars[0]!.high - bars[0]!.low, 1e-8);
+  for (let i = 1; i < bars.length; i += 1) {
+    const b = bars[i]!;
+    const prev = bars[i - 1]!;
+    const tr = Math.max(b.high - b.low, Math.abs(b.high - prev.close), Math.abs(b.low - prev.close));
+    if (i < period) {
+      const seed = (out[i - 1]! * (i - 1) + tr) / i;
+      out[i] = seed;
+    } else {
+      out[i] = (out[i - 1]! * (period - 1) + tr) / period;
+    }
+  }
   return out;
 }
 
@@ -266,6 +276,12 @@ function pivotLow(bars: readonly SiBar[], i: number, left: number, right: number
   return l;
 }
 
+function inDiscount(dir: 1 | -1, zlo: number, zhi: number, mid: number | null): boolean {
+  if (mid == null) return true;
+  const zmid = (zlo + zhi) / 2;
+  return dir === 1 ? zmid <= mid : zmid >= mid;
+}
+
 function findZone(
   bars: readonly SiBar[],
   i: number,
@@ -273,9 +289,15 @@ function findZone(
   anchorTime: number,
   atr: number,
   inputs: SiInputs,
+  anchor: number,
+  level: number,
 ): { zlo: number; zhi: number; isGap: boolean } | null {
   const look = Math.min(inputs.zoneLookback, i);
+  const mid = (anchor + level) / 2;
+  // Newest gap near current price is usually premium/chase. Prefer the unfilled
+  // FVG in discount (bull) / premium (bear) of the impulse — the actual POI.
   if (inputs.zoneMode !== "OB only") {
+    let best: { zlo: number; zhi: number; isGap: boolean } | null = null;
     for (let off = 0; off <= look; off += 1) {
       if (i - off - 2 < 0) break;
       const bi = bars[i - off]!;
@@ -283,7 +305,7 @@ function findZone(
       const gap = dir === 1 ? bi.low > b2.high : bi.high < b2.low;
       const gl = dir === 1 ? b2.high : bi.high;
       const gh = dir === 1 ? bi.low : b2.low;
-      let valid = gap && b2.time >= anchorTime && gh - gl >= atr * inputs.gapATR;
+      let valid = gap && bi.time >= anchorTime && gh - gl >= atr * inputs.gapATR;
       if (valid && off > 0) {
         for (let j = 0; j < off; j += 1) {
           const cj = bars[i - j]!.close;
@@ -294,8 +316,13 @@ function findZone(
         }
       }
       const behind = dir === 1 ? gh < bars[i]!.close : gl > bars[i]!.close;
-      if (valid && behind) return { zlo: gl, zhi: gh, isGap: true };
+      if (valid && behind && inDiscount(dir, gl, gh, mid)) {
+        if (best == null || (dir === 1 ? gh > best.zhi : gl < best.zlo)) {
+          best = { zlo: gl, zhi: gh, isGap: true };
+        }
+      }
     }
+    if (best) return best;
   }
   if (inputs.zoneMode !== "FVG only") {
     for (let off = 1; off <= look; off += 1) {
@@ -312,7 +339,9 @@ function findZone(
         }
       }
       const behind = dir === 1 ? bi.high < bars[i]!.close : bi.low > bars[i]!.close;
-      if (valid && behind) return { zlo: bi.low, zhi: bi.high, isGap: false };
+      if (valid && behind && inDiscount(dir, bi.low, bi.high, mid)) {
+        return { zlo: bi.low, zhi: bi.high, isGap: false };
+      }
     }
   }
   return null;
@@ -344,6 +373,8 @@ export function computeStructureIntelligence(
   let downSteps = 0;
   let bullSweepBar: number | null = null;
   let bearSweepBar: number | null = null;
+  let bullSweepPx: number | null = null;
+  let bearSweepPx: number | null = null;
   let lastBullBreak: number | null = null;
   let lastBearBreak: number | null = null;
   let usedHTime: number | null = null;
@@ -381,8 +412,14 @@ export function computeStructureIntelligence(
     if (majorH != null && bar.close > majorH) trend = 1;
     if (majorL != null && bar.close < majorL) trend = -1;
 
-    if (l != null && bar.low < l - atr * inputs.sweepATR && bar.close > l) bullSweepBar = i;
-    if (h != null && bar.high > h + atr * inputs.sweepATR && bar.close < h) bearSweepBar = i;
+    if (l != null && bar.low < l - atr * inputs.sweepATR && bar.close > l) {
+      bullSweepBar = i;
+      bullSweepPx = l;
+    }
+    if (h != null && bar.high > h + atr * inputs.sweepATR && bar.close < h) {
+      bearSweepBar = i;
+      bearSweepPx = h;
+    }
 
     const upProbe = inputs.breakOnWick ? bar.high : bar.close;
     const dnProbe = inputs.breakOnWick ? bar.low : bar.close;
@@ -411,10 +448,11 @@ export function computeStructureIntelligence(
         const outerBroken =
           s.outer != null && (s.dir === 1 ? bar.close > s.outer : bar.close < s.outer);
         if (outerBroken) s.flags = addFlag(s.flags, 4);
+        // Pending: only a CLOSE through the POI kills it. A wick into the zone
+        // is the fill, not invalidation (zone-stop would otherwise stop-out the
+        // first touch before the rejection can confirm).
         const dead =
-          s.dir === 1
-            ? bar.low <= s.stop || bar.close < s.zlo
-            : bar.high >= s.stop || bar.close > s.zhi;
+          s.dir === 1 ? bar.close < s.zlo : bar.close > s.zhi;
         if (dead) {
           s.stage = 6;
         } else if (i - s.bornBar > inputs.setupLife) {
@@ -422,6 +460,7 @@ export function computeStructureIntelligence(
         } else {
           const touch = bar.high >= s.zlo && bar.low <= s.zhi;
           if (touch && i > s.bornBar) {
+            if (s.stage !== 2) s.touches += 1;
             s.stage = 2;
             s.touchBar = i;
             const distance = Math.max(Math.abs(s.level - s.anchor), inputs.mintick);
@@ -438,23 +477,37 @@ export function computeStructureIntelligence(
           }
           const recentTouch =
             s.stage === 2 && s.touchBar != null && i - s.touchBar <= inputs.confirmWindow;
+          const overlapNow = touch && i > s.bornBar;
           const rejection =
             s.dir === 1 ? bar.close > bar.open && bar.close > s.zhi : bar.close < bar.open && bar.close < s.zlo;
           const microBreak = rejection && (s.dir === 1 ? bar.close > prev.high : bar.close < prev.low);
-          const trigger = inputs.triggerMode === "Micro break" ? microBreak : rejection;
+          // Reaction must happen in the zone this bar — later closes above it are chases, not fills.
+          const trigger =
+            (inputs.triggerMode === "Micro break" ? microBreak : rejection) && overlapNow;
           s.score = scoreFlags(s.flags, false);
           const readyScore = scoreFlags(s.flags, true);
-          const risk = s.dir === 1 ? bar.close - s.stop : s.stop - bar.close;
+          // Fill the POI (zone edge, traded on this overlap bar), stop just beyond it.
+          const fill = s.dir === 1 ? s.zhi : s.zlo;
+          const risk = Math.abs(fill - s.stop);
+          const fvgOk = !inputs.requireFvg || hasFlag(s.flags, 8);
+          const impulseOk =
+            !inputs.requireImpulseOrSweep || hasFlag(s.flags, 2) || hasFlag(s.flags, 1);
+          const firstTouchOk = !inputs.firstTouchOnly || s.touches <= 1;
+          const piercedStop = s.dir === 1 ? bar.low <= s.stop : bar.high >= s.stop;
           const quality =
             readyScore >= inputs.minScore &&
             (!inputs.requireOuter || hasFlag(s.flags, 4)) &&
+            fvgOk &&
+            impulseOk &&
+            firstTouchOk &&
+            !piercedStop &&
             risk > inputs.mintick &&
             risk <= atr * inputs.maxStopATR;
           if (recentTouch && trigger && quality) {
             s.stage = 3;
             s.score = readyScore;
-            s.entry = bar.close;
-            s.target = bar.close + s.dir * risk * inputs.targetR;
+            s.entry = fill;
+            s.target = fill + s.dir * risk * inputs.targetR;
             s.confirmBar = i;
             eventCount += 1;
             if (s.score > eventScore) {
@@ -501,18 +554,24 @@ export function computeStructureIntelligence(
       }
       const swept =
         dir === 1
-          ? bullSweepBar != null && i - bullSweepBar <= inputs.sweepLife
-          : bearSweepBar != null && i - bearSweepBar <= inputs.sweepLife;
+          ? bullSweepBar != null &&
+            i - bullSweepBar <= inputs.sweepLife &&
+            bullSweepPx != null &&
+            Math.abs(bullSweepPx - anchor) <= atr * 0.5
+          : bearSweepBar != null &&
+            i - bearSweepBar <= inputs.sweepLife &&
+            bearSweepPx != null &&
+            Math.abs(bearSweepPx - anchor) <= atr * 0.5;
       const impulse = dir === 1 ? bullImpulse : bearImpulse;
       const stepped = dir === 1 ? upSteps >= 2 : downSteps >= 2;
       const nested =
         dir === 1
-          ? lastBearBreak != null && i - lastBearBreak <= inputs.sweepLife
-          : lastBullBreak != null && i - lastBullBreak <= inputs.sweepLife;
+          ? lastBearBreak != null && i - lastBearBreak <= inputs.nestedLife
+          : lastBullBreak != null && i - lastBullBreak <= inputs.nestedLife;
       const reversal = previousTrend === -dir;
       const outer = dir === 1 ? majorH : majorL;
       const outerBroken = outer != null && (dir === 1 ? bar.close > outer : bar.close < outer);
-      const zone = findZone(bars, i, dir, anchorTime, atr, inputs);
+      const zone = findZone(bars, i, dir, anchorTime, atr, inputs, anchor, level);
       let duplicate = false;
       for (const old of setups) {
         if (old.dir === dir && old.anchorTime === anchorTime && old.stage <= 3) {
@@ -529,10 +588,12 @@ export function computeStructureIntelligence(
           (stepped ? 16 : 0) +
           (nested ? 32 : 0);
         const family = nested ? 5 : stepped ? 3 : swept ? 2 : reversal ? 1 : 4;
+        // POI invalidation: just beyond the far zone edge (not the swing — that
+        // made 1R ≈ the whole impulse and hid ~70% zone-hold success).
         const stop =
           dir === 1
-            ? Math.min(anchor, zone.zlo) - atr * inputs.stopATR
-            : Math.max(anchor, zone.zhi) + atr * inputs.stopATR;
+            ? zone.zlo - atr * inputs.stopATR
+            : zone.zhi + atr * inputs.stopATR;
         if (setups.length >= inputs.candidateLimit) {
           const removeIndex = setups.findIndex((s) => s.stage > 3);
           if (removeIndex >= 0) setups.splice(removeIndex, 1);
@@ -548,6 +609,7 @@ export function computeStructureIntelligence(
             bornBar: i,
             bornTime: bar.time,
             touchBar: null,
+            touches: 0,
             confirmBar: null,
             anchorTime,
             levelTime,

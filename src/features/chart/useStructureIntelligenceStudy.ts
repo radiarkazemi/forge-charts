@@ -120,7 +120,7 @@ export function useStructureIntelligenceStudy(enabled = true): void {
           showPaths: bool("showPaths", SI_STUDY_DEFAULTS.showPaths),
           showActive: bool("showActive", SI_STUDY_DEFAULTS.showActive),
           showHistory: bool("showHistory", SI_STUDY_DEFAULTS.showHistory),
-          historyLimit: Math.max(5, Math.floor(num("historyLimit", SI_STUDY_DEFAULTS.historyLimit))),
+          historyLimit: Math.max(0, Math.floor(num("historyLimit", SI_STUDY_DEFAULTS.historyLimit))),
           bullColor: SI_DEFAULTS.bullColor,
           bearColor: SI_DEFAULTS.bearColor,
         };
