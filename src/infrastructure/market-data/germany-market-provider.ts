@@ -246,6 +246,29 @@ function applyTick(current: Bar | null, price: number, tsSec: number, step: numb
   };
 }
 
+/**
+ * Mid-session holes in Mongo (live writer outages) look like price gaps on the chart.
+ * TradingView’s broker feed stays continuous — splice Germany `/ohlc/` into those holes only.
+ * Skips overnight session breaks (≥ 45m on minute charts).
+ */
+function hasMidSessionHoles(bars: readonly Bar[], stepSec: number): boolean {
+  if (bars.length < 2 || stepSec <= 0) return false;
+  const limit = stepSec * 1.5;
+  const sessionBreak = Math.max(stepSec * 9, 45 * 60);
+  for (let i = 1; i < bars.length; i += 1) {
+    const gap = bars[i]!.time - bars[i - 1]!.time;
+    if (gap > limit && gap < sessionBreak) return true;
+  }
+  return false;
+}
+
+function mergeBarsPreferPrimary(primary: readonly Bar[], fill: readonly Bar[]): Bar[] {
+  const byTime = new Map<number, Bar>();
+  for (const b of fill) byTime.set(b.time, b);
+  for (const b of primary) byTime.set(b.time, b);
+  return [...byTime.values()].sort((a, b) => a.time - b.time);
+}
+
 /** Aggregate lower-TF bars into `stepSec` candles (standard OHLCV rollup). */
 function aggregateBars(bars: readonly Bar[], stepSec: number): Bar[] {
   if (stepSec <= 1 || bars.length === 0) return [...bars];
@@ -618,14 +641,16 @@ export class GermanyMarketProvider implements MarketDataProvider {
       if (!bars.length) {
         await this.assertHealthy();
         bars = await this.fetchOhlcBars(route, interval, germanyLimit);
-      } else if (bars.length < Math.min(range.countBack, 50)) {
-        // Mongo thin on this page — splice in recent Germany bars if available.
+      } else if (
+        bars.length < Math.min(range.countBack, 50) ||
+        hasMidSessionHoles(bars, step)
+      ) {
+        // Mongo thin OR missing mid-session minutes (live socket outage) —
+        // splice Germany OHLC so the chart matches TradingView’s continuous candles.
         try {
           await this.assertHealthy();
           const recent = await this.fetchOhlcBars(route, interval, germanyLimit);
-          const byTime = new Map<number, Bar>();
-          for (const b of [...bars, ...recent]) byTime.set(b.time, b);
-          bars = [...byTime.values()].sort((a, b) => a.time - b.time);
+          bars = mergeBarsPreferPrimary(bars, recent);
         } catch {
           /* keep mongo bars */
         }
