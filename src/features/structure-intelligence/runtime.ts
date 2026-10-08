@@ -96,7 +96,7 @@ export const SI_DEFAULTS: SiInputs = {
   withTrend: true,
   requireImpulse: true,
   /** Natural POI risk band (0.01 lot ≈ $1 / 1.00). Do NOT invent a larger stop. */
-  minRisk: 2,
+  minRisk: 2.5,
   maxRisk: 12,
   /** Skip 2-candle micro flips; keep swings that actually travel. */
   minSwing: 8,
@@ -296,12 +296,71 @@ function pivotLow(bars: readonly SiBar[], i: number, left: number, right: number
   return l;
 }
 
-function inDiscount(dir: 1 | -1, zlo: number, zhi: number, mid: number | null): boolean {
-  if (mid == null) return true;
-  const zmid = (zlo + zhi) / 2;
-  return dir === 1 ? zmid <= mid : zmid >= mid;
+
+function spawnSetup(
+  setups: Setup[],
+  inputs: SiInputs,
+  args: {
+    dir: 1 | -1;
+    family: number;
+    flags: number;
+    bornBar: number;
+    bornTime: number;
+    anchorTime: number;
+    levelTime: number;
+    anchor: number;
+    level: number;
+    outer: number | null;
+    zone: { zlo: number; zhi: number; isGap: boolean };
+    atr: number;
+  },
+): boolean {
+  const { dir, zone, atr } = args;
+  const stop =
+    dir === 1 ? zone.zlo - atr * inputs.stopATR : zone.zhi + atr * inputs.stopATR;
+  const near = dir === 1 ? zone.zhi : zone.zlo;
+  const risk0 = Math.abs(near - stop);
+  const zoneH = zone.zhi - zone.zlo;
+  const zoneOk = zoneH >= Math.max(1.5, atr * inputs.gapATR);
+  if (
+    !zoneOk ||
+    risk0 < inputs.minRisk - 1e-8 ||
+    risk0 > inputs.maxRisk + 1e-8
+  ) {
+    return false;
+  }
+  if (setups.length >= inputs.candidateLimit) {
+    const removeIndex = setups.findIndex((s) => s.stage > 3);
+    if (removeIndex >= 0) setups.splice(removeIndex, 1);
+  }
+  if (setups.length >= inputs.candidateLimit) return false;
+  setups.push({
+    id: args.bornTime * 2 + (dir === 1 ? 0 : 1),
+    dir,
+    family: args.family,
+    stage: 1,
+    score: scoreFlags(args.flags, false),
+    flags: args.flags,
+    bornBar: args.bornBar,
+    bornTime: args.bornTime,
+    touchBar: null,
+    touches: 0,
+    confirmBar: null,
+    anchorTime: args.anchorTime,
+    levelTime: args.levelTime,
+    anchor: args.anchor,
+    level: args.level,
+    outer: args.outer,
+    zlo: zone.zlo,
+    zhi: zone.zhi,
+    stop,
+    entry: null,
+    target: null,
+  });
+  return true;
 }
 
+/** Newest unfilled FVG (then OB) still behind price — matches Pine `f_zone`. */
 function findZone(
   bars: readonly SiBar[],
   i: number,
@@ -309,15 +368,11 @@ function findZone(
   anchorTime: number,
   atr: number,
   inputs: SiInputs,
-  anchor: number,
-  level: number,
+  _anchor: number,
+  _level: number,
 ): { zlo: number; zhi: number; isGap: boolean } | null {
   const look = Math.min(inputs.zoneLookback, i);
-  const mid = (anchor + level) / 2;
-  // Newest gap near current price is usually premium/chase. Prefer the unfilled
-  // FVG in discount (bull) / premium (bear) of the impulse — the actual POI.
   if (inputs.zoneMode !== "OB only") {
-    let best: { zlo: number; zhi: number; isGap: boolean } | null = null;
     for (let off = 0; off <= look; off += 1) {
       if (i - off - 2 < 0) break;
       const bi = bars[i - off]!;
@@ -336,13 +391,10 @@ function findZone(
         }
       }
       const behind = dir === 1 ? gh < bars[i]!.close : gl > bars[i]!.close;
-      if (valid && behind && inDiscount(dir, gl, gh, mid)) {
-        if (best == null || (dir === 1 ? gh > best.zhi : gl < best.zlo)) {
-          best = { zlo: gl, zhi: gh, isGap: true };
-        }
+      if (valid && behind) {
+        return { zlo: gl, zhi: gh, isGap: true };
       }
     }
-    if (best) return best;
   }
   if (inputs.zoneMode !== "FVG only") {
     for (let off = 1; off <= look; off += 1) {
@@ -359,7 +411,7 @@ function findZone(
         }
       }
       const behind = dir === 1 ? bi.high < bars[i]!.close : bi.low > bars[i]!.close;
-      if (valid && behind && inDiscount(dir, bi.low, bi.high, mid)) {
+      if (valid && behind) {
         return { zlo: bi.low, zhi: bi.high, isGap: false };
       }
     }
@@ -480,6 +532,8 @@ export function computeStructureIntelligence(
         } else {
           const touch = bar.high >= s.zlo && bar.low <= s.zhi;
           if (touch && i > s.bornBar) {
+            // Count each new visit (stage was not already touching). Re-entries
+            // after leaving the zone must fail firstTouchOnly.
             if (s.stage !== 2) s.touches += 1;
             s.stage = 2;
             s.touchBar = i;
@@ -497,18 +551,26 @@ export function computeStructureIntelligence(
           }
           const recentTouch =
             s.stage === 2 && s.touchBar != null && i - s.touchBar <= inputs.confirmWindow;
-          const overlapNow = touch && i > s.bornBar;
           const rejection =
             s.dir === 1 ? bar.close > bar.open && bar.close > s.zhi : bar.close < bar.open && bar.close < s.zlo;
           const microBreak = rejection && (s.dir === 1 ? bar.close > prev.high : bar.close < prev.low);
-          // Reaction must happen in the zone this bar — later closes above it are chases, not fills.
+          // Pine: recent touch + trigger. Require THIS bar to still overlap the POI so
+          // we do not confirm a chase candle that has already left the zone.
+          const overlapNow = touch && i > s.bornBar;
           const trigger =
             (inputs.triggerMode === "Micro break" ? microBreak : rejection) && overlapNow;
           s.score = scoreFlags(s.flags, false);
           const readyScore = scoreFlags(s.flags, true);
-          // Fill the POI (zone edge, traded on this overlap bar), stop just beyond it.
-          const fill = s.dir === 1 ? s.zhi : s.zlo;
-          const risk = Math.abs(fill - s.stop);
+          // Realistic fill = confirmation close (Pine). Stop stays beyond the POI.
+          // Zone-edge "entries" after a chased close invented fake R multiples.
+          const fill = bar.close;
+          const risk = s.dir === 1 ? fill - s.stop : s.stop - fill;
+          const zoneH = Math.max(s.zhi - s.zlo, inputs.mintick);
+          // Keep the fill AT the POI: close must not run more than one zone height
+          // past the near edge (hand setups react in/near the gap, not 10pts away).
+          const near = s.dir === 1 ? s.zhi : s.zlo;
+          const chase = Math.abs(fill - near);
+          const atPoi = chase <= zoneH * 1.25;
           const fvgOk = !inputs.requireFvg || hasFlag(s.flags, 8);
           const impulseOk = inputs.requireImpulse
             ? hasFlag(s.flags, 2)
@@ -527,6 +589,7 @@ export function computeStructureIntelligence(
             nestedOk &&
             swingOk &&
             dollarOk &&
+            atPoi &&
             !piercedStop &&
             risk > inputs.mintick &&
             risk <= atr * inputs.maxStopATR;
@@ -598,7 +661,6 @@ export function computeStructureIntelligence(
       const reversal = previousTrend === -dir;
       const outer = dir === 1 ? majorH : majorL;
       const outerBroken = outer != null && (dir === 1 ? bar.close > outer : bar.close < outer);
-      const zone = findZone(bars, i, dir, anchorTime, atr, inputs, anchor, level);
       let duplicate = false;
       for (const old of setups) {
         if (old.dir === dir && old.anchorTime === anchorTime && old.stage <= 3) {
@@ -607,65 +669,38 @@ export function computeStructureIntelligence(
         }
       }
       if (
-        zone &&
         !duplicate &&
         (!inputs.requireSweep || swept) &&
         (!inputs.skipNested || !nested) &&
         (!inputs.withTrend || previousTrend === 0 || previousTrend === dir || outerBroken) &&
         Math.abs(level - anchor) >= inputs.minSwing
       ) {
-        const flags =
+        const flagsBase =
           (swept ? 1 : 0) +
           (impulse ? 2 : 0) +
           (outerBroken ? 4 : 0) +
-          (zone.isGap ? 8 : 0) +
           (stepped ? 16 : 0) +
           (nested ? 32 : 0);
         const family = nested ? 5 : stepped ? 3 : swept ? 2 : reversal ? 1 : 4;
-        // Only clean with-trend families. Sweep (~50% 1R) and counter-trend
-        // reversals (0% 3R on 1m) are not the hand-drawn working setups.
-        const familyOk = family === 3 || family === 4;
-        // True POI stop = far zone edge + ATR buffer. Never invent a larger
-        // dollar stop — that turned working zone holds into random $7 loses.
-        // Skip tiny FVGs (below minRisk) instead of stretching the stop.
-        const fillPx = dir === 1 ? zone.zhi : zone.zlo;
-        const stop =
-          dir === 1
-            ? zone.zlo - atr * inputs.stopATR
-            : zone.zhi + atr * inputs.stopATR;
-        const risk0 = Math.abs(fillPx - stop);
-        if (
-          familyOk &&
-          risk0 >= inputs.minRisk - 1e-8 &&
-          risk0 <= inputs.maxRisk + 1e-8
-        ) {
-          if (setups.length >= inputs.candidateLimit) {
-            const removeIndex = setups.findIndex((s) => s.stage > 3);
-            if (removeIndex >= 0) setups.splice(removeIndex, 1);
-          }
-          if (setups.length < inputs.candidateLimit) {
-            setups.push({
-              id: bar.time * 2 + (dir === 1 ? 0 : 1),
+        // Hand-drawn certain-win POIs: stepped structure + FVG left behind the break.
+        if (family === 3) {
+          const zoneRaw = findZone(bars, i, dir, anchorTime, atr, inputs, anchor, level);
+          const clean =
+            zoneRaw && !(bar.high >= zoneRaw.zlo && bar.low <= zoneRaw.zhi) ? zoneRaw : null;
+          if (clean) {
+            spawnSetup(setups, inputs, {
               dir,
               family,
-              stage: 1,
-              score: scoreFlags(flags, false),
-              flags,
+              flags: flagsBase + (clean.isGap ? 8 : 0),
               bornBar: i,
               bornTime: bar.time,
-              touchBar: null,
-              touches: 0,
-              confirmBar: null,
               anchorTime,
               levelTime,
               anchor,
               level,
               outer,
-              zlo: zone.zlo,
-              zhi: zone.zhi,
-              stop,
-              entry: null,
-              target: null,
+              zone: clean,
+              atr,
             });
           }
         }
