@@ -171,9 +171,9 @@ const m5 = m5file.length > 200 ? m5file : aggregate(m1, 300);
 
 const variants = [
   { name: "defaults", opts: { historyLimit: 5000 } },
-  { name: "minScore 75", opts: { historyLimit: 5000, minScore: 75 } },
-  { name: "require sweep", opts: { historyLimit: 5000, requireSweep: true } },
-  { name: "require outer", opts: { historyLimit: 5000, requireOuter: true } },
+  { name: "minRisk 3.5", opts: { historyLimit: 5000, minRisk: 3.5 } },
+  { name: "minRisk 5 (≈$15 3R)", opts: { historyLimit: 5000, minRisk: 5 } },
+  { name: "no outer require", opts: { historyLimit: 5000, requireOuter: false } },
 ];
 
 const report = {

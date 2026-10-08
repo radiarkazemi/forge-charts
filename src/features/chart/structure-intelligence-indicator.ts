@@ -42,7 +42,7 @@ export function createStructureIntelligenceIndicator(PineJS: {
       id: SI_STUDY_ID as never,
       name: SI_STUDY_NAME,
       description: SI_STUDY_NAME,
-      shortDescription: "Forge SI 1:3",
+      shortDescription: "Forge SI POI 1:3",
       isCustomIndicator: true,
       is_price_study: true,
       linkedToSeries: true,

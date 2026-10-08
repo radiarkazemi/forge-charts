@@ -62,9 +62,9 @@ export interface SiInputs {
 }
 
 export const SI_DEFAULTS: SiInputs = {
-  minorLen: 4,
+  minorLen: 3,
   majorLen: 10,
-  swingATR: 0.5,
+  swingATR: 0.35,
   breakOnWick: false,
   sweepLife: 30,
   sweepATR: 0.05,
@@ -95,9 +95,11 @@ export const SI_DEFAULTS: SiInputs = {
   skipNested: true,
   withTrend: true,
   requireImpulse: true,
-  minRisk: 7,
-  maxRisk: 10,
-  minSwing: 12,
+  /** Natural POI risk band (0.01 lot ≈ $1 / 1.00). Do NOT invent a larger stop. */
+  minRisk: 2,
+  maxRisk: 12,
+  /** Skip 2-candle micro flips; keep swings that actually travel. */
+  minSwing: 8,
   bullColor: "#00AE8B",
   bearColor: "#E74A5E",
   mintick: 0.01,
@@ -620,24 +622,23 @@ export function computeStructureIntelligence(
           (stepped ? 16 : 0) +
           (nested ? 32 : 0);
         const family = nested ? 5 : stepped ? 3 : swept ? 2 : reversal ? 1 : 4;
-        // Clean trend only: stepped continuation or with-trend continuation.
-        // Skip sweep-reversals and 2-candle counter-trend flips.
-        if (family !== 3 && family !== 4) {
-          /* skip */
-        } else {
-        // POI invalidation: just beyond the far zone edge (not the swing — that
-        // made 1R ≈ the whole impulse and hid ~70% zone-hold success).
+        // Only clean with-trend families. Sweep (~50% 1R) and counter-trend
+        // reversals (0% 3R on 1m) are not the hand-drawn working setups.
+        const familyOk = family === 3 || family === 4;
+        // True POI stop = far zone edge + ATR buffer. Never invent a larger
+        // dollar stop — that turned working zone holds into random $7 loses.
+        // Skip tiny FVGs (below minRisk) instead of stretching the stop.
         const fillPx = dir === 1 ? zone.zhi : zone.zlo;
-        const zoneStop =
+        const stop =
           dir === 1
             ? zone.zlo - atr * inputs.stopATR
             : zone.zhi + atr * inputs.stopATR;
-        // Size the stop so 0.01-lot gold is ~$minRisk–$maxRisk (3R ≥ ~$20, SL ≤ ~$10).
-        const sizedStop =
-          dir === 1 ? fillPx - inputs.minRisk : fillPx + inputs.minRisk;
-        const stop = dir === 1 ? Math.min(zoneStop, sizedStop) : Math.max(zoneStop, sizedStop);
         const risk0 = Math.abs(fillPx - stop);
-        if (risk0 >= inputs.minRisk - 1e-8 && risk0 <= inputs.maxRisk + 1e-8) {
+        if (
+          familyOk &&
+          risk0 >= inputs.minRisk - 1e-8 &&
+          risk0 <= inputs.maxRisk + 1e-8
+        ) {
           if (setups.length >= inputs.candidateLimit) {
             const removeIndex = setups.findIndex((s) => s.stage > 3);
             if (removeIndex >= 0) setups.splice(removeIndex, 1);
@@ -667,7 +668,6 @@ export function computeStructureIntelligence(
               target: null,
             });
           }
-        }
         }
       }
       if (dir === 1) {
