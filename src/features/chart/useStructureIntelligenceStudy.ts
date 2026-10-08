@@ -106,6 +106,9 @@ export function useStructureIntelligenceStudy(enabled = true): void {
           breakOnWick: bool("breakOnWick", SI_STUDY_DEFAULTS.breakOnWick),
           requireSweep: bool("requireSweep", SI_STUDY_DEFAULTS.requireSweep),
           requireOuter: bool("requireOuter", SI_STUDY_DEFAULTS.requireOuter),
+          minRisk: Math.max(0, num("minRisk", SI_STUDY_DEFAULTS.minRisk)),
+          maxRisk: Math.max(1, num("maxRisk", SI_STUDY_DEFAULTS.maxRisk)),
+          minSwing: Math.max(0, num("minSwing", SI_STUDY_DEFAULTS.minSwing)),
           zoneMode: zoneModeFrom(Math.floor(num("zoneMode", SI_STUDY_DEFAULTS.zoneMode))),
           triggerMode:
             Math.floor(num("triggerMode", SI_STUDY_DEFAULTS.triggerMode)) === 1
@@ -120,7 +123,10 @@ export function useStructureIntelligenceStudy(enabled = true): void {
           showPaths: bool("showPaths", SI_STUDY_DEFAULTS.showPaths),
           showActive: bool("showActive", SI_STUDY_DEFAULTS.showActive),
           showHistory: bool("showHistory", SI_STUDY_DEFAULTS.showHistory),
-          historyLimit: Math.max(5, Math.floor(num("historyLimit", SI_STUDY_DEFAULTS.historyLimit))),
+          historyLimit: Math.min(
+            24,
+            Math.max(1, Math.floor(num("historyLimit", SI_STUDY_DEFAULTS.historyLimit))),
+          ),
           bullColor: SI_DEFAULTS.bullColor,
           bearColor: SI_DEFAULTS.bearColor,
         };
