@@ -698,6 +698,37 @@ async def fetch_iran_quote_faraz_relay(session: aiohttp.ClientSession) -> tuple[
         return None
 
 
+# Written by an external Faraz bridge (e.g. cloud agent → scp) when Germany is down.
+_FARAZ_BRIDGE_PATH = os.environ.get("FARAZ_BRIDGE_QUOTE_PATH", "/tmp/faraz_live_quote.json")
+_FARAZ_BRIDGE_MAX_AGE_SEC = float(os.environ.get("FARAZ_BRIDGE_MAX_AGE_SEC", "8"))
+
+
+def fetch_iran_quote_faraz_bridge_file() -> tuple[dict[str, float], str] | None:
+    """Fresh Faraz quote dropped on disk by an external bridge (native geramTalaHejdah)."""
+    try:
+        st = os.stat(_FARAZ_BRIDGE_PATH)
+        age = time.time() - st.st_mtime
+        if age > _FARAZ_BRIDGE_MAX_AGE_SEC:
+            return None
+        with open(_FARAZ_BRIDGE_PATH, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data, dict):
+            return None
+        # Accept either raw Faraz get-data shape or already-mapped quote fields.
+        if "geramTalaHejdah" in data or "abshodeNaghdi" in data:
+            return _quote_from_faraz_public_raw(data)
+        mapped = _quote_from_anil_shape(data, "faraz")
+        if mapped is None:
+            return None
+        quote, _src = mapped
+        return quote, "faraz-bridge"
+    except FileNotFoundError:
+        return None
+    except Exception as exc:
+        LOG.debug("faraz bridge file: %s", exc)
+        return None
+
+
 async def fetch_iran_quote_faraz_proxy(session: aiohttp.ClientSession) -> tuple[dict[str, float], str] | None:
     """Faraz via Germany market-api `/gold/live/` (reachable from Iran VPS)."""
     try:
@@ -756,23 +787,58 @@ async def fetch_iran_quote_mongo_faraz() -> tuple[dict[str, float], str] | None:
 
 
 async def fetch_iran_quote(session: aiohttp.ClientSession) -> tuple[dict[str, float], str] | None:
-    """Faraz-only quote resolution. Never TGJU.
+    """Prefer native Faraz (geramTalaHejdah). Fall back only when Germany is down.
 
-    Prefer native Faraz public market via Germany :8091 relay (geramTalaHejdah),
-    then direct faraz.io. market-api `/gold/live/` is lower priority — it has
-    frozen stale prices and synthesized G18 from mesghal.
+    Order: bridge file → Germany :8091 public-market → direct Faraz → market-api
+    gold/live → Anil (any source, emergency) → Mongo Faraz (last resort).
     """
+    bridge = fetch_iran_quote_faraz_bridge_file()
+    if bridge:
+        return bridge
+
     for fetcher in (
         lambda: fetch_iran_quote_faraz_relay(session),  # Germany :8091 → faraz.io public
         lambda: fetch_iran_quote_faraz_direct(session),  # direct faraz.io when unblocked
         lambda: fetch_iran_quote_faraz_proxy(session),  # market-api /gold/live (may be stale)
-        lambda: fetch_iran_quote_anil_faraz(session),
-        fetch_iran_quote_mongo_faraz,
     ):
         quote_src = await fetcher()
         if quote_src:
             return quote_src
-    return None
+
+    # Emergency: Anil live prices beat a frozen Mongo Faraz row when Germany is offline.
+    try:
+        async with session.get(
+            f"{ANIL_GOLD_API}/gold-price/",
+            params={"auto": "0"},
+            timeout=aiohttp.ClientTimeout(total=1.5),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json(content_type=None)
+                if isinstance(data, dict):
+                    g18 = float(data.get("price_18k_per_gram") or 0)
+                    if g18 > 0:
+                        quote = {
+                            "mesghal_17": float(
+                                data.get("mesghal_17") or data.get("mesghal") or 0
+                            ),
+                            "price_18k_per_gram": g18,
+                            "price_24k_per_gram": float(data.get("price_24k_per_gram") or 0),
+                            "coin_emami": float(data.get("coin_emami") or 0),
+                            "coin_half": float(data.get("coin_half") or 0),
+                            "coin_quarter": float(data.get("coin_quarter") or 0),
+                            "ounce_usd": float(data.get("ounce_usd") or 0),
+                        }
+                        src = str(data.get("source") or "anil")
+                        LOG.warning(
+                            "iran quote emergency fallback to anil/%s g18=%s",
+                            src,
+                            int(g18),
+                        )
+                        return quote, f"anil:{src}"
+    except Exception as exc:
+        LOG.debug("anil emergency: %s", exc)
+
+    return await fetch_iran_quote_mongo_faraz()
 
 
 def persist_iran_tick_1s(quote: dict[str, float], src_name: str, ts: int) -> None:
