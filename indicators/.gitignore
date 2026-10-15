@@ -1,0 +1,4 @@
+.trh-logs/
+.trh-secrets.json
+.trh-server-state.json
+.trh-tunnel-url
