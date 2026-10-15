@@ -136,7 +136,11 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
         <StepIcon />
       </ButtonBase>
 
-      <ButtonBase sx={{ ...btnSx, minWidth: 40 }} title="Playback speed" onClick={openSpeed}>
+      <ButtonBase
+        sx={{ ...btnSx, minWidth: 40 }}
+        title="Playback speed (1x = one candle takes its real timeframe)"
+        onClick={openSpeed}
+      >
         {snap.speed}x
       </ButtonBase>
       <Menu
@@ -155,7 +159,7 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
               setSpeedAnchor(null);
             }}
           >
-            {s}x
+            {s === 1 ? "1x realtime" : `${s}x`}
           </MenuItem>
         ))}
       </Menu>
@@ -165,6 +169,9 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
         sx={{ px: 0.75, fontSize: 12, fontWeight: 600, color: "#787b86", minWidth: 28, textAlign: "center" }}
       >
         {resolutionLabel}
+        {snap.phase === "playing" && snap.formProgress > 0
+          ? ` ${Math.round(snap.formProgress * 100)}%`
+          : ""}
       </Typography>
 
       <ButtonBase
