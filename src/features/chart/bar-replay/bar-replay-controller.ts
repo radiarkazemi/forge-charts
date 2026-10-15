@@ -1,5 +1,10 @@
 import { createStore, type Store } from "@/application";
-import type { Bar } from "@/domain";
+import {
+  formingBarFromOhlc,
+  formingBarFromSubBars,
+  intervalSeconds,
+  type Bar,
+} from "@/domain";
 import type { TradingViewDatafeed } from "@/infrastructure/tradingview/datafeed";
 import type { EntityId, IChartingLibraryWidget } from "@/infrastructure/tradingview";
 
@@ -16,15 +21,9 @@ export interface BarReplayState {
   readonly startIndex: number;
   readonly bufferLength: number;
   readonly selecting: boolean;
+  /** 0–1 progress through the forming candle. */
+  readonly formProgress: number;
 }
-
-const SPEED_MS: Record<BarReplaySpeed, number> = {
-  0.5: 2_000,
-  1: 1_000,
-  2: 500,
-  5: 200,
-  10: 100,
-};
 
 const INITIAL: BarReplayState = {
   active: false,
@@ -35,6 +34,7 @@ const INITIAL: BarReplayState = {
   startIndex: -1,
   bufferLength: 0,
   selecting: false,
+  formProgress: 0,
 };
 
 function formatResolution(res: string): string {
@@ -47,9 +47,44 @@ function formatResolution(res: string): string {
   return res;
 }
 
+/** Real wall duration of one candle for this resolution (ms). */
+function resolutionToStepMs(res: string): number {
+  try {
+    return Math.max(1_000, intervalSeconds(res) * 1_000);
+  } catch {
+    return 60_000;
+  }
+}
+
+function resolutionToSec(res: string): number {
+  return Math.max(1, Math.floor(resolutionToStepMs(res) / 1000));
+}
+
+/** Tick cadence while a candle is forming (denser on short TFs). */
+function tickIntervalMs(stepMs: number, speed: BarReplaySpeed): number {
+  const effective = stepMs / Math.max(0.25, speed);
+  if (effective <= 2_000) return 50;
+  if (effective <= 15_000) return 100;
+  if (effective <= 60_000) return 200;
+  if (effective <= 5 * 60_000) return 400;
+  return 1_000;
+}
+
+/** Prefer a denser TF for true intra-bar path when available. */
+function microResolutionFor(res: string): string | null {
+  const sec = resolutionToSec(res);
+  if (sec <= 1) return null;
+  if (sec <= 60) return "1S";
+  if (sec <= 300) return "1";
+  if (sec <= 900) return "1";
+  return "5";
+}
+
 /**
  * TradingView-style Bar Replay: select a bar, truncate future history,
- * then step / play forward through a prefetched buffer.
+ * then form each next candle over real timeframe duration (scaled by speed).
+ * Uses true lower-TF data for the path when available; otherwise simulates
+ * a natural O→H→L→C path from the closed bar’s OHLC.
  */
 export class BarReplayController {
   readonly state: Store<BarReplayState> = createStore(INITIAL);
@@ -57,9 +92,15 @@ export class BarReplayController {
   private widget: IChartingLibraryWidget | null = null;
   private datafeed: TradingViewDatafeed | null = null;
   private buffer: Bar[] = [];
+  /** Lower-TF bars for true intra-candle paths (optional). */
+  private microBuffer: Bar[] = [];
   private playTimer = 0;
   private markerId: EntityId | null = null;
   private selectToken = 0;
+  private formStartedAtMs = 0;
+  private formProgressAtStart = 0;
+  private formingTarget: Bar | null = null;
+  private formingSubs: Bar[] = [];
 
   attach(widget: IChartingLibraryWidget, datafeed: TradingViewDatafeed): void {
     this.widget = widget;
@@ -72,6 +113,9 @@ export class BarReplayController {
     this.widget = null;
     this.datafeed = null;
     this.buffer = [];
+    this.microBuffer = [];
+    this.formingTarget = null;
+    this.formingSubs = [];
     this.markerId = null;
     this.state.set(INITIAL);
   }
@@ -87,6 +131,7 @@ export class BarReplayController {
     if (!widget || !datafeed) return;
 
     this.stopPlayTimer();
+    this.formingTarget = null;
     try {
       widget.activeChart().cancelSelectBar();
     } catch {
@@ -102,6 +147,7 @@ export class BarReplayController {
 
     datafeed.beginReplay();
     this.buffer = [];
+    this.microBuffer = [];
     this.state.set({
       active: true,
       phase: "selecting",
@@ -111,21 +157,27 @@ export class BarReplayController {
       startIndex: -1,
       bufferLength: 0,
       selecting: true,
+      formProgress: 0,
     });
 
-    // Fire-and-forget so the toolbar paints before the picker blocks.
+    try {
+      widget.applyOverrides({ "mainSeriesProperties.showCountdown": true });
+    } catch {
+      /* ignore */
+    }
+
     void this.selectBar();
   }
 
-  /** Activate CL bar picker; on click, cut history at that bar. */
   async selectBar(): Promise<void> {
     const widget = this.widget;
     const datafeed = this.datafeed;
     if (!widget || !datafeed || !this.state.get().active) return;
 
     this.stopPlayTimer();
+    this.formingTarget = null;
     const token = ++this.selectToken;
-    this.patch({ phase: "selecting", selecting: true });
+    this.patch({ phase: "selecting", selecting: true, formProgress: 0 });
 
     try {
       widget.activeChart().cancelSelectBar();
@@ -138,7 +190,6 @@ export class BarReplayController {
       selectedTime = await widget.activeChart().requestSelectBar();
     } catch {
       if (token !== this.selectToken) return;
-      // User cancelled — keep toolbar open if we already have a cursor.
       const hasCursor = this.state.get().cursorIndex >= 0;
       this.patch({
         phase: hasCursor ? "ready" : "selecting",
@@ -167,45 +218,106 @@ export class BarReplayController {
   }
 
   setSpeed(speed: BarReplaySpeed): void {
-    this.patch({ speed });
-    if (this.state.get().phase === "playing") {
+    const playing = this.state.get().phase === "playing" || this.playTimer !== 0;
+    // Preserve mid-candle progress across speed changes.
+    if (playing && this.formingTarget) {
+      const stepMs = resolutionToStepMs(this.state.get().resolution);
+      const prevSpeed = this.state.get().speed;
+      const elapsed = Date.now() - this.formStartedAtMs;
+      const progress = Math.min(
+        1,
+        this.formProgressAtStart + elapsed / (stepMs / Math.max(0.25, prevSpeed)),
+      );
+      this.formProgressAtStart = progress;
+      this.formStartedAtMs = Date.now();
+      this.patch({ speed, formProgress: progress });
+    } else {
+      this.patch({ speed });
+    }
+    if (playing) {
       this.stopPlayTimer();
+      this.startPlayTimer();
+    }
+  }
+
+  /**
+   * Chart interval changed during replay — rebuild buffer at the new TF and
+   * keep forming candles at that TF’s real duration.
+   */
+  async onResolutionChanged(resolution: string): Promise<void> {
+    if (!this.state.get().active || this.state.get().cursorIndex < 0) return;
+    const next = String(resolution || "").trim();
+    if (!next || next === this.state.get().resolution) return;
+
+    const wasPlaying = this.state.get().phase === "playing" || this.playTimer !== 0;
+    this.stopPlayTimer();
+    this.formingTarget = null;
+
+    const cursorTime = this.buffer[this.state.get().cursorIndex]?.time;
+    await this.rebuildBufferAt(next, cursorTime);
+    if (wasPlaying && this.state.get().cursorIndex >= 0) {
+      this.patch({ phase: "playing" });
+      this.beginFormingNext();
       this.startPlayTimer();
     }
   }
 
   async play(): Promise<void> {
     if (!this.state.get().active || this.state.get().cursorIndex < 0) return;
-    if (this.state.get().phase === "playing") {
+    if (this.state.get().phase === "playing" || this.playTimer !== 0) {
       this.pause();
       return;
     }
     this.patch({ phase: "playing" });
+    if (!this.formingTarget) {
+      this.beginFormingNext();
+    } else {
+      // Resume mid-candle from saved progress.
+      this.formStartedAtMs = Date.now();
+      this.formProgressAtStart = this.state.get().formProgress;
+    }
     this.startPlayTimer();
   }
 
   pause(): void {
+    if (this.formingTarget && this.playTimer !== 0) {
+      const stepMs = resolutionToStepMs(this.state.get().resolution);
+      const speed = this.state.get().speed;
+      const elapsed = Date.now() - this.formStartedAtMs;
+      const progress = Math.min(
+        1,
+        this.formProgressAtStart + elapsed / (stepMs / Math.max(0.25, speed)),
+      );
+      this.patch({ formProgress: progress });
+      this.formProgressAtStart = progress;
+    }
     this.stopPlayTimer();
     if (this.state.get().active && this.state.get().cursorIndex >= 0) {
       this.patch({ phase: "ready" });
     }
   }
 
+  /** Complete the forming candle immediately (or step one closed bar). */
   async stepForward(): Promise<void> {
     if (!this.state.get().active) return;
     this.pause();
-    await this.advanceOne();
+    if (this.formingTarget) {
+      await this.commitFormingBar();
+      return;
+    }
+    await this.advanceClosedOne();
   }
 
-  /** Jump back to the originally selected start bar. */
   async jumpToStart(): Promise<void> {
     const { startIndex, active } = this.state.get();
     if (!active || startIndex < 0) return;
     this.pause();
+    this.formingTarget = null;
+    this.formingSubs = [];
+    this.patch({ formProgress: 0 });
     await this.seekToIndex(startIndex, { pushTick: false, reload: true });
   }
 
-  /** Exit replay and restore live data. */
   async jumpToRealtime(): Promise<void> {
     await this.exit();
   }
@@ -213,6 +325,8 @@ export class BarReplayController {
   async exit(): Promise<void> {
     this.stopPlayTimer();
     this.selectToken += 1;
+    this.formingTarget = null;
+    this.formingSubs = [];
     try {
       this.widget?.activeChart().cancelSelectBar();
     } catch {
@@ -225,6 +339,7 @@ export class BarReplayController {
     const widget = this.widget;
     datafeed?.endReplay();
     this.buffer = [];
+    this.microBuffer = [];
     this.state.set({ ...INITIAL, speed: this.state.get().speed });
 
     if (widget) {
@@ -245,13 +360,30 @@ export class BarReplayController {
     if (!widget || !datafeed) return;
 
     const chart = widget.activeChart();
-    const symbol = chart.symbol();
     const resolution = String(chart.resolution());
+    const ok = await this.rebuildBufferAt(resolution, selectedTimeSec, {
+      resetStart: true,
+      selecting: false,
+    });
+    if (!ok) {
+      this.patch({ phase: "selecting", selecting: false });
+    }
+  }
 
-    // Prefetch full buffer BEFORE applying cutoff so we can step into “future”.
+  private async rebuildBufferAt(
+    resolution: string,
+    anchorTimeSec: number | undefined,
+    opts: { resetStart?: boolean; selecting?: boolean } = {},
+  ): Promise<boolean> {
+    const widget = this.widget;
+    const datafeed = this.datafeed;
+    if (!widget || !datafeed) return false;
+
+    const chart = widget.activeChart();
+    const symbol = chart.symbol();
+
     let buffer = await datafeed.fetchReplayBuffer(symbol, resolution, 8_000);
     if (buffer.length === 0) {
-      // Fallback: export whatever the chart currently has.
       try {
         const exported = await chart.exportData({
           includeTime: true,
@@ -264,32 +396,118 @@ export class BarReplayController {
       }
     }
 
-    if (buffer.length === 0) {
-      this.patch({ phase: "selecting", selecting: false });
-      return;
+    // Prefer a denser TF for true intra-bar paths; also use it to synthesize
+    // the chart TF when native history is missing.
+    const microRes = microResolutionFor(resolution);
+    let micro: Bar[] = [];
+    if (microRes) {
+      try {
+        const fetched = await datafeed.fetchReplayBuffer(symbol, microRes, 20_000);
+        micro = [...fetched];
+      } catch {
+        micro = [];
+      }
     }
 
-    let index = nearestBarIndex(buffer, selectedTimeSec);
+    if (buffer.length < 10 && micro.length > 0) {
+      buffer = aggregateBars(micro, resolutionToSec(resolution));
+    }
+
+    if (buffer.length === 0) return false;
+
+    const prev = this.state.get();
+    const anchor =
+      anchorTimeSec != null && Number.isFinite(anchorTimeSec)
+        ? Number(anchorTimeSec)
+        : Number(this.buffer[Math.max(0, prev.cursorIndex)]?.time ?? buffer[0]!.time);
+    let index = nearestBarIndex(buffer, anchor);
     if (index < 0) index = 0;
 
+    let startIndex = index;
+    if (!opts.resetStart && prev.startIndex >= 0 && this.buffer[prev.startIndex]) {
+      const startTime = Number(this.buffer[prev.startIndex]!.time);
+      startIndex = nearestBarIndex(buffer, startTime);
+      if (startIndex < 0) startIndex = index;
+    }
+
     this.buffer = [...buffer];
+    this.microBuffer = micro;
+    this.formingTarget = null;
+    this.formingSubs = [];
     this.patch({
       resolution,
       cursorIndex: index,
-      startIndex: index,
+      startIndex,
       bufferLength: buffer.length,
-      phase: "ready",
-      selecting: false,
+      phase: this.playTimer !== 0 || prev.phase === "playing" ? "playing" : "ready",
+      selecting: opts.selecting ?? false,
+      formProgress: 0,
     });
 
-    datafeed.setReplayBuffer(buffer);
+    datafeed.setReplayBuffer(buffer, resolution);
     datafeed.setReplayCutoff(buffer[index]!.time);
+    datafeed.setReplayClock(buffer[index]!.time);
     await this.removeMarker();
     await this.drawMarker(buffer[index]!.time);
     this.reloadSeries();
+    return true;
   }
 
-  private async advanceOne(): Promise<boolean> {
+  /** Start forming the bar after the current closed cursor. */
+  private beginFormingNext(): void {
+    const { cursorIndex, bufferLength, resolution } = this.state.get();
+    if (cursorIndex < 0 || cursorIndex >= bufferLength - 1) {
+      this.pause();
+      return;
+    }
+    const target = this.buffer[cursorIndex + 1];
+    if (!target) {
+      this.pause();
+      return;
+    }
+    this.formingTarget = target;
+    this.formStartedAtMs = Date.now();
+    this.formProgressAtStart = 0;
+    this.formingSubs = subsForBar(this.microBuffer, target, resolutionToSec(resolution));
+    this.patch({ formProgress: 0 });
+    this.pushForming(0.02);
+  }
+
+  private pushForming(progress: number): void {
+    const datafeed = this.datafeed;
+    const target = this.formingTarget;
+    if (!datafeed || !target) return;
+    const barSec = resolutionToSec(this.state.get().resolution);
+    const forming =
+      this.formingSubs.length > 0
+        ? formingBarFromSubBars(target, this.formingSubs, progress, barSec)
+        : formingBarFromOhlc(target, progress);
+    const clockSec = target.time + Math.min(barSec - 1, Math.floor(progress * barSec));
+    datafeed.setReplayClock(Math.max(target.time + 1, clockSec));
+    datafeed.pushReplayBar(forming);
+  }
+
+  private async commitFormingBar(): Promise<void> {
+    const datafeed = this.datafeed;
+    const target = this.formingTarget;
+    if (!datafeed || !target) return;
+    const barSec = resolutionToSec(this.state.get().resolution);
+    const nextIndex = this.state.get().cursorIndex + 1;
+    datafeed.setReplayCutoff(target.time);
+    datafeed.setReplayClock(target.time + barSec);
+    datafeed.pushReplayBar({ ...target });
+    this.formingTarget = null;
+    this.formingSubs = [];
+    this.patch({
+      cursorIndex: nextIndex,
+      formProgress: 0,
+      phase: this.playTimer !== 0 ? "playing" : "ready",
+    });
+    await this.removeMarker();
+    await this.drawMarker(target.time);
+  }
+
+  private async advanceClosedOne(): Promise<boolean> {
     const { cursorIndex, bufferLength } = this.state.get();
     if (cursorIndex < 0 || cursorIndex >= bufferLength - 1) {
       this.pause();
@@ -308,8 +526,16 @@ export class BarReplayController {
     const bar = this.buffer[index];
     if (!datafeed || !bar) return;
 
+    this.formingTarget = null;
+    this.formingSubs = [];
     datafeed.setReplayCutoff(bar.time);
-    this.patch({ cursorIndex: index, phase: "ready" });
+    datafeed.setReplayClock(bar.time);
+    const keepPlaying = this.playTimer !== 0 || this.state.get().phase === "playing";
+    this.patch({
+      cursorIndex: index,
+      phase: keepPlaying ? "playing" : "ready",
+      formProgress: 0,
+    });
     await this.removeMarker();
     await this.drawMarker(bar.time);
 
@@ -320,6 +546,39 @@ export class BarReplayController {
     if (opts.pushTick) {
       datafeed.pushReplayBar(bar);
     }
+  }
+
+  private onFormTick(): void {
+    if (this.state.get().phase !== "playing" && this.playTimer === 0) return;
+    const target = this.formingTarget;
+    if (!target) {
+      this.beginFormingNext();
+      return;
+    }
+
+    const stepMs = resolutionToStepMs(this.state.get().resolution);
+    const speed = this.state.get().speed;
+    const elapsed = Date.now() - this.formStartedAtMs;
+    const progress = Math.min(
+      1,
+      this.formProgressAtStart + elapsed / (stepMs / Math.max(0.25, speed)),
+    );
+    this.patch({ formProgress: progress, phase: "playing" });
+
+    if (progress >= 1) {
+      void this.commitFormingBar().then(() => {
+        if (this.state.get().cursorIndex >= this.state.get().bufferLength - 1) {
+          this.pause();
+          return;
+        }
+        if (this.playTimer !== 0) {
+          this.beginFormingNext();
+        }
+      });
+      return;
+    }
+
+    this.pushForming(progress);
   }
 
   private reloadSeries(): void {
@@ -337,6 +596,7 @@ export class BarReplayController {
     const chart = this.widget?.activeChart();
     if (!chart) return;
     try {
+      await this.removeMarker();
       this.markerId = await chart.createShape(
         { time: timeSec },
         {
@@ -372,11 +632,10 @@ export class BarReplayController {
 
   private startPlayTimer(): void {
     this.stopPlayTimer();
-    const ms = SPEED_MS[this.state.get().speed] ?? 1_000;
+    const stepMs = resolutionToStepMs(this.state.get().resolution);
+    const ms = tickIntervalMs(stepMs, this.state.get().speed);
     this.playTimer = window.setInterval(() => {
-      void this.advanceOne().then((ok) => {
-        if (!ok) this.pause();
-      });
+      this.onFormTick();
     }, ms);
   }
 
@@ -404,6 +663,48 @@ function nearestBarIndex(bars: readonly Bar[], timeSec: number): number {
     }
   }
   return best;
+}
+
+function subsForBar(micro: readonly Bar[], parent: Bar, barSec: number): Bar[] {
+  if (!micro.length || barSec <= 0) return [];
+  const end = parent.time + barSec;
+  return micro.filter((b) => {
+    const t = Number(b.time);
+    return t >= parent.time && t < end;
+  });
+}
+
+/** Aggregate lower-TF closes into OHLC for a coarser step (seconds). */
+function aggregateBars(micro: readonly Bar[], stepSec: number): Bar[] {
+  if (!micro.length || stepSec <= 0) return [];
+  type Acc = { time: number; open: number; high: number; low: number; close: number; volume: number };
+  const buckets = new Map<number, Acc>();
+  for (const b of micro) {
+    const t0 = Number(b.time) - (Number(b.time) % stepSec);
+    const existing = buckets.get(t0);
+    if (!existing) {
+      buckets.set(t0, {
+        time: t0,
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        volume: b.volume || 0,
+      });
+    } else {
+      buckets.set(t0, {
+        time: t0,
+        open: existing.open,
+        high: Math.max(existing.high, b.high),
+        low: Math.min(existing.low, b.low),
+        close: b.close,
+        volume: existing.volume + (b.volume || 0),
+      });
+    }
+  }
+  return [...buckets.values()]
+    .sort((a, b) => a.time - b.time)
+    .map((b) => ({ ...b }));
 }
 
 function barsFromExport(exported: {

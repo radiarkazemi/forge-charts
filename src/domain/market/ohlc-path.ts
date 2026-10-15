@@ -103,3 +103,64 @@ export function formingBarFromOhlc(parent: Bar, progress01: number): Bar {
     volume: parent.volume * progress,
   };
 }
+
+/**
+ * Form a parent candle from real lower-TF bars when available.
+ * `progress01` selects how far into the parent period we have “seen”.
+ * Falls back to the synthetic OHLC path when `subs` is empty.
+ */
+export function formingBarFromSubBars(
+  parent: Bar,
+  subs: readonly Bar[],
+  progress01: number,
+  barSec: number,
+): Bar {
+  const progress = Math.min(1, Math.max(0, progress01));
+  if (progress >= 1) {
+    return {
+      time: parent.time,
+      open: parent.open,
+      high: parent.high,
+      low: parent.low,
+      close: parent.close,
+      volume: parent.volume,
+    };
+  }
+  if (!subs.length || barSec <= 0) {
+    return formingBarFromOhlc(parent, progress);
+  }
+
+  const cutoff = parent.time + Math.max(0, Math.floor(progress * barSec));
+  const seen = subs.filter((b) => {
+    const t = Number(b.time);
+    return t >= parent.time && t <= cutoff;
+  });
+  if (seen.length === 0) {
+    return formingBarFromOhlc(parent, Math.max(progress, 0.02));
+  }
+
+  let open = seen[0]!.open;
+  let high = seen[0]!.high;
+  let low = seen[0]!.low;
+  let close = seen[0]!.close;
+  let volume = 0;
+  for (const b of seen) {
+    high = Math.max(high, b.high);
+    low = Math.min(low, b.low);
+    close = b.close;
+    volume += b.volume || 0;
+  }
+  // Stay inside the known parent envelope when we already have the closed bar.
+  high = Math.min(Math.max(high, open, close), parent.high);
+  low = Math.max(Math.min(low, open, close), parent.low);
+  open = parent.open;
+
+  return {
+    time: parent.time,
+    open,
+    high,
+    low,
+    close,
+    volume: volume || parent.volume * progress,
+  };
+}

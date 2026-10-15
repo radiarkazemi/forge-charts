@@ -114,6 +114,7 @@ IRAN_BOOTSTRAP_RESOLUTIONS = (
     "1",
     "5",
     "15",
+    "30",
     "60",
     "240",
     "1D",
@@ -122,6 +123,9 @@ IRAN_BOOTSTRAP_RESOLUTIONS = (
 )
 _IRAN_BOOTSTRAP_DONE: set[str] = set()
 _FARAZ_CUSTOMER_AUTH_OK: bool | None = None
+# Retry customer auth after this monotonic time (avoid permanent lockout on expired cookie).
+_FARAZ_AUTH_RETRY_AT: float = 0.0
+_FARAZ_AUTH_RETRY_SEC = float(os.environ.get("FARAZ_AUTH_RETRY_SEC", "300"))
 # channel|resolution -> monotonic time of last live/tail merge into response path
 _FARAZ_HISTORY_LIVE_AT: dict[str, float] = {}
 # Aliases so clients can subscribe with friendlier names.
@@ -589,6 +593,44 @@ def _extract_faraz_price(entry: Any) -> float:
     return 0.0
 
 
+def _quote_from_faraz_public_raw(raw: dict[str, Any]) -> tuple[dict[str, float], str] | None:
+    """Map Faraz public get-data payload → iran quote. Prefer native geramTalaHejdah."""
+    mesghal = _extract_faraz_price(raw.get("abshodeNaghdi"))
+    # Native G18 first; never silently prefer mesghal-derived when native exists.
+    g18_native = _extract_faraz_price(raw.get("geramTalaHejdah"))
+    if g18_native <= 0:
+        g18_native = _extract_faraz_price(raw.get("tala18Estjt"))
+    g18 = g18_native
+    g24 = _extract_faraz_price(raw.get("tala24Estjt"))
+    derived = 0.0
+    if mesghal > 0:
+        derived = float(int(round((mesghal * 750 / 705) / 4.608)))
+    # Fallback only if native G18 missing — keep abshode usable.
+    if g18 <= 0 and derived > 0:
+        g18 = derived
+        LOG.warning("faraz G18 missing — using mesghal-derived %s", int(g18))
+    elif g18 > 0 and derived > 0 and abs(g18 - derived) < 1.0:
+        # Exact match usually means upstream derived; still accept (native may equal formula).
+        pass
+    if g24 <= 0 and g18 > 0:
+        g24 = float(int(round(g18 * 999 / 750)))
+    if mesghal <= 0 and g18 <= 0:
+        return None
+    ounce = _extract_faraz_price(raw.get("FOREXCOM_XAUUSD"))
+    return (
+        {
+            "mesghal_17": float(int(round(mesghal))) if mesghal > 0 else 0.0,
+            "price_18k_per_gram": float(int(round(g18))) if g18 > 0 else 0.0,
+            "price_24k_per_gram": float(int(round(g24))) if g24 > 0 else 0.0,
+            "coin_emami": float(int(round(_extract_faraz_price(raw.get("sekkeNewEstjt"))))),
+            "coin_half": float(int(round(_extract_faraz_price(raw.get("nimSekkeEstjt"))))),
+            "coin_quarter": float(int(round(_extract_faraz_price(raw.get("robSekkeEstjt"))))),
+            "ounce_usd": float(ounce) if ounce else 0.0,
+        },
+        "faraz",
+    )
+
+
 async def fetch_iran_quote_faraz_direct(session: aiohttp.ClientSession) -> tuple[dict[str, float], str] | None:
     """Direct Faraz public market API — native symbols (geramTalaHejdah, abshodeNaghdi, …)."""
     symbols = [
@@ -623,31 +665,71 @@ async def fetch_iran_quote_faraz_direct(session: aiohttp.ClientSession) -> tuple
             raw = await resp.json(content_type=None)
         if not isinstance(raw, dict):
             return None
-        mesghal = _extract_faraz_price(raw.get("abshodeNaghdi"))
-        g18 = _extract_faraz_price(raw.get("geramTalaHejdah"))
-        g24 = _extract_faraz_price(raw.get("tala24Estjt"))
-        # Fallback only if native G18 missing — keep abshode usable.
-        if g18 <= 0 and mesghal > 0:
-            g18 = float(int(round((mesghal * 750 / 705) / 4.608)))
-        if g24 <= 0 and g18 > 0:
-            g24 = float(int(round(g18 * 999 / 750)))
-        if mesghal <= 0 and g18 <= 0:
-            return None
-        ounce = _extract_faraz_price(raw.get("FOREXCOM_XAUUSD"))
-        return (
-            {
-                "mesghal_17": float(int(round(mesghal))) if mesghal > 0 else 0.0,
-                "price_18k_per_gram": float(int(round(g18))) if g18 > 0 else 0.0,
-                "price_24k_per_gram": float(int(round(g24))) if g24 > 0 else 0.0,
-                "coin_emami": float(int(round(_extract_faraz_price(raw.get("sekkeNewEstjt"))))),
-                "coin_half": float(int(round(_extract_faraz_price(raw.get("nimSekkeEstjt"))))),
-                "coin_quarter": float(int(round(_extract_faraz_price(raw.get("robSekkeEstjt"))))),
-                "ounce_usd": float(ounce) if ounce else 0.0,
-            },
-            "faraz",
-        )
+        return _quote_from_faraz_public_raw(raw)
     except Exception as exc:
         LOG.debug("faraz direct: %s", exc)
+        return None
+
+
+async def fetch_iran_quote_faraz_relay(session: aiohttp.ClientSession) -> tuple[dict[str, float], str] | None:
+    """Faraz public market via Germany faraz-history-proxy (Iran VPS is CF-blocked)."""
+    symbols = [
+        "abshodeNaghdi",
+        "geramTalaHejdah",
+        "tala24Estjt",
+        "sekkeNewEstjt",
+        "nimSekkeEstjt",
+        "robSekkeEstjt",
+        "FOREXCOM_XAUUSD",
+    ]
+    try:
+        async with session.get(
+            f"{FARAZ_HISTORY_PROXY}/faraz/public-market",
+            params={
+                "symbolNames": json.dumps(symbols, separators=(",", ":")),
+                "cache": "false",
+            },
+            timeout=aiohttp.ClientTimeout(total=4.0),
+        ) as resp:
+            if resp.status != 200:
+                return None
+            raw = await resp.json(content_type=None)
+        if not isinstance(raw, dict):
+            return None
+        return _quote_from_faraz_public_raw(raw)
+    except Exception as exc:
+        LOG.debug("faraz relay public-market: %s", exc)
+        return None
+
+
+# Written by an external Faraz bridge (e.g. cloud agent → scp) when Germany is down.
+_FARAZ_BRIDGE_PATH = os.environ.get("FARAZ_BRIDGE_QUOTE_PATH", "/tmp/faraz_live_quote.json")
+_FARAZ_BRIDGE_MAX_AGE_SEC = float(os.environ.get("FARAZ_BRIDGE_MAX_AGE_SEC", "8"))
+
+
+def fetch_iran_quote_faraz_bridge_file() -> tuple[dict[str, float], str] | None:
+    """Fresh Faraz quote dropped on disk by an external bridge (native geramTalaHejdah)."""
+    try:
+        st = os.stat(_FARAZ_BRIDGE_PATH)
+        age = time.time() - st.st_mtime
+        if age > _FARAZ_BRIDGE_MAX_AGE_SEC:
+            return None
+        with open(_FARAZ_BRIDGE_PATH, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data, dict):
+            return None
+        # Accept either raw Faraz get-data shape or already-mapped quote fields.
+        if "geramTalaHejdah" in data or "abshodeNaghdi" in data:
+            return _quote_from_faraz_public_raw(data)
+        mapped = _quote_from_anil_shape(data, "faraz")
+        if mapped is None:
+            return None
+        quote, _src = mapped
+        return quote, "faraz-bridge"
+    except FileNotFoundError:
+        return None
+    except Exception as exc:
+        LOG.debug("faraz bridge file: %s", exc)
         return None
 
 
@@ -709,17 +791,58 @@ async def fetch_iran_quote_mongo_faraz() -> tuple[dict[str, float], str] | None:
 
 
 async def fetch_iran_quote(session: aiohttp.ClientSession) -> tuple[dict[str, float], str] | None:
-    """Faraz-only quote resolution. Never TGJU."""
+    """Prefer native Faraz (geramTalaHejdah). Fall back only when Germany is down.
+
+    Order: bridge file → Germany :8091 public-market → direct Faraz → market-api
+    gold/live → Anil (any source, emergency) → Mongo Faraz (last resort).
+    """
+    bridge = fetch_iran_quote_faraz_bridge_file()
+    if bridge:
+        return bridge
+
     for fetcher in (
-        lambda: fetch_iran_quote_faraz_proxy(session),  # Germany → Faraz (reliable from VPS)
+        lambda: fetch_iran_quote_faraz_relay(session),  # Germany :8091 → faraz.io public
         lambda: fetch_iran_quote_faraz_direct(session),  # direct faraz.io when unblocked
-        lambda: fetch_iran_quote_anil_faraz(session),
-        fetch_iran_quote_mongo_faraz,
+        lambda: fetch_iran_quote_faraz_proxy(session),  # market-api /gold/live (may be stale)
     ):
         quote_src = await fetcher()
         if quote_src:
             return quote_src
-    return None
+
+    # Emergency: Anil live prices beat a frozen Mongo Faraz row when Germany is offline.
+    try:
+        async with session.get(
+            f"{ANIL_GOLD_API}/gold-price/",
+            params={"auto": "0"},
+            timeout=aiohttp.ClientTimeout(total=1.5),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json(content_type=None)
+                if isinstance(data, dict):
+                    g18 = float(data.get("price_18k_per_gram") or 0)
+                    if g18 > 0:
+                        quote = {
+                            "mesghal_17": float(
+                                data.get("mesghal_17") or data.get("mesghal") or 0
+                            ),
+                            "price_18k_per_gram": g18,
+                            "price_24k_per_gram": float(data.get("price_24k_per_gram") or 0),
+                            "coin_emami": float(data.get("coin_emami") or 0),
+                            "coin_half": float(data.get("coin_half") or 0),
+                            "coin_quarter": float(data.get("coin_quarter") or 0),
+                            "ounce_usd": float(data.get("ounce_usd") or 0),
+                        }
+                        src = str(data.get("source") or "anil")
+                        LOG.warning(
+                            "iran quote emergency fallback to anil/%s g18=%s",
+                            src,
+                            int(g18),
+                        )
+                        return quote, f"anil:{src}"
+    except Exception as exc:
+        LOG.debug("anil emergency: %s", exc)
+
+    return await fetch_iran_quote_mongo_faraz()
 
 
 def persist_iran_tick_1s(quote: dict[str, float], src_name: str, ts: int) -> None:
@@ -816,7 +939,11 @@ def _iran_history_limit(step: int, requested: int) -> int:
 
 
 def _faraz_resolution_for_step(step: int) -> str | None:
-    """Best Faraz resolution for a chart step (customer history supports minutes)."""
+    """Best stored / Faraz resolution for a chart step.
+
+    Sub-minute (10S–45S) are our live tick folds into faraz_ohlc (Faraz customer
+    history has no sub-minute); 1m+ can also pull Faraz customer/chart history.
+    """
     if step >= 30 * 86_400:
         return "1M"
     if step >= 7 * 86_400:
@@ -827,12 +954,23 @@ def _faraz_resolution_for_step(step: int) -> str | None:
         return "240"
     if step >= 3600:
         return "60"
+    if step >= 1800:
+        return "30"
     if step >= 900:
         return "15"
     if step >= 300:
         return "5"
     if step >= 60:
         return "1"
+    # Persist/serve live sub-minute buckets (10S top → 1m).
+    if step >= 45:
+        return "45S"
+    if step >= 30:
+        return "30S"
+    if step >= 15:
+        return "15S"
+    if step >= 10:
+        return "10S"
     return None
 
 
@@ -1048,10 +1186,16 @@ def persist_faraz_bars(
 
 
 # Resolutions updated on every live Faraz tick (keeps faraz_ohlc from going stale).
+# Include 10S→1m so sub-minute charts have persisted OHLC besides tick_1s aggregates.
 _IRAN_LIVE_RES_STEPS: tuple[tuple[str, int], ...] = (
+    ("10S", 10),
+    ("15S", 15),
+    ("30S", 30),
+    ("45S", 45),
     ("1", 60),
     ("5", 300),
     ("15", 900),
+    ("30", 1_800),
     ("60", 3600),
     ("240", 14_400),
 )
@@ -1115,6 +1259,8 @@ def append_realtime_ohlc(quote: dict[str, float], src_name: str, ts: int) -> Non
                     )
             # Canonical Faraz store — forming bucket only. Closed minutes are owned by
             # Faraz customer history (tail/live refresh); ticks must not reshape them.
+            # Tag tick folds as faraz-tick so history can prefer real Faraz OHLC.
+            tick_src = "faraz-tick"
             base = client["anil_gold"]["faraz_ohlc"]
             for resolution, step in _IRAN_LIVE_RES_STEPS:
                 wall_t = _align_iran_bar_time(now_ts, step)
@@ -1123,7 +1269,7 @@ def append_realtime_ohlc(quote: dict[str, float], src_name: str, ts: int) -> Non
                     continue
                 existing = base.find_one(
                     {"channel": channel, "resolution": resolution, "t": t0},
-                    {"_id": 1},
+                    {"_id": 1, "src": 1},
                 )
                 if existing is None:
                     base.update_one(
@@ -1140,19 +1286,24 @@ def append_realtime_ohlc(quote: dict[str, float], src_name: str, ts: int) -> Non
                                 "l": price,
                                 "c": price,
                                 "v": 1,
-                                "src": src_name,
+                                "src": tick_src,
                                 "updated_at": now,
                             }
                         },
                         upsert=True,
                     )
                 else:
+                    # Never relabel a Faraz customer/bootstrap/tail bar as a tick fold.
+                    prev_src = str(existing.get("src") or "")
+                    keep_src = prev_src if prev_src.startswith("faraz-") and prev_src != "faraz" else tick_src
+                    if prev_src in {"faraz-bootstrap", "faraz-tail", "faraz-customer", "faraz-live"}:
+                        keep_src = prev_src
                     base.update_one(
                         {"channel": channel, "resolution": resolution, "t": t0},
                         {
                             "$set": {
                                 "c": price,
-                                "src": src_name,
+                                "src": keep_src,
                                 "updated_at": now,
                             },
                             "$max": {"h": price},
@@ -1175,9 +1326,12 @@ async def fetch_faraz_customer_history(
     first: bool = True,
 ) -> list[dict[str, float]]:
     """Faraz `/api/customer/trading-view/history` with max countback (via Germany proxy)."""
-    global _FARAZ_CUSTOMER_AUTH_OK
+    global _FARAZ_CUSTOMER_AUTH_OK, _FARAZ_AUTH_RETRY_AT
     if _FARAZ_CUSTOMER_AUTH_OK is False:
-        return []
+        if time.monotonic() < _FARAZ_AUTH_RETRY_AT:
+            return []
+        # Cookie may have been refreshed — allow another attempt.
+        _FARAZ_CUSTOMER_AUTH_OK = None
     faraz_sym = IRAN_FARAZ_HISTORY_SYMBOL.get(channel)
     if not faraz_sym:
         return []
@@ -1244,9 +1398,12 @@ async def fetch_faraz_customer_history(
             LOG.debug("faraz customer history %s %s via %s: %s", channel, resolution, url, exc)
     if saw_auth_error and _FARAZ_CUSTOMER_AUTH_OK is not True:
         _FARAZ_CUSTOMER_AUTH_OK = False
+        _FARAZ_AUTH_RETRY_AT = time.monotonic() + _FARAZ_AUTH_RETRY_SEC
         LOG.warning(
             "faraz customer history unauthorized — set FARAZ_COOKIE (or FARAZ_TOKEN) "
-            "on Germany faraz-history-proxy / market-ticks for deep countback"
+            "on Germany faraz-history-proxy / market-ticks for deep countback "
+            "(retry in %.0fs)",
+            _FARAZ_AUTH_RETRY_SEC,
         )
     return []
 
@@ -1305,6 +1462,113 @@ async def fetch_faraz_customer_history_all(
             break
         to_ts = new_to
     return [merged[t] for t in sorted(merged)]
+
+
+async def fetch_faraz_public_tv_history(
+    session: aiohttp.ClientSession,
+    channel: str,
+    resolution: str,
+    *,
+    countback: int = 500,
+) -> list[dict[str, float]]:
+    """Faraz public `/api/public/trading-view/history` via Germany proxy (no cookie).
+
+    Note: Faraz often returns daily-spaced bars even for minute resolutions — callers
+    should only use this as a fallback when customer auth is unavailable.
+    """
+    faraz_sym = IRAN_FARAZ_HISTORY_SYMBOL.get(channel)
+    if not faraz_sym:
+        return []
+    now = int(time.time())
+    params = {
+        "symbolName": faraz_sym,
+        "symbol": faraz_sym,
+        "resolution": resolution,
+        "from": str(max(0, now - 20 * 365 * 86_400)),
+        "to": str(now + 86_400),
+        "countback": str(min(2_000, max(1, countback))),
+        "firstDataRequest": "true",
+        "latest": "false",
+        "adjustType": str(FARAZ_ADJUST_TYPE),
+        "json": "true",
+    }
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Origin": FARAZ_BASE,
+        "Referer": f"{FARAZ_BASE}/markets/gold-currency",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+    }
+    urls = [
+        f"{FARAZ_HISTORY_PROXY}/faraz/public-history",
+        f"{FARAZ_BASE}/api/public/trading-view/history",
+    ]
+    for url in urls:
+        try:
+            async with session.get(
+                url,
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=30),
+                headers=headers,
+            ) as resp:
+                if resp.status != 200:
+                    continue
+                data = await resp.json(content_type=None)
+            bars = _parse_faraz_history_payload(data, faraz_sym, channel)
+            if bars:
+                return bars
+        except Exception as exc:
+            LOG.debug("faraz public tv history %s %s via %s: %s", channel, resolution, url, exc)
+    return []
+
+
+def purge_flat_tick_ohlc() -> int:
+    """Remove closed flat tick-fold bars that hide real Faraz OHLC on the tip."""
+    client = mongo_client()
+    if client is None:
+        return 0
+    try:
+        base = client["anil_gold"]["faraz_ohlc"]
+        now_ts = int(time.time())
+        removed = 0
+        for resolution, step in _IRAN_LIVE_RES_STEPS:
+            if step < 60:
+                continue
+            wall_t = _align_iran_bar_time(now_ts, step)
+            for channel in IRAN_FARAZ_HISTORY_SYMBOL:
+                ids: list[Any] = []
+                cursor = base.find(
+                    {
+                        "channel": channel,
+                        "resolution": resolution,
+                        "t": {"$lt": wall_t},
+                        "src": {"$in": ["faraz", "faraz-tick"]},
+                    },
+                    {"o": 1, "h": 1, "l": 1, "c": 1},
+                )
+                for doc in cursor:
+                    try:
+                        o = float(doc["o"])
+                        h = float(doc["h"])
+                        l = float(doc["l"])
+                        c = float(doc["c"])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    if o == h == l == c:
+                        ids.append(doc["_id"])
+                if ids:
+                    # Chunk deletes for large tips.
+                    for i in range(0, len(ids), 5_000):
+                        res = base.delete_many({"_id": {"$in": ids[i : i + 5_000]}})
+                        removed += int(res.deleted_count or 0)
+        if removed:
+            LOG.warning("purged %s flat tick-fold faraz_ohlc bars", removed)
+        return removed
+    except Exception as exc:
+        LOG.warning("purge flat tick ohlc: %s", exc)
+        return 0
 
 
 async def fetch_faraz_chart_history(
@@ -1668,29 +1932,48 @@ def _load_iran_history_mongo(
             fq: dict[str, Any] = {"channel": channel, "c": {"$gt": 0}, "resolution": faraz_res}
             if before is not None:
                 fq["t"] = {"$lt": before}
+            # Pull extra — we drop closed flat tick-folds that pollute the tip.
             stored = list(
                 client["anil_gold"]["faraz_ohlc"]
-                .find(fq, {"t": 1, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1})
+                .find(fq, {"t": 1, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1, "src": 1})
                 .sort("t", -1)
-                .limit(min(limit, 50_000))
+                .limit(min(max(limit * 4, limit), 50_000))
             )
+            wall_t = _align_iran_bar_time(int(time.time()), step)
+            kept = 0
             if stored:
                 sources.append("anil_gold.faraz_ohlc")
                 for doc in reversed(stored):
                     try:
+                        t0 = int(doc["t"])
+                        o = float(doc["o"])
+                        h = float(doc["h"])
+                        l = float(doc["l"])
+                        c = float(doc["c"])
+                        src = str(doc.get("src") or "")
+                        is_flat = abs(o - h) < 1e-9 and abs(h - l) < 1e-9 and abs(l - c) < 1e-9
+                        is_tick_fold = src in {"faraz", "faraz-tick"} or src.startswith("faraz-tick")
+                        # Closed flat tick bars hide real Faraz OHLC — skip them.
+                        if is_tick_fold and is_flat and t0 < wall_t:
+                            continue
                         ingest(
-                            {
-                                "t": int(doc["t"]),
-                                "o": float(doc["o"]),
-                                "h": float(doc["h"]),
-                                "l": float(doc["l"]),
-                                "c": float(doc["c"]),
-                                "v": float(doc.get("v") or 0),
-                            },
+                            {"t": t0, "o": o, "h": h, "l": l, "c": c, "v": float(doc.get("v") or 0)},
                             exact=exact_faraz,
                         )
+                        kept += 1
                     except (KeyError, TypeError, ValueError):
                         continue
+                # Trim to newest `limit` after filter.
+                if len(buckets) > limit:
+                    keep_ts = sorted(buckets)[-limit:]
+                    buckets = {t: buckets[t] for t in keep_ts}
+                LOG.debug(
+                    "iran history %s %s kept=%s raw=%s",
+                    channel,
+                    faraz_res,
+                    kept,
+                    len(stored),
+                )
 
         # When native Faraz history is present for this exact resolution, do NOT
         # overlay ohlc_1h/1m parents (they used UTC buckets and smash 1h/4h OHLC).
@@ -1854,10 +2137,12 @@ async def iran_gold_history(request: web.Request) -> web.Response:
     )
     # Refresh from Faraz when store is empty, tip is stale, OR a lone realtime
     # tick sits after a multi-hour hole (append_realtime makes tip look "fresh").
+    # Faraz customer history has no sub-minute — those come from our live folds.
+    faraz_remote_ok = bool(faraz_res) and step >= 60
     need_live = False
-    if faraz_res and len(buckets) < min(limit, 50):
+    if faraz_remote_ok and len(buckets) < min(limit, 50):
         need_live = True
-    elif faraz_res and exact and buckets and before is None:
+    elif faraz_remote_ok and exact and buckets and before is None:
         ordered_t = sorted(buckets)
         latest = ordered_t[-1]
         now_i = int(time.time())
@@ -1872,6 +2157,23 @@ async def iran_gold_history(request: web.Request) -> web.Response:
                 if scan[i] - scan[i - 1] > gap_lim:
                     need_live = True
                     break
+            # Flat / near-flat tip (tick pollution) — force Faraz rewrite.
+            if not need_live:
+                recent = ordered_t[-min(len(ordered_t), 120) :]
+                closes = {
+                    round(float(buckets[t]["c"]), 2)
+                    for t in recent
+                    if float(buckets[t].get("c") or 0) > 0
+                }
+                ranged = sum(
+                    1
+                    for t in recent
+                    if float(buckets[t].get("h") or 0) - float(buckets[t].get("l") or 0) > 1e-6
+                )
+                if len(recent) >= 20 and (
+                    len(closes) <= max(2, len(recent) // 20) or ranged < max(3, len(recent) // 10)
+                ):
+                    need_live = True
         # Sub-15m: refresh from Faraz at least every ~45s so OHLC matches Faraz
         # (tick-formed opens/highs drift within a minute).
         if not need_live and step <= 900:
@@ -1879,9 +2181,10 @@ async def iran_gold_history(request: web.Request) -> web.Response:
             if time.monotonic() - _FARAZ_HISTORY_LIVE_AT.get(live_key, 0.0) > 45.0:
                 need_live = True
 
-    if faraz_res and need_live:
+    if faraz_remote_ok and need_live:
         # Prefer a recent customer page for intraday; chart-history for D/W/M fallback.
         # Keep countback modest so /iran-gold/history stays snappy; tail poll fills depth.
+        faraz_bars: list[dict[str, float]] = []
         if exact and step < 86_400:
             cb = 500 if step <= 60 else 400 if step <= 900 else 300
             faraz_bars = await fetch_faraz_customer_history(
@@ -1890,6 +2193,12 @@ async def iran_gold_history(request: web.Request) -> web.Response:
                 faraz_res,
                 countback=min(_faraz_countback_cap(faraz_res), cb),
             )
+            if not faraz_bars:
+                # Public TV history (often daily regardless of resolution) — still
+                # useful when customer auth is down for higher TFs / seed.
+                faraz_bars = await fetch_faraz_public_tv_history(
+                    session, channel, faraz_res, countback=min(1_000, cb)
+                )
         else:
             faraz_bars = await fetch_faraz_chart_history(session, channel, faraz_res)
         if faraz_bars:
@@ -2030,10 +2339,25 @@ async def health(_request: web.Request) -> web.Response:
     )
 
 
+async def poll_purge_flat_ticks() -> None:
+    """Periodically drop closed flat tick-fold OHLC so charts show real Faraz bars."""
+    while True:
+        try:
+            await asyncio.to_thread(purge_flat_tick_ohlc)
+        except Exception as exc:
+            LOG.debug("purge flat ticks: %s", exc)
+        await asyncio.sleep(3600.0)
+
+
 async def start_background(app: web.Application) -> None:
     headers = {"X-API-Key": API_KEY} if API_KEY else {}
     session = aiohttp.ClientSession(headers=headers)
     app["session"] = session
+    # Clean tip pollution before serving history.
+    try:
+        await asyncio.to_thread(purge_flat_tick_ohlc)
+    except Exception as exc:
+        LOG.warning("startup purge flat ticks: %s", exc)
     app["tasks"] = [
         asyncio.create_task(tv_quote_feeder()),
         asyncio.create_task(poll_mongo()),
@@ -2043,6 +2367,7 @@ async def start_background(app: web.Application) -> None:
         asyncio.create_task(poll_iran_materialize()),
         asyncio.create_task(poll_iran_bootstrap(session)),
         asyncio.create_task(poll_iran_faraz_tail(session)),
+        asyncio.create_task(poll_purge_flat_ticks()),
     ]
 
 
