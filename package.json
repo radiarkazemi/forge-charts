@@ -15,7 +15,8 @@
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "trh:alert": "node indicators/trh-free-alert.mjs",
-    "trh:server": "node indicators/trh-alert-server.mjs"
+    "trh:server": "node indicators/trh-alert-server.mjs",
+    "mt5:watch": "node mt5-watch/server.mjs"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
