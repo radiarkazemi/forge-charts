@@ -160,6 +160,12 @@ export class BarReplayController {
       formProgress: 0,
     });
 
+    try {
+      widget.applyOverrides({ "mainSeriesProperties.showCountdown": true });
+    } catch {
+      /* ignore */
+    }
+
     void this.selectBar();
   }
 
