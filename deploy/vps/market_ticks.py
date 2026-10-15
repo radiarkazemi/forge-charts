@@ -589,6 +589,44 @@ def _extract_faraz_price(entry: Any) -> float:
     return 0.0
 
 
+def _quote_from_faraz_public_raw(raw: dict[str, Any]) -> tuple[dict[str, float], str] | None:
+    """Map Faraz public get-data payload → iran quote. Prefer native geramTalaHejdah."""
+    mesghal = _extract_faraz_price(raw.get("abshodeNaghdi"))
+    # Native G18 first; never silently prefer mesghal-derived when native exists.
+    g18_native = _extract_faraz_price(raw.get("geramTalaHejdah"))
+    if g18_native <= 0:
+        g18_native = _extract_faraz_price(raw.get("tala18Estjt"))
+    g18 = g18_native
+    g24 = _extract_faraz_price(raw.get("tala24Estjt"))
+    derived = 0.0
+    if mesghal > 0:
+        derived = float(int(round((mesghal * 750 / 705) / 4.608)))
+    # Fallback only if native G18 missing — keep abshode usable.
+    if g18 <= 0 and derived > 0:
+        g18 = derived
+        LOG.warning("faraz G18 missing — using mesghal-derived %s", int(g18))
+    elif g18 > 0 and derived > 0 and abs(g18 - derived) < 1.0:
+        # Exact match usually means upstream derived; still accept (native may equal formula).
+        pass
+    if g24 <= 0 and g18 > 0:
+        g24 = float(int(round(g18 * 999 / 750)))
+    if mesghal <= 0 and g18 <= 0:
+        return None
+    ounce = _extract_faraz_price(raw.get("FOREXCOM_XAUUSD"))
+    return (
+        {
+            "mesghal_17": float(int(round(mesghal))) if mesghal > 0 else 0.0,
+            "price_18k_per_gram": float(int(round(g18))) if g18 > 0 else 0.0,
+            "price_24k_per_gram": float(int(round(g24))) if g24 > 0 else 0.0,
+            "coin_emami": float(int(round(_extract_faraz_price(raw.get("sekkeNewEstjt"))))),
+            "coin_half": float(int(round(_extract_faraz_price(raw.get("nimSekkeEstjt"))))),
+            "coin_quarter": float(int(round(_extract_faraz_price(raw.get("robSekkeEstjt"))))),
+            "ounce_usd": float(ounce) if ounce else 0.0,
+        },
+        "faraz",
+    )
+
+
 async def fetch_iran_quote_faraz_direct(session: aiohttp.ClientSession) -> tuple[dict[str, float], str] | None:
     """Direct Faraz public market API — native symbols (geramTalaHejdah, abshodeNaghdi, …)."""
     symbols = [
@@ -623,31 +661,40 @@ async def fetch_iran_quote_faraz_direct(session: aiohttp.ClientSession) -> tuple
             raw = await resp.json(content_type=None)
         if not isinstance(raw, dict):
             return None
-        mesghal = _extract_faraz_price(raw.get("abshodeNaghdi"))
-        g18 = _extract_faraz_price(raw.get("geramTalaHejdah"))
-        g24 = _extract_faraz_price(raw.get("tala24Estjt"))
-        # Fallback only if native G18 missing — keep abshode usable.
-        if g18 <= 0 and mesghal > 0:
-            g18 = float(int(round((mesghal * 750 / 705) / 4.608)))
-        if g24 <= 0 and g18 > 0:
-            g24 = float(int(round(g18 * 999 / 750)))
-        if mesghal <= 0 and g18 <= 0:
-            return None
-        ounce = _extract_faraz_price(raw.get("FOREXCOM_XAUUSD"))
-        return (
-            {
-                "mesghal_17": float(int(round(mesghal))) if mesghal > 0 else 0.0,
-                "price_18k_per_gram": float(int(round(g18))) if g18 > 0 else 0.0,
-                "price_24k_per_gram": float(int(round(g24))) if g24 > 0 else 0.0,
-                "coin_emami": float(int(round(_extract_faraz_price(raw.get("sekkeNewEstjt"))))),
-                "coin_half": float(int(round(_extract_faraz_price(raw.get("nimSekkeEstjt"))))),
-                "coin_quarter": float(int(round(_extract_faraz_price(raw.get("robSekkeEstjt"))))),
-                "ounce_usd": float(ounce) if ounce else 0.0,
-            },
-            "faraz",
-        )
+        return _quote_from_faraz_public_raw(raw)
     except Exception as exc:
         LOG.debug("faraz direct: %s", exc)
+        return None
+
+
+async def fetch_iran_quote_faraz_relay(session: aiohttp.ClientSession) -> tuple[dict[str, float], str] | None:
+    """Faraz public market via Germany faraz-history-proxy (Iran VPS is CF-blocked)."""
+    symbols = [
+        "abshodeNaghdi",
+        "geramTalaHejdah",
+        "tala24Estjt",
+        "sekkeNewEstjt",
+        "nimSekkeEstjt",
+        "robSekkeEstjt",
+        "FOREXCOM_XAUUSD",
+    ]
+    try:
+        async with session.get(
+            f"{FARAZ_HISTORY_PROXY}/faraz/public-market",
+            params={
+                "symbolNames": json.dumps(symbols, separators=(",", ":")),
+                "cache": "false",
+            },
+            timeout=aiohttp.ClientTimeout(total=4.0),
+        ) as resp:
+            if resp.status != 200:
+                return None
+            raw = await resp.json(content_type=None)
+        if not isinstance(raw, dict):
+            return None
+        return _quote_from_faraz_public_raw(raw)
+    except Exception as exc:
+        LOG.debug("faraz relay public-market: %s", exc)
         return None
 
 
@@ -709,10 +756,16 @@ async def fetch_iran_quote_mongo_faraz() -> tuple[dict[str, float], str] | None:
 
 
 async def fetch_iran_quote(session: aiohttp.ClientSession) -> tuple[dict[str, float], str] | None:
-    """Faraz-only quote resolution. Never TGJU."""
+    """Faraz-only quote resolution. Never TGJU.
+
+    Prefer native Faraz public market via Germany :8091 relay (geramTalaHejdah),
+    then direct faraz.io. market-api `/gold/live/` is lower priority — it has
+    frozen stale prices and synthesized G18 from mesghal.
+    """
     for fetcher in (
-        lambda: fetch_iran_quote_faraz_proxy(session),  # Germany → Faraz (reliable from VPS)
+        lambda: fetch_iran_quote_faraz_relay(session),  # Germany :8091 → faraz.io public
         lambda: fetch_iran_quote_faraz_direct(session),  # direct faraz.io when unblocked
+        lambda: fetch_iran_quote_faraz_proxy(session),  # market-api /gold/live (may be stale)
         lambda: fetch_iran_quote_anil_faraz(session),
         fetch_iran_quote_mongo_faraz,
     ):
@@ -816,7 +869,11 @@ def _iran_history_limit(step: int, requested: int) -> int:
 
 
 def _faraz_resolution_for_step(step: int) -> str | None:
-    """Best Faraz resolution for a chart step (customer history supports minutes)."""
+    """Best stored / Faraz resolution for a chart step.
+
+    Sub-minute (10S–45S) are our live tick folds into faraz_ohlc (Faraz customer
+    history has no sub-minute); 1m+ can also pull Faraz customer/chart history.
+    """
     if step >= 30 * 86_400:
         return "1M"
     if step >= 7 * 86_400:
@@ -833,6 +890,15 @@ def _faraz_resolution_for_step(step: int) -> str | None:
         return "5"
     if step >= 60:
         return "1"
+    # Persist/serve live sub-minute buckets (10S top → 1m).
+    if step >= 45:
+        return "45S"
+    if step >= 30:
+        return "30S"
+    if step >= 15:
+        return "15S"
+    if step >= 10:
+        return "10S"
     return None
 
 
@@ -1048,7 +1114,12 @@ def persist_faraz_bars(
 
 
 # Resolutions updated on every live Faraz tick (keeps faraz_ohlc from going stale).
+# Include 10S→1m so sub-minute charts have persisted OHLC besides tick_1s aggregates.
 _IRAN_LIVE_RES_STEPS: tuple[tuple[str, int], ...] = (
+    ("10S", 10),
+    ("15S", 15),
+    ("30S", 30),
+    ("45S", 45),
     ("1", 60),
     ("5", 300),
     ("15", 900),
@@ -1854,10 +1925,12 @@ async def iran_gold_history(request: web.Request) -> web.Response:
     )
     # Refresh from Faraz when store is empty, tip is stale, OR a lone realtime
     # tick sits after a multi-hour hole (append_realtime makes tip look "fresh").
+    # Faraz customer history has no sub-minute — those come from our live folds.
+    faraz_remote_ok = bool(faraz_res) and step >= 60
     need_live = False
-    if faraz_res and len(buckets) < min(limit, 50):
+    if faraz_remote_ok and len(buckets) < min(limit, 50):
         need_live = True
-    elif faraz_res and exact and buckets and before is None:
+    elif faraz_remote_ok and exact and buckets and before is None:
         ordered_t = sorted(buckets)
         latest = ordered_t[-1]
         now_i = int(time.time())
@@ -1872,6 +1945,16 @@ async def iran_gold_history(request: web.Request) -> web.Response:
                 if scan[i] - scan[i - 1] > gap_lim:
                     need_live = True
                     break
+            # Flatline store (e.g. stale derived G18) — force Faraz rewrite.
+            if not need_live:
+                recent = ordered_t[-min(len(ordered_t), 120) :]
+                closes = {
+                    round(float(buckets[t]["c"]), 2)
+                    for t in recent
+                    if float(buckets[t].get("c") or 0) > 0
+                }
+                if len(closes) <= 1 and len(recent) >= 20:
+                    need_live = True
         # Sub-15m: refresh from Faraz at least every ~45s so OHLC matches Faraz
         # (tick-formed opens/highs drift within a minute).
         if not need_live and step <= 900:
@@ -1879,7 +1962,7 @@ async def iran_gold_history(request: web.Request) -> web.Response:
             if time.monotonic() - _FARAZ_HISTORY_LIVE_AT.get(live_key, 0.0) > 45.0:
                 need_live = True
 
-    if faraz_res and need_live:
+    if faraz_remote_ok and need_live:
         # Prefer a recent customer page for intraday; chart-history for D/W/M fallback.
         # Keep countback modest so /iran-gold/history stays snappy; tail poll fills depth.
         if exact and step < 86_400:

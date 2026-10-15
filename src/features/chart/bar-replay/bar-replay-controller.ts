@@ -174,9 +174,29 @@ export class BarReplayController {
     }
   }
 
+  /**
+   * Chart interval changed during replay — rebuild the stepping buffer at the
+   * new resolution so Play advances 5m bars on 5m (not leftover 1m bars).
+   */
+  async onResolutionChanged(resolution: string): Promise<void> {
+    if (!this.state.get().active || this.state.get().cursorIndex < 0) return;
+    const next = String(resolution || "").trim();
+    if (!next || next === this.state.get().resolution) return;
+
+    const wasPlaying = this.state.get().phase === "playing" || this.playTimer !== 0;
+    this.stopPlayTimer();
+
+    const cursorTime = this.buffer[this.state.get().cursorIndex]?.time;
+    await this.rebuildBufferAt(next, cursorTime);
+    if (wasPlaying && this.state.get().cursorIndex >= 0) {
+      this.patch({ phase: "playing" });
+      this.startPlayTimer();
+    }
+  }
+
   async play(): Promise<void> {
     if (!this.state.get().active || this.state.get().cursorIndex < 0) return;
-    if (this.state.get().phase === "playing") {
+    if (this.state.get().phase === "playing" || this.playTimer !== 0) {
       this.pause();
       return;
     }
@@ -245,8 +265,31 @@ export class BarReplayController {
     if (!widget || !datafeed) return;
 
     const chart = widget.activeChart();
-    const symbol = chart.symbol();
     const resolution = String(chart.resolution());
+    const ok = await this.rebuildBufferAt(resolution, selectedTimeSec, {
+      resetStart: true,
+      selecting: false,
+    });
+    if (!ok) {
+      this.patch({ phase: "selecting", selecting: false });
+    }
+  }
+
+  /**
+   * Prefetch bars for `resolution` and place the cursor on the bar nearest
+   * `anchorTimeSec` (current replay time). Used on select and on TF change.
+   */
+  private async rebuildBufferAt(
+    resolution: string,
+    anchorTimeSec: number | undefined,
+    opts: { resetStart?: boolean; selecting?: boolean } = {},
+  ): Promise<boolean> {
+    const widget = this.widget;
+    const datafeed = this.datafeed;
+    if (!widget || !datafeed) return false;
+
+    const chart = widget.activeChart();
+    const symbol = chart.symbol();
 
     // Prefetch full buffer BEFORE applying cutoff so we can step into “future”.
     let buffer = await datafeed.fetchReplayBuffer(symbol, resolution, 8_000);
@@ -264,29 +307,40 @@ export class BarReplayController {
       }
     }
 
-    if (buffer.length === 0) {
-      this.patch({ phase: "selecting", selecting: false });
-      return;
-    }
+    if (buffer.length === 0) return false;
 
-    let index = nearestBarIndex(buffer, selectedTimeSec);
+    const prev = this.state.get();
+    const anchor =
+      anchorTimeSec != null && Number.isFinite(anchorTimeSec)
+        ? Number(anchorTimeSec)
+        : Number(this.buffer[Math.max(0, prev.cursorIndex)]?.time ?? buffer[0]!.time);
+    let index = nearestBarIndex(buffer, anchor);
     if (index < 0) index = 0;
+
+    let startIndex = index;
+    if (!opts.resetStart && prev.startIndex >= 0 && this.buffer[prev.startIndex]) {
+      const startTime = Number(this.buffer[prev.startIndex]!.time);
+      startIndex = nearestBarIndex(buffer, startTime);
+      if (startIndex < 0) startIndex = index;
+    }
 
     this.buffer = [...buffer];
     this.patch({
       resolution,
       cursorIndex: index,
-      startIndex: index,
+      startIndex,
       bufferLength: buffer.length,
-      phase: "ready",
-      selecting: false,
+      phase: this.playTimer !== 0 || prev.phase === "playing" ? "playing" : "ready",
+      selecting: opts.selecting ?? false,
     });
 
-    datafeed.setReplayBuffer(buffer);
+    datafeed.setReplayBuffer(buffer, resolution);
     datafeed.setReplayCutoff(buffer[index]!.time);
+    datafeed.setReplayClock(buffer[index]!.time);
     await this.removeMarker();
     await this.drawMarker(buffer[index]!.time);
     this.reloadSeries();
+    return true;
   }
 
   private async advanceOne(): Promise<boolean> {
@@ -309,7 +363,14 @@ export class BarReplayController {
     if (!datafeed || !bar) return;
 
     datafeed.setReplayCutoff(bar.time);
-    this.patch({ cursorIndex: index, phase: "ready" });
+    datafeed.setReplayClock(bar.time);
+    // Keep "playing" while the timer owns playback — forcing "ready" here
+    // made Pause look idle while bars kept advancing.
+    const keepPlaying = this.playTimer !== 0 || this.state.get().phase === "playing";
+    this.patch({
+      cursorIndex: index,
+      phase: keepPlaying ? "playing" : "ready",
+    });
     await this.removeMarker();
     await this.drawMarker(bar.time);
 
