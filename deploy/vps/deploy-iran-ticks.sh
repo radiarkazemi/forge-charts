@@ -20,7 +20,7 @@ fi
 
 # Paths used on the live hosts (forge-market-ticks / faraz-history-proxy units).
 IRAN_MT_DEST="${IRAN_MARKET_TICKS_PATH:-/opt/cp_fetcher/ws/market_ticks.py}"
-GERMANY_PROXY_DEST="${FARAZ_PROXY_PATH:-/opt/faraz-history-proxy/faraz_history_proxy.py}"
+GERMANY_PROXY_DEST="${FARAZ_PROXY_PATH:-/opt/faraz-history-proxy/proxy.py}"
 
 echo "Uploading faraz_history_proxy.py → root@${GERMANY}:${GERMANY_PROXY_DEST}"
 "${SCP[@]}" "$ROOT/deploy/vps/faraz_history_proxy.py" "root@${GERMANY}:${GERMANY_PROXY_DEST}"
