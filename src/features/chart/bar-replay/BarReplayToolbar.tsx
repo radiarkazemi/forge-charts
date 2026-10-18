@@ -54,6 +54,7 @@ function stepMsFor(resolution: string): number {
 /**
  * Compact TradingView-style Bar Replay strip:
  * Select · transport · speed · TF countdown · close
+ * (v2 — tighter controls so the bar reads cleanly on mobile + desktop)
  */
 export function BarReplayToolbar({ controller, forceVisible = false }: BarReplayToolbarProps) {
   const snap = useStore(controller.state);

@@ -1099,6 +1099,58 @@ def _ohlc_coll_for_resolution(resolution: str) -> str | None:
     return None
 
 
+def _plausible_intraday_bars(
+    bars: list[dict[str, float]],
+    step: int,
+) -> list[dict[str, float]]:
+    """Drop Faraz rows that are clearly the wrong timeframe.
+
+    When customer auth is 401, Faraz public TV history often returns *daily*
+    bars regardless of `resolution=1`. Persisting those as 1m creates
+    multi-hour holes on the chart (one bar per midnight).
+    """
+    if not bars or step <= 0:
+        return bars
+    if step >= 86_400:
+        return bars
+    # Expected spacing ≈ step; reject series whose median gap is >> step.
+    ordered = sorted(bars, key=lambda b: int(b["t"]))
+    if len(ordered) < 3:
+        # Single/dual bars: keep only if on a sensible grid for this step.
+        out: list[dict[str, float]] = []
+        for b in ordered:
+            t = int(b["t"])
+            if step < 3600 and t % 86_400 == 0:
+                continue
+            out.append(b)
+        return out
+    gaps = [int(ordered[i]["t"]) - int(ordered[i - 1]["t"]) for i in range(1, len(ordered))]
+    gaps_pos = sorted(g for g in gaps if g > 0)
+    if not gaps_pos:
+        return []
+    med = gaps_pos[len(gaps_pos) // 2]
+    # Daily (or hourly) junk served as 1m/5m/…
+    if med >= max(step * 8, 3_600):
+        LOG.warning(
+            "reject Faraz bars: median gap %ss for step %ss (likely wrong TF)",
+            med,
+            step,
+        )
+        return []
+    # Keep bars whose gap to previous is within a generous band of `step`.
+    kept: list[dict[str, float]] = [ordered[0]]
+    for i in range(1, len(ordered)):
+        g = int(ordered[i]["t"]) - int(ordered[i - 1]["t"])
+        if g <= 0:
+            continue
+        if g > max(step * 12, 3_600):
+            # Allow a session break but drop isolated day stamps inside 1m series.
+            if step <= 900 and int(ordered[i]["t"]) % 86_400 == 0 and g >= 86_400:
+                continue
+        kept.append(ordered[i])
+    return kept
+
+
 def persist_faraz_bars(
     channel: str,
     resolution: str,
@@ -1107,6 +1159,10 @@ def persist_faraz_bars(
     src: str = "faraz",
 ) -> int:
     """Upsert Faraz OHLC into Mongo (once-per-symbol history base)."""
+    if not bars:
+        return 0
+    step = _parse_step_seconds(resolution)
+    bars = _plausible_intraday_bars(bars, step)
     if not bars:
         return 0
     client = mongo_client()
@@ -1510,10 +1566,12 @@ async def fetch_faraz_public_tv_history(
 
 
 def purge_flat_tick_ohlc() -> int:
-    """Remove closed tick-fold bars that hide real Faraz OHLC on the tip.
+    """Remove closed tick-fold bars + daily-as-1m junk that hide real Faraz OHLC.
 
     Closed `faraz-tick` rows leave multi-minute holes and exaggerated H/L versus
     Faraz customer candles. Keep only the wall-clock forming bucket as a tick fold.
+    Also delete resolution=1/5/… bars that sit on midnight UTC with day spacing
+    (persisted when Faraz public TV returned daily under an expired cookie).
     """
     client = mongo_client()
     if client is None:
@@ -1534,8 +1592,36 @@ def purge_flat_tick_ohlc() -> int:
                     }
                 )
                 removed += int(res.deleted_count or 0)
+                # Drop faraz-live rows that are daily stamps stored as intraday
+                # (expired cookie → public TV returned 1D under resolution=1).
+                if step < 86_400:
+                    live = list(
+                        base.find(
+                            {
+                                "channel": channel,
+                                "resolution": resolution,
+                                "src": "faraz-live",
+                            },
+                            {"t": 1},
+                        )
+                        .sort("t", -1)
+                        .limit(40)
+                    )
+                    if len(live) >= 3:
+                        ts = sorted(int(d["t"]) for d in live)
+                        gaps = [ts[i] - ts[i - 1] for i in range(1, len(ts))]
+                        med = sorted(gaps)[len(gaps) // 2] if gaps else 0
+                        if med >= max(3_600, step * 8):
+                            r2 = base.delete_many(
+                                {
+                                    "channel": channel,
+                                    "resolution": resolution,
+                                    "src": "faraz-live",
+                                }
+                            )
+                            removed += int(r2.deleted_count or 0)
         if removed:
-            LOG.warning("purged %s closed tick-fold faraz_ohlc bars", removed)
+            LOG.warning("purged %s polluted faraz_ohlc bars", removed)
         return removed
     except Exception as exc:
         LOG.warning("purge flat tick ohlc: %s", exc)
@@ -1997,6 +2083,9 @@ def _load_iran_history_mongo(
             kept = 0
             if stored:
                 sources.append("anil_gold.faraz_ohlc")
+                # First pass — collect candidate bars, then drop wrong-TF junk
+                # (daily stamps persisted as resolution=1 when Faraz auth was 401).
+                candidates: list[dict[str, float]] = []
                 for doc in reversed(stored):
                     try:
                         t0 = int(doc["t"])
@@ -2012,13 +2101,23 @@ def _load_iran_history_mongo(
                         # Keep only the forming wall-clock bucket as a live tick fold.
                         if is_tick_fold and t0 < wall_t:
                             continue
-                        ingest(
-                            {"t": t0, "o": o, "h": h, "l": l, "c": c, "v": float(doc.get("v") or 0)},
-                            exact=exact_faraz,
+                        candidates.append(
+                            {
+                                "t": t0,
+                                "o": o,
+                                "h": h,
+                                "l": l,
+                                "c": c,
+                                "v": float(doc.get("v") or 0),
+                            }
                         )
-                        kept += 1
                     except (KeyError, TypeError, ValueError):
                         continue
+                if step < 86_400:
+                    candidates = _plausible_intraday_bars(candidates, step)
+                for bar in candidates:
+                    ingest(bar, exact=exact_faraz)
+                    kept += 1
                 # Trim to newest `limit` after filter.
                 if len(buckets) > limit:
                     keep_ts = sorted(buckets)[-limit:]
@@ -2048,8 +2147,16 @@ def _load_iran_history_mongo(
         rows: list[dict[str, Any]] = []
         wall_t = _align_iran_bar_time(int(time.time()), step)
 
-        def _bucket_ticks_fill_missing(tick_rows: list[dict[str, Any]]) -> None:
-            """Build/fill step buckets from ticks without widening good Faraz bars."""
+        def _bucket_ticks_fill_missing(
+            tick_rows: list[dict[str, Any]],
+            *,
+            overwrite_from: int | None = None,
+        ) -> None:
+            """Build/fill step buckets from ticks without widening good Faraz bars.
+
+            When `overwrite_from` is set, tick bars replace anything at/after that
+            timestamp (used to heal multi-hour holes left by daily-as-1m junk).
+            """
             if not tick_rows:
                 return
             # Typical Faraz 1m body on G18 is a few thousand toman — clamp outliers.
@@ -2093,7 +2200,8 @@ def _load_iran_history_mongo(
             for t0, bar in built.items():
                 clamped = _clamp_iran_tick_wicks(bar, max_range)
                 existing = buckets.get(t0)
-                if existing is None:
+                replace = overwrite_from is not None and t0 >= overwrite_from
+                if existing is None or replace:
                     buckets[t0] = clamped
                 elif t0 == wall_t:
                     # Forming bar: merge live ticks into whatever we already have.
@@ -2101,7 +2209,26 @@ def _load_iran_history_mongo(
                     existing["l"] = min(float(existing["l"]), float(clamped["l"]))
                     existing["c"] = float(clamped["c"])
                     existing["v"] = float(existing.get("v") or 0) + float(clamped.get("v") or 0)
-                # Closed Faraz / filled bars stay untouched.
+                # Older closed Faraz bars stay untouched.
+
+        # If stored Faraz OHLC left a multi-hour hole before now (daily-as-1m junk
+        # or expired cookie), rebuild the recent window from tick_1s.
+        tip_rebuild_from: int | None = None
+        if step <= 1_800 and before is None and buckets:
+            ordered_t = sorted(buckets)
+            latest = ordered_t[-1]
+            hole = wall_t - latest
+            if hole > max(step * 5, 600):
+                tip_rebuild_from = max(0, wall_t - max(limit, 500) * step)
+            else:
+                # Also heal internal multi-hour holes near the tip.
+                scan = ordered_t[-min(len(ordered_t), 200) :]
+                for i in range(1, len(scan)):
+                    if scan[i] - scan[i - 1] > max(step * 30, 3_600):
+                        tip_rebuild_from = max(0, wall_t - max(limit, 500) * step)
+                        break
+
+        tick_pull = min(50_000, max(pull, 20_000 if tip_rebuild_from is not None else pull))
 
         if step < 60:
             # Sub-minute: prefer stored faraz_ohlc; fill holes + forming from ticks.
@@ -2109,22 +2236,25 @@ def _load_iran_history_mongo(
             recent = list(
                 tick_coll.find(query, {field: 1, "ts": 1, "ts_unix": 1})
                 .sort("ts", -1)
-                .limit(min(8_000, pull))
+                .limit(min(12_000, tick_pull))
             )
             if recent:
                 sources.append("anil_gold.tick_1s")
-                _bucket_ticks_fill_missing(recent)
-        elif faraz_exact_ready:
+                _bucket_ticks_fill_missing(recent, overwrite_from=tip_rebuild_from)
+        elif faraz_exact_ready or tip_rebuild_from is not None:
             recent = list(
                 tick_coll.find(query, {field: 1, "ts": 1, "ts_unix": 1})
                 .sort("ts", -1)
-                .limit(min(4_000, pull))
+                .limit(min(tick_pull, 40_000))
             )
             if recent:
                 sources.append("anil_gold.tick_1s")
-                _merge_tick_into_forming(recent)
-                # Also patch holes behind the tip when Faraz customer auth is stale.
-                _bucket_ticks_fill_missing(recent)
+                if tip_rebuild_from is None:
+                    _merge_tick_into_forming(recent)
+                # Patch / rebuild holes behind the tip when Faraz customer auth is stale.
+                _bucket_ticks_fill_missing(recent, overwrite_from=tip_rebuild_from)
+                if tip_rebuild_from is not None:
+                    sources.append("tick-rebuild")
         else:
             parent_coll = None
             if step >= 86_400:
@@ -2303,13 +2433,16 @@ async def iran_gold_history(request: web.Request) -> web.Response:
                 countback=min(_faraz_countback_cap(faraz_res), cb),
             )
             if not faraz_bars:
-                # Public TV history (often daily regardless of resolution) — still
-                # useful when customer auth is down for higher TFs / seed.
-                faraz_bars = await fetch_faraz_public_tv_history(
+                # Public TV history is often *daily* regardless of resolution —
+                # only accept it when it looks like real intraday spacing.
+                public = await fetch_faraz_public_tv_history(
                     session, channel, faraz_res, countback=min(1_000, cb)
                 )
+                faraz_bars = _plausible_intraday_bars(public, step)
         else:
             faraz_bars = await fetch_faraz_chart_history(session, channel, faraz_res)
+        if faraz_bars and step < 86_400:
+            faraz_bars = _plausible_intraday_bars(faraz_bars, step)
         if faraz_bars:
             sources.append(f"faraz:{faraz_res}")
             _FARAZ_HISTORY_LIVE_AT[f"{channel}|{faraz_res}"] = time.monotonic()
