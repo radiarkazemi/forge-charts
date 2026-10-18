@@ -1628,6 +1628,187 @@ def purge_flat_tick_ohlc() -> int:
         return 0
 
 
+def _price_along_ohlc_path(o: float, h: float, l: float, c: float, t01: float) -> float:
+    """Classic O→extreme→extreme→C path (same shape as frontend ohlc-path)."""
+    t = min(1.0, max(0.0, float(t01)))
+    bullish = c >= o
+    p1, p2, p3, p4 = o, (l if bullish else h), (h if bullish else l), c
+    if t < 0.28:
+        f = t / 0.28
+        return p1 + (p2 - p1) * f
+    if t < 0.62:
+        f = (t - 0.28) / 0.34
+        return p2 + (p3 - p2) * f
+    f = (t - 0.62) / 0.38
+    return p3 + (p4 - p3) * f
+
+
+def _expand_coarser_bar_to_step(
+    parent: dict[str, float],
+    parent_step: int,
+    child_step: int,
+) -> list[dict[str, float]]:
+    """Expand one coarser OHLC bar into `parent_step/child_step` child bars.
+
+    Used when Faraz 1m is missing for a range (e.g. Apr 2026) but 5m exists.
+    """
+    if child_step <= 0 or parent_step < child_step or parent_step % child_step != 0:
+        return [
+            {
+                "t": int(parent["t"]),
+                "o": float(parent["o"]),
+                "h": float(parent["h"]),
+                "l": float(parent["l"]),
+                "c": float(parent["c"]),
+                "v": float(parent.get("v") or 0),
+            }
+        ]
+    n = parent_step // child_step
+    o = float(parent["o"])
+    h = float(parent["h"])
+    l = float(parent["l"])
+    c = float(parent["c"])
+    v_each = float(parent.get("v") or 0) / n
+    t_base = int(parent["t"])
+    out: list[dict[str, float]] = []
+    prev = o
+    bullish = c >= o
+    for i in range(n):
+        t_end = (i + 1) / n
+        px = _price_along_ohlc_path(o, h, l, c, t_end)
+        # denser samples inside the slice for H/L
+        samples = [prev, px]
+        for k in (1, 2, 3):
+            samples.append(_price_along_ohlc_path(o, h, l, c, (i + k / 4) / n))
+        # Lock parent extremes into the slice that owns them on the path.
+        if bullish:
+            if i == 0 or (i / n) <= 0.28 < ((i + 1) / n):
+                samples.append(l)
+            if (i / n) <= 0.62 < ((i + 1) / n) or i == n - 1:
+                samples.append(h)
+        else:
+            if i == 0 or (i / n) <= 0.28 < ((i + 1) / n):
+                samples.append(h)
+            if (i / n) <= 0.62 < ((i + 1) / n) or i == n - 1:
+                samples.append(l)
+        if i == n - 1:
+            px = c
+            samples.append(c)
+        hi = min(h, max(samples))
+        lo = max(l, min(samples))
+        hi = max(hi, prev, px)
+        lo = min(lo, prev, px)
+        out.append(
+            {
+                "t": t_base + i * child_step,
+                "o": prev,
+                "h": hi,
+                "l": lo,
+                "c": px,
+                "v": v_each,
+            }
+        )
+        prev = px
+    return out
+
+
+def _fill_iran_from_coarser_faraz(
+    client: Any,
+    channel: str,
+    buckets: dict[int, dict[str, float]],
+    step: int,
+    *,
+    limit: int,
+    before: int | None,
+    wall_t: int,
+) -> int:
+    """Fill missing intraday buckets from the next coarser Faraz resolution.
+
+    G18 1m only starts ~Jun 2026 in Mongo; Apr 2026 has dense 5m — expand those
+    so scrolling back to April is not an empty hole.
+    """
+    if client is None or step < 60 or step >= 86_400:
+        return 0
+    # Prefer the next coarser stored Faraz TF.
+    coarser: tuple[str, int] | None = None
+    if step == 60:
+        coarser = ("5", 300)
+    elif step == 300:
+        coarser = ("15", 900)
+    elif step == 900:
+        coarser = ("60", 3600)
+    elif step == 1_800:
+        coarser = ("60", 3600)
+    elif step == 3600:
+        coarser = ("240", 14_400)
+    if coarser is None:
+        return 0
+    parent_res, parent_step = coarser
+    if parent_step % step != 0:
+        return 0
+
+    # Window to cover: either around existing holes, or the full requested page
+    # when native bars are scarce.
+    if before is not None:
+        end_t = before
+    else:
+        end_t = wall_t + step
+    start_t = end_t - max(limit, 500) * step
+    if buckets:
+        ordered = sorted(t for t in buckets if t < end_t)
+        if ordered:
+            # Extend back through any leading hole before the first native bar.
+            start_t = min(start_t, ordered[0] - max(limit // 2, 100) * step)
+            # And cover trailing hole up to wall.
+            if ordered[-1] < wall_t:
+                start_t = min(start_t, ordered[-1])
+
+    fq: dict[str, Any] = {
+        "channel": channel,
+        "resolution": parent_res,
+        "c": {"$gt": 0},
+        "t": {"$gte": start_t - parent_step, "$lt": end_t},
+    }
+    parents = list(
+        client["anil_gold"]["faraz_ohlc"]
+        .find(fq, {"t": 1, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1, "src": 1})
+        .sort("t", 1)
+        .limit(min(max(limit * (parent_step // step) // 2, 2_000), 20_000))
+    )
+    if not parents:
+        return 0
+    # Reject wrong-TF parents (daily junk stored as 5m etc.).
+    parent_bars = _plausible_intraday_bars(
+        [
+            {
+                "t": int(d["t"]),
+                "o": float(d["o"]),
+                "h": float(d["h"]),
+                "l": float(d["l"]),
+                "c": float(d["c"]),
+                "v": float(d.get("v") or 0),
+            }
+            for d in parents
+        ],
+        parent_step,
+    )
+    filled = 0
+    for parent in parent_bars:
+        # Skip closed tick-fold parents.
+        # (src already stripped above when missing)
+        for child in _expand_coarser_bar_to_step(parent, parent_step, step):
+            t0 = int(child["t"])
+            if t0 >= end_t or t0 > wall_t:
+                continue
+            if t0 < start_t:
+                continue
+            if t0 in buckets:
+                continue
+            buckets[t0] = child
+            filled += 1
+    return filled
+
+
 def _fill_iran_session_gaps(
     buckets: dict[int, dict[str, float]],
     step: int,
@@ -1765,6 +1946,127 @@ async def fetch_faraz_chart_history(
         except Exception as exc:
             LOG.debug("faraz chart-history %s %s via %s: %s", channel, resolution, url, exc)
     return []
+
+
+def materialize_iran_1m_from_5m(*, channels: list[str] | None = None) -> int:
+    """Persist derived 1m bars from stored 5m Faraz OHLC where 1m is missing.
+
+    Heals ranges like G18 Apr 1–26 2026 (dense 5m, empty 1m) so chart scrollback
+    does not show a blank hole.
+    """
+    client = mongo_client()
+    if client is None:
+        return 0
+    try:
+        from datetime import datetime, timezone
+
+        from pymongo import UpdateOne
+
+        base = client["anil_gold"]["faraz_ohlc"]
+        now = datetime.now(tz=timezone.utc)
+        targets = channels or list(IRAN_FARAZ_HISTORY_SYMBOL.keys())
+        written = 0
+        for channel in targets:
+            # Find 5m span; derive 1m only where no native 1m exists.
+            parents = list(
+                base.find(
+                    {"channel": channel, "resolution": "5", "c": {"$gt": 0}},
+                    {"t": 1, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1},
+                )
+                .sort("t", 1)
+                .limit(50_000)
+            )
+            if not parents:
+                continue
+            parent_bars = _plausible_intraday_bars(
+                [
+                    {
+                        "t": int(d["t"]),
+                        "o": float(d["o"]),
+                        "h": float(d["h"]),
+                        "l": float(d["l"]),
+                        "c": float(d["c"]),
+                        "v": float(d.get("v") or 0),
+                    }
+                    for d in parents
+                ],
+                300,
+            )
+            if not parent_bars:
+                continue
+            t_min = int(parent_bars[0]["t"])
+            t_max = int(parent_bars[-1]["t"]) + 300
+            existing = {
+                int(d["t"])
+                for d in base.find(
+                    {
+                        "channel": channel,
+                        "resolution": "1",
+                        "t": {"$gte": t_min, "$lt": t_max},
+                        "src": {
+                            "$nin": ["faraz", "faraz-tick", "derived-5m"],
+                        },
+                    },
+                    {"t": 1},
+                )
+            }
+            # Also skip timestamps that already have derived-5m.
+            existing |= {
+                int(d["t"])
+                for d in base.find(
+                    {
+                        "channel": channel,
+                        "resolution": "1",
+                        "t": {"$gte": t_min, "$lt": t_max},
+                        "src": "derived-5m",
+                    },
+                    {"t": 1},
+                )
+            }
+            ops: list[UpdateOne] = []
+            faraz_sym = IRAN_FARAZ_HISTORY_SYMBOL.get(channel, "")
+            field = IRAN_FIELD_BY_CHANNEL.get(channel, "")
+            for parent in parent_bars:
+                for child in _expand_coarser_bar_to_step(parent, 300, 60):
+                    t0 = int(child["t"])
+                    if t0 in existing:
+                        continue
+                    ops.append(
+                        UpdateOne(
+                            {"channel": channel, "resolution": "1", "t": t0},
+                            {
+                                "$set": {
+                                    "channel": channel,
+                                    "faraz_symbol": faraz_sym,
+                                    "field": field,
+                                    "resolution": "1",
+                                    "t": t0,
+                                    "o": child["o"],
+                                    "h": child["h"],
+                                    "l": child["l"],
+                                    "c": child["c"],
+                                    "v": child["v"],
+                                    "src": "derived-5m",
+                                    "updated_at": now,
+                                }
+                            },
+                            upsert=True,
+                        )
+                    )
+                    existing.add(t0)
+            for i in range(0, len(ops), 1_000):
+                base.bulk_write(ops[i : i + 1_000], ordered=False)
+            written += len(ops)
+            if ops:
+                LOG.warning(
+                    "materialized %s derived 1m bars from 5m for %s",
+                    len(ops),
+                    channel,
+                )
+        return written
+    except Exception as exc:
+        LOG.warning("materialize 1m from 5m: %s", exc)
+        return 0
 
 
 async def bootstrap_faraz_history(session: aiohttp.ClientSession) -> None:
@@ -2274,19 +2576,24 @@ def _load_iran_history_mongo(
                 )
                 if parents:
                     sources.append(parent_coll.name)
-                    for doc in reversed(parents):
+                    parent_bars = _plausible_intraday_bars(
+                        [
+                            {
+                                "t": int(doc["t"]),
+                                "o": float(doc["o"]),
+                                "h": float(doc["h"]),
+                                "l": float(doc["l"]),
+                                "c": float(doc["c"]),
+                                "v": float(doc.get("v") or 0),
+                            }
+                            for doc in reversed(parents)
+                            if doc.get("t") is not None
+                        ],
+                        step if step >= 60 else 60,
+                    )
+                    for bar in parent_bars:
                         try:
-                            ingest(
-                                {
-                                    "t": int(doc["t"]),
-                                    "o": float(doc["o"]),
-                                    "h": float(doc["h"]),
-                                    "l": float(doc["l"]),
-                                    "c": float(doc["c"]),
-                                    "v": float(doc.get("v") or 0),
-                                },
-                                exact=(step <= 60),
-                            )
+                            ingest(bar, exact=(step <= 60))
                         except (KeyError, TypeError, ValueError):
                             continue
             recent = list(
@@ -2306,12 +2613,27 @@ def _load_iran_history_mongo(
         if rows:
             _bucket_ticks_fill_missing(rows)
 
+        # Historical holes (e.g. G18 Apr 2026 has 5m but no 1m): expand coarser Faraz.
+        if step >= 60 and step < 86_400:
+            derived = _fill_iran_from_coarser_faraz(
+                client,
+                channel,
+                buckets,
+                step,
+                limit=limit,
+                before=before,
+                wall_t=wall_t if before is None else (before - step),
+            )
+            if derived:
+                sources.append(f"derived-{derived}")
+
         # Faraz-like continuity: fill short intraday holes (missed poll minutes).
-        if step <= 1_800 and before is None:
+        if step <= 1_800:
+            gap_wall = wall_t if before is None else min(wall_t, before - step)
             filled = _fill_iran_session_gaps(
                 buckets,
                 step,
-                wall_t=wall_t,
+                wall_t=gap_wall,
                 max_gap_steps=90 if step <= 60 else 45,
             )
             if filled:
@@ -2603,6 +2925,12 @@ async def start_background(app: web.Application) -> None:
                 LOG.warning("startup purged %s closed tick-fold bars", removed)
         except Exception as exc:
             LOG.warning("startup purge flat ticks: %s", exc)
+        try:
+            derived = await asyncio.to_thread(materialize_iran_1m_from_5m)
+            if derived:
+                LOG.warning("startup materialized %s derived 1m bars from 5m", derived)
+        except Exception as exc:
+            LOG.warning("startup materialize 1m from 5m: %s", exc)
 
     # Do not block HTTP bind on a large Mongo purge — run it in the background.
     app["tasks"] = [
