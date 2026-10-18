@@ -74,10 +74,12 @@ function tickIntervalMs(stepMs: number, speed: BarReplaySpeed): number {
 function microResolutionFor(res: string): string | null {
   const sec = resolutionToSec(res);
   if (sec <= 1) return null;
+  // Sub-minute → 1S ticks; 1–15m → 1m; higher → 5m.
+  if (sec < 60) return "1S";
   if (sec <= 60) return "1S";
-  if (sec <= 300) return "1";
   if (sec <= 900) return "1";
-  return "5";
+  if (sec <= 3600) return "5";
+  return "15";
 }
 
 /**

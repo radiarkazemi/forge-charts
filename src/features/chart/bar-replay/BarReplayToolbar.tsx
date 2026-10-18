@@ -14,26 +14,24 @@ interface BarReplayToolbarProps {
   readonly forceVisible?: boolean;
 }
 
-const SPEEDS: readonly { value: BarReplaySpeed; label: string; hint: string }[] = [
-  { value: 0.5, label: "0.5×", hint: "Half speed" },
-  { value: 1, label: "1×", hint: "Realtime candle" },
-  { value: 2, label: "2×", hint: "2× faster" },
-  { value: 5, label: "5×", hint: "5× faster" },
-  { value: 10, label: "10×", hint: "10× faster" },
+const SPEEDS: readonly { value: BarReplaySpeed; label: string }[] = [
+  { value: 0.5, label: "0.5×" },
+  { value: 1, label: "1×" },
+  { value: 2, label: "2×" },
+  { value: 5, label: "5×" },
+  { value: 10, label: "10×" },
 ];
 
-const btnSx = {
-  minWidth: 34,
-  height: 34,
-  px: 0.85,
+const iconBtn = {
+  width: 32,
+  height: 32,
+  minWidth: 32,
   borderRadius: "6px",
   color: "#d1d4dc",
-  fontSize: 13,
-  fontWeight: 600,
   transition: "background .12s ease, color .12s ease",
-  "&:hover": { bgcolor: "rgba(255,255,255,0.08)" },
-  "&.active": { color: "#2962ff", bgcolor: "rgba(41,98,255,0.16)" },
-  "&.Mui-disabled": { opacity: 0.35 },
+  "&:hover": { bgcolor: "rgba(255,255,255,0.08)", color: "#f0f3fa" },
+  "&.active": { color: "#2962ff", bgcolor: "rgba(41,98,255,0.18)" },
+  "&.Mui-disabled": { opacity: 0.32 },
 } as const;
 
 function formatRemain(ms: number): string {
@@ -54,8 +52,8 @@ function stepMsFor(resolution: string): number {
 }
 
 /**
- * TradingView-style floating Bar Replay bar (bottom of chart).
- * Select → transport → speed → TF / countdown → exit.
+ * Compact TradingView-style Bar Replay strip:
+ * Select · transport · speed · TF countdown · close
  */
 export function BarReplayToolbar({ controller, forceVisible = false }: BarReplayToolbarProps) {
   const snap = useStore(controller.state);
@@ -67,7 +65,6 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
     if (!snap.active && !forceVisible) return;
     const tick = () => {
       const stepMs = stepMsFor(snap.resolution);
-      // While a candle is forming (play or paused mid-bar), show remaining candle time.
       const progress =
         snap.cursorIndex >= 0 ? Math.min(1, Math.max(0, snap.formProgress)) : 0;
       const remain =
@@ -106,47 +103,33 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
       sx={{
         position: "absolute",
         left: "50%",
-        bottom: { xs: 100, sm: 56 },
+        bottom: { xs: 96, sm: 52 },
         transform: "translateX(-50%)",
         zIndex: 30,
         display: "flex",
         alignItems: "center",
-        gap: 0.5,
-        px: 1.25,
-        py: 0.85,
-        bgcolor: "rgba(19, 23, 34, 0.96)",
+        gap: 0.25,
+        px: 0.75,
+        py: 0.5,
+        bgcolor: "rgba(19, 23, 34, 0.97)",
         border: "1px solid #2a2e39",
-        borderRadius: "12px",
-        boxShadow: "0 10px 32px rgba(0,0,0,0.55)",
-        backdropFilter: "blur(8px)",
+        borderRadius: "8px",
+        boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
         pointerEvents: "auto",
         userSelect: "none",
         whiteSpace: "nowrap",
-        maxWidth: "calc(100vw - 24px)",
+        maxWidth: "calc(100vw - 16px)",
       }}
     >
-      {/* Select */}
       <ButtonBase
         className={snap.selecting ? "active" : undefined}
-        sx={{ ...btnSx, gap: 0.75, px: 1.1, minWidth: "auto" }}
+        sx={iconBtn}
         onClick={openSelect}
         title="Select bar"
+        aria-label="Select bar"
       >
         <SelectBarIcon />
-        <Typography
-          component="span"
-          sx={{
-            fontSize: 13,
-            fontWeight: 600,
-            color: "inherit",
-            display: { xs: "none", sm: "inline" },
-          }}
-        >
-          Select
-        </Typography>
-        <ChevronIcon />
       </ButtonBase>
-
       <Menu
         anchorEl={selectAnchor}
         open={Boolean(selectAnchor)}
@@ -159,7 +142,7 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
               bgcolor: "#1c2030",
               border: "1px solid #2a2e39",
               color: "#d1d4dc",
-              minWidth: 200,
+              minWidth: 168,
             },
           },
         }}
@@ -170,71 +153,77 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
             void controller.selectBar();
           }}
         >
-          Select bar on chart
+          Select bar
         </MenuItem>
-        {snap.cursorIndex >= 0 ? (
-          <MenuItem
-            onClick={() => {
-              setSelectAnchor(null);
-              void controller.jumpToStart();
-            }}
-          >
-            Jump to start
-          </MenuItem>
-        ) : null}
+        <MenuItem
+          disabled={snap.startIndex < 0}
+          onClick={() => {
+            setSelectAnchor(null);
+            void controller.jumpToStart();
+          }}
+        >
+          Jump to start
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            setSelectAnchor(null);
+            void controller.jumpToRealtime();
+          }}
+        >
+          Jump to realtime
+        </MenuItem>
       </Menu>
 
-      <Divider />
+      <Rule />
 
-      {/* Transport */}
-      <Box sx={{ display: "flex", alignItems: "center", gap: 0.15 }}>
-        <ButtonBase
-          sx={btnSx}
-          title="Jump to start"
-          disabled={snap.startIndex < 0}
-          onClick={() => void controller.jumpToStart()}
-        >
-          <JumpStartIcon />
-        </ButtonBase>
-
-        <ButtonBase
-          sx={{
-            ...btnSx,
-            minWidth: 40,
-            height: 40,
-            borderRadius: "10px",
-            bgcolor: playing ? "rgba(41,98,255,0.2)" : "rgba(255,255,255,0.06)",
-            color: playing ? "#5b8cff" : "#f0f3fa",
-            "&:hover": { bgcolor: playing ? "rgba(41,98,255,0.3)" : "rgba(255,255,255,0.1)" },
-          }}
-          title={playing ? "Pause" : "Play"}
-          disabled={snap.cursorIndex < 0}
-          onClick={() => void controller.play()}
-        >
-          {playing ? <PauseIcon /> : <PlayIcon />}
-        </ButtonBase>
-
-        <ButtonBase
-          sx={btnSx}
-          title="Forward one bar"
-          disabled={!canStep && snap.formProgress <= 0}
-          onClick={() => void controller.stepForward()}
-        >
-          <StepIcon />
-        </ButtonBase>
-      </Box>
-
-      <Divider />
-
-      {/* Speed */}
       <ButtonBase
-        sx={{ ...btnSx, minWidth: 52, gap: 0.4, px: 1 }}
-        title="Playback speed — 1× forms each candle in real timeframe"
+        sx={{
+          ...iconBtn,
+          width: 36,
+          height: 36,
+          minWidth: 36,
+          borderRadius: "8px",
+          bgcolor: playing ? "rgba(41,98,255,0.22)" : "transparent",
+          color: playing ? "#5b8cff" : "#f0f3fa",
+          "&:hover": {
+            bgcolor: playing ? "rgba(41,98,255,0.32)" : "rgba(255,255,255,0.08)",
+          },
+        }}
+        title={playing ? "Pause" : "Play"}
+        aria-label={playing ? "Pause" : "Play"}
+        disabled={snap.cursorIndex < 0}
+        onClick={() => void controller.play()}
+      >
+        {playing ? <PauseIcon /> : <PlayIcon />}
+      </ButtonBase>
+
+      <ButtonBase
+        sx={iconBtn}
+        title="Forward one bar"
+        aria-label="Forward one bar"
+        disabled={!canStep && snap.formProgress <= 0}
+        onClick={() => void controller.stepForward()}
+      >
+        <StepIcon />
+      </ButtonBase>
+
+      <Rule />
+
+      <ButtonBase
+        sx={{
+          ...iconBtn,
+          width: "auto",
+          minWidth: 40,
+          px: 0.75,
+          gap: 0.25,
+          fontSize: 12,
+          fontWeight: 700,
+          color: "#f0f3fa",
+        }}
+        title="Playback speed"
         onClick={openSpeed}
       >
-        <Typography component="span" sx={{ fontSize: 13, fontWeight: 700, color: "#f0f3fa" }}>
-          {speedMeta.label}
-        </Typography>
+        {speedMeta.label}
         <ChevronIcon />
       </ButtonBase>
       <Menu
@@ -249,7 +238,7 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
               bgcolor: "#1c2030",
               border: "1px solid #2a2e39",
               color: "#d1d4dc",
-              minWidth: 180,
+              minWidth: 88,
             },
           },
         }}
@@ -262,38 +251,29 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
               controller.setSpeed(s.value);
               setSpeedAnchor(null);
             }}
-            sx={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 2,
-              "&.Mui-selected": { bgcolor: "rgba(41,98,255,0.18)" },
-            }}
+            sx={{ "&.Mui-selected": { bgcolor: "rgba(41,98,255,0.18)" } }}
           >
             <Typography component="span" sx={{ fontWeight: 700, fontSize: 13 }}>
               {s.label}
-            </Typography>
-            <Typography component="span" sx={{ fontSize: 12, color: "#787b86" }}>
-              {s.hint}
             </Typography>
           </MenuItem>
         ))}
       </Menu>
 
-      <Divider />
+      <Rule />
 
-      {/* TF + countdown */}
       <Box
         sx={{
           display: "flex",
           alignItems: "center",
-          gap: 0.75,
-          px: 0.5,
-          minWidth: { xs: 72, sm: 108 },
+          gap: 0.5,
+          px: 0.35,
+          minWidth: showCountdown ? 72 : 28,
         }}
       >
         <Typography
           component="span"
-          sx={{ fontSize: 12, fontWeight: 700, color: "#8b919e", letterSpacing: 0.2 }}
+          sx={{ fontSize: 11, fontWeight: 700, color: "#8b919e", letterSpacing: 0.3 }}
         >
           {resolutionLabel}
         </Typography>
@@ -303,16 +283,16 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
             title="Time left on forming candle"
             sx={{
               fontFamily: '"Trebuchet MS", "Segoe UI", sans-serif',
-              fontSize: 12,
+              fontSize: 11,
               fontWeight: 700,
               color: "#f0f3fa",
               bgcolor: "#2962ff",
-              borderRadius: "4px",
-              px: "7px",
-              py: "2px",
-              lineHeight: 1.35,
+              borderRadius: "3px",
+              px: "6px",
+              py: "1px",
+              lineHeight: 1.4,
               letterSpacing: 0.2,
-              minWidth: 40,
+              minWidth: 36,
               textAlign: "center",
             }}
           >
@@ -321,30 +301,27 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
         ) : null}
       </Box>
 
+      <Rule />
+
       <ButtonBase
-        sx={btnSx}
-        title="Jump to realtime"
-        onClick={() => void controller.jumpToRealtime()}
+        sx={iconBtn}
+        title="Close Bar Replay"
+        aria-label="Close Bar Replay"
+        onClick={() => void controller.exit()}
       >
-        <RealtimeIcon />
-      </ButtonBase>
-
-      <Divider />
-
-      <ButtonBase sx={btnSx} title="Close Bar Replay" onClick={() => void controller.exit()}>
         <CloseIcon />
       </ButtonBase>
     </Box>
   );
 }
 
-function Divider() {
-  return <Box sx={{ width: 1, height: 22, bgcolor: "#363a45", mx: 0.35, flexShrink: 0 }} />;
+function Rule() {
+  return <Box sx={{ width: 1, height: 18, bgcolor: "#363a45", mx: 0.2, flexShrink: 0 }} />;
 }
 
 function SelectBarIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 18 18" fill="none" aria-hidden>
+    <svg width="15" height="15" viewBox="0 0 18 18" fill="none" aria-hidden>
       <path d="M4 2v14M4 9h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
       <path d="M11 6l4 3-4 3V6z" fill="currentColor" />
     </svg>
@@ -353,24 +330,15 @@ function SelectBarIcon() {
 
 function ChevronIcon() {
   return (
-    <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+    <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden>
       <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function JumpStartIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 18 18" fill="currentColor" aria-hidden>
-      <rect x="2" y="4" width="2" height="10" rx="0.5" />
-      <path d="M15 4v10L7 9l8-5z" />
     </svg>
   );
 }
 
 function PlayIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 18 18" fill="currentColor" aria-hidden>
+    <svg width="14" height="14" viewBox="0 0 18 18" fill="currentColor" aria-hidden>
       <path d="M5 3.5v11l10-5.5L5 3.5z" />
     </svg>
   );
@@ -378,7 +346,7 @@ function PlayIcon() {
 
 function PauseIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 18 18" fill="currentColor" aria-hidden>
+    <svg width="14" height="14" viewBox="0 0 18 18" fill="currentColor" aria-hidden>
       <rect x="4" y="3.5" width="3.5" height="11" rx="0.5" />
       <rect x="10.5" y="3.5" width="3.5" height="11" rx="0.5" />
     </svg>
@@ -387,26 +355,16 @@ function PauseIcon() {
 
 function StepIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 18 18" fill="currentColor" aria-hidden>
+    <svg width="14" height="14" viewBox="0 0 18 18" fill="currentColor" aria-hidden>
       <path d="M3 4v10l7-5L3 4z" />
       <rect x="12" y="4" width="2.5" height="10" rx="0.5" />
     </svg>
   );
 }
 
-function RealtimeIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 18 18" fill="currentColor" aria-hidden>
-      <path d="M2 4v10l5.5-5L2 4z" />
-      <path d="M8 4v10l5.5-5L8 4z" />
-      <rect x="14.5" y="4" width="2" height="10" rx="0.5" />
-    </svg>
-  );
-}
-
 function CloseIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
+    <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden>
       <path d="M3 3l8 8M11 3L3 11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   );

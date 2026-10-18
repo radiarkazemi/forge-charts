@@ -274,7 +274,23 @@ export class IranGoldProvider implements MarketDataProvider {
         if (pending.length > 50) pending.shift();
         return;
       }
-      emit(applyTick(current, price, ts, step));
+      // If the feed skipped buckets (sparse Faraz polls), bridge with carry-forward
+      // closes so 10S/15S charts stay continuous — never invent a second clock path.
+      const next = applyTick(current, price, ts, step);
+      if (current && next.time > current.time + step) {
+        const bridgePx = current.close;
+        for (let t = current.time + step; t < next.time; t += step) {
+          emit({
+            time: t,
+            open: bridgePx,
+            high: bridgePx,
+            low: bridgePx,
+            close: bridgePx,
+            volume: 0,
+          });
+        }
+      }
+      emit(next);
     };
 
     // Seed forming bar from deep history (Faraz D/W/M or Mongo), like cp_fetcher.
@@ -312,28 +328,9 @@ export class IranGoldProvider implements MarketDataProvider {
       }
     })();
 
-    // Seconds: keep forming while the 1s Faraz→market-ticks poll is alive.
-    if (parseInterval(interval).unit === "seconds" && typeof window !== "undefined") {
-      const quietMs = Math.max(2_500, step * 2_500);
-      const clock = window.setInterval(() => {
-        if (!isMarketSessionOpen(symbol)) return;
-        if (Date.now() - lastTickMs > quietMs) return;
-        const lastPrice = current?.close;
-        if (!Number.isFinite(lastPrice)) return;
-        const bucket = alignTime(Math.floor(Date.now() / 1000), step);
-        if (!current || current.time < bucket) {
-          emit({
-            time: bucket,
-            open: lastPrice!,
-            high: lastPrice!,
-            low: lastPrice!,
-            close: lastPrice!,
-            volume: 0,
-          });
-        }
-      }, Math.min(250, Math.max(50, (step * 1000) / 4)));
-      disposers.push(() => clearInterval(clock));
-    }
+    // Seconds charts: do NOT invent empty dojis on a wall-clock timer — that caused
+    // duplicate / missing 10S candles when Faraz polls ~1s. New buckets open only
+    // from real ticks (WS + HTTP heartbeat); skipped buckets are bridged in onTick.
 
     // Primary realtime path — same `/market-ticks` WS used by cp_fetcher crypto/FX.
     disposers.push(openMarketTicksSocket(route.channel, onTick));

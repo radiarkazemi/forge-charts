@@ -19,7 +19,7 @@ if [[ -n "${SSHPASS:-}" ]]; then
 fi
 
 # Paths used on the live hosts (forge-market-ticks / faraz-history-proxy units).
-IRAN_MT_DEST="${IRAN_MARKET_TICKS_PATH:-/opt/cp_fetcher/ws/market_ticks.py}"
+IRAN_MT_DEST="${IRAN_MARKET_TICKS_PATH:-/opt/forge-market-ticks/market_ticks.py}"
 GERMANY_PROXY_DEST="${FARAZ_PROXY_PATH:-/opt/faraz-history-proxy/proxy.py}"
 
 echo "Uploading faraz_history_proxy.py → root@${GERMANY}:${GERMANY_PROXY_DEST}"
@@ -30,6 +30,6 @@ echo "Uploading faraz_history_proxy.py → root@${GERMANY}:${GERMANY_PROXY_DEST}
 echo "Uploading market_ticks.py → root@${IRAN}:${IRAN_MT_DEST}"
 "${SCP[@]}" "$ROOT/deploy/vps/market_ticks.py" "root@${IRAN}:${IRAN_MT_DEST}"
 "${SSH[@]}" "root@${IRAN}" \
-  "systemctl restart forge-market-ticks.service && sleep 2 && systemctl is-active forge-market-ticks.service && curl -sS 'http://127.0.0.1:8765/iran-gold/quote' 2>/dev/null | head -c 300 || curl -sS 'https://forgechart.ir/iran-gold/quote' | head -c 300; echo"
+  "systemctl restart forge-market-ticks.service && sleep 2 && systemctl is-active forge-market-ticks.service && (curl -sS 'http://127.0.0.1:8015/iran-gold/quote' || curl -sS 'http://127.0.0.1:8088/iran-gold/quote' || curl -sS 'https://forgechart.ir/iran-gold/quote') | head -c 300; echo"
 
 echo "Done. Verify G18 moves with Faraz geramTalaHejdah (not a frozen mesghal-derived value)."
