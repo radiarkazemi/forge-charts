@@ -879,8 +879,10 @@ async def poll_iran_gold(session: aiohttp.ClientSession) -> None:
                 quote, src_name = quote_src
                 ts = int(time.time())
                 src = f"iran:{src_name}"
-                persist_iran_tick_1s(quote, src_name, ts)
-                append_realtime_ohlc(quote, src_name, ts)
+                # Mongo writes off the event loop — append_realtime does many
+                # upserts per tick and must not stall /iran-gold/history.
+                await asyncio.to_thread(persist_iran_tick_1s, quote, src_name, ts)
+                await asyncio.to_thread(append_realtime_ohlc, quote, src_name, ts)
                 # Warm LAST + push to any live WS subscribers (cp_fetcher-style).
                 for field, channel in IRAN_FIELDS.items():
                     price = float(quote.get(field) or 0)
@@ -1223,40 +1225,29 @@ def append_realtime_ohlc(quote: dict[str, float], src_name: str, ts: int) -> Non
                 wall_t = _align_iran_bar_time(now_ts, step)
                 t0 = wall_t
                 coll = client["anil_gold"][coll_name]
-                existing = coll.find_one({"channel": channel, "t": t0}, {"_id": 1})
-                if existing is None:
-                    coll.update_one(
-                        {"channel": channel, "t": t0},
-                        {
-                            "$set": {
-                                "channel": channel,
-                                "field": field,
-                                "t": t0,
-                                "o": price,
-                                "h": price,
-                                "l": price,
-                                "c": price,
-                                "v": 1,
-                                "src": src_name,
-                                "updated_at": now,
-                            }
+                coll.update_one(
+                    {"channel": channel, "t": t0},
+                    {
+                        "$set": {
+                            "channel": channel,
+                            "field": field,
+                            "t": t0,
+                            "c": price,
+                            "src": src_name,
+                            "updated_at": now,
                         },
-                        upsert=True,
-                    )
-                else:
-                    coll.update_one(
-                        {"channel": channel, "t": t0},
-                        {
-                            "$set": {
-                                "c": price,
-                                "src": src_name,
-                                "updated_at": now,
-                            },
-                            "$max": {"h": price},
-                            "$min": {"l": price},
-                            "$inc": {"v": 1},
+                        "$setOnInsert": {
+                            "o": price,
+                            "h": price,
+                            "l": price,
+                            "v": 0,
                         },
-                    )
+                        "$max": {"h": price},
+                        "$min": {"l": price},
+                        "$inc": {"v": 1},
+                    },
+                    upsert=True,
+                )
             # Canonical Faraz store — forming bucket only. Closed minutes are owned by
             # Faraz customer history (tail/live refresh); ticks must not reshape them.
             # Tag tick folds as faraz-tick so history can prefer real Faraz OHLC.
@@ -1265,13 +1256,11 @@ def append_realtime_ohlc(quote: dict[str, float], src_name: str, ts: int) -> Non
             for resolution, step in _IRAN_LIVE_RES_STEPS:
                 wall_t = _align_iran_bar_time(now_ts, step)
                 t0 = wall_t
-                existing = base.find_one(
+                # Single upsert — avoid find_one+update (was stalling the event loop).
+                # Preserve Faraz customer/bootstrap/tail/live src via pipeline.
+                base.update_one(
                     {"channel": channel, "resolution": resolution, "t": t0},
-                    {"_id": 1, "src": 1},
-                )
-                if existing is None:
-                    base.update_one(
-                        {"channel": channel, "resolution": resolution, "t": t0},
+                    [
                         {
                             "$set": {
                                 "channel": channel,
@@ -1279,36 +1268,34 @@ def append_realtime_ohlc(quote: dict[str, float], src_name: str, ts: int) -> Non
                                 "field": field,
                                 "resolution": resolution,
                                 "t": t0,
-                                "o": price,
-                                "h": price,
-                                "l": price,
+                                "o": {"$ifNull": ["$o", price]},
+                                "h": {"$max": [{"$ifNull": ["$h", price]}, price]},
+                                "l": {"$min": [{"$ifNull": ["$l", price]}, price]},
                                 "c": price,
-                                "v": 1,
-                                "src": tick_src,
+                                "v": {"$add": [{"$ifNull": ["$v", 0]}, 1]},
                                 "updated_at": now,
+                                "src": {
+                                    "$cond": [
+                                        {
+                                            "$in": [
+                                                {"$ifNull": ["$src", ""]},
+                                                [
+                                                    "faraz-bootstrap",
+                                                    "faraz-tail",
+                                                    "faraz-customer",
+                                                    "faraz-live",
+                                                ],
+                                            ]
+                                        },
+                                        "$src",
+                                        tick_src,
+                                    ]
+                                },
                             }
-                        },
-                        upsert=True,
-                    )
-                else:
-                    # Never relabel a Faraz customer/bootstrap/tail bar as a tick fold.
-                    prev_src = str(existing.get("src") or "")
-                    keep_src = prev_src if prev_src.startswith("faraz-") and prev_src != "faraz" else tick_src
-                    if prev_src in {"faraz-bootstrap", "faraz-tail", "faraz-customer", "faraz-live"}:
-                        keep_src = prev_src
-                    base.update_one(
-                        {"channel": channel, "resolution": resolution, "t": t0},
-                        {
-                            "$set": {
-                                "c": price,
-                                "src": keep_src,
-                                "updated_at": now,
-                            },
-                            "$max": {"h": price},
-                            "$min": {"l": price},
-                            "$inc": {"v": 1},
-                        },
-                    )
+                        }
+                    ],
+                    upsert=True,
+                )
     except Exception as exc:
         LOG.debug("append realtime ohlc: %s", exc)
 
@@ -2475,12 +2462,18 @@ async def start_background(app: web.Application) -> None:
     headers = {"X-API-Key": API_KEY} if API_KEY else {}
     session = aiohttp.ClientSession(headers=headers)
     app["session"] = session
-    # Clean tip pollution before serving history.
-    try:
-        await asyncio.to_thread(purge_flat_tick_ohlc)
-    except Exception as exc:
-        LOG.warning("startup purge flat ticks: %s", exc)
+
+    async def _startup_purge() -> None:
+        try:
+            removed = await asyncio.to_thread(purge_flat_tick_ohlc)
+            if removed:
+                LOG.warning("startup purged %s closed tick-fold bars", removed)
+        except Exception as exc:
+            LOG.warning("startup purge flat ticks: %s", exc)
+
+    # Do not block HTTP bind on a large Mongo purge — run it in the background.
     app["tasks"] = [
+        asyncio.create_task(_startup_purge()),
         asyncio.create_task(tv_quote_feeder()),
         asyncio.create_task(poll_mongo()),
         asyncio.create_task(poll_crypto(session)),
