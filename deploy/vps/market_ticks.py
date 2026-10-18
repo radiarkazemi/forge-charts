@@ -1968,99 +1968,95 @@ def materialize_iran_1m_from_5m(*, channels: list[str] | None = None) -> int:
         written = 0
         for channel in targets:
             # Find 5m span; derive 1m only where no native 1m exists.
-            parents = list(
-                base.find(
-                    {"channel": channel, "resolution": "5", "c": {"$gt": 0}},
-                    {"t": 1, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1},
-                )
-                .sort("t", 1)
-                .limit(50_000)
-            )
-            if not parents:
-                continue
-            parent_bars = _plausible_intraday_bars(
-                [
-                    {
-                        "t": int(d["t"]),
-                        "o": float(d["o"]),
-                        "h": float(d["h"]),
-                        "l": float(d["l"]),
-                        "c": float(d["c"]),
-                        "v": float(d.get("v") or 0),
-                    }
-                    for d in parents
-                ],
-                300,
-            )
-            if not parent_bars:
-                continue
-            t_min = int(parent_bars[0]["t"])
-            t_max = int(parent_bars[-1]["t"]) + 300
-            existing = {
-                int(d["t"])
-                for d in base.find(
-                    {
-                        "channel": channel,
-                        "resolution": "1",
-                        "t": {"$gte": t_min, "$lt": t_max},
-                        "src": {
-                            "$nin": ["faraz", "faraz-tick", "derived-5m"],
-                        },
-                    },
-                    {"t": 1},
-                )
-            }
-            # Also skip timestamps that already have derived-5m.
-            existing |= {
-                int(d["t"])
-                for d in base.find(
-                    {
-                        "channel": channel,
-                        "resolution": "1",
-                        "t": {"$gte": t_min, "$lt": t_max},
-                        "src": "derived-5m",
-                    },
-                    {"t": 1},
-                )
-            }
-            ops: list[UpdateOne] = []
+            # Page through ALL 5m history (oldest→newest). A single 50k cap skipped
+            # Apr 2026 when older months already filled the batch.
             faraz_sym = IRAN_FARAZ_HISTORY_SYMBOL.get(channel, "")
             field = IRAN_FIELD_BY_CHANNEL.get(channel, "")
-            for parent in parent_bars:
-                for child in _expand_coarser_bar_to_step(parent, 300, 60):
-                    t0 = int(child["t"])
-                    if t0 in existing:
-                        continue
-                    ops.append(
-                        UpdateOne(
-                            {"channel": channel, "resolution": "1", "t": t0},
-                            {
-                                "$set": {
-                                    "channel": channel,
-                                    "faraz_symbol": faraz_sym,
-                                    "field": field,
-                                    "resolution": "1",
-                                    "t": t0,
-                                    "o": child["o"],
-                                    "h": child["h"],
-                                    "l": child["l"],
-                                    "c": child["c"],
-                                    "v": child["v"],
-                                    "src": "derived-5m",
-                                    "updated_at": now,
-                                }
-                            },
-                            upsert=True,
-                        )
+            channel_written = 0
+            cursor_t = 0
+            while True:
+                parents = list(
+                    base.find(
+                        {
+                            "channel": channel,
+                            "resolution": "5",
+                            "c": {"$gt": 0},
+                            "t": {"$gt": cursor_t},
+                        },
+                        {"t": 1, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1},
                     )
-                    existing.add(t0)
-            for i in range(0, len(ops), 1_000):
-                base.bulk_write(ops[i : i + 1_000], ordered=False)
-            written += len(ops)
-            if ops:
+                    .sort("t", 1)
+                    .limit(5_000)
+                )
+                if not parents:
+                    break
+                cursor_t = int(parents[-1]["t"])
+                parent_bars = _plausible_intraday_bars(
+                    [
+                        {
+                            "t": int(d["t"]),
+                            "o": float(d["o"]),
+                            "h": float(d["h"]),
+                            "l": float(d["l"]),
+                            "c": float(d["c"]),
+                            "v": float(d.get("v") or 0),
+                        }
+                        for d in parents
+                    ],
+                    300,
+                )
+                if not parent_bars:
+                    continue
+                t_min = int(parent_bars[0]["t"])
+                t_max = int(parent_bars[-1]["t"]) + 300
+                existing = {
+                    int(d["t"])
+                    for d in base.find(
+                        {
+                            "channel": channel,
+                            "resolution": "1",
+                            "t": {"$gte": t_min, "$lt": t_max},
+                        },
+                        {"t": 1},
+                    )
+                }
+                ops: list[UpdateOne] = []
+                for parent in parent_bars:
+                    for child in _expand_coarser_bar_to_step(parent, 300, 60):
+                        t0 = int(child["t"])
+                        if t0 in existing:
+                            continue
+                        ops.append(
+                            UpdateOne(
+                                {"channel": channel, "resolution": "1", "t": t0},
+                                {
+                                    "$set": {
+                                        "channel": channel,
+                                        "faraz_symbol": faraz_sym,
+                                        "field": field,
+                                        "resolution": "1",
+                                        "t": t0,
+                                        "o": child["o"],
+                                        "h": child["h"],
+                                        "l": child["l"],
+                                        "c": child["c"],
+                                        "v": child["v"],
+                                        "src": "derived-5m",
+                                        "updated_at": now,
+                                    }
+                                },
+                                upsert=True,
+                            )
+                        )
+                        existing.add(t0)
+                for i in range(0, len(ops), 1_000):
+                    base.bulk_write(ops[i : i + 1_000], ordered=False)
+                channel_written += len(ops)
+            written += channel_written
+            if channel_written:
                 LOG.warning(
                     "materialized %s derived 1m bars from 5m for %s",
-                    len(ops),
+                    channel_written,
                     channel,
                 )
         return written
