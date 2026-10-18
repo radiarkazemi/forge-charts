@@ -221,7 +221,7 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
           fontWeight: 700,
           color: "#f0f3fa",
         }}
-        title="Playback speed"
+        title="Replay speed"
         onClick={openSpeed}
       >
         {speedMeta.label}
@@ -306,7 +306,7 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
 
       <ButtonBase
         sx={iconBtn}
-        title="Close Bar Replay"
+        title="Exit Bar Replay"
         aria-label="Close Bar Replay"
         onClick={() => void controller.exit()}
       >
