@@ -12,8 +12,8 @@ export function targetHistoryDepth(interval: Interval): number {
   // stopping at the first weekend hole or thin native window.
   if (unit === "minutes" && count === 1) return 50_000;
   if (unit === "minutes" && count <= 5) return 25_000;
+  if (unit === "minutes" && count >= 60) return 10_000;
   if (unit === "minutes") return 15_000;
-  if (unit === "hours") return 10_000;
   return 8_000;
 }
 
