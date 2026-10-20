@@ -217,7 +217,7 @@ export class IranGoldProvider implements MarketDataProvider {
     const step = intervalSeconds(interval);
     // Same depth targets as cp_fetcher chart history (1m=20k, 5m=10k, else 5k).
     const target = targetHistoryDepth(interval);
-    const limit = Math.min(target, Math.max(range.countBack + 100, 8_000));
+    const limit = Math.min(target, Math.max(range.countBack + 100, 2_000));
     const json = await fetchJson<HistoryResponse>(
       buildUrl(HISTORY_BASE, {
         symbol: route.ticker,

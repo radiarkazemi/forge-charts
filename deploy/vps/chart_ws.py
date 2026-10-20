@@ -41,8 +41,10 @@ HTTP_PORT = int(os.environ.get("CHART_HTTP_PORT", "8003"))
 POLL_SEC = float(os.environ.get("CHART_WS_POLL_SEC", "1.0"))
 CACHE_TTL = float(os.environ.get("CHART_HIST_CACHE_TTL", "15"))
 
-MAX_HISTORY_LIMIT = int(os.environ.get("CHART_HIST_MAX_LIMIT", "50000"))
-MAX_RAW_LIMIT = int(os.environ.get("CHART_HIST_MAX_RAW", "120000"))
+MAX_HISTORY_LIMIT = int(os.environ.get("CHART_HIST_MAX_LIMIT", "25000"))
+MAX_RAW_LIMIT = int(os.environ.get("CHART_HIST_MAX_RAW", "60000"))
+# Soft cap for on-read coarser→finer expand (avoid OOM on small VPS).
+BACKFILL_MAX_NEED = int(os.environ.get("CHART_BACKFILL_MAX_NEED", "4000"))
 
 # Native Mongo bases written by cp_fetcher live/historical scrapers.
 TF_COLL = {"1m": "1", "1h": "1h", "1d": "1D"}
@@ -391,26 +393,24 @@ class PriceHub:
         need: int,
         before: int | None,
     ) -> list[list[float]]:
-        """Fill missing finer bars from coarser Mongo hist (1h/1d → 1m, 1d → 1h).
+        """Fill missing finer bars from coarser Mongo hist (1h → 1m only on-read).
 
-        XAUUSD 1m only starts mid-Aug 2026 while April has dense 1h + daily —
-        expand those so scrollback is not an empty hole (same idea as G18 5m→1m).
+        Skip when native coverage is already dense — expensive 1d→1m expand is
+        offline-only (--materialize-finer) so live /history stays fast on a 2GB VPS.
         """
-        if parent not in ("1m", "1h"):
+        if parent != "1m":
+            return bars
+        need = min(max(1, need), BACKFILL_MAX_NEED)
+        # Already enough native/materialized bars — do not touch coarser TFs.
+        if len(bars) >= max(need * 0.85, need - 50):
             return bars
         child_step = STEP_SEC[parent]
-        sources: list[tuple[str, int]] = (
-            [("1h", 3600), ("1d", 86400)] if parent == "1m" else [("1d", 86400)]
-        )
+        # On-read: only 1h→1m (60×). Never expand 1d here (1440× blows RAM).
+        sources: list[tuple[str, int]] = [("1h", 3600)]
         wall = int(time.time())
         end_t = int(before) if before else wall + child_step
-        start_t = end_t - max(need, 500) * child_step
+        start_t = end_t - need * child_step
         existing: dict[int, list[float]] = {int(b[0]): b for b in bars}
-        if existing:
-            ordered = sorted(t for t in existing if t < end_t)
-            if ordered:
-                # Extend window back through any leading hole before native tip.
-                start_t = min(start_t, ordered[0] - max(need // 2, 100) * child_step)
 
         filled = 0
         for src_parent, src_step in sources:
@@ -432,7 +432,7 @@ class PriceHub:
                     filled += 1
         if filled:
             LOG.info(
-                "backfill %s %s: +%s from coarser (need=%s before=%s)",
+                "backfill %s %s: +%s from 1h (need=%s before=%s)",
                 symbol,
                 parent,
                 filled,
