@@ -535,6 +535,8 @@ class PriceHub:
         dest = self.hist[f"{symbol}{HIST_SUFFIX[child]}"]
         id_fmt = ID_FORMAT[child]
         written = 0
+        # Daily→1m expands 1440×; keep parent pages small to avoid OOM.
+        page_size = 50 if any(s == "1d" for s in src_list) else 2_000
         for src in src_list:
             if src not in STEP_SEC or STEP_SEC[src] <= child_step:
                 continue
@@ -543,6 +545,7 @@ class PriceHub:
                 continue
             src_coll = self.hist[f"{symbol}{HIST_SUFFIX[src]}"]
             cursor_id = ""
+            src_page = 50 if src == "1d" else page_size
             while True:
                 parents_raw = list(
                     src_coll.find(
@@ -550,7 +553,7 @@ class PriceHub:
                         projection={"data": 1},
                     )
                     .sort("_id", 1)
-                    .limit(2_000)
+                    .limit(src_page)
                 )
                 if not parents_raw:
                     break
@@ -576,11 +579,12 @@ class PriceHub:
                         continue
                 if not parents:
                     continue
-                t_min = int(parents[0][0])
-                t_max = int(parents[-1][0]) + src_step
-                existing_ids = {
-                    d["_id"]
-                    for d in dest.find(
+                ops: list[Any] = []
+                for p in parents:
+                    t_min = int(p[0])
+                    t_max = t_min + src_step
+                    # Skip dense days already covered by native/1h-derived 1m.
+                    existing_n = dest.count_documents(
                         {
                             "_id": {
                                 "$gte": datetime.fromtimestamp(
@@ -590,12 +594,27 @@ class PriceHub:
                                     t_max, tz=timezone.utc
                                 ).strftime(id_fmt),
                             }
-                        },
-                        {"_id": 1},
+                        }
                     )
-                }
-                ops: list[Any] = []
-                for p in parents:
+                    expect = src_step // child_step
+                    if existing_n >= expect * 0.85:
+                        continue
+                    existing_ids = {
+                        d["_id"]
+                        for d in dest.find(
+                            {
+                                "_id": {
+                                    "$gte": datetime.fromtimestamp(
+                                        t_min, tz=timezone.utc
+                                    ).strftime(id_fmt),
+                                    "$lt": datetime.fromtimestamp(
+                                        t_max, tz=timezone.utc
+                                    ).strftime(id_fmt),
+                                }
+                            },
+                            {"_id": 1},
+                        )
+                    }
                     for child_bar in expand_coarser_to_finer(p, src_step, child_step):
                         t0 = int(child_bar[0])
                         bar_id = datetime.fromtimestamp(t0, tz=timezone.utc).strftime(
@@ -628,13 +647,14 @@ class PriceHub:
                 for i in range(0, len(ops), 1_000):
                     dest.bulk_write(ops[i : i + 1_000], ordered=False)
                 written += len(ops)
-                LOG.info(
-                    "materialize %s %s from %s: +%s (batch)",
-                    symbol,
-                    child,
-                    src,
-                    len(ops),
-                )
+                if ops:
+                    LOG.info(
+                        "materialize %s %s from %s: +%s (batch)",
+                        symbol,
+                        child,
+                        src,
+                        len(ops),
+                    )
         return written
 
 
