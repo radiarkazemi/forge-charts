@@ -261,7 +261,7 @@ export function TradingViewChart({
 
       {isPrimary ? <QuickTradeOverlay containerRef={containerRef} /> : null}
       {isPrimary ? <TradeLinesOverlay containerRef={containerRef} /> : null}
-      {isPrimary ? <CandleCountdownOverlay /> : null}
+      {isPrimary && !showReplayToolbar ? <CandleCountdownOverlay /> : null}
 
       {showReplayToolbar ? <BarReplayToolbar controller={barReplay} forceVisible={forceReplayUi} /> : null}
 

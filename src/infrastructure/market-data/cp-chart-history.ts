@@ -8,9 +8,13 @@ const REQUEST_TIMEOUT_MS = 45_000;
 /** Target depths for TradingView scroll-back (as many as Mongo can serve). */
 export function targetHistoryDepth(interval: Interval): number {
   const { unit, count } = parseInterval(interval);
-  if (unit === "minutes" && count === 1) return 20_000;
-  if (unit === "minutes" && count === 5) return 10_000;
-  return 5_000;
+  // Deep enough to cover multi-month scroll (e.g. XAUUSD Nov'25→Apr'26) without
+  // stopping at the first weekend hole or thin native window.
+  if (unit === "minutes" && count === 1) return 50_000;
+  if (unit === "minutes" && count <= 5) return 25_000;
+  if (unit === "minutes") return 15_000;
+  if (unit === "hours") return 10_000;
+  return 8_000;
 }
 
 /**
@@ -79,7 +83,9 @@ export async function fetchCpChartHistory(
   if (!plan) throw new Error(`cp-chart-history: unsupported interval ${interval}`);
 
   const target = targetHistoryDepth(interval);
-  const limit = Math.min(target, Math.max(range.countBack + 100, 2_000));
+  // Prefer a deep first page so zoom-out / left-scroll covers months (Nov→Apr)
+  // without depending on dozens of tiny TV countBack round-trips.
+  const limit = Math.min(target, Math.max(range.countBack + 100, 8_000));
 
   // Pass TV interval so the server can resolve parent+group (and still accept explicit group).
   const before = range.to > 0 ? range.to : Number.POSITIVE_INFINITY;

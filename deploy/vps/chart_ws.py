@@ -41,8 +41,8 @@ HTTP_PORT = int(os.environ.get("CHART_HTTP_PORT", "8003"))
 POLL_SEC = float(os.environ.get("CHART_WS_POLL_SEC", "1.0"))
 CACHE_TTL = float(os.environ.get("CHART_HIST_CACHE_TTL", "15"))
 
-MAX_HISTORY_LIMIT = int(os.environ.get("CHART_HIST_MAX_LIMIT", "25000"))
-MAX_RAW_LIMIT = int(os.environ.get("CHART_HIST_MAX_RAW", "60000"))
+MAX_HISTORY_LIMIT = int(os.environ.get("CHART_HIST_MAX_LIMIT", "50000"))
+MAX_RAW_LIMIT = int(os.environ.get("CHART_HIST_MAX_RAW", "120000"))
 
 # Native Mongo bases written by cp_fetcher live/historical scrapers.
 TF_COLL = {"1m": "1", "1h": "1h", "1d": "1D"}

@@ -5,6 +5,7 @@ import MenuItem from "@mui/material/MenuItem";
 import Typography from "@mui/material/Typography";
 import { useEffect, useState, type MouseEvent } from "react";
 import { intervalSeconds } from "@/domain";
+import { MOBILE_BOTTOM_BAR_HEIGHT } from "@/features/layout/mobile-chrome";
 import { useStore } from "@/shared/hooks/useStore";
 import type { BarReplayController, BarReplaySpeed } from "./bar-replay-controller";
 
@@ -22,6 +23,12 @@ const SPEEDS: readonly { value: BarReplaySpeed; label: string }[] = [
   { value: 10, label: "10×" },
 ];
 
+const MENU_PAPER = {
+  bgcolor: "#1c2030",
+  border: "1px solid #2a2e39",
+  color: "#d1d4dc",
+} as const;
+
 const iconBtn = {
   width: 32,
   height: 32,
@@ -32,6 +39,7 @@ const iconBtn = {
   "&:hover": { bgcolor: "rgba(255,255,255,0.08)", color: "#f0f3fa" },
   "&.active": { color: "#2962ff", bgcolor: "rgba(41,98,255,0.18)" },
   "&.Mui-disabled": { opacity: 0.32 },
+  "&:focus-visible": { outline: "2px solid rgba(41,98,255,0.55)", outlineOffset: 1 },
 } as const;
 
 function formatRemain(ms: number): string {
@@ -52,9 +60,8 @@ function stepMsFor(resolution: string): number {
 }
 
 /**
- * Compact TradingView-style Bar Replay strip:
- * Select · transport · speed · TF countdown · close
- * (v2 — tighter controls so the bar reads cleanly on mobile + desktop)
+ * TradingView-style Bar Replay strip — single compact row:
+ * Select bar · jump/play/step · speed · TF+countdown · exit
  */
 export function BarReplayToolbar({ controller, forceVisible = false }: BarReplayToolbarProps) {
   const snap = useStore(controller.state);
@@ -101,21 +108,27 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
 
   return (
     <Box
+      data-testid="bar-replay-toolbar"
       sx={{
         position: "absolute",
         left: "50%",
-        bottom: { xs: 96, sm: 52 },
+        bottom: {
+          xs: `calc(${MOBILE_BOTTOM_BAR_HEIGHT}px + 10px + env(safe-area-inset-bottom, 0px))`,
+          sm: 56,
+        },
         transform: "translateX(-50%)",
-        zIndex: 30,
+        zIndex: 40,
         display: "flex",
         alignItems: "center",
-        gap: 0.25,
-        px: 0.75,
-        py: 0.5,
-        bgcolor: "rgba(19, 23, 34, 0.97)",
+        gap: 0.5,
+        px: 1,
+        py: 0.6,
+        bgcolor: "rgba(19, 23, 34, 0.94)",
         border: "1px solid #2a2e39",
-        borderRadius: "8px",
-        boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+        borderTop: "2px solid #2962ff",
+        borderRadius: "10px",
+        boxShadow: "0 10px 28px rgba(0,0,0,0.55)",
+        backdropFilter: "blur(10px)",
         pointerEvents: "auto",
         userSelect: "none",
         whiteSpace: "nowrap",
@@ -124,12 +137,25 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
     >
       <ButtonBase
         className={snap.selecting ? "active" : undefined}
-        sx={iconBtn}
+        sx={{
+          ...iconBtn,
+          width: "auto",
+          minWidth: 32,
+          px: { xs: 0.5, sm: 1 },
+          gap: 0.6,
+          fontSize: 12,
+          fontWeight: 700,
+          color: snap.selecting ? "#5b8cff" : "#f0f3fa",
+        }}
         onClick={openSelect}
         title="Select bar"
         aria-label="Select bar"
+        aria-haspopup="menu"
       >
         <SelectBarIcon />
+        <Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>
+          Select bar
+        </Box>
       </ButtonBase>
       <Menu
         anchorEl={selectAnchor}
@@ -137,16 +163,7 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
         onClose={() => setSelectAnchor(null)}
         anchorOrigin={{ vertical: "top", horizontal: "left" }}
         transformOrigin={{ vertical: "bottom", horizontal: "left" }}
-        slotProps={{
-          paper: {
-            sx: {
-              bgcolor: "#1c2030",
-              border: "1px solid #2a2e39",
-              color: "#d1d4dc",
-              minWidth: 168,
-            },
-          },
-        }}
+        slotProps={{ paper: { sx: { ...MENU_PAPER, minWidth: 168 } } }}
       >
         <MenuItem
           onClick={() => {
@@ -155,15 +172,6 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
           }}
         >
           Select bar
-        </MenuItem>
-        <MenuItem
-          disabled={snap.startIndex < 0}
-          onClick={() => {
-            setSelectAnchor(null);
-            void controller.jumpToStart();
-          }}
-        >
-          Jump to start
         </MenuItem>
         <MenuItem
           onClick={() => {
@@ -178,12 +186,18 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
       <Rule />
 
       <ButtonBase
+        sx={iconBtn}
+        title="Jump to start"
+        aria-label="Jump to start"
+        disabled={snap.startIndex < 0}
+        onClick={() => void controller.jumpToStart()}
+      >
+        <JumpStartIcon />
+      </ButtonBase>
+
+      <ButtonBase
         sx={{
           ...iconBtn,
-          width: 36,
-          height: 36,
-          minWidth: 36,
-          borderRadius: "8px",
           bgcolor: playing ? "rgba(41,98,255,0.22)" : "transparent",
           color: playing ? "#5b8cff" : "#f0f3fa",
           "&:hover": {
@@ -214,14 +228,16 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
         sx={{
           ...iconBtn,
           width: "auto",
-          minWidth: 40,
-          px: 0.75,
-          gap: 0.25,
+          minWidth: 44,
+          px: 0.85,
+          gap: 0.3,
           fontSize: 12,
           fontWeight: 700,
           color: "#f0f3fa",
         }}
         title="Replay speed"
+        aria-label="Replay speed"
+        aria-haspopup="menu"
         onClick={openSpeed}
       >
         {speedMeta.label}
@@ -233,16 +249,7 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
         onClose={() => setSpeedAnchor(null)}
         anchorOrigin={{ vertical: "top", horizontal: "center" }}
         transformOrigin={{ vertical: "bottom", horizontal: "center" }}
-        slotProps={{
-          paper: {
-            sx: {
-              bgcolor: "#1c2030",
-              border: "1px solid #2a2e39",
-              color: "#d1d4dc",
-              minWidth: 88,
-            },
-          },
-        }}
+        slotProps={{ paper: { sx: { ...MENU_PAPER, minWidth: 88 } } }}
       >
         {SPEEDS.map((s) => (
           <MenuItem
@@ -267,9 +274,10 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
         sx={{
           display: "flex",
           alignItems: "center",
-          gap: 0.5,
-          px: 0.35,
-          minWidth: showCountdown ? 72 : 28,
+          gap: 0.55,
+          px: 0.4,
+          minWidth: 76,
+          justifyContent: "center",
         }}
       >
         <Typography
@@ -278,28 +286,27 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
         >
           {resolutionLabel}
         </Typography>
-        {showCountdown ? (
-          <Box
-            component="span"
-            title="Time left on forming candle"
-            sx={{
-              fontFamily: '"Trebuchet MS", "Segoe UI", sans-serif',
-              fontSize: 11,
-              fontWeight: 700,
-              color: "#f0f3fa",
-              bgcolor: "#2962ff",
-              borderRadius: "3px",
-              px: "6px",
-              py: "1px",
-              lineHeight: 1.4,
-              letterSpacing: 0.2,
-              minWidth: 36,
-              textAlign: "center",
-            }}
-          >
-            {countdown}
-          </Box>
-        ) : null}
+        <Box
+          component="span"
+          title="Time left on forming candle"
+          sx={{
+            fontFamily: '"Trebuchet MS", "Segoe UI", sans-serif',
+            fontSize: 11,
+            fontWeight: 700,
+            color: "#f0f3fa",
+            bgcolor: showCountdown ? "#2962ff" : "rgba(41,98,255,0.25)",
+            borderRadius: "3px",
+            px: "6px",
+            py: "1px",
+            lineHeight: 1.4,
+            letterSpacing: 0.2,
+            minWidth: 36,
+            textAlign: "center",
+            opacity: showCountdown ? 1 : 0.45,
+          }}
+        >
+          {showCountdown ? countdown : "—"}
+        </Box>
       </Box>
 
       <Rule />
@@ -307,7 +314,7 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
       <ButtonBase
         sx={iconBtn}
         title="Exit Bar Replay"
-        aria-label="Close Bar Replay"
+        aria-label="Exit Bar Replay"
         onClick={() => void controller.exit()}
       >
         <CloseIcon />
@@ -317,7 +324,7 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
 }
 
 function Rule() {
-  return <Box sx={{ width: 1, height: 18, bgcolor: "#363a45", mx: 0.2, flexShrink: 0 }} />;
+  return <Box sx={{ width: 1, height: 18, bgcolor: "#363a45", mx: 0.15, flexShrink: 0 }} />;
 }
 
 function SelectBarIcon() {
@@ -325,6 +332,15 @@ function SelectBarIcon() {
     <svg width="15" height="15" viewBox="0 0 18 18" fill="none" aria-hidden>
       <path d="M4 2v14M4 9h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
       <path d="M11 6l4 3-4 3V6z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function JumpStartIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 18 18" fill="currentColor" aria-hidden>
+      <rect x="3" y="4" width="2.5" height="10" rx="0.5" />
+      <path d="M15 4v10l-7-5 7-5z" />
     </svg>
   );
 }
