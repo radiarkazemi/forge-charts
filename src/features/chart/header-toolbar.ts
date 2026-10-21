@@ -161,8 +161,8 @@ export function mountHeaderToolbar(
     widget.createButton({
       align: "left",
       useTradingViewStyle: true,
-      text: "Replay",
-      title: "Bar Replay — select a bar and play history forward",
+      text: "▶ Bar Replay",
+      title: "Bar Replay — select a bar and play history forward (build 1021v3)",
       onClick: () => handlers.onEnterBarReplay(),
     });
 
