@@ -4,7 +4,7 @@ import { App } from "./app/App";
 import { createServices } from "./app/container";
 
 /** One-shot wipe of known-bad chart snapshots that left /charts spinning for users. */
-const BOOT_RECOVERY = "forge.boot.recovery.v5-1021v4";
+const BOOT_RECOVERY = "forge.boot.recovery.v6-1021v5";
 
 function runBootRecovery(): void {
   try {

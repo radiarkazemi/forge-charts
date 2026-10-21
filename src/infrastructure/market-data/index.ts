@@ -4,5 +4,11 @@ export { GermanyMarketProvider } from "./germany-market-provider";
 export { IranGoldProvider } from "./iran-gold-provider";
 export { SyntheticProvider } from "./synthetic-provider";
 export { YahooProvider } from "./yahoo-provider";
-export { fetchCpChartHistory, targetHistoryDepth, mongoHistoryPlan } from "./cp-chart-history";
+export {
+  alignFxDailyBars,
+  alignFxSessionDailyTime,
+  fetchCpChartHistory,
+  targetHistoryDepth,
+  mongoHistoryPlan,
+} from "./cp-chart-history";
 export { startPolling } from "./polling";
