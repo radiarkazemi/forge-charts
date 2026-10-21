@@ -4,7 +4,7 @@ import { App } from "./app/App";
 import { createServices } from "./app/container";
 
 /** One-shot wipe of known-bad chart snapshots that left /charts spinning for users. */
-const BOOT_RECOVERY = "forge.boot.recovery.v4";
+const BOOT_RECOVERY = "forge.boot.recovery.v5-1021v4";
 
 function runBootRecovery(): void {
   try {
@@ -19,7 +19,9 @@ function runBootRecovery(): void {
         key === "forge.tv.autosave" ||
         key.startsWith("forge.tv.autosave.") ||
         key.startsWith("tradingview.") ||
-        key.startsWith("tvlocalstorage.")
+        key.startsWith("tvlocalstorage.") ||
+        // Prior recovery flags — force a fresh wipe for this deploy.
+        key.startsWith("forge.boot.recovery.")
       ) {
         keysToRemove.push(key);
       }
