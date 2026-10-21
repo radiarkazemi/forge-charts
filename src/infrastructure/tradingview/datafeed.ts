@@ -117,6 +117,8 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   private replayOnTick: SubscribeBarsCallback | null = null;
   /** Prefetched bars for replay/demo — served from memory so past cutoffs don't re-fetch live-only OHLC. */
   private replayBuffer: Bar[] | null = null;
+  /** Resolution the replay buffer was built for — reject mismatches after TF changes. */
+  private replayBufferResolution: string | null = null;
 
   constructor(
     private readonly marketData: MarketDataService,
@@ -129,6 +131,7 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     this.replayCutoffSec = null;
     this.replayClockSec = null;
     this.replayBuffer = null;
+    this.replayBufferResolution = null;
   }
 
   /** Hide bars with time (unix sec) strictly after cutoff. Also drives getServerTime fallback. */
@@ -148,8 +151,12 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   }
 
   /** Attach the prefetched stepping buffer so getBars can serve history at any past cutoff. */
-  setReplayBuffer(bars: readonly Bar[]): void {
+  setReplayBuffer(bars: readonly Bar[], resolution?: string): void {
     this.replayBuffer = bars.length > 0 ? [...bars] : null;
+    this.replayBufferResolution =
+      bars.length > 0 && resolution != null && String(resolution).trim()
+        ? String(resolution).trim()
+        : this.replayBufferResolution;
   }
 
   getReplayCutoff(): number | null {
@@ -175,6 +182,7 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     this.replayCutoffSec = null;
     this.replayClockSec = null;
     this.replayBuffer = null;
+    this.replayBufferResolution = null;
   }
 
   /** Prefetch a deep history buffer for stepping (before cutoff is applied). */
@@ -191,6 +199,9 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       to,
       countBack,
     });
+    if (bars.length > 0) {
+      this.replayBufferResolution = String(resolution);
+    }
     return bars;
   }
 
@@ -273,7 +284,15 @@ export class TradingViewDatafeed implements IBasicDataFeed {
 
       // Prefer the prefetched replay buffer — providers often only return the
       // latest window, so re-fetching with to=pastCutoff yields empty history.
-      if (this.replayActive && this.replayBuffer && this.replayBuffer.length > 0) {
+      // Skip when the chart TF no longer matches the buffer (e.g. 1m → 5m).
+      const bufferResOk =
+        !this.replayBufferResolution || this.replayBufferResolution === String(resolution);
+      if (
+        this.replayActive &&
+        bufferResOk &&
+        this.replayBuffer &&
+        this.replayBuffer.length > 0
+      ) {
         const end = cutoffOn ? cutoff! : Number.POSITIVE_INFINITY;
         const countBack = Math.max(periodParams.countBack || 300, 1);
         const upToCutoff = this.replayBuffer.filter((b) => Number(b.time) <= end);

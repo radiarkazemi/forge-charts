@@ -43,6 +43,8 @@ CACHE_TTL = float(os.environ.get("CHART_HIST_CACHE_TTL", "15"))
 
 MAX_HISTORY_LIMIT = int(os.environ.get("CHART_HIST_MAX_LIMIT", "25000"))
 MAX_RAW_LIMIT = int(os.environ.get("CHART_HIST_MAX_RAW", "60000"))
+# Soft cap for on-read coarser→finer expand (avoid OOM on small VPS).
+BACKFILL_MAX_NEED = int(os.environ.get("CHART_BACKFILL_MAX_NEED", "4000"))
 
 # Native Mongo bases written by cp_fetcher live/historical scrapers.
 TF_COLL = {"1m": "1", "1h": "1h", "1d": "1D"}
@@ -186,6 +188,68 @@ def aggregate(bars: list[list[float]], group: int, step: int) -> list[list[float
     return out
 
 
+def _price_along_ohlc(o: float, h: float, l: float, c: float, t01: float) -> float:
+    """O→extreme→extreme→C path for synthesizing finer bars from coarser OHLC."""
+    t = min(1.0, max(0.0, float(t01)))
+    bullish = c >= o
+    p1, p2, p3, p4 = o, (l if bullish else h), (h if bullish else l), c
+    if t < 0.28:
+        f = t / 0.28
+        return p1 + (p2 - p1) * f
+    if t < 0.62:
+        f = (t - 0.28) / 0.34
+        return p2 + (p3 - p2) * f
+    f = (t - 0.62) / 0.38
+    return p3 + (p4 - p3) * f
+
+
+def expand_coarser_to_finer(
+    parent: list[float],
+    parent_step: int,
+    child_step: int,
+) -> list[list[float]]:
+    """Expand one coarser bar [t,o,h,l,c,v] into child_step bars.
+
+    Used when XAUUSD (etc.) 1m is missing for a range but 1h / 1d exists
+    (e.g. Apr 2026 has daily + hourly, while 1m only starts mid-Aug).
+    """
+    if child_step <= 0 or parent_step < child_step or parent_step % child_step != 0:
+        return [list(parent)]
+    n = parent_step // child_step
+    t_base = int(parent[0])
+    o, h, l, c = float(parent[1]), float(parent[2]), float(parent[3]), float(parent[4])
+    v_each = float(parent[5] if len(parent) > 5 else 0) / n
+    out: list[list[float]] = []
+    prev = o
+    bullish = c >= o
+    for i in range(n):
+        t_end = (i + 1) / n
+        px = _price_along_ohlc(o, h, l, c, t_end)
+        samples = [prev, px]
+        for k in (1, 2, 3):
+            samples.append(_price_along_ohlc(o, h, l, c, (i + k / 4) / n))
+        if bullish:
+            if i == 0 or (i / n) <= 0.28 < ((i + 1) / n):
+                samples.append(l)
+            if (i / n) <= 0.62 < ((i + 1) / n) or i == n - 1:
+                samples.append(h)
+        else:
+            if i == 0 or (i / n) <= 0.28 < ((i + 1) / n):
+                samples.append(h)
+            if (i / n) <= 0.62 < ((i + 1) / n) or i == n - 1:
+                samples.append(l)
+        if i == n - 1:
+            px = c
+            samples.append(c)
+        hi = min(h, max(samples))
+        lo = max(l, min(samples))
+        hi = max(hi, prev, px)
+        lo = min(lo, prev, px)
+        out.append([float(t_base + i * child_step), prev, hi, lo, px, v_each])
+        prev = px
+    return out
+
+
 def pack_bar(rows: list[list[float]]) -> list[float] | None:
     if not rows:
         return None
@@ -321,6 +385,65 @@ class PriceHub:
             "pc": live["pc"],
         }
 
+    def _backfill_from_coarser(
+        self,
+        symbol: str,
+        parent: str,
+        bars: list[list[float]],
+        need: int,
+        before: int | None,
+    ) -> list[list[float]]:
+        """Fill missing finer bars from coarser Mongo hist (1h → 1m only on-read).
+
+        Skip when native coverage is already dense — expensive 1d→1m expand is
+        offline-only (--materialize-finer) so live /history stays fast on a 2GB VPS.
+        """
+        if parent != "1m":
+            return bars
+        need = min(max(1, need), BACKFILL_MAX_NEED)
+        # Already enough native/materialized bars — do not touch coarser TFs.
+        if len(bars) >= max(need * 0.85, need - 50):
+            return bars
+        child_step = STEP_SEC[parent]
+        # On-read: only 1h→1m (60×). Never expand 1d here (1440× blows RAM).
+        sources: list[tuple[str, int]] = [("1h", 3600)]
+        wall = int(time.time())
+        end_t = int(before) if before else wall + child_step
+        start_t = end_t - need * child_step
+        existing: dict[int, list[float]] = {int(b[0]): b for b in bars}
+
+        filled = 0
+        for src_parent, src_step in sources:
+            if src_step <= child_step or src_step % child_step != 0:
+                continue
+            parents = self._hist_parents_in_range(
+                symbol, src_parent, start_t - src_step, end_t
+            )
+            if not parents:
+                continue
+            for p in parents:
+                for child in expand_coarser_to_finer(p, src_step, child_step):
+                    t0 = int(child[0])
+                    if t0 < start_t or t0 >= end_t or t0 > wall:
+                        continue
+                    if t0 in existing:
+                        continue
+                    existing[t0] = child
+                    filled += 1
+        if filled:
+            LOG.info(
+                "backfill %s %s: +%s from 1h (need=%s before=%s)",
+                symbol,
+                parent,
+                filled,
+                need,
+                before,
+            )
+        out = [existing[t] for t in sorted(existing)]
+        if before:
+            out = [b for b in out if b[0] < before]
+        return out
+
     def read_history(
         self,
         symbol: str,
@@ -363,6 +486,9 @@ class PriceHub:
             bars.append([t, o, h, l, c, v])
         bars.reverse()
         step = STEP_SEC[parent]
+        # Heal holes from coarser hist before aggregating derived TFs (5m/15m/…).
+        need = max(limit, limit * max(group, 1))
+        bars = self._backfill_from_coarser(symbol, parent, bars, need, before)
         if group > 1:
             bars = aggregate(bars, group, step)
             if before:
@@ -387,6 +513,149 @@ class PriceHub:
             for key, _ in oldest:
                 self._cache.pop(key, None)
         return payload
+
+    def materialize_finer_from_coarser(
+        self,
+        symbol: str,
+        *,
+        child: str = "1m",
+        sources: list[str] | None = None,
+    ) -> int:
+        """Persist derived finer bars into Mongo where native child hist is missing.
+
+        Prefer 1h→1m, then 1d→1m for remaining holes (XAUUSD Apr 2026 pattern).
+        """
+        from pymongo import UpdateOne
+
+        symbol = normalize_symbol(symbol)
+        if child not in STEP_SEC or child not in HIST_SUFFIX:
+            return 0
+        child_step = STEP_SEC[child]
+        src_list = sources or (["1h", "1d"] if child == "1m" else ["1d"])
+        dest = self.hist[f"{symbol}{HIST_SUFFIX[child]}"]
+        id_fmt = ID_FORMAT[child]
+        written = 0
+        # Daily→1m expands 1440×; keep parent pages small to avoid OOM.
+        page_size = 50 if any(s == "1d" for s in src_list) else 2_000
+        for src in src_list:
+            if src not in STEP_SEC or STEP_SEC[src] <= child_step:
+                continue
+            src_step = STEP_SEC[src]
+            if src_step % child_step != 0:
+                continue
+            src_coll = self.hist[f"{symbol}{HIST_SUFFIX[src]}"]
+            cursor_id = ""
+            src_page = 50 if src == "1d" else page_size
+            while True:
+                parents_raw = list(
+                    src_coll.find(
+                        {"_id": {"$gt": cursor_id}} if cursor_id else {},
+                        projection={"data": 1},
+                    )
+                    .sort("_id", 1)
+                    .limit(src_page)
+                )
+                if not parents_raw:
+                    break
+                cursor_id = str(parents_raw[-1]["_id"])
+                parents: list[list[float]] = []
+                for doc in parents_raw:
+                    data = doc.get("data") or {}
+                    t = to_unix(data.get("time") or doc.get("_id"))
+                    if t is None:
+                        continue
+                    try:
+                        parents.append(
+                            [
+                                float(t),
+                                float(data["open"]),
+                                float(data["high"]),
+                                float(data["low"]),
+                                float(data["close"]),
+                                float(data.get("volume") or 0),
+                            ]
+                        )
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                if not parents:
+                    continue
+                ops: list[Any] = []
+                for p in parents:
+                    t_min = int(p[0])
+                    t_max = t_min + src_step
+                    # Skip dense days already covered by native/1h-derived 1m.
+                    existing_n = dest.count_documents(
+                        {
+                            "_id": {
+                                "$gte": datetime.fromtimestamp(
+                                    t_min, tz=timezone.utc
+                                ).strftime(id_fmt),
+                                "$lt": datetime.fromtimestamp(
+                                    t_max, tz=timezone.utc
+                                ).strftime(id_fmt),
+                            }
+                        }
+                    )
+                    expect = src_step // child_step
+                    if existing_n >= expect * 0.85:
+                        continue
+                    existing_ids = {
+                        d["_id"]
+                        for d in dest.find(
+                            {
+                                "_id": {
+                                    "$gte": datetime.fromtimestamp(
+                                        t_min, tz=timezone.utc
+                                    ).strftime(id_fmt),
+                                    "$lt": datetime.fromtimestamp(
+                                        t_max, tz=timezone.utc
+                                    ).strftime(id_fmt),
+                                }
+                            },
+                            {"_id": 1},
+                        )
+                    }
+                    for child_bar in expand_coarser_to_finer(p, src_step, child_step):
+                        t0 = int(child_bar[0])
+                        bar_id = datetime.fromtimestamp(t0, tz=timezone.utc).strftime(
+                            id_fmt
+                        )
+                        if bar_id in existing_ids:
+                            continue
+                        iso = datetime.fromtimestamp(t0, tz=timezone.utc)
+                        ops.append(
+                            UpdateOne(
+                                {"_id": bar_id},
+                                {
+                                    "$set": {
+                                        "_id": bar_id,
+                                        "data": {
+                                            "time": iso,
+                                            "open": float(child_bar[1]),
+                                            "high": float(child_bar[2]),
+                                            "low": float(child_bar[3]),
+                                            "close": float(child_bar[4]),
+                                            "volume": float(child_bar[5]),
+                                        },
+                                        "src": f"derived-{src}",
+                                    }
+                                },
+                                upsert=True,
+                            )
+                        )
+                        existing_ids.add(bar_id)
+                for i in range(0, len(ops), 1_000):
+                    dest.bulk_write(ops[i : i + 1_000], ordered=False)
+                written += len(ops)
+                if ops:
+                    LOG.info(
+                        "materialize %s %s from %s: +%s (batch)",
+                        symbol,
+                        child,
+                        src,
+                        len(ops),
+                    )
+        return written
 
 
 hub = PriceHub()
@@ -567,6 +836,27 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(description="cp_fetcher chart WS + history")
+    parser.add_argument(
+        "--materialize-finer",
+        metavar="SYMBOL",
+        help="Persist missing 1m from 1h/1d into Mongo (e.g. xauusd), then exit",
+    )
+    parser.add_argument(
+        "--child",
+        default="1m",
+        help="Child TF to materialize (default 1m)",
+    )
+    args, _unknown = parser.parse_known_args()
+    if args.materialize_finer:
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+        hub.ping()
+        n = hub.materialize_finer_from_coarser(args.materialize_finer, child=args.child)
+        print(f"materialized {n} {args.child} bars for {normalize_symbol(args.materialize_finer)}")
+        sys.exit(0)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

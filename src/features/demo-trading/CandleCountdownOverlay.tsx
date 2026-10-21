@@ -1,7 +1,7 @@
 import Box from "@mui/material/Box";
 import { useEffect, useState } from "react";
 import { useServices } from "@/app/use-services";
-import { isMarketSessionOpen } from "@/domain";
+import { intervalSeconds, isMarketSessionOpen } from "@/domain";
 import { useStore } from "@/shared/hooks/useStore";
 import { resolutionToStepMs } from "./demo-space-controller";
 
@@ -14,14 +14,23 @@ function formatRemain(ms: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+function replayStepMs(resolution: string): number {
+  try {
+    return Math.max(1_000, intervalSeconds(resolution) * 1_000);
+  } catch {
+    return resolutionToStepMs(resolution);
+  }
+}
+
 /**
  * TradingView-style candle close countdown (price-scale companion).
- * Uses demo-space form progress when active; otherwise wall-clock vs resolution.
- * Hidden when the real market session is closed (unless demo-space is running).
+ * Uses bar-replay / demo-space form progress when active; otherwise wall-clock.
+ * Hidden when the real market session is closed (unless replay/demo is running).
  */
 export function CandleCountdownOverlay() {
-  const { demoSpace, chart, symbols } = useServices();
+  const { demoSpace, barReplay, chart, symbols } = useServices();
   const space = useStore(demoSpace.state);
+  const replay = useStore(barReplay.state);
   const interval = useStore(chart.state, (s) => s.interval);
   const ticker = useStore(chart.state, (s) => s.symbol);
   const [label, setLabel] = useState("0:00");
@@ -30,7 +39,8 @@ export function CandleCountdownOverlay() {
   useEffect(() => {
     const tick = () => {
       const info = symbols.findByTicker(ticker);
-      const open = space.active || !info || isMarketSessionOpen(info);
+      const replayOn = replay.active && replay.cursorIndex >= 0;
+      const open = space.active || replayOn || !info || isMarketSessionOpen(info);
       setSessionOpen(open);
       if (!open) {
         setLabel("0:00");
@@ -41,18 +51,43 @@ export function CandleCountdownOverlay() {
         setLabel(formatRemain(remain));
         return;
       }
+      if (replayOn) {
+        const stepMs = replayStepMs(replay.resolution);
+        const progress = Math.min(1, Math.max(0, replay.formProgress));
+        const remain =
+          replay.phase === "playing" || progress > 0 ? stepMs * (1 - progress) : stepMs;
+        setLabel(formatRemain(remain));
+        return;
+      }
       const stepMs = resolutionToStepMs(String(interval));
       const now = Date.now();
       const remain = stepMs - (now % stepMs);
       setLabel(formatRemain(remain));
     };
     tick();
-    const id = window.setInterval(tick, 250);
+    const id = window.setInterval(tick, 200);
     return () => window.clearInterval(id);
-  }, [space.active, space.stepMs, space.formProgress, interval, ticker, symbols]);
+  }, [
+    space.active,
+    space.stepMs,
+    space.formProgress,
+    replay.active,
+    replay.cursorIndex,
+    replay.resolution,
+    replay.formProgress,
+    replay.phase,
+    interval,
+    ticker,
+    symbols,
+  ]);
 
   // Hide on daily+ (TV has no intraday countdown there).
-  const stepMs = space.active ? space.stepMs : resolutionToStepMs(String(interval));
+  const replayOn = replay.active && replay.cursorIndex >= 0;
+  const stepMs = space.active
+    ? space.stepMs
+    : replayOn
+      ? replayStepMs(replay.resolution)
+      : resolutionToStepMs(String(interval));
   if (stepMs >= 24 * 60 * 60_000) return null;
   // Market closed → no countdown (matches TradingView endofday freeze).
   if (!sessionOpen) return null;

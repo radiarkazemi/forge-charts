@@ -4,6 +4,8 @@
 Germany can reach faraz.io; the Iran VPS is Cloudflare-blocked.
 
   GET /health
+  GET /faraz/public-market?symbolNames=["geramTalaHejdah","abshodeNaghdi",…]
+      → /api/public/market/get-data (live ticks; used when Iran VPS is CF-blocked)
   GET /faraz/chart-history?symbol=geramTalaHejdah&resolution=1D
   GET /faraz/tv-history?symbolName=geramTalaHejdah&resolution=1D&from=…&to=…&countback=10000
       → /api/customer/trading-view/history (Cookie / UserId / token from env)
@@ -86,6 +88,30 @@ class Handler(BaseHTTPRequestHandler):
                 }
             ).encode()
             self._send(200, body)
+            return
+
+        if parsed.path == "/faraz/public-market":
+            # Live Faraz public market (native G18 = geramTalaHejdah, etc.).
+            default_syms = [
+                "abshodeNaghdi",
+                "geramTalaHejdah",
+                "tala24Estjt",
+                "sekkeNewEstjt",
+                "nimSekkeEstjt",
+                "robSekkeEstjt",
+                "FOREXCOM_XAUUSD",
+            ]
+            if "symbolNames" in qs:
+                symbol_names = qs["symbolNames"][0]
+            else:
+                symbol_names = json.dumps(default_syms, separators=(",", ":"))
+            cache = (qs.get("cache") or ["false"])[0]
+            url = (
+                f"{FARAZ}/api/public/market/get-data?"
+                + urllib.parse.urlencode({"symbolNames": symbol_names, "cache": cache})
+            )
+            code, data = _fetch(url, _ua_headers(), timeout=8.0)
+            self._send(code, data)
             return
 
         if parsed.path == "/faraz/chart-history":

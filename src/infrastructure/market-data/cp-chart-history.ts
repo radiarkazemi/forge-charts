@@ -8,6 +8,8 @@ const REQUEST_TIMEOUT_MS = 45_000;
 /** Target depths for TradingView scroll-back (as many as Mongo can serve). */
 export function targetHistoryDepth(interval: Interval): number {
   const { unit, count } = parseInterval(interval);
+  // Keep first pages modest — TV left-scroll pages more. Huge limits + on-read
+  // expand starved the 2GB VPS (504s on /crypto-chart/history).
   if (unit === "minutes" && count === 1) return 20_000;
   if (unit === "minutes" && count === 5) return 10_000;
   return 5_000;

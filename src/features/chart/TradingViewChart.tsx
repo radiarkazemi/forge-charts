@@ -100,6 +100,10 @@ export function TradingViewChart({
           // After routing, active pane may have been corrected (header focus steal).
           if (layoutSyncBus.getActivePane() === 0) {
             settings.rememberChart(settings.settings.get().lastSymbol, interval);
+            // Bar Replay must rebind its buffer to the new TF (5m steps on 5m, etc.).
+            if (barReplay.state.get().active) {
+              void barReplay.onResolutionChanged(String(interval));
+            }
           }
           return;
         }
@@ -114,7 +118,7 @@ export function TradingViewChart({
       unregister();
       controller.setSyncHooks({});
     };
-  }, [controller, paneIndex, settings]);
+  }, [controller, paneIndex, settings, barReplay]);
 
   // Primary left toolbar → shared tool for all panes in the layout.
   useEffect(() => {
@@ -257,7 +261,7 @@ export function TradingViewChart({
 
       {isPrimary ? <QuickTradeOverlay containerRef={containerRef} /> : null}
       {isPrimary ? <TradeLinesOverlay containerRef={containerRef} /> : null}
-      {isPrimary ? <CandleCountdownOverlay /> : null}
+      {isPrimary && !showReplayToolbar ? <CandleCountdownOverlay /> : null}
 
       {showReplayToolbar ? <BarReplayToolbar controller={barReplay} forceVisible={forceReplayUi} /> : null}
 
