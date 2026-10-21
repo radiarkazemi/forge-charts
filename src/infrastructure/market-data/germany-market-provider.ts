@@ -2,7 +2,7 @@ import { intervalSeconds, parseInterval, isMarketSessionOpen, priceAlongOhlcPath
 import type { MarketDataProvider, Unsubscribe } from "@/application";
 import { buildUrl, fetchJson } from "../http/fetch-json";
 import { startPolling } from "./polling";
-import { fetchCpChartHistory, mongoHistoryPlan } from "./cp-chart-history";
+import { alignFxDailyBars, fetchCpChartHistory, mongoHistoryPlan } from "./cp-chart-history";
 
 /**
  * Germany Market Price API via `/market-api/` + browser Binance tick streams.
@@ -250,9 +250,12 @@ function applyTick(current: Bar | null, price: number, tsSec: number, step: numb
  * Mid-session holes in Mongo (live writer outages) look like price gaps on the chart.
  * TradingView’s broker feed stays continuous — splice Germany `/ohlc/` into those holes only.
  * Skips overnight session breaks (≥ 45m on minute charts).
+ * Daily+ weekend gaps (2–4d) are normal — never treat them as holes (merging midnight
+ * Germany bars with 22:00/23:00 Mongo dailies also broke the TV FX session grid).
  */
 function hasMidSessionHoles(bars: readonly Bar[], stepSec: number): boolean {
   if (bars.length < 2 || stepSec <= 0) return false;
+  if (stepSec >= 86_400) return false;
   const limit = stepSec * 1.5;
   const sessionBreak = Math.max(stepSec * 9, 45 * 60);
   for (let i = 1; i < bars.length; i += 1) {
@@ -620,7 +623,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
   async fetchBars(symbol: SymbolInfo, interval: Interval, range: BarRange): Promise<Bar[]> {
     const route = routeFor(symbol);
     if (!route) throw new Error(`germany-market: unsupported ${symbol.ticker}`);
-    const { unit } = parseInterval(interval);
+    const { unit, count } = parseInterval(interval);
     const step = intervalSeconds(interval);
     const germanyLimit = Math.min(MAX_BARS, Math.max(50, range.countBack + 20));
 
@@ -666,7 +669,11 @@ export class GermanyMarketProvider implements MarketDataProvider {
     // and TradingView would keep paging forever.
     // `to <= 0` means “latest window” (TV first request sometimes sends 0).
     const before = range.to > 0 ? range.to : Number.POSITIVE_INFINITY;
-    const filtered = bars.filter((b) => b.time < before).sort((a, b) => a.time - b.time);
+    let filtered = bars.filter((b) => b.time < before).sort((a, b) => a.time - b.time);
+    // Germany `/ohlc/` 1D is midnight UTC — snap onto the FX 22:00 grid so TV keeps them.
+    if (unit === "days" && count === 1) {
+      filtered = alignFxDailyBars(filtered).filter((b) => b.time < before);
+    }
     if (!filtered.length) return [];
     return filtered.slice(-Math.max(range.countBack, 1));
   }

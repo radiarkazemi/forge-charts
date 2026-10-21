@@ -68,6 +68,35 @@ function parsePackedBar(row: unknown): Bar | null {
   };
 }
 
+/** FX session open used by `SESSION_FX` with `Etc/UTC` (`2200-2159:123456`). */
+const FX_SESSION_OPEN_SEC = 22 * 3_600;
+
+/**
+ * Snap a daily bar onto the TradingView FX daily grid (22:00 UTC).
+ *
+ * Mongo XAUUSD dailies alternate 22:00 UTC (EDT months) and 23:00 UTC (EST).
+ * With symbol.timezone `Etc/UTC`, the library only keeps bars on the 22:00
+ * grid — winter 23:00 stamps are dropped, which carved Nov→spring holes on 1D.
+ */
+export function alignFxSessionDailyTime(timeSec: number): number {
+  const day = Math.floor(timeSec / 86_400) * 86_400;
+  const tod = timeSec - day;
+  if (tod < FX_SESSION_OPEN_SEC) {
+    return day - 86_400 + FX_SESSION_OPEN_SEC;
+  }
+  return day + FX_SESSION_OPEN_SEC;
+}
+
+/** Dedupe daily bars onto the 22:00 UTC session grid (last write wins). */
+export function alignFxDailyBars(bars: readonly Bar[]): Bar[] {
+  const byTime = new Map<number, Bar>();
+  for (const bar of bars) {
+    const time = alignFxSessionDailyTime(bar.time);
+    byTime.set(time, { ...bar, time });
+  }
+  return [...byTime.values()].sort((a, b) => a.time - b.time);
+}
+
 /**
  * Deep OHLC from VPS Mongo via chart_ws — derived TFs aggregated from base candles.
  * `before` (= exclusive `range.to`) enables TradingView left-scroll paging.
@@ -97,11 +126,16 @@ export async function fetchCpChartHistory(
   const json = await fetchJson<ChartHistoryResponse>(url, { timeoutMs: REQUEST_TIMEOUT_MS });
   if (json.detail) throw new Error(json.detail);
 
-  const bars = (json.bars ?? [])
+  let bars = (json.bars ?? [])
     .map(parsePackedBar)
     .filter((b): b is Bar => b !== null)
     .filter((b) => b.time < before)
     .sort((a, b) => a.time - b.time);
+
+  // Native 1D only — weekly/monthly aggregates keep server bucket times.
+  if (plan.timeframe === "1d" && plan.group === 1) {
+    bars = alignFxDailyBars(bars).filter((b) => b.time < before);
+  }
 
   if (!bars.length) return [];
   return bars.slice(-Math.max(range.countBack, 1));
