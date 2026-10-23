@@ -964,7 +964,7 @@ def _faraz_resolution_for_step(step: int) -> str | None:
         return "5"
     if step >= 60:
         return "1"
-    # Persist/serve live sub-minute buckets (10S top → 1m).
+    # Persist/serve live sub-minute buckets (1S → 45S) from tick folds.
     if step >= 45:
         return "45S"
     if step >= 30:
@@ -973,6 +973,10 @@ def _faraz_resolution_for_step(step: int) -> str | None:
         return "15S"
     if step >= 10:
         return "10S"
+    if step >= 5:
+        return "5S"
+    if step >= 1:
+        return "1S"
     return None
 
 
@@ -1244,8 +1248,11 @@ def persist_faraz_bars(
 
 
 # Resolutions updated on every live Faraz tick (keeps faraz_ohlc from going stale).
-# Include 10S→1m so sub-minute charts have persisted OHLC besides tick_1s aggregates.
+# Persist 1S/5S/10S→… so lower TFs + Bar Replay can densify from real folds
+# (Faraz customer history has no sub-minute archive).
 _IRAN_LIVE_RES_STEPS: tuple[tuple[str, int], ...] = (
+    ("1S", 1),
+    ("5S", 5),
     ("10S", 10),
     ("15S", 15),
     ("30S", 30),
@@ -2395,9 +2402,10 @@ def _load_iran_history_mongo(
                         is_tick_fold = src in {"faraz", "faraz-tick"} or src.startswith(
                             "faraz-tick"
                         )
-                        # Closed tick folds hide Faraz OHLC and leave holes / wild wicks.
-                        # Keep only the forming wall-clock bucket as a live tick fold.
-                        if is_tick_fold and t0 < wall_t:
+                        # Minute+: closed tick folds hide real Faraz OHLC — drop them.
+                        # Sub-minute: Faraz has no archive; closed faraz-tick bars ARE
+                        # the history (and the only feed for 10S replay densify).
+                        if step >= 60 and is_tick_fold and t0 < wall_t:
                             continue
                         candidates.append(
                             {
@@ -2530,11 +2538,11 @@ def _load_iran_history_mongo(
 
         if step < 60:
             # Sub-minute: prefer stored faraz_ohlc; fill holes + forming from ticks.
-            # Never rebuild the whole series from sparse polls (flat dojis / duplicates).
+            # Pull deep tick_1s so 10S/1S charts and replay keep dense history.
             recent = list(
                 tick_coll.find(query, {field: 1, "ts": 1, "ts_unix": 1})
                 .sort("ts", -1)
-                .limit(min(12_000, tick_pull))
+                .limit(min(IRAN_HISTORY_DEPTH["seconds"], max(tick_pull, 40_000)))
             )
             if recent:
                 sources.append("anil_gold.tick_1s")

@@ -4,6 +4,7 @@ import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
 import Typography from "@mui/material/Typography";
 import { useState, type MouseEvent } from "react";
+import { MOBILE_BOTTOM_BAR_HEIGHT } from "@/features/layout/mobile-chrome";
 import { useStore } from "@/shared/hooks/useStore";
 import type { BarReplayController, BarReplaySpeed } from "./bar-replay-controller";
 
@@ -63,11 +64,14 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
     <Box
       data-testid="bar-replay-toolbar"
       sx={{
-        // Sit under TradingView’s top toolbar (symbol / intervals / Bar Replay).
+        // TradingView-style strip pinned to the bottom of the chart pane.
         position: "absolute",
-        top: { xs: 36, sm: 39 },
         left: 0,
         right: 0,
+        bottom: {
+          xs: `calc(${MOBILE_BOTTOM_BAR_HEIGHT}px + env(safe-area-inset-bottom, 0px))`,
+          sm: 0,
+        },
         zIndex: 40,
         display: "flex",
         alignItems: "center",
@@ -76,7 +80,6 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
         px: 1.25,
         bgcolor: "#131722",
         borderTop: "1px solid #2a2e39",
-        borderBottom: "1px solid #2a2e39",
         pointerEvents: "auto",
         userSelect: "none",
         whiteSpace: "nowrap",
