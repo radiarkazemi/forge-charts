@@ -384,7 +384,13 @@ export class BarReplayController {
     const chart = widget.activeChart();
     const symbol = chart.symbol();
 
-    let buffer = await datafeed.fetchReplayBuffer(symbol, resolution, 8_000);
+    const stepSec = resolutionToSec(resolution);
+    // Seconds / sub-minute need a deep buffer — short pages look like 2–3 candles
+    // then a jump when play advances across sparse holes.
+    const parentNeed = stepSec < 60 ? 20_000 : 8_000;
+    const microNeed = stepSec < 60 ? 50_000 : 20_000;
+
+    let buffer = await datafeed.fetchReplayBuffer(symbol, resolution, parentNeed);
     if (buffer.length === 0) {
       try {
         const exported = await chart.exportData({
@@ -399,21 +405,19 @@ export class BarReplayController {
     }
 
     // Prefer a denser TF for true intra-bar paths; also use it to synthesize
-    // the chart TF when native history is missing.
+    // the chart TF when native history is missing or gappy.
     const microRes = microResolutionFor(resolution);
     let micro: Bar[] = [];
     if (microRes) {
       try {
-        const fetched = await datafeed.fetchReplayBuffer(symbol, microRes, 20_000);
+        const fetched = await datafeed.fetchReplayBuffer(symbol, microRes, microNeed);
         micro = [...fetched];
       } catch {
         micro = [];
       }
     }
 
-    if (buffer.length < 10 && micro.length > 0) {
-      buffer = aggregateBars(micro, resolutionToSec(resolution));
-    }
+    buffer = densifyReplayBuffer(buffer, micro, stepSec);
 
     if (buffer.length === 0) return false;
 
@@ -707,6 +711,71 @@ function aggregateBars(micro: readonly Bar[], stepSec: number): Bar[] {
   return [...buckets.values()]
     .sort((a, b) => a.time - b.time)
     .map((b) => ({ ...b }));
+}
+
+function hasReplayHoles(bars: readonly Bar[], stepSec: number): boolean {
+  if (bars.length < 2 || stepSec <= 0) return false;
+  const limit = stepSec * 1.5;
+  for (let i = 1; i < bars.length; i += 1) {
+    if (Number(bars[i]!.time) - Number(bars[i - 1]!.time) > limit) return true;
+  }
+  return false;
+}
+
+function mergeBarsPreferPrimary(primary: readonly Bar[], fill: readonly Bar[]): Bar[] {
+  const byTime = new Map<number, Bar>();
+  for (const b of fill) byTime.set(Number(b.time), b);
+  for (const b of primary) byTime.set(Number(b.time), b);
+  return [...byTime.values()].sort((a, b) => Number(a.time) - Number(b.time));
+}
+
+/**
+ * Fill short holes so play advances one bar at a time instead of “dodging”
+ * across multi-minute gaps. Caps fill length so weekend gaps on higher TFs
+ * do not explode memory.
+ */
+function fillShortReplayGaps(bars: readonly Bar[], stepSec: number): Bar[] {
+  if (bars.length < 2 || stepSec <= 0) return [...bars];
+  const maxFill = stepSec < 60 ? 180 : stepSec <= 300 ? 60 : 12;
+  const out: Bar[] = [bars[0]!];
+  for (let i = 1; i < bars.length; i += 1) {
+    const prev = out[out.length - 1]!;
+    const cur = bars[i]!;
+    const gap = Number(cur.time) - Number(prev.time);
+    if (gap > stepSec * 1.5) {
+      let t = Number(prev.time) + stepSec;
+      let n = 0;
+      while (t < Number(cur.time) - stepSec * 0.25 && n < maxFill) {
+        out.push({
+          time: t,
+          open: prev.close,
+          high: prev.close,
+          low: prev.close,
+          close: prev.close,
+          volume: 0,
+        });
+        t += stepSec;
+        n += 1;
+      }
+    }
+    out.push(cur);
+  }
+  return out;
+}
+
+/** Densify sparse replay series from micro bars, then bridge remaining short holes. */
+function densifyReplayBuffer(buffer: readonly Bar[], micro: readonly Bar[], stepSec: number): Bar[] {
+  let next = [...buffer];
+  if (micro.length > 0 && (next.length < 10 || hasReplayHoles(next, stepSec) || stepSec < 60)) {
+    const fromMicro = aggregateBars(micro, stepSec);
+    if (fromMicro.length > 0) {
+      next = next.length === 0 ? fromMicro : mergeBarsPreferPrimary(next, fromMicro);
+    }
+  }
+  if (hasReplayHoles(next, stepSec)) {
+    next = fillShortReplayGaps(next, stepSec);
+  }
+  return next;
 }
 
 function barsFromExport(exported: {

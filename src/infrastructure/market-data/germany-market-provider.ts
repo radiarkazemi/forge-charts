@@ -1069,8 +1069,8 @@ export class GermanyMarketProvider implements MarketDataProvider {
   }
 
   /**
-   * Seconds history: synthesize from fresh 1m `/ohlc/` only.
-   * Do not splice Germany `/history/?timeframe=1s` — that archive lags by many minutes
+   * Seconds history: synthesize from deep 1m parents (Mongo first, Germany `/ohlc/`
+   * fallback). Do not splice Germany `/history/?timeframe=1s` — that archive lags
    * and produced gaps + staircase garbage when mixed with live ticks.
    */
   private async fetchSecondBars(
@@ -1079,11 +1079,27 @@ export class GermanyMarketProvider implements MarketDataProvider {
     limit: number,
     range: BarRange,
   ): Promise<Bar[]> {
-    const parentNeed = Math.min(MAX_BARS, Math.ceil((limit * step) / 60) + 10);
-    const parents = await fetchOhlc(route.apiSymbol, route.exchange, "1", parentNeed);
+    const parentNeed = Math.min(20_000, Math.ceil((limit * step) / 60) + 50);
+    let parents: Bar[] = [];
+    if (mongoHistoryPlan("1")) {
+      try {
+        parents = await fetchCpChartHistory(route.apiSymbol, "1", {
+          from: 0,
+          to: range.to > 0 ? range.to : Math.floor(Date.now() / 1000) + 60,
+          countBack: parentNeed,
+        });
+      } catch {
+        parents = [];
+      }
+    }
+    if (!parents.length) {
+      const germanyNeed = Math.min(MAX_BARS, Math.ceil((limit * step) / 60) + 10);
+      parents = await fetchOhlc(route.apiSymbol, route.exchange, "1", germanyNeed);
+    }
     if (!parents.length) throw new Error(`germany-market: no 1m parents for ${route.apiSymbol}`);
     const bars = synthesizeFromMinuteBars(parents, step);
-    return bars.filter((b) => b.time < range.to).slice(-Math.max(limit, 1));
+    const before = range.to > 0 ? range.to : Number.POSITIVE_INFINITY;
+    return bars.filter((b) => b.time < before).slice(-Math.max(limit, 1));
   }
 
   private async isHealthy(): Promise<boolean> {

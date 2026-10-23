@@ -10,6 +10,8 @@ export function targetHistoryDepth(interval: Interval): number {
   const { unit, count } = parseInterval(interval);
   // Keep first pages modest — TV left-scroll pages more. Huge limits + on-read
   // expand starved the 2GB VPS (504s on /crypto-chart/history).
+  // Seconds need depth for 10S charts + Bar Replay densify from 1S.
+  if (unit === "seconds") return 20_000;
   if (unit === "minutes" && count === 1) return 20_000;
   if (unit === "minutes" && count === 5) return 10_000;
   return 5_000;

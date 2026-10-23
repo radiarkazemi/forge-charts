@@ -964,7 +964,7 @@ def _faraz_resolution_for_step(step: int) -> str | None:
         return "5"
     if step >= 60:
         return "1"
-    # Persist/serve live sub-minute buckets (10S top → 1m).
+    # Persist/serve live sub-minute buckets (1S → 45S) from tick folds.
     if step >= 45:
         return "45S"
     if step >= 30:
@@ -973,6 +973,10 @@ def _faraz_resolution_for_step(step: int) -> str | None:
         return "15S"
     if step >= 10:
         return "10S"
+    if step >= 5:
+        return "5S"
+    if step >= 1:
+        return "1S"
     return None
 
 
@@ -1244,8 +1248,11 @@ def persist_faraz_bars(
 
 
 # Resolutions updated on every live Faraz tick (keeps faraz_ohlc from going stale).
-# Include 10S→1m so sub-minute charts have persisted OHLC besides tick_1s aggregates.
+# Persist 1S/5S/10S→… so lower TFs + Bar Replay can densify from real folds
+# (Faraz customer history has no sub-minute archive).
 _IRAN_LIVE_RES_STEPS: tuple[tuple[str, int], ...] = (
+    ("1S", 1),
+    ("5S", 5),
     ("10S", 10),
     ("15S", 15),
     ("30S", 30),
@@ -1281,6 +1288,9 @@ def append_realtime_ohlc(quote: dict[str, float], src_name: str, ts: int) -> Non
                 wall_t = _align_iran_bar_time(now_ts, step)
                 t0 = wall_t
                 coll = client["anil_gold"][coll_name]
+                # Do not $setOnInsert h/l/v while also using $max/$min/$inc on the
+                # same paths — Mongo rejects that conflict and aborted the whole
+                # append (so 10S/1S faraz_ohlc never got written).
                 coll.update_one(
                     {"channel": channel, "t": t0},
                     {
@@ -1294,9 +1304,6 @@ def append_realtime_ohlc(quote: dict[str, float], src_name: str, ts: int) -> Non
                         },
                         "$setOnInsert": {
                             "o": price,
-                            "h": price,
-                            "l": price,
-                            "v": 0,
                         },
                         "$max": {"h": price},
                         "$min": {"l": price},
@@ -1353,7 +1360,8 @@ def append_realtime_ohlc(quote: dict[str, float], src_name: str, ts: int) -> Non
                     upsert=True,
                 )
     except Exception as exc:
-        LOG.debug("append realtime ohlc: %s", exc)
+        # Must be visible — silent failure here means 10S/1S never persist.
+        LOG.warning("append realtime ohlc: %s", exc)
 
 
 async def fetch_faraz_customer_history(
@@ -1568,10 +1576,10 @@ async def fetch_faraz_public_tv_history(
 def purge_flat_tick_ohlc() -> int:
     """Remove closed tick-fold bars + daily-as-1m junk that hide real Faraz OHLC.
 
-    Closed `faraz-tick` rows leave multi-minute holes and exaggerated H/L versus
-    Faraz customer candles. Keep only the wall-clock forming bucket as a tick fold.
-    Also delete resolution=1/5/… bars that sit on midnight UTC with day spacing
-    (persisted when Faraz public TV returned daily under an expired cookie).
+    Closed `faraz-tick` rows on minute+ TFs leave holes vs Faraz customer candles.
+    Sub-minute (1S–45S) tick folds are the only durable history for those TFs and
+    for bar replay — never delete them. Also delete resolution=1/5/… bars that sit
+    on midnight UTC with day spacing (expired cookie → public TV returned 1D).
     """
     client = mongo_client()
     if client is None:
@@ -1581,6 +1589,9 @@ def purge_flat_tick_ohlc() -> int:
         now_ts = int(time.time())
         removed = 0
         for resolution, step in _IRAN_LIVE_RES_STEPS:
+            # Keep all closed sub-minute faraz-tick/faraz bars (10S history + replay).
+            if step < 60:
+                continue
             wall_t = _align_iran_bar_time(now_ts, step)
             for channel in IRAN_FARAZ_HISTORY_SYMBOL:
                 res = base.delete_many(
@@ -2212,7 +2223,7 @@ def _bucket_price_rows(rows: list[dict[str, Any]], field: str, step: int) -> dic
 
 
 def materialize_iran_ohlc_bases() -> None:
-    """Bucket recent tick_1s into 1m/1h/1d collections (cp_fetcher-style parents)."""
+    """Bucket recent tick_1s into 1m/1h/1d + sub-minute faraz_ohlc (10S/1S…)."""
     client = mongo_client()
     if client is None:
         return
@@ -2258,8 +2269,50 @@ def materialize_iran_ohlc_bases() -> None:
             for i in range(0, len(ops), 1000):
                 coll.bulk_write(ops[i : i + 1000], ordered=False)
             coll.create_index([("channel", 1), ("t", -1)], background=True)
+
+        # Persist 10S+ sub-minute OHLC from ticks (skip 1S/5S bulk — too heavy on
+        # 2GB VPS; those still fold live via append_realtime_ohlc).
+        base = client["anil_gold"]["faraz_ohlc"]
+        sub_since = datetime.fromtimestamp(now - 36 * 3_600, tz=timezone.utc)
+        sub_rows = list(
+            tick_coll.find({"ts": {"$gte": sub_since}}).sort("ts", 1).limit(100_000)
+        )
+        written = 0
+        for resolution, step in _IRAN_LIVE_RES_STEPS:
+            if step < 10 or step >= 60:
+                continue
+            for field, channel in IRAN_FIELDS.items():
+                buckets = _bucket_price_rows(sub_rows, field, step)
+                ops = [
+                    UpdateOne(
+                        {"channel": channel, "resolution": resolution, "t": int(t0)},
+                        {
+                            "$set": {
+                                "channel": channel,
+                                "field": field,
+                                "resolution": resolution,
+                                "t": int(t0),
+                                "o": bar["o"],
+                                "h": bar["h"],
+                                "l": bar["l"],
+                                "c": bar["c"],
+                                "v": bar["v"],
+                                "src": "faraz-tick",
+                                "updated_at": now_dt,
+                            }
+                        },
+                        upsert=True,
+                    )
+                    for t0, bar in buckets.items()
+                ]
+                for i in range(0, len(ops), 500):
+                    base.bulk_write(ops[i : i + 500], ordered=False)
+                written += len(ops)
+        if written:
+            LOG.info("iran sub-minute materialize ops=%s", written)
+        base.create_index([("channel", 1), ("resolution", 1), ("t", -1)], background=True)
     except Exception as exc:
-        LOG.debug("iran ohlc materialize: %s", exc)
+        LOG.warning("iran ohlc materialize: %s", exc)
 
 
 async def poll_iran_materialize() -> None:
@@ -2267,7 +2320,7 @@ async def poll_iran_materialize() -> None:
         try:
             await asyncio.to_thread(materialize_iran_ohlc_bases)
         except Exception as exc:
-            LOG.debug("iran materialize loop: %s", exc)
+            LOG.warning("iran materialize loop: %s", exc)
         await asyncio.sleep(30.0)
 
 
@@ -2395,9 +2448,10 @@ def _load_iran_history_mongo(
                         is_tick_fold = src in {"faraz", "faraz-tick"} or src.startswith(
                             "faraz-tick"
                         )
-                        # Closed tick folds hide Faraz OHLC and leave holes / wild wicks.
-                        # Keep only the forming wall-clock bucket as a live tick fold.
-                        if is_tick_fold and t0 < wall_t:
+                        # Minute+: closed tick folds hide real Faraz OHLC — drop them.
+                        # Sub-minute: Faraz has no archive; closed faraz-tick bars ARE
+                        # the history (and the only feed for 10S replay densify).
+                        if step >= 60 and is_tick_fold and t0 < wall_t:
                             continue
                         candidates.append(
                             {
@@ -2530,11 +2584,11 @@ def _load_iran_history_mongo(
 
         if step < 60:
             # Sub-minute: prefer stored faraz_ohlc; fill holes + forming from ticks.
-            # Never rebuild the whole series from sparse polls (flat dojis / duplicates).
+            # Pull deep tick_1s so 10S/1S charts and replay keep dense history.
             recent = list(
                 tick_coll.find(query, {field: 1, "ts": 1, "ts_unix": 1})
                 .sort("ts", -1)
-                .limit(min(12_000, tick_pull))
+                .limit(min(IRAN_HISTORY_DEPTH["seconds"], max(tick_pull, 40_000)))
             )
             if recent:
                 sources.append("anil_gold.tick_1s")
