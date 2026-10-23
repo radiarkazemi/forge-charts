@@ -42,7 +42,7 @@ const iconBtn = {
 } as const;
 
 /**
- * TradingView Bar Replay navbar — full-width top strip, controls right-aligned:
+ * TradingView Bar Replay navbar — full-width bottom strip, controls right-aligned:
  * [Select bar ▾] | ▶  ▶|  1x  5m | ▶||  ✕
  */
 export function BarReplayToolbar({ controller, forceVisible = false }: BarReplayToolbarProps) {

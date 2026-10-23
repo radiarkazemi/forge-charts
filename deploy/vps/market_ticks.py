@@ -1576,10 +1576,10 @@ async def fetch_faraz_public_tv_history(
 def purge_flat_tick_ohlc() -> int:
     """Remove closed tick-fold bars + daily-as-1m junk that hide real Faraz OHLC.
 
-    Closed `faraz-tick` rows leave multi-minute holes and exaggerated H/L versus
-    Faraz customer candles. Keep only the wall-clock forming bucket as a tick fold.
-    Also delete resolution=1/5/… bars that sit on midnight UTC with day spacing
-    (persisted when Faraz public TV returned daily under an expired cookie).
+    Closed `faraz-tick` rows on minute+ TFs leave holes vs Faraz customer candles.
+    Sub-minute (1S–45S) tick folds are the only durable history for those TFs and
+    for bar replay — never delete them. Also delete resolution=1/5/… bars that sit
+    on midnight UTC with day spacing (expired cookie → public TV returned 1D).
     """
     client = mongo_client()
     if client is None:
@@ -1589,6 +1589,9 @@ def purge_flat_tick_ohlc() -> int:
         now_ts = int(time.time())
         removed = 0
         for resolution, step in _IRAN_LIVE_RES_STEPS:
+            # Keep all closed sub-minute faraz-tick/faraz bars (10S history + replay).
+            if step < 60:
+                continue
             wall_t = _align_iran_bar_time(now_ts, step)
             for channel in IRAN_FARAZ_HISTORY_SYMBOL:
                 res = base.delete_many(
