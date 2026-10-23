@@ -1288,6 +1288,9 @@ def append_realtime_ohlc(quote: dict[str, float], src_name: str, ts: int) -> Non
                 wall_t = _align_iran_bar_time(now_ts, step)
                 t0 = wall_t
                 coll = client["anil_gold"][coll_name]
+                # Do not $setOnInsert h/l while also using $max/$min on the same
+                # paths — Mongo rejects that conflict and aborted the whole
+                # append (so 10S/1S faraz_ohlc never got written).
                 coll.update_one(
                     {"channel": channel, "t": t0},
                     {
@@ -1301,8 +1304,6 @@ def append_realtime_ohlc(quote: dict[str, float], src_name: str, ts: int) -> Non
                         },
                         "$setOnInsert": {
                             "o": price,
-                            "h": price,
-                            "l": price,
                             "v": 0,
                         },
                         "$max": {"h": price},
@@ -1360,7 +1361,8 @@ def append_realtime_ohlc(quote: dict[str, float], src_name: str, ts: int) -> Non
                     upsert=True,
                 )
     except Exception as exc:
-        LOG.debug("append realtime ohlc: %s", exc)
+        # Must be visible — silent failure here means 10S/1S never persist.
+        LOG.warning("append realtime ohlc: %s", exc)
 
 
 async def fetch_faraz_customer_history(
@@ -2219,7 +2221,7 @@ def _bucket_price_rows(rows: list[dict[str, Any]], field: str, step: int) -> dic
 
 
 def materialize_iran_ohlc_bases() -> None:
-    """Bucket recent tick_1s into 1m/1h/1d collections (cp_fetcher-style parents)."""
+    """Bucket recent tick_1s into 1m/1h/1d + sub-minute faraz_ohlc (10S/1S…)."""
     client = mongo_client()
     if client is None:
         return
@@ -2265,8 +2267,50 @@ def materialize_iran_ohlc_bases() -> None:
             for i in range(0, len(ops), 1000):
                 coll.bulk_write(ops[i : i + 1000], ordered=False)
             coll.create_index([("channel", 1), ("t", -1)], background=True)
+
+        # Persist 10S+ sub-minute OHLC from ticks (skip 1S/5S bulk — too heavy on
+        # 2GB VPS; those still fold live via append_realtime_ohlc).
+        base = client["anil_gold"]["faraz_ohlc"]
+        sub_since = datetime.fromtimestamp(now - 36 * 3_600, tz=timezone.utc)
+        sub_rows = list(
+            tick_coll.find({"ts": {"$gte": sub_since}}).sort("ts", 1).limit(100_000)
+        )
+        written = 0
+        for resolution, step in _IRAN_LIVE_RES_STEPS:
+            if step < 10 or step >= 60:
+                continue
+            for field, channel in IRAN_FIELDS.items():
+                buckets = _bucket_price_rows(sub_rows, field, step)
+                ops = [
+                    UpdateOne(
+                        {"channel": channel, "resolution": resolution, "t": int(t0)},
+                        {
+                            "$set": {
+                                "channel": channel,
+                                "field": field,
+                                "resolution": resolution,
+                                "t": int(t0),
+                                "o": bar["o"],
+                                "h": bar["h"],
+                                "l": bar["l"],
+                                "c": bar["c"],
+                                "v": bar["v"],
+                                "src": "faraz-tick",
+                                "updated_at": now_dt,
+                            }
+                        },
+                        upsert=True,
+                    )
+                    for t0, bar in buckets.items()
+                ]
+                for i in range(0, len(ops), 500):
+                    base.bulk_write(ops[i : i + 500], ordered=False)
+                written += len(ops)
+        if written:
+            LOG.info("iran sub-minute materialize ops=%s", written)
+        base.create_index([("channel", 1), ("resolution", 1), ("t", -1)], background=True)
     except Exception as exc:
-        LOG.debug("iran ohlc materialize: %s", exc)
+        LOG.warning("iran ohlc materialize: %s", exc)
 
 
 async def poll_iran_materialize() -> None:
@@ -2274,7 +2318,7 @@ async def poll_iran_materialize() -> None:
         try:
             await asyncio.to_thread(materialize_iran_ohlc_bases)
         except Exception as exc:
-            LOG.debug("iran materialize loop: %s", exc)
+            LOG.warning("iran materialize loop: %s", exc)
         await asyncio.sleep(30.0)
 
 
