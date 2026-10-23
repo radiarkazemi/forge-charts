@@ -1288,8 +1288,8 @@ def append_realtime_ohlc(quote: dict[str, float], src_name: str, ts: int) -> Non
                 wall_t = _align_iran_bar_time(now_ts, step)
                 t0 = wall_t
                 coll = client["anil_gold"][coll_name]
-                # Do not $setOnInsert h/l while also using $max/$min on the same
-                # paths — Mongo rejects that conflict and aborted the whole
+                # Do not $setOnInsert h/l/v while also using $max/$min/$inc on the
+                # same paths — Mongo rejects that conflict and aborted the whole
                 # append (so 10S/1S faraz_ohlc never got written).
                 coll.update_one(
                     {"channel": channel, "t": t0},
@@ -1304,7 +1304,6 @@ def append_realtime_ohlc(quote: dict[str, float], src_name: str, ts: int) -> Non
                         },
                         "$setOnInsert": {
                             "o": price,
-                            "v": 0,
                         },
                         "$max": {"h": price},
                         "$min": {"l": price},
