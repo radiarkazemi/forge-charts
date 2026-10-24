@@ -631,7 +631,9 @@ export class ChartController {
         ? "DealingRanges@tv-basicstudies-1"
         : /forge\s*structure\s*intelligence|forge\s*si/i.test(displayName)
           ? "ForgeStructureIntelligence@tv-basicstudies-1"
-          : displayName;
+          : /forge\s*sessions|sessions\s*\[luxalgo\]/i.test(displayName)
+            ? "ForgeSessions@tv-basicstudies-1"
+            : displayName;
       const study = chart.getStudyById(entityId);
       const inputs: Record<string, unknown> = {};
       for (const item of study.getInputValues()) {
@@ -657,7 +659,9 @@ export class ChartController {
           ? "DealingRanges@tv-basicstudies-1"
           : /forge\s*structure\s*intelligence|forge\s*si/i.test(name)
             ? "ForgeStructureIntelligence@tv-basicstudies-1"
-            : null;
+            : /forge\s*sessions|sessions\s*\[luxalgo\]/i.test(name)
+              ? "ForgeSessions@tv-basicstudies-1"
+              : null;
     void chart
       .createStudy(name, false, false, inputs as never)
       .catch(() => {
