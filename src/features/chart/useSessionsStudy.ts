@@ -100,9 +100,9 @@ function readStyleColors(
 }
 
 function defaultOpts(): SessionsOptions {
-  const map = new Map<string, unknown>([["sessionCount", 4]]);
+  const map = new Map<string, unknown>([["sessionCount", 8]]);
   return {
-    sessions: mergeSessionDefs(readSessionSlotsFromMap(map), 4, ""),
+    sessions: mergeSessionDefs(readSessionSlotsFromMap(map), 8, ""),
     historyLimit: 0,
     timezoneOffset: SESSIONS_STUDY_DEFAULTS.timezoneOffset,
     useExchangeTimezone: SESSIONS_STUDY_DEFAULTS.useExchangeTimezone,
@@ -202,7 +202,7 @@ export function useSessionsStudy(enabled = true): void {
         // Inputs “+ Add session” / “− Remove” checkboxes (CL has no real + button).
         let sessionCount = Math.max(
           1,
-          Math.min(SESSIONS_MAX_COUNT, Math.floor(num("sessionCount", 4))),
+          Math.min(SESSIONS_MAX_COUNT, Math.floor(num("sessionCount", 8))),
         );
         if (bool("addSession", false) && sessionCount < SESSIONS_MAX_COUNT) {
           sessionCount += 1;

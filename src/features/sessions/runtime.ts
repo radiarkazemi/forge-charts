@@ -11,14 +11,14 @@ import type { DrawCmd } from "@/features/pine/orca-runtime";
  * Soft palette — auto-assigned when a session line has no color.
  */
 export const SESSION_COLOR_PALETTE = [
-  "#ff5d00", // LQ — soft orange
-  "#43a047", // Open — green (sample)
-  "#e53935", // NY1 — soft red
-  "#e53935", // NY2 — soft red
-  "#2157f3",
-  "#00bcd4",
-  "#9c27b0",
-  "#ff9800",
+  "#ff5d00", // LQ
+  "#43a047", // Open
+  "#e53935", // NY1
+  "#e53935", // NY2
+  "#2157f3", // LND1
+  "#00bcd4", // LND2
+  "#9c27b0", // ASIA
+  "#ff9800", // FF
 ] as const;
 
 export interface SessionDef {
@@ -47,7 +47,7 @@ export interface SessionsOptions {
   readonly showRangeLabel: boolean;
   /**
    * Horizontal “Midnight line”: from today’s 00:00 candle open to
-   * (last bar − 5 minutes). Resets each local day. Black + “midnight candle”.
+   * (last bar − 5 minutes). Resets each local day. Black + right-edge “00:00”.
    */
   readonly showMidnightLine: boolean;
   readonly dashboard: boolean;
@@ -134,6 +134,50 @@ export const DEFAULT_SESSION_DEFS: SessionDef[] = [
     maxMin: false,
     color: "#e53935",
   },
+  {
+    enable: true,
+    name: "LND1",
+    hours: "0230-0300",
+    range: true,
+    trendline: false,
+    mean: false,
+    vwap: false,
+    maxMin: false,
+    color: "#2157f3",
+  },
+  {
+    enable: true,
+    name: "LND2",
+    hours: "0400-0430",
+    range: true,
+    trendline: false,
+    mean: false,
+    vwap: false,
+    maxMin: false,
+    color: "#00bcd4",
+  },
+  {
+    enable: true,
+    name: "ASIA",
+    hours: "2000-0000",
+    range: true,
+    trendline: false,
+    mean: false,
+    vwap: false,
+    maxMin: false,
+    color: "#9c27b0",
+  },
+  {
+    enable: true,
+    name: "FF",
+    hours: "0100-0300",
+    range: true,
+    trendline: false,
+    mean: false,
+    vwap: false,
+    maxMin: false,
+    color: "#ff9800",
+  },
 ];
 
 /** One zone per line — add more lines for unlimited sessions. */
@@ -142,6 +186,10 @@ export const DEFAULT_SESSIONS_TEXT = [
   "Open 09:30-11:00 #43a047",
   "NY1 08:50-09:10 #e53935",
   "NY2 09:50-10:10 #e53935",
+  "LND1 02:30-03:00 #2157f3",
+  "LND2 04:00-04:30 #00bcd4",
+  "ASIA 20:00-00:00 #9c27b0",
+  "FF 01:00-03:00 #ff9800",
 ].join("\n");
 
 export const SESSIONS_DEFAULTS = {
@@ -402,12 +450,13 @@ function pushMidnightLine(
     width: 1,
     style: "solid",
   });
+  // Label on the right edge of the line.
   cmds.push({
     kind: "label",
-    t1: midnight.time,
+    t1: endTime,
     p1: price,
     color: "#000000",
-    text: "midnight candle",
+    text: "00:00",
   });
 }
 
@@ -963,8 +1012,9 @@ export async function paintSessionsOnChart(
               fillBackground: false,
               drawBorder: false,
               bold: false,
-              horzLabelsAlign: "center",
-              vertLabelsAlign: "bottom",
+              // “00:00” sits on the right tip; zone names stay centered above boxes.
+              horzLabelsAlign: cmd.text === "00:00" ? "right" : "center",
+              vertLabelsAlign: cmd.text === "00:00" ? "middle" : "bottom",
             },
           },
         );

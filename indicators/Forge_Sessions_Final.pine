@@ -1,0 +1,203 @@
+// Forge Sessions — final zone + Midnight line port for TradingView.com
+// Mirrors Forge Charts “Forge Sessions” (BUILD 1021v17+).
+// Hours default to America/New_York (UTC−4 fixed offset in Forge).
+//
+//@version=6
+indicator("Forge Sessions", "Forge Sessions", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+// ── Inputs ──────────────────────────────────────────────────────────
+sessionCount = input.int(8, "Sessions · count (1–12)", minval = 1, maxval = 12)
+
+showMidnight = input.bool(true, "Midnight line · Enable (00:00 open → tip − 5×1m)")
+tzOffset = input.int(-4, "Timezone · UTC (+/-)", minval = -12, maxval = 14)
+useExchangeTz = input.bool(false, "Timezone · Use Exchange Timezone")
+tzIana = input.string("America/New_York", "Timezone · IANA (if Exchange on)")
+
+showOutline = input.bool(true, "Zones · Outline")
+showLabel = input.bool(true, "Zones · Label")
+fillTransp = input.int(88, "Zones · Fill transparency", minval = 0, maxval = 100)
+
+string tz = useExchangeTz ? tzIana : str.format("UTC{0}{1}", tzOffset >= 0 ? "+" : "", tzOffset)
+
+// Session A–H defaults (same as Forge)
+enA = input.bool(true, "SESSION A · Enable", group = "SESSION A")
+nmA = input.string("LQ", "SESSION A · Name", group = "SESSION A")
+hrA = input.session("0700-0927", "SESSION A · Hours", group = "SESSION A")
+colA = input.color(color.new(#ff5d00, 0), "SESSION A · Color", group = "SESSION A")
+
+enB = input.bool(true, "SESSION B · Enable", group = "SESSION B")
+nmB = input.string("Open", "SESSION B · Name", group = "SESSION B")
+hrB = input.session("0930-1100", "SESSION B · Hours", group = "SESSION B")
+colB = input.color(color.new(#43a047, 0), "SESSION B · Color", group = "SESSION B")
+
+enC = input.bool(true, "SESSION C · Enable", group = "SESSION C")
+nmC = input.string("NY1", "SESSION C · Name", group = "SESSION C")
+hrC = input.session("0850-0910", "SESSION C · Hours", group = "SESSION C")
+colC = input.color(color.new(#e53935, 0), "SESSION C · Color", group = "SESSION C")
+
+enD = input.bool(true, "SESSION D · Enable", group = "SESSION D")
+nmD = input.string("NY2", "SESSION D · Name", group = "SESSION D")
+hrD = input.session("0950-1010", "SESSION D · Hours", group = "SESSION D")
+colD = input.color(color.new(#e53935, 0), "SESSION D · Color", group = "SESSION D")
+
+enE = input.bool(true, "SESSION E · Enable", group = "SESSION E")
+nmE = input.string("LND1", "SESSION E · Name", group = "SESSION E")
+hrE = input.session("0230-0300", "SESSION E · Hours", group = "SESSION E")
+colE = input.color(color.new(#2157f3, 0), "SESSION E · Color", group = "SESSION E")
+
+enF = input.bool(true, "SESSION F · Enable", group = "SESSION F")
+nmF = input.string("LND2", "SESSION F · Name", group = "SESSION F")
+hrF = input.session("0400-0430", "SESSION F · Hours", group = "SESSION F")
+colF = input.color(color.new(#00bcd4, 0), "SESSION F · Color", group = "SESSION F")
+
+enG = input.bool(true, "SESSION G · Enable", group = "SESSION G")
+nmG = input.string("ASIA", "SESSION G · Name", group = "SESSION G")
+hrG = input.session("2000-0000", "SESSION G · Hours", group = "SESSION G")
+colG = input.color(color.new(#9c27b0, 0), "SESSION G · Color", group = "SESSION G")
+
+enH = input.bool(true, "SESSION H · Enable", group = "SESSION H")
+nmH = input.string("FF", "SESSION H · Name", group = "SESSION H")
+hrH = input.session("0100-0300", "SESSION H · Hours", group = "SESSION H")
+colH = input.color(color.new(#ff9800, 0), "SESSION H · Color", group = "SESSION H")
+
+enI = input.bool(false, "SESSION I · Enable", group = "SESSION I")
+nmI = input.string("S9", "SESSION I · Name", group = "SESSION I")
+hrI = input.session("0000-0100", "SESSION I · Hours", group = "SESSION I")
+colI = input.color(color.new(#2157f3, 0), "SESSION I · Color", group = "SESSION I")
+
+enJ = input.bool(false, "SESSION J · Enable", group = "SESSION J")
+nmJ = input.string("S10", "SESSION J · Name", group = "SESSION J")
+hrJ = input.session("0000-0100", "SESSION J · Hours", group = "SESSION J")
+colJ = input.color(color.new(#00bcd4, 0), "SESSION J · Color", group = "SESSION J")
+
+enK = input.bool(false, "SESSION K · Enable", group = "SESSION K")
+nmK = input.string("S11", "SESSION K · Name", group = "SESSION K")
+hrK = input.session("0000-0100", "SESSION K · Hours", group = "SESSION K")
+colK = input.color(color.new(#9c27b0, 0), "SESSION K · Color", group = "SESSION K")
+
+enL = input.bool(false, "SESSION L · Enable", group = "SESSION L")
+nmL = input.string("S12", "SESSION L · Name", group = "SESSION L")
+hrL = input.session("0000-0100", "SESSION L · Hours", group = "SESSION L")
+colL = input.color(color.new(#ff9800, 0), "SESSION L · Color", group = "SESSION L")
+
+// ── Helpers ─────────────────────────────────────────────────────────
+f_enabled(int i) =>
+    i == 0 ? enA : i == 1 ? enB : i == 2 ? enC : i == 3 ? enD : i == 4 ? enE : i == 5 ? enF : i == 6 ? enG : i == 7 ? enH : i == 8 ? enI : i == 9 ? enJ : i == 10 ? enK : enL
+
+f_name(int i) =>
+    i == 0 ? nmA : i == 1 ? nmB : i == 2 ? nmC : i == 3 ? nmD : i == 4 ? nmE : i == 5 ? nmF : i == 6 ? nmG : i == 7 ? nmH : i == 8 ? nmI : i == 9 ? nmJ : i == 10 ? nmK : nmL
+
+f_hours(int i) =>
+    i == 0 ? hrA : i == 1 ? hrB : i == 2 ? hrC : i == 3 ? hrD : i == 4 ? hrE : i == 5 ? hrF : i == 6 ? hrG : i == 7 ? hrH : i == 8 ? hrI : i == 9 ? hrJ : i == 10 ? hrK : hrL
+
+f_color(int i) =>
+    i == 0 ? colA : i == 1 ? colB : i == 2 ? colC : i == 3 ? colD : i == 4 ? colE : i == 5 ? colF : i == 6 ? colG : i == 7 ? colH : i == 8 ? colI : i == 9 ? colJ : i == 10 ? colK : colL
+
+f_in_session(string sess) =>
+    not na(time(timeframe.period, sess, tz))
+
+// ── Session range boxes ─────────────────────────────────────────────
+var box[] boxes = array.new_box()
+var label[] labels = array.new_label()
+var bool[] active = array.new_bool(12, false)
+var float[] runHi = array.new_float(12, na)
+var float[] runLo = array.new_float(12, na)
+var int[] runLeft = array.new_int(12, na)
+
+if barstate.isfirst
+    for i = 0 to 11
+        array.push(boxes, box.new(na, na, na, na, xloc = xloc.bar_time, extend = extend.none, bgcolor = color.new(color.black, 100), border_color = color.new(color.black, 100)))
+        array.push(labels, label.new(na, na, "", xloc = xloc.bar_time, style = label.style_label_down, color = color.new(color.black, 100), textcolor = color.black, size = size.small))
+
+for i = 0 to 11
+    bool use = i < sessionCount and f_enabled(i)
+    bool nowIn = use and f_in_session(f_hours(i))
+    bool wasIn = array.get(active, i)
+    color c = f_color(i)
+    color fillC = color.new(c, fillTransp)
+    color borderC = showOutline ? c : color.new(c, 100)
+
+    if nowIn and not wasIn
+        array.set(runHi, i, high)
+        array.set(runLo, i, low)
+        array.set(runLeft, i, time)
+        array.set(active, i, true)
+        box b = array.get(boxes, i)
+        box.set_lefttop(b, time, high)
+        box.set_rightbottom(b, time, low)
+        box.set_bgcolor(b, fillC)
+        box.set_border_color(b, borderC)
+        box.set_border_style(b, showOutline ? line.style_dotted : line.style_solid)
+        box.set_border_width(b, 1)
+        if showLabel
+            label lb = array.get(labels, i)
+            label.set_xy(lb, time, high)
+            label.set_text(lb, f_name(i))
+            label.set_textcolor(lb, c)
+            label.set_color(lb, color.new(color.black, 100))
+    else if nowIn and wasIn
+        array.set(runHi, i, math.max(nz(array.get(runHi, i), high), high))
+        array.set(runLo, i, math.min(nz(array.get(runLo, i), low), low))
+        box b = array.get(boxes, i)
+        box.set_right(b, time)
+        box.set_top(b, array.get(runHi, i))
+        box.set_bottom(b, array.get(runLo, i))
+        if showLabel
+            label lb = array.get(labels, i)
+            int midT = int(math.round((nz(array.get(runLeft, i), time) + time) * 0.5))
+            label.set_xy(lb, midT, array.get(runHi, i))
+            label.set_text(lb, f_name(i))
+            label.set_textcolor(lb, c)
+    else if not nowIn and wasIn
+        array.set(active, i, false)
+        // Keep completed box as drawn (right edge = last in-session bar via previous update).
+    else if not use
+        array.set(active, i, false)
+
+// ── Midnight line: today’s 00:00 open → tip − 5 minutes ─────────────
+var line midnightLn = na
+var label midnightLb = na
+var float midnightOpen = na
+var int midnightStart = na
+var int midnightDay = na
+
+int lagMs = 5 * 60 * 1000
+int tipEnd = time - lagMs
+
+if showMidnight
+    int y = year(time, tz)
+    int m = month(time, tz)
+    int d = dayofmonth(time, tz)
+    int dayKey = y * 10000 + m * 100 + d
+    int hhmm = hour(time, tz) * 100 + minute(time, tz)
+
+    // First bar of the local day (00:00 candle, or first print after the open).
+    if na(midnightDay) or dayKey != midnightDay
+        midnightDay := dayKey
+        midnightOpen := open
+        midnightStart := time
+        if not na(midnightLn)
+            line.delete(midnightLn)
+        if not na(midnightLb)
+            label.delete(midnightLb)
+        midnightLn := line.new(midnightStart, midnightOpen, tipEnd, midnightOpen, xloc = xloc.bar_time, color = color.black, width = 1, style = line.style_solid)
+        midnightLb := label.new(tipEnd, midnightOpen, "00:00", xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 100), textcolor = color.black, size = size.small)
+    else
+        // Capture true 00:00 open if this is the midnight bar.
+        if hhmm == 0 and (na(midnightStart) or time <= midnightStart)
+            midnightOpen := open
+            midnightStart := time
+        if not na(midnightLn) and tipEnd > midnightStart
+            line.set_xy1(midnightLn, midnightStart, midnightOpen)
+            line.set_xy2(midnightLn, tipEnd, midnightOpen)
+            if not na(midnightLb)
+                label.set_xy(midnightLb, tipEnd, midnightOpen)
+                label.set_text(midnightLb, "00:00")
+                label.set_style(midnightLb, label.style_label_left)
+else
+    if not na(midnightLn)
+        line.delete(midnightLn)
+        midnightLn := na
+    if not na(midnightLb)
+        label.delete(midnightLb)
+        midnightLb := na

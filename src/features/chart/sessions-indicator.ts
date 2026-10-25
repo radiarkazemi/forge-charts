@@ -67,8 +67,10 @@ function buildSlotInputs(index: number): Array<Record<string, unknown>> {
   ];
 }
 
+const DEFAULT_ZONE_COUNT = 8;
+
 const slotInputDefaults: Record<string, string | number | boolean> = {
-  sessionCount: 4,
+  sessionCount: DEFAULT_ZONE_COUNT,
   addSession: false,
   removeSession: false,
 };
@@ -76,7 +78,7 @@ for (let i = 0; i < SESSIONS_MAX_COUNT; i += 1) {
   const d = defaultSlot(i);
   const L = SLOT_IDS[i]!;
   Object.assign(slotInputDefaults, {
-    [`s${L}Enable`]: i < 4 ? d.enable : false,
+    [`s${L}Enable`]: i < DEFAULT_ZONE_COUNT ? d.enable : false,
     [`s${L}Name`]: d.name,
     [`s${L}Hours`]: hoursSession(d.hours),
   });
@@ -102,7 +104,7 @@ export const SESSIONS_STUDY_DEFAULTS = {
 export function readSessionSlotsFromMap(map: Map<string, unknown>): SessionDef[] {
   const count = Math.max(
     1,
-    Math.min(SESSIONS_MAX_COUNT, Math.floor(Number(map.get("sessionCount")) || 4)),
+    Math.min(SESSIONS_MAX_COUNT, Math.floor(Number(map.get("sessionCount")) || DEFAULT_ZONE_COUNT)),
   );
   const slots: SessionDef[] = [];
   for (let i = 0; i < count; i += 1) {
@@ -151,7 +153,7 @@ export function createSessionsIndicator(PineJS: {
     const d = defaultSlot(i);
     const id = stylePlotId(L);
     stylesMeta[id] = {
-      title: i < 4 ? d.name : `Session ${L}`,
+      title: i < DEFAULT_ZONE_COUNT ? d.name : `Session ${L}`,
       histogramBase: 0,
     };
     stylesDefaults[id] = {
@@ -203,7 +205,7 @@ export function createSessionsIndicator(PineJS: {
         {
           id: "sessionCount",
           name: "Sessions · count (1–12)",
-          defval: 4,
+          defval: DEFAULT_ZONE_COUNT,
           type: "integer",
           min: 1,
           max: SESSIONS_MAX_COUNT,

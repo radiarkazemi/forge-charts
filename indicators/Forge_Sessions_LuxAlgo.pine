@@ -1,17 +1,4 @@
-// Forge Charts reference copy of Sessions [LuxAlgo]
-// Licensed under CC BY-NC-SA 4.0 — © LuxAlgo
-// https://creativecommons.org/licenses/by-nc-sa/4.0/
-//
-// Forge runs a TypeScript port (Indicators → “Forge Sessions”) with the same
-// drawings plus unlimited session zones via Extra sessions + 20 slots.
-// This file is for TradingView.com / documentation parity only — CL cannot
-// compile real Pine.
-
+// See Forge_Sessions_Final.pine for the TradingView-ready script that matches
+// Forge Charts “Forge Sessions” (8 default zones + Midnight line “00:00”).
 //@version=6
-indicator("Sessions [LuxAlgo]", "LuxAlgo - Sessions", overlay = true, max_bars_back = 500, max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
-
-// Full script body lives in the Forge Sessions runtime:
-//   src/features/sessions/runtime.ts
-//   src/features/chart/sessions-indicator.ts
-//
-// Defaults: New York 1300-2200, London 0700-1600, Tokyo 0000-0900, Sydney 2100-0600 (UTC).
+indicator("Forge Sessions (see Forge_Sessions_Final.pine)", overlay = true)

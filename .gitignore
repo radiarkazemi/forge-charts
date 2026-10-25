@@ -12,3 +12,4 @@ indicators/.trh-alert-state.json
 indicators/.trh-secrets.json
 
 public/charting_library/
+deploy/vps/__pycache__/
