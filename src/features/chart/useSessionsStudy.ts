@@ -1,5 +1,5 @@
 /**
- * Watches Indicators “Forge Sessions” and paints LuxAlgo-style session zones.
+ * Watches Indicators “Forge Sessions” and paints session zones.
  */
 
 import { useEffect, useRef } from "react";
@@ -9,15 +9,13 @@ import type { EntityId } from "@/infrastructure/tradingview";
 import { barsFromChartExport } from "@/features/pine/orca-runtime";
 import {
   computeSessions,
-  mergeSessionDefs,
+  parseSessionsText,
   paintSessionsOnChart,
   publishSessionsDashboard,
+  DEFAULT_SESSION_DEFS,
   type SessionsOptions,
 } from "@/features/sessions/runtime";
-import {
-  readSessionSlotsFromMap,
-  SESSIONS_STUDY_DEFAULTS,
-} from "./sessions-indicator";
+import { SESSIONS_STUDY_DEFAULTS } from "./sessions-indicator";
 
 const MAX_BARS = 8_000;
 const STUDY_DEBOUNCE_MS = 450;
@@ -30,25 +28,26 @@ function fingerprintCmds(cmds: readonly { kind: string; t1: number; p1: number }
   return `${cmds.length}|${[...head, ...tail].map((c) => `${c.kind}:${c.t1}:${c.p1}`).join(";")}`;
 }
 
+function sessionsFromText(text: string) {
+  const parsed = parseSessionsText(text);
+  return parsed.length > 0 ? parsed : [...DEFAULT_SESSION_DEFS];
+}
+
 function defaultOpts(): SessionsOptions {
   return {
-    sessions: mergeSessionDefs(
-      readSessionSlotsFromMap(new Map()),
-      SESSIONS_STUDY_DEFAULTS.sessionCount,
-      SESSIONS_STUDY_DEFAULTS.extraSessions,
-    ),
-    historyLimit: SESSIONS_STUDY_DEFAULTS.historyLimit,
+    sessions: sessionsFromText(SESSIONS_STUDY_DEFAULTS.sessionsText),
+    historyLimit: 0,
     timezoneOffset: SESSIONS_STUDY_DEFAULTS.timezoneOffset,
     useExchangeTimezone: SESSIONS_STUDY_DEFAULTS.useExchangeTimezone,
     exchangeTimezone: SESSIONS_STUDY_DEFAULTS.exchangeTimezone,
     rangeTransparency: SESSIONS_STUDY_DEFAULTS.rangeTransparency,
-    showRangeOutline: SESSIONS_STUDY_DEFAULTS.showRangeOutline,
+    showRangeOutline: true,
     showRangeLabel: SESSIONS_STUDY_DEFAULTS.showRangeLabel,
-    dashboard: SESSIONS_STUDY_DEFAULTS.dashboard,
-    advancedDashboard: SESSIONS_STUDY_DEFAULTS.advancedDashboard,
-    dashboardPosition: SESSIONS_STUDY_DEFAULTS.dashboardPosition as 0 | 1 | 2,
-    dashboardSize: SESSIONS_STUDY_DEFAULTS.dashboardSize as 0 | 1 | 2 | 3 | 4,
-    showSessionDivider: SESSIONS_STUDY_DEFAULTS.showSessionDivider,
+    dashboard: false,
+    advancedDashboard: false,
+    dashboardPosition: 0,
+    dashboardSize: 1,
+    showSessionDivider: false,
     showDayDivider: SESSIONS_STUDY_DEFAULTS.showDayDivider,
   };
 }
@@ -123,33 +122,37 @@ export function useSessionsStudy(enabled = true): void {
           const v = map.get(id);
           return typeof v === "boolean" ? v : fallback;
         };
-        const sessionCount = Math.max(
-          1,
-          Math.min(20, Math.floor(num("sessionCount", SESSIONS_STUDY_DEFAULTS.sessionCount))),
+
+        // Prefer new simple field; fall back to legacy extraSessions if present.
+        const sessionsText = str(
+          "sessionsText",
+          str("extraSessions", SESSIONS_STUDY_DEFAULTS.sessionsText),
         );
-        const slots = readSessionSlotsFromMap(map);
-        const pos = Math.max(0, Math.min(2, Math.floor(num("dashboardPosition", 0)))) as 0 | 1 | 2;
-        const size = Math.max(0, Math.min(4, Math.floor(num("dashboardSize", 1)))) as
-          | 0
-          | 1
-          | 2
-          | 3
-          | 4;
+
         return {
-          sessions: mergeSessionDefs(slots, sessionCount, str("extraSessions", "")),
-          historyLimit: Math.max(0, Math.floor(num("historyLimit", 0))),
-          timezoneOffset: Math.max(-12, Math.min(14, Math.floor(num("timezoneOffset", 0)))),
-          useExchangeTimezone: bool("useExchangeTimezone", false),
-          exchangeTimezone: str("exchangeTimezone", ""),
-          rangeTransparency: Math.max(0, Math.min(100, Math.floor(num("rangeTransparency", 90)))),
-          showRangeOutline: bool("showRangeOutline", true),
-          showRangeLabel: bool("showRangeLabel", true),
-          dashboard: bool("dashboard", false),
-          advancedDashboard: bool("advancedDashboard", false),
-          dashboardPosition: pos,
-          dashboardSize: size,
-          showSessionDivider: bool("showSessionDivider", false),
-          showDayDivider: bool("showDayDivider", true),
+          sessions: sessionsFromText(sessionsText),
+          historyLimit: 0,
+          timezoneOffset: Math.max(
+            -12,
+            Math.min(14, Math.floor(num("timezoneOffset", SESSIONS_STUDY_DEFAULTS.timezoneOffset))),
+          ),
+          useExchangeTimezone: bool(
+            "useExchangeTimezone",
+            SESSIONS_STUDY_DEFAULTS.useExchangeTimezone,
+          ),
+          exchangeTimezone: str("exchangeTimezone", SESSIONS_STUDY_DEFAULTS.exchangeTimezone),
+          rangeTransparency: Math.max(
+            0,
+            Math.min(100, Math.floor(num("rangeTransparency", SESSIONS_STUDY_DEFAULTS.rangeTransparency))),
+          ),
+          showRangeOutline: true,
+          showRangeLabel: bool("showRangeLabel", SESSIONS_STUDY_DEFAULTS.showRangeLabel),
+          dashboard: false,
+          advancedDashboard: false,
+          dashboardPosition: 0,
+          dashboardSize: 1,
+          showSessionDivider: false,
+          showDayDivider: bool("showDayDivider", SESSIONS_STUDY_DEFAULTS.showDayDivider),
         };
       } catch {
         return null;

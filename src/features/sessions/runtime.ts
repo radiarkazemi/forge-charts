@@ -6,7 +6,17 @@
 import type { EntityId, IChartWidgetApi } from "@/infrastructure/tradingview";
 import type { DrawCmd } from "@/features/pine/orca-runtime";
 
-export const SESSIONS_MAX_SLOTS = 20;
+/** Soft palette — auto-assigned when a session line has no color. */
+export const SESSION_COLOR_PALETTE = [
+  "#ff5d00",
+  "#2157f3",
+  "#e91e63",
+  "#ffeb3b",
+  "#00bcd4",
+  "#9c27b0",
+  "#8bc34a",
+  "#ff9800",
+] as const;
 
 export interface SessionDef {
   readonly enable: boolean;
@@ -64,11 +74,12 @@ export interface SessionsDashboardState {
   readonly rows: readonly SessionDashRow[];
 }
 
+/** Trader startup presets (from LuxAlgo Sessions setup). */
 export const DEFAULT_SESSION_DEFS: SessionDef[] = [
   {
     enable: true,
-    name: "New York",
-    hours: "1300-2200",
+    name: "LQ",
+    hours: "0700-0927",
     range: true,
     trendline: false,
     mean: false,
@@ -78,8 +89,8 @@ export const DEFAULT_SESSION_DEFS: SessionDef[] = [
   },
   {
     enable: true,
-    name: "London",
-    hours: "0700-1600",
+    name: "Open",
+    hours: "0930-1100",
     range: true,
     trendline: false,
     mean: false,
@@ -89,8 +100,8 @@ export const DEFAULT_SESSION_DEFS: SessionDef[] = [
   },
   {
     enable: true,
-    name: "Tokyo",
-    hours: "0000-0900",
+    name: "NY1",
+    hours: "0850-0910",
     range: true,
     trendline: false,
     mean: false,
@@ -100,39 +111,31 @@ export const DEFAULT_SESSION_DEFS: SessionDef[] = [
   },
   {
     enable: true,
-    name: "Sydney",
-    hours: "2100-0600",
+    name: "NY2",
+    hours: "0950-1010",
     range: true,
     trendline: false,
     mean: false,
     vwap: false,
     maxMin: false,
-    color: "#ffeb3b",
+    color: "#00bcd4",
   },
 ];
 
-const EMPTY_SESSION: SessionDef = {
-  enable: false,
-  name: "",
-  hours: "0000-0000",
-  range: true,
-  trendline: false,
-  mean: false,
-  vwap: false,
-  maxMin: false,
-  color: "#89b4fa",
-};
-
-export function defaultSessionSlot(index: number): SessionDef {
-  return DEFAULT_SESSION_DEFS[index] ?? { ...EMPTY_SESSION, name: `Session ${index + 1}` };
-}
+/** One zone per line — add more lines for unlimited sessions. */
+export const DEFAULT_SESSIONS_TEXT = [
+  "LQ 07:00-09:27",
+  "Open 09:30-11:00",
+  "NY1 08:50-09:10",
+  "NY2 09:50-10:10",
+].join("\n");
 
 export const SESSIONS_DEFAULTS = {
-  sessionCount: 4,
+  sessionsText: DEFAULT_SESSIONS_TEXT,
   historyLimit: 0,
   timezoneOffset: 0,
-  useExchangeTimezone: false,
-  exchangeTimezone: "",
+  useExchangeTimezone: true,
+  exchangeTimezone: "America/New_York",
   rangeTransparency: 90,
   showRangeOutline: true,
   showRangeLabel: true,
@@ -142,87 +145,149 @@ export const SESSIONS_DEFAULTS = {
   dashboardSize: 1 as 0 | 1 | 2 | 3 | 4,
   showSessionDivider: false,
   showDayDivider: true,
-  extraSessions: "",
 } as const;
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
 
-/** Parse LuxAlgo-style `HHMM-HHMM` into minutes-from-midnight. */
-export function parseSessionHours(hours: string): { startMin: number; endMin: number } | null {
-  const m = String(hours ?? "")
-    .trim()
-    .match(/^(\d{1,4})\s*-\s*(\d{1,4})$/);
-  if (!m) return null;
-  const toMin = (raw: string) => {
-    const n = Number(raw.padStart(4, "0"));
-    if (!Number.isFinite(n) || n < 0 || n > 2359) return null;
+/** Normalize `07:00`, `700`, `0700` → `0700`. */
+function normalizeTimeToken(raw: string): string | null {
+  const t = raw.trim();
+  const colon = t.match(/^(\d{1,2}):(\d{2})$/);
+  if (colon) {
+    const hh = Number(colon[1]);
+    const mm = Number(colon[2]);
+    if (hh > 23 || mm > 59) return null;
+    return `${String(hh).padStart(2, "0")}${String(mm).padStart(2, "0")}`;
+  }
+  if (/^\d{3,4}$/.test(t)) {
+    const n = Number(t.padStart(4, "0"));
     const hh = Math.floor(n / 100);
     const mm = n % 100;
     if (hh > 23 || mm > 59) return null;
-    return hh * 60 + mm;
+    return `${String(hh).padStart(2, "0")}${String(mm).padStart(2, "0")}`;
+  }
+  return null;
+}
+
+/** Parse `HHMM-HHMM` or `HH:MM-HH:MM` into minutes-from-midnight. */
+export function parseSessionHours(hours: string): { startMin: number; endMin: number } | null {
+  const m = String(hours ?? "")
+    .trim()
+    .match(/^(.+?)\s*-\s*(.+)$/);
+  if (!m) return null;
+  const a = normalizeTimeToken(m[1]!);
+  const b = normalizeTimeToken(m[2]!);
+  if (!a || !b) return null;
+  const toMin = (hhmm: string) => {
+    const n = Number(hhmm);
+    return Math.floor(n / 100) * 60 + (n % 100);
   };
-  const startMin = toMin(m[1]!);
-  const endMin = toMin(m[2]!);
-  if (startMin == null || endMin == null) return null;
-  return { startMin, endMin };
+  return { startMin: toMin(a), endMin: toMin(b) };
+}
+
+function normalizeHoursKey(hours: string): string | null {
+  const parsed = parseSessionHours(hours);
+  if (!parsed) return null;
+  const fmt = (mins: number) => {
+    const hh = Math.floor(mins / 60);
+    const mm = mins % 60;
+    return `${String(hh).padStart(2, "0")}${String(mm).padStart(2, "0")}`;
+  };
+  return `${fmt(parsed.startMin)}-${fmt(parsed.endMin)}`;
+}
+
+function parseHexColor(raw: string | undefined, fallback: string): string {
+  const v = (raw ?? "").trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(v)) return v;
+  if (/^[0-9a-fA-F]{6}$/.test(v)) return `#${v}`;
+  return fallback;
 }
 
 /**
- * Extra sessions DSL (one per line, unlimited):
- *   Name|HHMM-HHMM|#RRGGBB|range|trendline|mean|vwap|maxmin
- * Flags are 0/1 or true/false. Missing flags default to range=1 others=0.
+ * Trader-friendly session list (unlimited — one zone per line):
+ *   LQ 07:00-09:27
+ *   Open 09:30-11:00 #2157f3
+ *   NY1|0850-0910|#e91e63
  */
-export function parseExtraSessions(text: string): SessionDef[] {
+export function parseSessionsText(text: string): SessionDef[] {
   const out: SessionDef[] = [];
   for (const line of String(text ?? "").split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
-    const parts = trimmed.split("|").map((p) => p.trim());
-    if (parts.length < 2) continue;
-    const name = parts[0] || `Session ${out.length + 1}`;
-    const hours = parts[1] || "0000-0000";
-    if (!parseSessionHours(hours)) continue;
-    const color = /^#?[0-9a-fA-F]{6}$/.test(parts[2] ?? "")
-      ? parts[2]!.startsWith("#")
-        ? parts[2]!
-        : `#${parts[2]!}`
-      : "#89b4fa";
-    const flag = (i: number, fallback: boolean) => {
-      const v = (parts[i] ?? "").toLowerCase();
-      if (v === "" || v === undefined) return fallback;
-      return v === "1" || v === "true" || v === "yes" || v === "on";
-    };
+
+    // Pipe form: Name|HHMM-HHMM|#hex|range|trend|mean|vwap|maxmin
+    if (trimmed.includes("|")) {
+      const parts = trimmed.split("|").map((p) => p.trim());
+      if (parts.length < 2) continue;
+      const hours = normalizeHoursKey(parts[1] ?? "");
+      if (!hours) continue;
+      const color = parseHexColor(
+        parts[2],
+        SESSION_COLOR_PALETTE[out.length % SESSION_COLOR_PALETTE.length]!,
+      );
+      const flag = (i: number, fallback: boolean) => {
+        const v = (parts[i] ?? "").toLowerCase();
+        if (!v) return fallback;
+        return v === "1" || v === "true" || v === "yes" || v === "on";
+      };
+      out.push({
+        enable: true,
+        name: parts[0] || `S${out.length + 1}`,
+        hours,
+        color,
+        range: flag(3, true),
+        trendline: flag(4, false),
+        mean: flag(5, false),
+        vwap: flag(6, false),
+        maxMin: flag(7, false),
+      });
+      continue;
+    }
+
+    // Simple form: Name HH:MM-HH:MM [#hex]
+    const simple = trimmed.match(
+      /^(\S+)\s+(\d{1,2}:?\d{2}\s*-\s*\d{1,2}:?\d{2})(?:\s+(#[0-9a-fA-F]{6}|[0-9a-fA-F]{6}))?\s*$/i,
+    );
+    if (!simple) continue;
+    const hours = normalizeHoursKey(simple[2]!);
+    if (!hours) continue;
     out.push({
       enable: true,
-      name,
+      name: simple[1]!,
       hours,
-      color,
-      range: flag(3, true),
-      trendline: flag(4, false),
-      mean: flag(5, false),
-      vwap: flag(6, false),
-      maxMin: flag(7, false),
+      color: parseHexColor(
+        simple[3],
+        SESSION_COLOR_PALETTE[out.length % SESSION_COLOR_PALETTE.length]!,
+      ),
+      range: true,
+      trendline: false,
+      mean: false,
+      vwap: false,
+      maxMin: false,
     });
   }
   return out;
 }
 
+/** @deprecated alias — use parseSessionsText */
+export function parseExtraSessions(text: string): SessionDef[] {
+  return parseSessionsText(text);
+}
+
 export function mergeSessionDefs(
-  slots: readonly SessionDef[],
-  sessionCount: number,
+  _slots: readonly SessionDef[],
+  _sessionCount: number,
   extraText: string,
 ): SessionDef[] {
-  const n = Math.max(0, Math.floor(sessionCount));
-  const fromSlots = slots.slice(0, Math.min(n, slots.length)).filter((s) => s.enable && s.name.trim());
-  const extras = parseExtraSessions(extraText);
-  // If user asks for more slots than metainfo provides, extras fill the rest.
-  return [...fromSlots, ...extras];
+  const parsed = parseSessionsText(extraText);
+  return parsed.length > 0 ? parsed : [...DEFAULT_SESSION_DEFS];
 }
 
 function tzOffsetSeconds(utcSec: number, opts: SessionsOptions): number {
-  if (opts.useExchangeTimezone && opts.exchangeTimezone.trim()) {
+  if (opts.useExchangeTimezone) {
+    const tz = opts.exchangeTimezone.trim() || "America/New_York";
     try {
-      return ianaOffsetSeconds(opts.exchangeTimezone.trim(), utcSec);
+      return ianaOffsetSeconds(tz, utcSec);
     } catch {
       /* fall through */
     }
