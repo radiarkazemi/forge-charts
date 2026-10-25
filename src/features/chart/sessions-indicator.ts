@@ -156,7 +156,7 @@ export function createSessionsIndicator(PineJS: {
         },
         {
           id: "timezoneOffset",
-          name: "Timezone · UTC (+/-)",
+          name: "Timezone · UTC (+/-)  [default New York −4]",
           defval: SESSIONS_STUDY_DEFAULTS.timezoneOffset,
           type: "integer",
           min: -12,
@@ -170,7 +170,7 @@ export function createSessionsIndicator(PineJS: {
         },
         {
           id: "exchangeTimezone",
-          name: "Timezone · IANA (when Exchange on)",
+          name: "Timezone · IANA (only if Exchange on)",
           defval: SESSIONS_STUDY_DEFAULTS.exchangeTimezone,
           type: "text",
         },

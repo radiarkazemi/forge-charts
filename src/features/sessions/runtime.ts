@@ -6,12 +6,15 @@
 import type { EntityId, IChartWidgetApi } from "@/infrastructure/tradingview";
 import type { DrawCmd } from "@/features/pine/orca-runtime";
 
-/** Soft palette — auto-assigned when a session line has no color. */
+/**
+ * LuxAlgo Sessions style colors (New York / London / Tokyo / Sydney).
+ * Soft palette — auto-assigned when a session line has no color.
+ */
 export const SESSION_COLOR_PALETTE = [
-  "#ff5d00",
-  "#2157f3",
-  "#e91e63",
-  "#ffeb3b",
+  "#ff5d00", // New York — orange
+  "#2157f3", // London — blue
+  "#e91e63", // Tokyo — pink
+  "#ffeb3b", // Sydney — yellow
   "#00bcd4",
   "#9c27b0",
   "#8bc34a",
@@ -74,7 +77,11 @@ export interface SessionsDashboardState {
   readonly rows: readonly SessionDashRow[];
 }
 
-/** Trader startup presets (from LuxAlgo Sessions setup). */
+/**
+ * Trader startup presets (from LuxAlgo Sessions setup).
+ * Colors match LuxAlgo Style defaults: NY orange, London blue, Tokyo pink, Sydney yellow.
+ * Hours are interpreted in New York time (UTC−4).
+ */
 export const DEFAULT_SESSION_DEFS: SessionDef[] = [
   {
     enable: true,
@@ -85,7 +92,7 @@ export const DEFAULT_SESSION_DEFS: SessionDef[] = [
     mean: false,
     vwap: false,
     maxMin: false,
-    color: "#ff5d00",
+    color: "#ff5d00", // New York
   },
   {
     enable: true,
@@ -96,7 +103,7 @@ export const DEFAULT_SESSION_DEFS: SessionDef[] = [
     mean: false,
     vwap: false,
     maxMin: false,
-    color: "#2157f3",
+    color: "#2157f3", // London
   },
   {
     enable: true,
@@ -107,7 +114,7 @@ export const DEFAULT_SESSION_DEFS: SessionDef[] = [
     mean: false,
     vwap: false,
     maxMin: false,
-    color: "#e91e63",
+    color: "#e91e63", // Tokyo
   },
   {
     enable: true,
@@ -118,23 +125,24 @@ export const DEFAULT_SESSION_DEFS: SessionDef[] = [
     mean: false,
     vwap: false,
     maxMin: false,
-    color: "#00bcd4",
+    color: "#ffeb3b", // Sydney
   },
 ];
 
 /** One zone per line — add more lines for unlimited sessions. */
 export const DEFAULT_SESSIONS_TEXT = [
-  "LQ 07:00-09:27",
-  "Open 09:30-11:00",
-  "NY1 08:50-09:10",
-  "NY2 09:50-10:10",
+  "LQ 07:00-09:27 #ff5d00",
+  "Open 09:30-11:00 #2157f3",
+  "NY1 08:50-09:10 #e91e63",
+  "NY2 09:50-10:10 #ffeb3b",
 ].join("\n");
 
 export const SESSIONS_DEFAULTS = {
   sessionsText: DEFAULT_SESSIONS_TEXT,
   historyLimit: 0,
-  timezoneOffset: 0,
-  useExchangeTimezone: true,
+  /** Fixed New York offset (UTC−4). Hours below are NY wall-clock. */
+  timezoneOffset: -4,
+  useExchangeTimezone: false,
   exchangeTimezone: "America/New_York",
   /** LuxAlgo default is 90; CL rectangles need a bit more fill to stay visible. */
   rangeTransparency: 80,
