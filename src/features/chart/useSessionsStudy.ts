@@ -1,5 +1,5 @@
 /**
- * Watches Indicators “Forge Sessions” and paints session zones.
+ * Watches Indicators “Forge Sessions” and paints LuxAlgo-style session zones.
  */
 
 import { useEffect, useRef } from "react";
@@ -9,13 +9,15 @@ import type { EntityId } from "@/infrastructure/tradingview";
 import { barsFromChartExport } from "@/features/pine/orca-runtime";
 import {
   computeSessions,
-  parseSessionsText,
+  mergeSessionDefs,
   paintSessionsOnChart,
   publishSessionsDashboard,
-  DEFAULT_SESSION_DEFS,
   type SessionsOptions,
 } from "@/features/sessions/runtime";
-import { SESSIONS_STUDY_DEFAULTS } from "./sessions-indicator";
+import {
+  readSessionSlotsFromMap,
+  SESSIONS_STUDY_DEFAULTS,
+} from "./sessions-indicator";
 
 const MAX_BARS = 8_000;
 const STUDY_DEBOUNCE_MS = 450;
@@ -28,26 +30,21 @@ function fingerprintCmds(cmds: readonly { kind: string; t1: number; p1: number }
   return `${cmds.length}|${[...head, ...tail].map((c) => `${c.kind}:${c.t1}:${c.p1}`).join(";")}`;
 }
 
-function sessionsFromText(text: string) {
-  const parsed = parseSessionsText(text);
-  return parsed.length > 0 ? parsed : [...DEFAULT_SESSION_DEFS];
-}
-
 function defaultOpts(): SessionsOptions {
   return {
-    sessions: sessionsFromText(SESSIONS_STUDY_DEFAULTS.sessionsText),
+    sessions: mergeSessionDefs(readSessionSlotsFromMap(new Map()), 4, ""),
     historyLimit: 0,
     timezoneOffset: SESSIONS_STUDY_DEFAULTS.timezoneOffset,
     useExchangeTimezone: SESSIONS_STUDY_DEFAULTS.useExchangeTimezone,
     exchangeTimezone: SESSIONS_STUDY_DEFAULTS.exchangeTimezone,
     rangeTransparency: SESSIONS_STUDY_DEFAULTS.rangeTransparency,
-    showRangeOutline: true,
+    showRangeOutline: SESSIONS_STUDY_DEFAULTS.showRangeOutline,
     showRangeLabel: SESSIONS_STUDY_DEFAULTS.showRangeLabel,
-    dashboard: false,
-    advancedDashboard: false,
-    dashboardPosition: 0,
-    dashboardSize: 1,
-    showSessionDivider: false,
+    dashboard: SESSIONS_STUDY_DEFAULTS.dashboard,
+    advancedDashboard: SESSIONS_STUDY_DEFAULTS.advancedDashboard,
+    dashboardPosition: SESSIONS_STUDY_DEFAULTS.dashboardPosition as 0 | 1 | 2,
+    dashboardSize: SESSIONS_STUDY_DEFAULTS.dashboardSize as 0 | 1 | 2 | 3 | 4,
+    showSessionDivider: SESSIONS_STUDY_DEFAULTS.showSessionDivider,
     showDayDivider: SESSIONS_STUDY_DEFAULTS.showDayDivider,
   };
 }
@@ -94,7 +91,8 @@ export function useSessionsStudy(enabled = true): void {
             return (
               /forge\s*sessions/i.test(name) ||
               /ForgeSessions@/i.test(name) ||
-              /sessions\s*\[luxalgo\]/i.test(name)
+              /sessions\s*\[luxalgo\]/i.test(name) ||
+              /luxalgo\s*-\s*sessions/i.test(name)
             );
           })
           .map((s: { id?: string | EntityId }) => s.id as EntityId);
@@ -123,14 +121,25 @@ export function useSessionsStudy(enabled = true): void {
           return typeof v === "boolean" ? v : fallback;
         };
 
-        // Prefer new simple field; fall back to legacy extraSessions if present.
-        const sessionsText = str(
-          "sessionsText",
-          str("extraSessions", SESSIONS_STUDY_DEFAULTS.sessionsText),
+        const slots = readSessionSlotsFromMap(map);
+        // Support both Extra sessions and legacy sessionsText.
+        const extra = str("extraSessions", str("sessionsText", ""));
+        const pos = Math.max(0, Math.min(2, Math.floor(num("dashboardPosition", 0)))) as 0 | 1 | 2;
+        const size = Math.max(0, Math.min(4, Math.floor(num("dashboardSize", 1)))) as
+          | 0
+          | 1
+          | 2
+          | 3
+          | 4;
+
+        const sessions = mergeSessionDefs(slots, 4, extra);
+        console.info(
+          `[forge-sessions] study=${String(studyId)} zones=${sessions.length}`,
+          sessions.map((s) => `${s.name}:${s.hours}`).join(", "),
         );
 
         return {
-          sessions: sessionsFromText(sessionsText),
+          sessions,
           historyLimit: 0,
           timezoneOffset: Math.max(
             -12,
@@ -143,18 +152,28 @@ export function useSessionsStudy(enabled = true): void {
           exchangeTimezone: str("exchangeTimezone", SESSIONS_STUDY_DEFAULTS.exchangeTimezone),
           rangeTransparency: Math.max(
             0,
-            Math.min(100, Math.floor(num("rangeTransparency", SESSIONS_STUDY_DEFAULTS.rangeTransparency))),
+            Math.min(
+              100,
+              Math.floor(num("rangeTransparency", SESSIONS_STUDY_DEFAULTS.rangeTransparency)),
+            ),
           ),
-          showRangeOutline: true,
+          showRangeOutline: bool("showRangeOutline", SESSIONS_STUDY_DEFAULTS.showRangeOutline),
           showRangeLabel: bool("showRangeLabel", SESSIONS_STUDY_DEFAULTS.showRangeLabel),
-          dashboard: false,
-          advancedDashboard: false,
-          dashboardPosition: 0,
-          dashboardSize: 1,
-          showSessionDivider: false,
+          dashboard: bool("dashboard", SESSIONS_STUDY_DEFAULTS.dashboard),
+          advancedDashboard: bool(
+            "advancedDashboard",
+            SESSIONS_STUDY_DEFAULTS.advancedDashboard,
+          ),
+          dashboardPosition: pos,
+          dashboardSize: size,
+          showSessionDivider: bool(
+            "showSessionDivider",
+            SESSIONS_STUDY_DEFAULTS.showSessionDivider,
+          ),
           showDayDivider: bool("showDayDivider", SESSIONS_STUDY_DEFAULTS.showDayDivider),
         };
-      } catch {
+      } catch (err) {
+        console.warn("[forge-sessions] readOptions failed", err);
         return null;
       }
     };
@@ -205,11 +224,18 @@ export function useSessionsStudy(enabled = true): void {
         }));
         if (bars.length > MAX_BARS) bars = bars.slice(bars.length - MAX_BARS);
         if (bars.length < 5) {
+          console.warn("[forge-sessions] not enough bars", bars.length);
           if (entityIdsRef.current.length === 0) lastKeyRef.current = "";
           return;
         }
 
         const { cmds, dashboard } = computeSessions(bars, opts);
+        const rects = cmds.filter((c) => c.kind === "rect").length;
+        console.info(
+          `[forge-sessions] bars=${bars.length} cmds=${cmds.length} rects=${rects}`,
+          `t=${bars[0]?.time}..${bars[bars.length - 1]?.time}`,
+        );
+
         const fp = fingerprintCmds(cmds);
         if (!force && fp === lastFpRef.current && lastKeyRef.current === key) {
           publishSessionsDashboard(dashboard);
@@ -237,6 +263,7 @@ export function useSessionsStudy(enabled = true): void {
         lastKeyRef.current = key;
         lastFpRef.current = fp;
         publishSessionsDashboard(dashboard);
+        console.info(`[forge-sessions] painted ${ids.length} shapes`);
         for (const id of prev) {
           try {
             chart.removeEntity(id);

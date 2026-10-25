@@ -136,7 +136,8 @@ export const SESSIONS_DEFAULTS = {
   timezoneOffset: 0,
   useExchangeTimezone: true,
   exchangeTimezone: "America/New_York",
-  rangeTransparency: 90,
+  /** LuxAlgo default is 90; CL rectangles need a bit more fill to stay visible. */
+  rangeTransparency: 80,
   showRangeOutline: true,
   showRangeLabel: true,
   dashboard: false,
@@ -274,13 +275,16 @@ export function parseExtraSessions(text: string): SessionDef[] {
   return parseSessionsText(text);
 }
 
+/** Merge SESSION A–D slots with unlimited Extra sessions lines. */
 export function mergeSessionDefs(
-  _slots: readonly SessionDef[],
+  slots: readonly SessionDef[],
   _sessionCount: number,
   extraText: string,
 ): SessionDef[] {
-  const parsed = parseSessionsText(extraText);
-  return parsed.length > 0 ? parsed : [...DEFAULT_SESSION_DEFS];
+  const fromSlots = slots.filter((s) => s.enable && s.name.trim() && parseSessionHours(s.hours));
+  const extras = parseSessionsText(extraText);
+  const merged = [...fromSlots, ...extras];
+  return merged.length > 0 ? merged : [...DEFAULT_SESSION_DEFS];
 }
 
 function tzOffsetSeconds(utcSec: number, opts: SessionsOptions): number {
@@ -442,23 +446,31 @@ function pushRange(
   opts: SessionsOptions,
 ): void {
   if (!def.range) return;
+  // CL rectangles reject zero-width time spans.
+  const t2 = endTime > run.startTime ? endTime : run.startTime + 60;
+  const top = Math.max(run.high, run.low);
+  const bot = Math.min(run.high, run.low);
+  // Avoid degenerate price boxes (flat tick) — pad a tiny amount so CL accepts.
+  const pad = Math.max(Math.abs(top) * 1e-6, 1e-8);
+  const p1 = top === bot ? top + pad : top;
+  const p2 = top === bot ? bot - pad : bot;
   cmds.push({
     kind: "rect",
     t1: run.startTime,
-    p1: run.high,
-    t2: endTime,
-    p2: run.low,
+    p1,
+    t2,
+    p2,
     color: def.color,
     fill: withAlpha(def.color, opts.rangeTransparency),
     style: opts.showRangeOutline ? "dotted" : "solid",
-    width: opts.showRangeOutline ? 1 : 1,
+    width: opts.showRangeOutline ? 2 : 1,
   });
   if (opts.showRangeLabel) {
-    const mid = Math.floor((run.startTime + endTime) / 2);
+    const mid = Math.floor((run.startTime + t2) / 2);
     cmds.push({
       kind: "label",
       t1: mid,
-      p1: run.high,
+      p1,
       color: def.color,
       text: def.name,
     });
@@ -532,13 +544,16 @@ export function computeSessions(
   const completedBoxes: DrawCmd[][] = defs.map(() => []);
 
   let prevDay = -1;
+  const lastBarTime = bars[bars.length - 1]!.time;
+  // Only draw ~3 weeks of day dividers — older ones clutter and steal paint budget.
+  const dayDividerFrom = lastBarTime - 21 * 86_400;
 
   for (let i = 0; i < bars.length; i += 1) {
     const bar = bars[i]!;
     const off = tzOffsetSeconds(bar.time, opts);
     const day = localWeekday(bar.time, off);
 
-    if (opts.showDayDivider) {
+    if (opts.showDayDivider && bar.time >= dayDividerFrom) {
       if (prevDay >= 0 && day !== prevDay) {
         cmds.push({
           kind: "vline",
@@ -556,6 +571,8 @@ export function computeSessions(
           text: DAY_NAMES[day] ?? "",
         });
       }
+      prevDay = day;
+    } else if (opts.showDayDivider) {
       prevDay = day;
     }
 
@@ -751,7 +768,7 @@ function parseRgba(fill: string | undefined, stroke: string): {
 
 const linestyleMap = { solid: 0, dotted: 1, dashed: 2 } as const;
 
-/** Paint session drawings — high cap so unlimited zones stay visible. */
+/** Paint session drawings — rectangles first so zones always win the budget. */
 export async function paintSessionsOnChart(
   chart: IChartWidgetApi,
   cmds: readonly DrawCmd[],
@@ -759,7 +776,14 @@ export async function paintSessionsOnChart(
 ): Promise<EntityId[]> {
   const ids: EntityId[] = [];
   const maxDrawings = options?.maxDrawings ?? 2_000;
-  const limited = cmds.length > maxDrawings ? cmds.slice(cmds.length - maxDrawings) : cmds;
+  // Prefer range boxes / overlays over day-divider noise.
+  const ordered = [
+    ...cmds.filter((c) => c.kind === "rect"),
+    ...cmds.filter((c) => c.kind === "line"),
+    ...cmds.filter((c) => c.kind === "label" || c.kind === "dot"),
+    ...cmds.filter((c) => c.kind === "vline"),
+  ];
+  const limited = ordered.length > maxDrawings ? ordered.slice(0, maxDrawings) : ordered;
   const ownerStudyId = options?.ownerStudyId;
 
   for (let i = 0; i < limited.length; i += 1) {
@@ -808,7 +832,9 @@ export async function paintSessionsOnChart(
         );
         if (id) ids.push(id);
       } else if (cmd.kind === "rect" && cmd.t2 != null && cmd.p2 != null) {
+        // Match Dealing Ranges paint path (known-good CL rectangle overrides).
         const { r, g, b, a } = parseRgba(cmd.fill, stroke);
+        const alpha = Math.max(0.12, Math.min(0.45, a > 0 ? a : 0.2));
         const id = await chart.createMultipointShape(
           [
             { time: cmd.t1 as never, price: cmd.p1 },
@@ -819,18 +845,17 @@ export async function paintSessionsOnChart(
             shape: "rectangle",
             overrides: {
               color: stroke,
-              backgroundColor: `rgba(${r}, ${g}, ${b}, ${a})`,
-              fillBackground: a > 0.001,
-              linewidth: cmd.width && cmd.width > 0 ? cmd.width : 1,
+              backgroundColor: `rgba(${r}, ${g}, ${b}, ${alpha})`,
+              fillBackground: true,
+              linewidth: optsShowOutline(cmd) ? 2 : 1,
               linestyle: linestyleMap[cmd.style ?? "dotted"],
-              transparency: Math.round((1 - a) * 100),
+              transparency: Math.round((1 - alpha) * 100),
             },
           },
         );
         if (id) ids.push(id);
       } else if (cmd.kind === "label" || cmd.kind === "dot") {
-        const text =
-          cmd.kind === "dot" ? "·" : (cmd.text ?? "").trim() || "·";
+        const text = cmd.kind === "dot" ? "·" : (cmd.text ?? "").trim() || "·";
         const id = await chart.createShape(
           { time: cmd.t1 as never, price: cmd.p1 },
           {
@@ -839,7 +864,7 @@ export async function paintSessionsOnChart(
             text,
             overrides: {
               color: stroke,
-              fontsize: cmd.kind === "dot" ? 10 : 11,
+              fontsize: cmd.kind === "dot" ? 10 : 12,
               fillBackground: false,
               drawBorder: false,
               bold: false,
@@ -851,13 +876,17 @@ export async function paintSessionsOnChart(
     } catch {
       /* skip bad draw */
     }
-    if (i > 0 && i % 6 === 0) {
+    if (i > 0 && i % 4 === 0) {
       await new Promise<void>((r) => {
         window.setTimeout(r, 0);
       });
     }
   }
   return ids;
+}
+
+function optsShowOutline(cmd: DrawCmd): boolean {
+  return (cmd.width ?? 1) > 0 && cmd.style !== "solid";
 }
 
 /* ── Dashboard pub/sub for React overlay ─────────────────────────── */
