@@ -11,13 +11,13 @@ import type { DrawCmd } from "@/features/pine/orca-runtime";
  * Soft palette — auto-assigned when a session line has no color.
  */
 export const SESSION_COLOR_PALETTE = [
-  "#ff5d00", // New York — orange
-  "#2157f3", // London — blue
-  "#e91e63", // Tokyo — pink
-  "#ffeb3b", // Sydney — yellow
+  "#ff5d00", // LQ — soft orange
+  "#43a047", // Open — green (sample)
+  "#e53935", // NY1 — soft red
+  "#e53935", // NY2 — soft red
+  "#2157f3",
   "#00bcd4",
   "#9c27b0",
-  "#8bc34a",
   "#ff9800",
 ] as const;
 
@@ -94,7 +94,7 @@ export const DEFAULT_SESSION_DEFS: SessionDef[] = [
     mean: false,
     vwap: false,
     maxMin: false,
-    color: "#ff5d00", // New York
+    color: "#ff5d00",
   },
   {
     enable: true,
@@ -105,7 +105,7 @@ export const DEFAULT_SESSION_DEFS: SessionDef[] = [
     mean: false,
     vwap: false,
     maxMin: false,
-    color: "#2157f3", // London
+    color: "#43a047",
   },
   {
     enable: true,
@@ -116,7 +116,7 @@ export const DEFAULT_SESSION_DEFS: SessionDef[] = [
     mean: false,
     vwap: false,
     maxMin: false,
-    color: "#e91e63", // Tokyo
+    color: "#e53935",
   },
   {
     enable: true,
@@ -127,16 +127,16 @@ export const DEFAULT_SESSION_DEFS: SessionDef[] = [
     mean: false,
     vwap: false,
     maxMin: false,
-    color: "#ffeb3b", // Sydney
+    color: "#e53935",
   },
 ];
 
 /** One zone per line — add more lines for unlimited sessions. */
 export const DEFAULT_SESSIONS_TEXT = [
   "LQ 07:00-09:27 #ff5d00",
-  "Open 09:30-11:00 #2157f3",
-  "NY1 08:50-09:10 #e91e63",
-  "NY2 09:50-10:10 #ffeb3b",
+  "Open 09:30-11:00 #43a047",
+  "NY1 08:50-09:10 #e53935",
+  "NY2 09:50-10:10 #e53935",
 ].join("\n");
 
 export const SESSIONS_DEFAULTS = {
@@ -146,8 +146,8 @@ export const SESSIONS_DEFAULTS = {
   timezoneOffset: -4,
   useExchangeTimezone: false,
   exchangeTimezone: "America/New_York",
-  /** LuxAlgo default is 90; CL rectangles need a bit more fill to stay visible. */
-  rangeTransparency: 80,
+  /** Soft sample look — high transparency so candles stay readable. */
+  rangeTransparency: 88,
   showRangeOutline: true,
   showRangeLabel: true,
   dashboard: false,
@@ -155,7 +155,8 @@ export const SESSIONS_DEFAULTS = {
   dashboardPosition: 0 as 0 | 1 | 2,
   dashboardSize: 1 as 0 | 1 | 2 | 3 | 4,
   showSessionDivider: false,
-  showDayDivider: true,
+  /** Off by default — day labels clutter the sample-style chart. */
+  showDayDivider: false,
 } as const;
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
@@ -476,15 +477,19 @@ function pushRange(
     p2,
     color: def.color,
     fill: withAlpha(def.color, transparency),
+    // Thin dotted outline — matches LuxAlgo / sample “smooth” boxes.
     style: opts.showRangeOutline ? "dotted" : "solid",
-    width: opts.showRangeOutline ? 2 : 1,
+    width: 1,
   });
   if (opts.showRangeLabel) {
     const mid = Math.floor((run.startTime + t2) / 2);
+    // Sit the label just above the box top (sample places names outside the fill).
+    const span = Math.abs(p1 - p2);
+    const pad = Math.max(span * 0.04, Math.abs(p1) * 2e-5, 1e-6);
     cmds.push({
       kind: "label",
       t1: mid,
-      p1,
+      p1: Math.max(p1, p2) + pad,
       color: def.color,
       text: def.name,
     });
@@ -849,13 +854,12 @@ export async function paintSessionsOnChart(
         );
         if (id) ids.push(id);
       } else if (cmd.kind === "rect" && cmd.t2 != null && cmd.p2 != null) {
-        // CL rectangles need solid hex + transparency (0–100). rgba fills were
-        // ignored so Style colors only tinted ownerStudyId labels.
+        // CL rectangles: solid hex + transparency. Soft fill + thin dotted border.
         const fillHex = clColor(cmd.fill ?? "", stroke);
         const { a } = parseRgba(cmd.fill, stroke);
         const transparency = Math.max(
           0,
-          Math.min(100, Number.isFinite(a) ? Math.round((1 - a) * 100) : 80),
+          Math.min(100, Number.isFinite(a) ? Math.round((1 - a) * 100) : 88),
         );
         const id = await chart.createMultipointShape(
           [
@@ -866,12 +870,11 @@ export async function paintSessionsOnChart(
             ...common,
             shape: "rectangle",
             overrides: {
-              // Border + fill both follow Style color (not label-only).
               color: fillHex,
               linecolor: fillHex,
               backgroundColor: fillHex,
               fillBackground: true,
-              linewidth: optsShowOutline(cmd) ? 2 : 1,
+              linewidth: 1,
               linestyle: linestyleMap[cmd.style ?? "dotted"],
               transparency,
               filled: true,
@@ -889,10 +892,12 @@ export async function paintSessionsOnChart(
             text,
             overrides: {
               color: stroke,
-              fontsize: cmd.kind === "dot" ? 10 : 12,
+              fontsize: cmd.kind === "dot" ? 10 : 11,
               fillBackground: false,
               drawBorder: false,
               bold: false,
+              horzLabelsAlign: "center",
+              vertLabelsAlign: "bottom",
             },
           },
         );
@@ -908,10 +913,6 @@ export async function paintSessionsOnChart(
     }
   }
   return ids;
-}
-
-function optsShowOutline(cmd: DrawCmd): boolean {
-  return (cmd.width ?? 1) > 0 && cmd.style !== "solid";
 }
 
 /* ── Dashboard pub/sub for React overlay ─────────────────────────── */

@@ -25,8 +25,11 @@ import {
 } from "./sessions-indicator";
 
 const MAX_BARS = 8_000;
-const STUDY_DEBOUNCE_MS = 450;
-const PRESENCE_POLL_MS = 6_000;
+const STUDY_DEBOUNCE_MS = 280;
+/** Presence / cleanup when study removed. */
+const PRESENCE_POLL_MS = 4_000;
+/** Soft refresh so forming session boxes track live bars (fixes “stuck”). */
+const LIVE_REFRESH_MS = 2_000;
 
 function fingerprintCmds(
   cmds: readonly { kind: string; t1: number; p1: number; color?: string; fill?: string }[],
@@ -135,8 +138,13 @@ export function useSessionsStudy(enabled = true): void {
 
     let cancelled = false;
     let studyTimer: number | undefined;
+    // Symbol/interval change must not reuse stale boxes from the previous series.
+    genRef.current += 1;
+    clearDrawingsSafe();
+    lastKeyRef.current = "";
+    lastFpRef.current = "";
 
-    const clearDrawings = () => {
+    function clearDrawingsSafe(): void {
       const ids = entityIdsRef.current;
       entityIdsRef.current = [];
       for (const id of ids) {
@@ -147,7 +155,9 @@ export function useSessionsStudy(enabled = true): void {
         }
       }
       publishSessionsDashboard(null);
-    };
+    }
+
+    const clearDrawings = clearDrawingsSafe;
 
     const findStudyIds = (): EntityId[] => {
       try {
@@ -303,10 +313,7 @@ export function useSessionsStudy(enabled = true): void {
 
       const studyId = studyIds[0]!;
       const opts = readOptions(studyId) ?? defaultOpts();
-      const key = JSON.stringify({ symbol, interval, opts, studies: studyIds });
-      if (!force && key === lastKeyRef.current && entityIdsRef.current.length > 0) {
-        return;
-      }
+      const optsKey = JSON.stringify({ symbol, interval, opts, studies: studyIds });
 
       const myGen = ++genRef.current;
       busyRef.current = true;
@@ -336,11 +343,15 @@ export function useSessionsStudy(enabled = true): void {
           return;
         }
 
+        // Tip changes as the active session extends — must refresh or boxes “stick”.
+        const tip = bars[bars.length - 1]!;
+        const key = `${optsKey}|${tip.time}:${tip.high}:${tip.low}:${tip.close}`;
+
         const { cmds, dashboard } = computeSessions(bars, opts);
         const rects = cmds.filter((c) => c.kind === "rect").length;
         console.info(
           `[forge-sessions] bars=${bars.length} cmds=${cmds.length} rects=${rects}`,
-          `t=${bars[0]?.time}..${bars[bars.length - 1]?.time}`,
+          `t=${bars[0]?.time}..${tip.time}`,
         );
 
         const fp = fingerprintCmds(cmds);
@@ -380,6 +391,8 @@ export function useSessionsStudy(enabled = true): void {
         }
       } catch (err) {
         console.warn("[forge-sessions] paint failed", err);
+        // Allow the next poll to retry instead of looking permanently stuck.
+        lastKeyRef.current = "";
       } finally {
         busyRef.current = false;
         if (!cancelled && pendingRef.current) {
@@ -429,9 +442,10 @@ export function useSessionsStudy(enabled = true): void {
     } catch {
       kickoff();
     }
-    const kickoffTimer = window.setTimeout(kickoff, 1_200);
+    const kickoffTimer = window.setTimeout(kickoff, 800);
+    const kickoffTimer2 = window.setTimeout(kickoff, 2_400);
 
-    const poll = window.setInterval(() => {
+    const presencePoll = window.setInterval(() => {
       if (cancelled || busyRef.current) return;
       const ids = findStudyIds();
       if (ids.length === 0) {
@@ -446,9 +460,26 @@ export function useSessionsStudy(enabled = true): void {
       if (lastKeyRef.current === "") void repaint(false);
     }, PRESENCE_POLL_MS);
 
+    // Live tip refresh — forming LQ/Open/NY boxes track new highs/lows.
+    const livePoll = window.setInterval(() => {
+      if (cancelled || busyRef.current) return;
+      if (findStudyIds().length === 0) return;
+      void repaint(false);
+    }, LIVE_REFRESH_MS);
+
+    const onDataLoaded = () => {
+      if (findStudyIds().length === 0) return;
+      scheduleRepaint();
+    };
+
     try {
       widget.subscribe("study_event", onStudyEvent as never);
       widget.subscribe("study_properties_changed", onStudyProperties as never);
+    } catch {
+      /* ignore */
+    }
+    try {
+      widget.activeChart()?.onDataLoaded()?.subscribe(null, onDataLoaded);
     } catch {
       /* ignore */
     }
@@ -458,10 +489,17 @@ export function useSessionsStudy(enabled = true): void {
       genRef.current += 1;
       window.clearTimeout(studyTimer);
       window.clearTimeout(kickoffTimer);
-      window.clearInterval(poll);
+      window.clearTimeout(kickoffTimer2);
+      window.clearInterval(presencePoll);
+      window.clearInterval(livePoll);
       try {
         widget.unsubscribe("study_event", onStudyEvent as never);
         widget.unsubscribe("study_properties_changed", onStudyProperties as never);
+      } catch {
+        /* ignore */
+      }
+      try {
+        widget.activeChart()?.onDataLoaded()?.unsubscribe(null, onDataLoaded);
       } catch {
         /* ignore */
       }
