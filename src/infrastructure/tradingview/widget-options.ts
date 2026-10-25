@@ -292,7 +292,8 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
     save_load_adapter: input.saveLoadAdapter,
     // Only the primary pane restores autosaved single-chart state.
     saved_data: secondary ? undefined : input.savedState,
-    auto_save_delay: 5,
+    // Persist indicators / drawings quickly so a hard refresh does not wipe them.
+    auto_save_delay: 1,
     charts_storage_api_version: "1.1",
     client_id: "forge-charts",
     user_id: secondary ? `local-pane-${input.symbol}` : "local",

@@ -249,7 +249,36 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         unmountSymbolSearchReset?.();
         unmountSymbolSearchReset = mountSymbolSearchExchangeReset(container);
         if (isPrimary) {
-          widget.subscribe("onAutoSaveNeeded", () => widget?.save((state) => storage.set(autosaveKey, state)));
+          const persistChart = () => {
+            try {
+              widget?.save((state) => storage.set(autosaveKey, state));
+            } catch {
+              /* ignore */
+            }
+          };
+          widget.subscribe("onAutoSaveNeeded", persistChart);
+          // Studies / drawings / properties — don't wait for the debounce alone.
+          try {
+            widget.subscribe("study_event", persistChart as never);
+            widget.subscribe("drawing_event", persistChart as never);
+            widget.subscribe("study_properties_changed", persistChart as never);
+          } catch {
+            /* older CL builds */
+          }
+          const onLeave = () => persistChart();
+          const onVisibility = () => {
+            if (document.visibilityState === "hidden") persistChart();
+          };
+          window.addEventListener("pagehide", onLeave);
+          window.addEventListener("beforeunload", onLeave);
+          document.addEventListener("visibilitychange", onVisibility);
+          (widget as unknown as { __forgePersistLeave?: () => void }).__forgePersistLeave = () => {
+            window.removeEventListener("pagehide", onLeave);
+            window.removeEventListener("beforeunload", onLeave);
+            document.removeEventListener("visibilitychange", onVisibility);
+          };
+          // Immediate snapshot after ready so a fast refresh still has a baseline.
+          window.setTimeout(persistChart, 400);
         }
         try {
           widget
@@ -317,6 +346,19 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
       unmountDealingRange?.();
       unmountPositionIcons?.();
       unmountSymbolSearchReset?.();
+      try {
+        (widget as unknown as { __forgePersistLeave?: () => void } | null)?.__forgePersistLeave?.();
+      } catch {
+        /* ignore */
+      }
+      // Flush latest chart state before tearing down (layout switches / HMR).
+      if (isPrimary && widget) {
+        try {
+          widget.save((state) => storage.set(autosaveKey, state));
+        } catch {
+          /* ignore */
+        }
+      }
       controller.detach();
       try {
         widget?.remove();
@@ -330,6 +372,18 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
   }, [containerRef, controller, datafeed, libraryPath, saveLoadAdapter, storage, isPrimary, paneIndex, hideHeader]);
 
   useEffect(() => {
-    void controller.changeTheme(theme);
-  }, [controller, theme]);
+    void (async () => {
+      await controller.changeTheme(theme);
+      // Theme is in forge.settings; also snapshot chart so CL chrome matches after refresh.
+      try {
+        const widget = controller.getWidget();
+        if (widget) {
+          const key = isPrimary ? AUTOSAVE_KEY : `${AUTOSAVE_KEY}.pane.${paneIndex}`;
+          widget.save((state) => storage.set(key, state));
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, [controller, theme, storage, isPrimary, paneIndex]);
 }

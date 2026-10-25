@@ -3,32 +3,34 @@ import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
 import { createServices } from "./app/container";
 
-/** One-shot wipe of known-bad chart snapshots that left /charts spinning for users. */
-const BOOT_RECOVERY = "forge.boot.recovery.v8-1021v18";
+/**
+ * Soft settings migration only.
+ * Do NOT wipe forge.tv.autosave.* on every deploy — that erased indicators,
+ * drawings, and chart layout after hard refresh whenever BOOT_RECOVERY bumped.
+ */
+const SETTINGS_MIGRATE = "forge.settings.migrate.v1";
 
 function runBootRecovery(): void {
   try {
     if (typeof localStorage === "undefined") return;
-    if (localStorage.getItem(BOOT_RECOVERY) === "1") return;
 
-    const keysToRemove: string[] = [];
-    for (let i = 0; i < localStorage.length; i += 1) {
-      const key = localStorage.key(i);
-      if (!key) continue;
-      if (
-        key === "forge.tv.autosave" ||
-        key.startsWith("forge.tv.autosave.") ||
-        key.startsWith("tradingview.") ||
-        key.startsWith("tvlocalstorage.") ||
-        // Prior recovery flags — force a fresh wipe for this deploy.
-        key.startsWith("forge.boot.recovery.")
-      ) {
-        keysToRemove.push(key);
+    // One-time drop of ancient autosave keys only (never the current v3 key).
+    for (const legacy of [
+      "forge.tv.autosave",
+      "forge.tv.autosave.v2",
+      "forge.tv.autosave.pane.1",
+      "forge.tv.autosave.pane.2",
+      "forge.tv.autosave.pane.3",
+    ]) {
+      try {
+        localStorage.removeItem(legacy);
+      } catch {
+        /* ignore */
       }
     }
-    for (const key of keysToRemove) localStorage.removeItem(key);
 
-    // Migrate legacy settings: ensure paneSymbols exists (pre-multi-chart saves crash otherwise).
+    if (localStorage.getItem(SETTINGS_MIGRATE) === "1") return;
+
     const raw = localStorage.getItem("forge.settings.v1");
     if (raw) {
       try {
@@ -38,6 +40,7 @@ function runBootRecovery(): void {
           settings.paneSymbols = [last];
         }
         if (typeof settings.chartLayout !== "string") settings.chartLayout = "s";
+        if (settings.theme !== "light" && settings.theme !== "dark") settings.theme = "dark";
         if (!settings.layoutSync || typeof settings.layoutSync !== "object") {
           settings.layoutSync = {
             symbol: true,
@@ -54,11 +57,11 @@ function runBootRecovery(): void {
         }
         localStorage.setItem("forge.settings.v1", JSON.stringify(settings));
       } catch {
-        localStorage.removeItem("forge.settings.v1");
+        /* keep broken blob — SettingsService will sanitize */
       }
     }
 
-    localStorage.setItem(BOOT_RECOVERY, "1");
+    localStorage.setItem(SETTINGS_MIGRATE, "1");
   } catch {
     /* private mode / blocked storage */
   }
