@@ -110,12 +110,13 @@ function defaultOpts(): SessionsOptions {
     rangeTransparency: SESSIONS_DEFAULTS.rangeTransparency,
     showRangeOutline: SESSIONS_STUDY_DEFAULTS.showRangeOutline,
     showRangeLabel: SESSIONS_STUDY_DEFAULTS.showRangeLabel,
-    dashboard: SESSIONS_STUDY_DEFAULTS.dashboard,
-    advancedDashboard: SESSIONS_STUDY_DEFAULTS.advancedDashboard,
-    dashboardPosition: SESSIONS_STUDY_DEFAULTS.dashboardPosition as 0 | 1 | 2,
-    dashboardSize: SESSIONS_STUDY_DEFAULTS.dashboardSize as 0 | 1 | 2 | 3 | 4,
-    showSessionDivider: SESSIONS_STUDY_DEFAULTS.showSessionDivider,
-    showDayDivider: SESSIONS_STUDY_DEFAULTS.showDayDivider,
+    showMidnightLine: SESSIONS_STUDY_DEFAULTS.showMidnightLine,
+    dashboard: false,
+    advancedDashboard: false,
+    dashboardPosition: 0,
+    dashboardSize: 1,
+    showSessionDivider: false,
+    showDayDivider: false,
   };
 }
 
@@ -240,13 +241,6 @@ export function useSessionsStudy(enabled = true): void {
         map.set("sessionCount", sessionCount);
         const slots = readSessionSlotsFromMap(map);
         const extra = str("extraSessions", str("sessionsText", ""));
-        const pos = Math.max(0, Math.min(2, Math.floor(num("dashboardPosition", 0)))) as 0 | 1 | 2;
-        const size = Math.max(0, Math.min(4, Math.floor(num("dashboardSize", 1)))) as
-          | 0
-          | 1
-          | 2
-          | 3
-          | 4;
 
         const styleColors = readStyleColors(api, slots.length);
         const coloredSlots = slots.map((slot, i) => ({
@@ -276,18 +270,13 @@ export function useSessionsStudy(enabled = true): void {
           rangeTransparency: SESSIONS_DEFAULTS.rangeTransparency,
           showRangeOutline: bool("showRangeOutline", SESSIONS_STUDY_DEFAULTS.showRangeOutline),
           showRangeLabel: bool("showRangeLabel", SESSIONS_STUDY_DEFAULTS.showRangeLabel),
-          dashboard: bool("dashboard", SESSIONS_STUDY_DEFAULTS.dashboard),
-          advancedDashboard: bool(
-            "advancedDashboard",
-            SESSIONS_STUDY_DEFAULTS.advancedDashboard,
-          ),
-          dashboardPosition: pos,
-          dashboardSize: size,
-          showSessionDivider: bool(
-            "showSessionDivider",
-            SESSIONS_STUDY_DEFAULTS.showSessionDivider,
-          ),
-          showDayDivider: bool("showDayDivider", SESSIONS_STUDY_DEFAULTS.showDayDivider),
+          showMidnightLine: bool("showMidnightLine", SESSIONS_STUDY_DEFAULTS.showMidnightLine),
+          dashboard: false,
+          advancedDashboard: false,
+          dashboardPosition: 0,
+          dashboardSize: 1,
+          showSessionDivider: false,
+          showDayDivider: false,
         };
       } catch (err) {
         console.warn("[forge-sessions] readOptions failed", err);

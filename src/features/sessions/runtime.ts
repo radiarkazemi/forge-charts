@@ -45,6 +45,11 @@ export interface SessionsOptions {
   readonly rangeTransparency: number;
   readonly showRangeOutline: boolean;
   readonly showRangeLabel: boolean;
+  /**
+   * Horizontal “Midnight line”: from today’s 00:00 candle open to
+   * (last bar − 5 minutes). Resets each local day. Black + “midnight candle”.
+   */
+  readonly showMidnightLine: boolean;
   readonly dashboard: boolean;
   readonly advancedDashboard: boolean;
   readonly dashboardPosition: 0 | 1 | 2;
@@ -150,6 +155,8 @@ export const SESSIONS_DEFAULTS = {
   rangeTransparency: 88,
   showRangeOutline: true,
   showRangeLabel: true,
+  /** Midnight open line — on by default. */
+  showMidnightLine: true,
   dashboard: false,
   advancedDashboard: false,
   dashboardPosition: 0 as 0 | 1 | 2,
@@ -158,6 +165,9 @@ export const SESSIONS_DEFAULTS = {
   /** Off by default — day labels clutter the sample-style chart. */
   showDayDivider: false,
 } as const;
+
+/** Always end the midnight line 5×1m candles behind the chart tip. */
+const MIDNIGHT_LAG_SEC = 5 * 60;
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
 
@@ -344,6 +354,61 @@ function localWeekday(utcSec: number, offsetSec: number): number {
   // 0=Sunday … match JS / Pine dayofweek
   const shifted = (utcSec + offsetSec) * 1000;
   return new Date(shifted).getUTCDay();
+}
+
+/** UTC unix of local midnight for the day containing `utcSec`. */
+function localDayStartUtc(utcSec: number, offsetSec: number): number {
+  const shifted = utcSec + offsetSec;
+  const daySec = ((shifted % 86_400) + 86_400) % 86_400;
+  return utcSec - daySec;
+}
+
+/**
+ * Current local day’s Midnight line: horizontal at the 00:00 candle open,
+ * from that candle to (last bar − 5 minutes). Resets when the local day rolls.
+ */
+function pushMidnightLine(
+  cmds: DrawCmd[],
+  bars: readonly SessionBar[],
+  opts: SessionsOptions,
+): void {
+  if (!opts.showMidnightLine || bars.length < 2) return;
+  const last = bars[bars.length - 1]!;
+  const off = tzOffsetSeconds(last.time, opts);
+  const dayStart = localDayStartUtc(last.time, off);
+
+  let midnight: SessionBar | null = null;
+  for (let i = 0; i < bars.length; i += 1) {
+    const bar = bars[i]!;
+    if (bar.time < dayStart) continue;
+    const barOff = tzOffsetSeconds(bar.time, opts);
+    if (localDayStartUtc(bar.time, barOff) !== dayStart) continue;
+    midnight = bar;
+    break;
+  }
+  if (!midnight || !Number.isFinite(midnight.open)) return;
+
+  const endTime = last.time - MIDNIGHT_LAG_SEC;
+  if (endTime <= midnight.time) return;
+
+  const price = midnight.open;
+  cmds.push({
+    kind: "line",
+    t1: midnight.time,
+    p1: price,
+    t2: endTime,
+    p2: price,
+    color: "#000000",
+    width: 1,
+    style: "solid",
+  });
+  cmds.push({
+    kind: "label",
+    t1: midnight.time,
+    p1: price,
+    color: "#000000",
+    text: "midnight candle",
+  });
 }
 
 export function isSessionActive(
@@ -709,6 +774,8 @@ export function computeSessions(
       cmds.push(...boxCmds);
     }
   }
+
+  pushMidnightLine(cmds, bars, opts);
 
   const dashboard = opts.dashboard
     ? buildDashboard(defs, runs, bars, opts)
