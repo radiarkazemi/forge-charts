@@ -16,8 +16,11 @@ import {
 } from "@/features/sessions/runtime";
 import {
   readSessionSlotsFromMap,
+  stylePlotIdForIndex,
   SESSIONS_STUDY_DEFAULTS,
+  SESSIONS_MAX_COUNT,
 } from "./sessions-indicator";
+import { SESSION_COLOR_PALETTE, SESSIONS_DEFAULTS } from "@/features/sessions/runtime";
 
 const MAX_BARS = 8_000;
 const STUDY_DEBOUNCE_MS = 450;
@@ -31,13 +34,14 @@ function fingerprintCmds(cmds: readonly { kind: string; t1: number; p1: number }
 }
 
 function defaultOpts(): SessionsOptions {
+  const map = new Map<string, unknown>([["sessionCount", 4]]);
   return {
-    sessions: mergeSessionDefs(readSessionSlotsFromMap(new Map()), 4, ""),
+    sessions: mergeSessionDefs(readSessionSlotsFromMap(map), 4, ""),
     historyLimit: 0,
     timezoneOffset: SESSIONS_STUDY_DEFAULTS.timezoneOffset,
     useExchangeTimezone: SESSIONS_STUDY_DEFAULTS.useExchangeTimezone,
     exchangeTimezone: SESSIONS_STUDY_DEFAULTS.exchangeTimezone,
-    rangeTransparency: SESSIONS_STUDY_DEFAULTS.rangeTransparency,
+    rangeTransparency: SESSIONS_DEFAULTS.rangeTransparency,
     showRangeOutline: SESSIONS_STUDY_DEFAULTS.showRangeOutline,
     showRangeLabel: SESSIONS_STUDY_DEFAULTS.showRangeLabel,
     dashboard: SESSIONS_STUDY_DEFAULTS.dashboard,
@@ -121,8 +125,15 @@ export function useSessionsStudy(enabled = true): void {
           return typeof v === "boolean" ? v : fallback;
         };
 
+        const sessionCount = Math.max(
+          1,
+          Math.min(
+            SESSIONS_MAX_COUNT,
+            Math.floor(num("sessionCount", 4)),
+          ),
+        );
+        map.set("sessionCount", sessionCount);
         const slots = readSessionSlotsFromMap(map);
-        // Support both Extra sessions and legacy sessionsText.
         const extra = str("extraSessions", str("sessionsText", ""));
         const pos = Math.max(0, Math.min(2, Math.floor(num("dashboardPosition", 0)))) as 0 | 1 | 2;
         const size = Math.max(0, Math.min(4, Math.floor(num("dashboardSize", 1)))) as
@@ -132,10 +143,35 @@ export function useSessionsStudy(enabled = true): void {
           | 3
           | 4;
 
-        const sessions = mergeSessionDefs(slots, 4, extra);
+        // Style tab palette colors + opacity (transparency) per session.
+        let styleMap: Record<string, { color?: string; transparency?: number }> = {};
+        try {
+          const styleValues = api.getStyleValues?.() as
+            | { styles?: Record<string, { color?: string; transparency?: number } | undefined> }
+            | undefined;
+          styleMap = styleValues?.styles ?? {};
+        } catch {
+          styleMap = {};
+        }
+
+        const coloredSlots = slots.map((slot, i) => {
+          const plotId = stylePlotIdForIndex(i);
+          const st = styleMap[plotId];
+          const color =
+            typeof st?.color === "string" && st.color.trim()
+              ? st.color
+              : (SESSION_COLOR_PALETTE[i % SESSION_COLOR_PALETTE.length] ?? slot.color);
+          const transparency =
+            typeof st?.transparency === "number" && Number.isFinite(st.transparency)
+              ? st.transparency
+              : SESSIONS_DEFAULTS.rangeTransparency;
+          return { ...slot, color, transparency };
+        });
+
+        const sessions = mergeSessionDefs(coloredSlots, sessionCount, extra);
         console.info(
           `[forge-sessions] study=${String(studyId)} zones=${sessions.length}`,
-          sessions.map((s) => `${s.name}:${s.hours}`).join(", "),
+          sessions.map((s) => `${s.name}:${s.hours}:${s.color}:t${s.transparency ?? "?"}`).join(", "),
         );
 
         return {
@@ -150,13 +186,7 @@ export function useSessionsStudy(enabled = true): void {
             SESSIONS_STUDY_DEFAULTS.useExchangeTimezone,
           ),
           exchangeTimezone: str("exchangeTimezone", SESSIONS_STUDY_DEFAULTS.exchangeTimezone),
-          rangeTransparency: Math.max(
-            0,
-            Math.min(
-              100,
-              Math.floor(num("rangeTransparency", SESSIONS_STUDY_DEFAULTS.rangeTransparency)),
-            ),
-          ),
+          rangeTransparency: SESSIONS_DEFAULTS.rangeTransparency,
           showRangeOutline: bool("showRangeOutline", SESSIONS_STUDY_DEFAULTS.showRangeOutline),
           showRangeLabel: bool("showRangeLabel", SESSIONS_STUDY_DEFAULTS.showRangeLabel),
           dashboard: bool("dashboard", SESSIONS_STUDY_DEFAULTS.dashboard),

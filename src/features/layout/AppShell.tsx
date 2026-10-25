@@ -49,7 +49,7 @@ export function AppShell() {
   }, [profileAnchorRef]);
 
   useEffect(() => {
-    document.title = `${symbol} — Forge Charts · 1021v11`;
+    document.title = `${symbol} — Forge Charts · 1021v12`;
   }, [symbol]);
 
   useEffect(() => {
@@ -101,7 +101,7 @@ export function AppShell() {
       {/* Always-visible deploy marker — proves which bundle the browser loaded. */}
       <Box
         component="a"
-        href="https://forgechart.ir/charts/?v=1021v11"
+        href="https://forgechart.ir/charts/?v=1021v12"
         data-testid="forge-build-badge"
         sx={{
           position: "fixed",
@@ -123,7 +123,7 @@ export function AppShell() {
         }}
         title="Live deploy marker — if you do not see this green badge, your browser is on a cached build"
       >
-        BUILD 1021v11
+        BUILD 1021v12
       </Box>
       <Box component="main" sx={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
         <Box sx={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>

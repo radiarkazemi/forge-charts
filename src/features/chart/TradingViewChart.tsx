@@ -16,6 +16,7 @@ import { useDealingRangesStudy } from "./useDealingRangesStudy";
 import { useSessionsStudy } from "./useSessionsStudy";
 import { useStructureIntelligenceStudy } from "./useStructureIntelligenceStudy";
 import { SessionsDashboard } from "@/features/sessions/SessionsDashboard";
+import { SessionsAddControl } from "@/features/sessions/SessionsAddControl";
 import { useTradingViewWidget } from "./useTradingViewWidget";
 import {
   QuickTradeOverlay,
@@ -266,6 +267,7 @@ export function TradingViewChart({
       {isPrimary ? <TradeLinesOverlay containerRef={containerRef} /> : null}
       {isPrimary && !showReplayToolbar ? <CandleCountdownOverlay /> : null}
       <SessionsDashboard />
+      <SessionsAddControl />
 
       {showReplayToolbar ? <BarReplayToolbar controller={barReplay} forceVisible={forceReplayUi} /> : null}
 

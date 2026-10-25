@@ -31,6 +31,8 @@ export interface SessionDef {
   readonly vwap: boolean;
   readonly maxMin: boolean;
   readonly color: string;
+  /** Box opacity from Style tab (0–100 transparency). */
+  readonly transparency?: number;
 }
 
 export interface SessionsOptions {
@@ -462,6 +464,10 @@ function pushRange(
   const pad = Math.max(Math.abs(top) * 1e-6, 1e-8);
   const p1 = top === bot ? top + pad : top;
   const p2 = top === bot ? bot - pad : bot;
+  const transparency =
+    typeof def.transparency === "number" && Number.isFinite(def.transparency)
+      ? def.transparency
+      : opts.rangeTransparency;
   cmds.push({
     kind: "rect",
     t1: run.startTime,
@@ -469,7 +475,7 @@ function pushRange(
     t2,
     p2,
     color: def.color,
-    fill: withAlpha(def.color, opts.rangeTransparency),
+    fill: withAlpha(def.color, transparency),
     style: opts.showRangeOutline ? "dotted" : "solid",
     width: opts.showRangeOutline ? 2 : 1,
   });
