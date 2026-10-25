@@ -95,6 +95,23 @@ export function resolvePineStudy(code: string): PineResolveResult {
     };
   }
 
+  if (
+    /Sessions\s*\[\s*LuxAlgo\s*\]/i.test(code) ||
+    /LuxAlgo\s*-\s*Sessions/i.test(code) ||
+    /Forge Sessions/i.test(code)
+  ) {
+    return {
+      ok: true,
+      kind: "study",
+      study: {
+        studyName: "ForgeSessions@tv-basicstudies-1",
+        forceOverlay: true,
+        inputs: {},
+        label: "Forge Sessions (LuxAlgo-style)",
+      },
+    };
+  }
+
   if (ADVANCED_PINE.test(body)) {
     return {
       ok: false,

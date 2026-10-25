@@ -12,6 +12,7 @@ export interface OrcaBar {
   readonly high: number;
   readonly low: number;
   readonly close: number;
+  readonly volume?: number;
 }
 
 export interface OrcaInputs {
@@ -165,7 +166,7 @@ interface CircleEvent {
 }
 
 export interface DrawCmd {
-  kind: "line" | "rect" | "dot" | "label";
+  kind: "line" | "rect" | "dot" | "label" | "vline";
   t1: number;
   p1: number;
   t2?: number;
@@ -740,6 +741,7 @@ export function barsFromChartExport(exported: {
   const h = find("high");
   const l = find("low");
   const c = find("close");
+  const v = find("volume");
   if (timeIdx < 0 || o < 0 || h < 0 || l < 0 || c < 0) return [];
 
   const out: OrcaBar[] = [];
@@ -747,12 +749,14 @@ export function barsFromChartExport(exported: {
     const t = Number(row[timeIdx]);
     if (!Number.isFinite(t) || t <= 0) continue;
     const timeSec = t > 1e12 ? Math.floor(t / 1000) : Math.floor(t);
+    const vol = v >= 0 ? Number(row[v]) : 0;
     out.push({
       time: timeSec,
       open: Number(row[o]),
       high: Number(row[h]),
       low: Number(row[l]),
       close: Number(row[c]),
+      volume: Number.isFinite(vol) ? vol : 0,
     });
   }
   return out;

@@ -13,7 +13,9 @@ import type { HeaderToolbarApi } from "./header-toolbar";
 import { layoutSyncBus } from "./layout-sync";
 import { useChartAlertLines } from "./useChartAlertLines";
 import { useDealingRangesStudy } from "./useDealingRangesStudy";
+import { useSessionsStudy } from "./useSessionsStudy";
 import { useStructureIntelligenceStudy } from "./useStructureIntelligenceStudy";
+import { SessionsDashboard } from "@/features/sessions/SessionsDashboard";
 import { useTradingViewWidget } from "./useTradingViewWidget";
 import {
   QuickTradeOverlay,
@@ -238,6 +240,7 @@ export function TradingViewChart({
   // Must run on every pane — header Indicators can migrate the study off pane 0.
   useDealingRangesStudy(true);
   useStructureIntelligenceStudy(true);
+  useSessionsStudy(true);
 
   const showReplayToolbar = isPrimary && (replayActive || forceReplayUi);
 
@@ -262,6 +265,7 @@ export function TradingViewChart({
       {isPrimary ? <QuickTradeOverlay containerRef={containerRef} /> : null}
       {isPrimary ? <TradeLinesOverlay containerRef={containerRef} /> : null}
       {isPrimary && !showReplayToolbar ? <CandleCountdownOverlay /> : null}
+      <SessionsDashboard />
 
       {showReplayToolbar ? <BarReplayToolbar controller={barReplay} forceVisible={forceReplayUi} /> : null}
 
