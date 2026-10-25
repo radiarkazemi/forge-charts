@@ -1,0 +1,112 @@
+// Forge ICT HTF Candles — TradingView companion for the Forge Charts port
+// of Fadi’s open-source ICT HTF Candles idea (side HTF candles + FVG/VI/timer).
+// Forge Indicators → “ICT HTF Candles”. This Pine file is for TV.com parity.
+//@version=6
+indicator("Forge ICT HTF Candles", "Forge HTF", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+htfChoice = input.string("1H", "HTF", options = ["5m", "15m", "30m", "1H", "4H", "1D", "1W", "1M"])
+maxN = input.int(5, "Candles to display", minval = 1, maxval = 20)
+pad = input.int(8, "Padding from chart", minval = 1)
+space = input.int(2, "Space between", minval = 0)
+width = input.int(3, "Candle width", minval = 1) * 2
+bullBody = input.color(color.new(#26a69a, 30), "Bull body")
+bearBody = input.color(color.new(#ef5350, 30), "Bear body")
+borderC = input.color(#787b86, "Border")
+bullWick = input.color(#26a69a, "Bull wick")
+bearWick = input.color(#ef5350, "Bear wick")
+showFvg = input.bool(true, "Show FVG")
+showVi = input.bool(true, "Show Volume Imbalance")
+showTimer = input.bool(true, "Show remaining time")
+showName = input.bool(true, "Show HTF name")
+
+htf = switch htfChoice
+    "5m" => "5"
+    "15m" => "15"
+    "30m" => "30"
+    "1H" => "60"
+    "4H" => "240"
+    "1D" => "D"
+    "1W" => "W"
+    "1M" => "M"
+    => "60"
+
+[o, h, l, c] = request.security(syminfo.tickerid, htf, [open, high, low, close], lookahead = barmerge.lookahead_off)
+newHtf = ta.change(time(htf)) != 0
+
+type C
+    float o
+    float h
+    float l
+    float c
+    box body
+    line wu
+    line wd
+
+var array<C> candles = array.new<C>()
+var label nameLb = na
+var label timerLb = na
+
+if newHtf
+    bull = c >= o
+    bx = box.new(bar_index, math.max(o, c), bar_index + width, math.min(o, c), border_color = borderC, bgcolor = bull ? bullBody : bearBody, border_width = 1)
+    wu = line.new(bar_index + width / 2, h, bar_index + width / 2, math.max(o, c), color = bull ? bullWick : bearWick)
+    wd = line.new(bar_index + width / 2, math.min(o, c), bar_index + width / 2, l, color = bull ? bullWick : bearWick)
+    array.unshift(candles, C.new(o, h, l, c, bx, wu, wd))
+    if array.size(candles) > maxN
+        old = array.pop(candles)
+        box.delete(old.body)
+        line.delete(old.wu)
+        line.delete(old.wd)
+
+if array.size(candles) > 0
+    cur = array.get(candles, 0)
+    cur.h := math.max(cur.h, high)
+    cur.l := math.min(cur.l, low)
+    cur.c := close
+    bull = cur.c >= cur.o
+    box.set_top(cur.body, math.max(cur.o, cur.c))
+    box.set_bottom(cur.body, math.min(cur.o, cur.c))
+    box.set_bgcolor(cur.body, bull ? bullBody : bearBody)
+    line.set_y1(cur.wu, cur.h)
+    line.set_y2(cur.wu, math.max(cur.o, cur.c))
+    line.set_color(cur.wu, bull ? bullWick : bearWick)
+    line.set_y1(cur.wd, math.min(cur.o, cur.c))
+    line.set_y2(cur.wd, cur.l)
+    line.set_color(cur.wd, bull ? bullWick : bearWick)
+
+if barstate.islast and array.size(candles) > 0
+    sz = array.size(candles)
+    float top = array.get(candles, 0).h
+    float bot = array.get(candles, 0).l
+    for i = 0 to sz - 1
+        cd = array.get(candles, i)
+        tbuf = pad + (width + space) * (sz - i - 1)
+        box.set_left(cd.body, bar_index + tbuf)
+        box.set_right(cd.body, bar_index + width + tbuf)
+        mid = bar_index + width / 2 + tbuf
+        line.set_x1(cd.wu, mid)
+        line.set_x2(cd.wu, mid)
+        line.set_x1(cd.wd, mid)
+        line.set_x2(cd.wd, mid)
+        top := math.max(top, cd.h)
+        bot := math.min(bot, cd.l)
+    left = bar_index + pad + width / 2
+    if showName
+        if na(nameLb)
+            nameLb := label.new(left, top, htfChoice, style = label.style_label_down, color = color.new(color.black, 100), textcolor = color.gray)
+        else
+            label.set_xy(nameLb, left, top)
+            label.set_text(nameLb, htfChoice)
+    if showTimer
+        rem = math.max(0, (time_close(htf) - timenow) / 1000)
+        mm = math.floor(rem / 60)
+        ss = math.floor(rem % 60)
+        txt = str.format("{0,number,00}:{1,number,00}", mm, ss)
+        if na(timerLb)
+            timerLb := label.new(left, bot, txt, style = label.style_none, color = color.new(color.black, 100), textcolor = color.gray)
+        else
+            label.set_xy(timerLb, left, bot)
+            label.set_text(timerLb, txt)
+
+// Note: FVG / VI for the side strip are fully painted in the Forge TypeScript port.
+plot(showFvg or showVi ? na : na, display = display.none)

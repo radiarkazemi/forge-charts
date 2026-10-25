@@ -14,6 +14,7 @@ import { layoutSyncBus } from "./layout-sync";
 import { useChartAlertLines } from "./useChartAlertLines";
 import { useDealingRangesStudy } from "./useDealingRangesStudy";
 import { useSessionsStudy } from "./useSessionsStudy";
+import { useHtfCandlesStudy } from "./useHtfCandlesStudy";
 import { useStructureIntelligenceStudy } from "./useStructureIntelligenceStudy";
 import { SessionsDashboard } from "@/features/sessions/SessionsDashboard";
 import { useTradingViewWidget } from "./useTradingViewWidget";
@@ -241,6 +242,7 @@ export function TradingViewChart({
   useDealingRangesStudy(true);
   useStructureIntelligenceStudy(true);
   useSessionsStudy(true);
+  useHtfCandlesStudy(true);
 
   const showReplayToolbar = isPrimary && (replayActive || forceReplayUi);
 

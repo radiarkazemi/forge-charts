@@ -13,6 +13,7 @@ import type {
 } from "./types";
 import { createDealingRangesIndicator } from "@/features/chart/dealing-ranges-indicator";
 import { createSessionsIndicator } from "@/features/chart/sessions-indicator";
+import { createHtfCandlesIndicator } from "@/features/chart/htf-candles-indicator";
 import { createStructureIntelligenceIndicator } from "@/features/chart/structure-intelligence-indicator";
 
 export interface WidgetOptionsInput {
@@ -300,6 +301,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
         createDealingRangesIndicator(PineJS) as CustomIndicator,
         createStructureIntelligenceIndicator(PineJS) as CustomIndicator,
         createSessionsIndicator(PineJS) as CustomIndicator,
+        createHtfCandlesIndicator(PineJS) as CustomIndicator,
       ]),
   };
 }
