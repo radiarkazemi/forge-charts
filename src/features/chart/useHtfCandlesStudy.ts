@@ -13,16 +13,18 @@ import {
   paintHtfCandlesOnChart,
   type DailyOpenMode,
   type HtfCandlesOptions,
-  type HtfPreset,
 } from "@/features/htf-candles/runtime";
-import { HTF_CANDLES_STUDY_DEFAULTS, HTF_CANDLES_STUDY_NAME } from "./htf-candles-indicator";
+import {
+  HTF_CANDLES_STUDY_DEFAULTS,
+  HTF_CANDLES_STUDY_NAME,
+  readHtfSlotsFromMap,
+} from "./htf-candles-indicator";
 
 const MAX_BARS = 12_000;
 const STUDY_DEBOUNCE_MS = 280;
 const LIVE_REFRESH_MS = 2_000;
 const PRESENCE_POLL_MS = 4_000;
 
-const HTF_SET = new Set<string>(["5", "15", "30", "60", "240", "1D", "1W", "1M"]);
 const DAILY_SET = new Set<string>(["midnight", "830", "930", "exchange"]);
 
 function fingerprintCmds(
@@ -130,32 +132,50 @@ export function useHtfCandlesStudy(enabled = true): void {
           const v = map.get(id);
           return typeof v === "boolean" ? v : fallback;
         };
-        const htfRaw = str("htf", HTF_CANDLES_STUDY_DEFAULTS.htf);
-        const htf = (HTF_SET.has(htfRaw) ? htfRaw : HTF_CANDLES_DEFAULTS.htf) as HtfPreset;
         const dailyRaw = str("dailyOpenMode", HTF_CANDLES_STUDY_DEFAULTS.dailyOpenMode);
         const dailyOpenMode = (
           DAILY_SET.has(dailyRaw) ? dailyRaw : HTF_CANDLES_DEFAULTS.dailyOpenMode
         ) as DailyOpenMode;
         return {
-          htf,
-          candleCount: Math.max(1, Math.min(20, Math.floor(num("candleCount", 5)))),
-          paddingBars: Math.max(1, Math.min(80, Math.floor(num("paddingBars", 8)))),
-          spacingBars: Math.max(0, Math.min(20, Math.floor(num("spacingBars", 2)))),
-          widthBars: Math.max(1, Math.min(20, Math.floor(num("widthBars", 3)))),
+          slots: readHtfSlotsFromMap(map),
+          limitHtf: Math.max(1, Math.min(6, Math.floor(num("limitHtf", HTF_CANDLES_DEFAULTS.limitHtf)))),
+          paddingBars: Math.max(
+            1,
+            Math.min(80, Math.floor(num("paddingBars", HTF_CANDLES_DEFAULTS.paddingBars))),
+          ),
+          spacingBars: Math.max(
+            0,
+            Math.min(20, Math.floor(num("spacingBars", HTF_CANDLES_DEFAULTS.spacingBars))),
+          ),
+          groupGapBars: Math.max(
+            0,
+            Math.min(40, Math.floor(num("groupGapBars", HTF_CANDLES_DEFAULTS.groupGapBars))),
+          ),
+          widthBars: Math.max(
+            1,
+            Math.min(20, Math.floor(num("widthBars", HTF_CANDLES_DEFAULTS.widthBars))),
+          ),
           bullBody: parseHex(map.get("bullBody"), HTF_CANDLES_DEFAULTS.bullBody),
           bearBody: parseHex(map.get("bearBody"), HTF_CANDLES_DEFAULTS.bearBody),
           border: parseHex(map.get("border"), HTF_CANDLES_DEFAULTS.border),
           bullWick: parseHex(map.get("bullWick"), HTF_CANDLES_DEFAULTS.bullWick),
           bearWick: parseHex(map.get("bearWick"), HTF_CANDLES_DEFAULTS.bearWick),
-          showFvg: bool("showFvg", true),
-          showVi: bool("showVi", true),
-          showTrace: bool("showTrace", true),
-          showLabels: bool("showLabels", false),
-          showTimer: bool("showTimer", true),
-          showHtfName: bool("showHtfName", true),
+          showFvg: bool("showFvg", HTF_CANDLES_DEFAULTS.showFvg),
+          showVi: bool("showVi", HTF_CANDLES_DEFAULTS.showVi),
+          showTrace: bool("showTrace", HTF_CANDLES_DEFAULTS.showTrace),
+          showLabels: bool("showLabels", HTF_CANDLES_DEFAULTS.showLabels),
+          showTimer: bool("showTimer", HTF_CANDLES_DEFAULTS.showTimer),
+          showHtfName: bool("showHtfName", HTF_CANDLES_DEFAULTS.showHtfName),
+          showGroupBackdrop: bool("showGroupBackdrop", HTF_CANDLES_DEFAULTS.showGroupBackdrop),
           dailyOpenMode,
-          timezoneOffset: Math.max(-12, Math.min(14, Math.floor(num("timezoneOffset", -4)))),
-          bodyTransparency: Math.max(0, Math.min(100, Math.floor(num("bodyTransparency", 30)))),
+          timezoneOffset: Math.max(
+            -12,
+            Math.min(14, Math.floor(num("timezoneOffset", HTF_CANDLES_DEFAULTS.timezoneOffset))),
+          ),
+          bodyTransparency: Math.max(
+            0,
+            Math.min(100, Math.floor(num("bodyTransparency", HTF_CANDLES_DEFAULTS.bodyTransparency))),
+          ),
         };
       } catch (err) {
         console.warn("[forge-htf-candles] readOptions failed", err);

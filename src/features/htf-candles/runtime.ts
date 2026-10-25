@@ -1,6 +1,6 @@
 /**
- * ICT HTF Candles (Fadi-style) — higher-timeframe candles drawn to the right
- * of current price, plus HTF FVG / volume imbalance / OHLC traces / timer.
+ * ICT HTF Candles (Fadi-style) — up to 6 higher-timeframe candle groups
+ * drawn to the right of price, with FVG / VI / traces / timers.
  */
 
 import type { EntityId, IChartWidgetApi } from "@/infrastructure/tradingview";
@@ -10,11 +10,22 @@ import { clColor } from "@/features/sessions/runtime";
 export type HtfPreset = "5" | "15" | "30" | "60" | "240" | "1D" | "1W" | "1M";
 export type DailyOpenMode = "exchange" | "midnight" | "830" | "930";
 
-export interface HtfCandlesOptions {
+export const HTF_SLOT_COUNT = 6;
+
+export interface HtfSlot {
+  readonly enable: boolean;
   readonly htf: HtfPreset;
   readonly candleCount: number;
+}
+
+export interface HtfCandlesOptions {
+  readonly slots: readonly HtfSlot[];
+  /** Max enabled HTF groups to show (1–6), Fadi “Limit to next HTFs only”. */
+  readonly limitHtf: number;
   readonly paddingBars: number;
   readonly spacingBars: number;
+  /** Gap between HTF groups (bars). */
+  readonly groupGapBars: number;
   readonly widthBars: number;
   readonly bullBody: string;
   readonly bearBody: string;
@@ -27,29 +38,41 @@ export interface HtfCandlesOptions {
   readonly showLabels: boolean;
   readonly showTimer: boolean;
   readonly showHtfName: boolean;
+  readonly showGroupBackdrop: boolean;
   readonly dailyOpenMode: DailyOpenMode;
-  /** Fixed UTC offset used for midnight / 8:30 / 9:30 day opens. */
   readonly timezoneOffset: number;
   readonly bodyTransparency: number;
 }
 
+/** Defaults match Fadi panel: 15m/30m/1H/4H on, 1D/1W off. */
+export const DEFAULT_HTF_SLOTS: readonly HtfSlot[] = [
+  { enable: true, htf: "15", candleCount: 20 },
+  { enable: true, htf: "30", candleCount: 15 },
+  { enable: true, htf: "60", candleCount: 10 },
+  { enable: true, htf: "240", candleCount: 7 },
+  { enable: false, htf: "1D", candleCount: 10 },
+  { enable: false, htf: "1W", candleCount: 10 },
+];
+
 export const HTF_CANDLES_DEFAULTS: HtfCandlesOptions = {
-  htf: "60",
-  candleCount: 5,
-  paddingBars: 8,
+  slots: DEFAULT_HTF_SLOTS,
+  limitHtf: 6,
+  paddingBars: 25,
   spacingBars: 2,
-  widthBars: 3,
+  groupGapBars: 10,
+  widthBars: 1,
   bullBody: "#26a69a",
   bearBody: "#ef5350",
-  border: "#787b86",
-  bullWick: "#26a69a",
-  bearWick: "#ef5350",
+  border: "#434651",
+  bullWick: "#434651",
+  bearWick: "#434651",
   showFvg: true,
   showVi: true,
-  showTrace: true,
+  showTrace: false,
   showLabels: false,
   showTimer: true,
   showHtfName: true,
+  showGroupBackdrop: true,
   dailyOpenMode: "midnight",
   timezoneOffset: -4,
   bodyTransparency: 30,
@@ -123,22 +146,22 @@ function localParts(utcSec: number, offsetHours: number): {
   return { dayKey, mins, weekday: d.getUTCDay() };
 }
 
-/** Bucket key for HTF aggregation (supports custom daily opens). */
-function bucketKey(utcSec: number, opts: HtfCandlesOptions): number {
-  const step = htfSeconds(opts.htf);
-  if (opts.htf === "1D") {
-    const { dayKey, mins } = localParts(utcSec, opts.timezoneOffset);
-    if (opts.dailyOpenMode === "exchange") {
-      return Math.floor(utcSec / 86_400);
-    }
+function bucketKey(
+  utcSec: number,
+  htf: HtfPreset,
+  dailyOpenMode: DailyOpenMode,
+  timezoneOffset: number,
+): number {
+  const step = htfSeconds(htf);
+  if (htf === "1D") {
+    const { dayKey, mins } = localParts(utcSec, timezoneOffset);
+    if (dailyOpenMode === "exchange") return Math.floor(utcSec / 86_400);
     const openMin =
-      opts.dailyOpenMode === "830" ? 8 * 60 + 30 : opts.dailyOpenMode === "930" ? 9 * 60 + 30 : 0;
-    // Bars before the custom open belong to the previous ICT day.
+      dailyOpenMode === "830" ? 8 * 60 + 30 : dailyOpenMode === "930" ? 9 * 60 + 30 : 0;
     return mins < openMin ? dayKey - 1 : dayKey;
   }
-  if (opts.htf === "1W") {
-    const { dayKey, weekday } = localParts(utcSec, opts.timezoneOffset);
-    // Anchor weeks on Sunday (0) in the configured offset.
+  if (htf === "1W") {
+    const { dayKey, weekday } = localParts(utcSec, timezoneOffset);
     return dayKey - weekday;
   }
   return Math.floor(utcSec / step) * step;
@@ -146,14 +169,16 @@ function bucketKey(utcSec: number, opts: HtfCandlesOptions): number {
 
 export function aggregateHtfBars(
   bars: readonly HtfBar[],
-  opts: HtfCandlesOptions,
+  htf: HtfPreset,
+  dailyOpenMode: DailyOpenMode,
+  timezoneOffset: number,
 ): HtfBar[] {
   if (bars.length === 0) return [];
   const out: HtfBar[] = [];
   let cur: HtfBar | null = null;
   let key = Number.NaN;
   for (const b of bars) {
-    const k = bucketKey(b.time, opts);
+    const k = bucketKey(b.time, htf, dailyOpenMode, timezoneOffset);
     if (!cur || k !== key) {
       if (cur) out.push(cur);
       key = k;
@@ -191,7 +216,6 @@ function withAlpha(color: string, transparency: number): string {
 
 function remainingLabel(htf: HtfPreset, lastBarTime: number, nowMs = Date.now()): string {
   const step = htfSeconds(htf);
-  // Approximate close of current HTF bucket from last bar time.
   const closeAt = (Math.floor(lastBarTime / step) + 1) * step;
   let rem = Math.max(0, closeAt - Math.floor(nowMs / 1000));
   const days = Math.floor(rem / 86_400);
@@ -208,37 +232,47 @@ function remainingLabel(htf: HtfPreset, lastBarTime: number, nowMs = Date.now())
 
 export interface HtfComputeResult {
   readonly cmds: DrawCmd[];
-  readonly timerText: string | null;
 }
 
-/**
- * Build draw commands for side HTF candles (to the right of `lastChartTime`).
- * X spacing uses chart interval seconds as “bars”.
- */
-export function computeHtfCandles(
-  chartBars: readonly HtfBar[],
-  chartIntervalSec: number,
+function paintOneGroup(
+  cmds: DrawCmd[],
+  htfBars: readonly HtfBar[],
+  groupOrigin: number,
+  step: number,
   opts: HtfCandlesOptions,
-): HtfComputeResult {
-  const cmds: DrawCmd[] = [];
-  if (chartBars.length < 3 || chartIntervalSec <= 0) return { cmds, timerText: null };
-
-  const htfAll = aggregateHtfBars(chartBars, opts);
-  if (htfAll.length === 0) return { cmds, timerText: null };
-  const n = Math.max(1, Math.min(20, opts.candleCount));
-  const htf = htfAll.slice(-n);
-  const lastChartTime = chartBars[chartBars.length - 1]!.time;
-  const step = Math.max(1, chartIntervalSec);
-  const pad = Math.max(1, opts.paddingBars) * step;
+  slot: HtfSlot,
+  lastChartTime: number,
+): number {
   const width = Math.max(1, opts.widthBars) * step;
   const gap = Math.max(0, opts.spacingBars) * step;
   const stride = width + gap;
+  const n = htfBars.length;
+  if (n === 0) return groupOrigin;
 
-  // Oldest near chart, newest furthest right (Fadi / common HTF candles layout).
-  for (let i = 0; i < htf.length; i += 1) {
-    const c = htf[i]!;
-    const fromRight = htf.length - 1 - i;
-    const tLeft = lastChartTime + pad + fromRight * stride;
+  const groupWidth = n * width + Math.max(0, n - 1) * gap;
+  const hi = Math.max(...htfBars.map((c) => c.high));
+  const lo = Math.min(...htfBars.map((c) => c.low));
+  const padY = Math.max((hi - lo) * 0.02, Math.abs(hi) * 1e-5);
+
+  // Soft backdrop behind the group (Fadi grey band).
+  if (opts.showGroupBackdrop) {
+    cmds.push({
+      kind: "rect",
+      t1: groupOrigin - step * 0.5,
+      p1: hi + padY * 2,
+      t2: groupOrigin + groupWidth + step * 0.5,
+      p2: lo - padY * 2,
+      color: "#787b86",
+      fill: withAlpha("#787b86", 92),
+      style: "solid",
+      width: 1,
+    });
+  }
+
+  for (let i = 0; i < n; i += 1) {
+    const c = htfBars[i]!;
+    // Oldest left (near previous group), newest right within the group.
+    const tLeft = groupOrigin + i * stride;
     const tRight = tLeft + width;
     const tMid = Math.floor((tLeft + tRight) / 2);
     const bull = c.close >= c.open;
@@ -247,7 +281,6 @@ export function computeHtfCandles(
     const top = Math.max(c.open, c.close);
     const bot = Math.min(c.open, c.close);
 
-    // Wicks
     cmds.push({
       kind: "line",
       t1: tMid,
@@ -268,7 +301,7 @@ export function computeHtfCandles(
       width: 1,
       style: "solid",
     });
-    // Body
+
     const bodyTop = top === bot ? top + Math.max(Math.abs(top) * 1e-6, 1e-8) : top;
     const bodyBot = top === bot ? bot - Math.max(Math.abs(bot) * 1e-6, 1e-8) : bot;
     cmds.push({
@@ -284,34 +317,20 @@ export function computeHtfCandles(
     });
 
     if (opts.showLabels) {
-      cmds.push({
-        kind: "label",
-        t1: tRight,
-        p1: c.high,
-        color: bodyColor,
-        text: String(c.high),
-      });
-      cmds.push({
-        kind: "label",
-        t1: tRight,
-        p1: c.low,
-        color: bodyColor,
-        text: String(c.low),
-      });
+      cmds.push({ kind: "label", t1: tRight, p1: c.high, color: bodyColor, text: String(c.high) });
+      cmds.push({ kind: "label", t1: tRight, p1: c.low, color: bodyColor, text: String(c.low) });
     }
 
     if (opts.showTrace) {
-      // Trace OHLC back toward the last chart bar (visual “source” rail).
-      const traceTo = lastChartTime;
       for (const [price, style] of [
-        [c.open, "dotted"],
-        [c.high, "dashed"],
-        [c.low, "dashed"],
-        [c.close, "solid"],
+        [c.open, "solid"],
+        [c.close, "dotted"],
+        [c.high, "dotted"],
+        [c.low, "dotted"],
       ] as const) {
         cmds.push({
           kind: "line",
-          t1: traceTo,
+          t1: lastChartTime,
           p1: price,
           t2: tLeft,
           p2: price,
@@ -323,17 +342,14 @@ export function computeHtfCandles(
     }
   }
 
-  // HTF Fair Value Gaps (classic 3-candle) on the side series’ price levels,
-  // drawn across the candle strip width for the middle gap candle.
-  if (opts.showFvg && htf.length >= 3) {
-    for (let i = 2; i < htf.length; i += 1) {
-      const a = htf[i - 2]!;
-      const c = htf[i]!;
+  if (opts.showFvg && n >= 3) {
+    for (let i = 2; i < n; i += 1) {
+      const a = htfBars[i - 2]!;
+      const c = htfBars[i]!;
       const bullGap = c.low > a.high;
       const bearGap = c.high < a.low;
       if (!bullGap && !bearGap) continue;
-      const fromRight = htf.length - 1 - (i - 1);
-      const tLeft = lastChartTime + pad + fromRight * stride;
+      const tLeft = groupOrigin + (i - 1) * stride;
       const tRight = tLeft + width;
       const top = bullGap ? c.low : a.low;
       const bot = bullGap ? a.high : c.high;
@@ -351,11 +367,10 @@ export function computeHtfCandles(
     }
   }
 
-  // Volume imbalance: gap between consecutive candle bodies (no overlap).
-  if (opts.showVi && htf.length >= 2) {
-    for (let i = 1; i < htf.length; i += 1) {
-      const prev = htf[i - 1]!;
-      const cur = htf[i]!;
+  if (opts.showVi && n >= 2) {
+    for (let i = 1; i < n; i += 1) {
+      const prev = htfBars[i - 1]!;
+      const cur = htfBars[i]!;
       const prevTop = Math.max(prev.open, prev.close);
       const prevBot = Math.min(prev.open, prev.close);
       const curTop = Math.max(cur.open, cur.close);
@@ -373,8 +388,7 @@ export function computeHtfCandles(
         ok = true;
       }
       if (!ok || top <= bot) continue;
-      const fromRight = htf.length - 1 - i;
-      const tLeft = lastChartTime + pad + fromRight * stride;
+      const tLeft = groupOrigin + i * stride;
       const tRight = tLeft + width;
       cmds.push({
         kind: "rect",
@@ -382,44 +396,66 @@ export function computeHtfCandles(
         p1: top,
         t2: tRight,
         p2: bot,
-        color: "#ff9800",
-        fill: withAlpha("#ff9800", 88),
+        color: "#ef5350",
+        fill: withAlpha("#ef5350", 88),
         style: "dotted",
         width: 1,
       });
     }
   }
 
-  const newestLeft = lastChartTime + pad;
-  const newestRight = newestLeft + width;
-  const newestMid = Math.floor((newestLeft + newestRight) / 2);
-  const hi = Math.max(...htf.map((c) => c.high));
-  const lo = Math.min(...htf.map((c) => c.low));
-  const padY = Math.max((hi - lo) * 0.01, Math.abs(hi) * 1e-5);
-
+  const mid = Math.floor(groupOrigin + groupWidth / 2);
   if (opts.showHtfName) {
     cmds.push({
       kind: "label",
-      t1: newestMid,
-      p1: hi + padY,
+      t1: mid,
+      p1: hi + padY * 3,
       color: "#787b86",
-      text: htfLabel(opts.htf),
+      text: htfLabel(slot.htf),
     });
   }
-
-  let timerText: string | null = null;
   if (opts.showTimer) {
-    timerText = remainingLabel(opts.htf, chartBars[chartBars.length - 1]!.time);
     cmds.push({
       kind: "label",
-      t1: newestMid,
-      p1: lo - padY,
+      t1: mid,
+      p1: lo - padY * 3,
       color: "#787b86",
-      text: timerText,
+      text: remainingLabel(slot.htf, htfBars[n - 1]!.time),
     });
   }
 
-  return { cmds, timerText };
+  return groupOrigin + groupWidth;
+}
+
+/**
+ * Build draw commands for up to 6 HTF groups, left→right = HTF1→HTF6.
+ */
+export function computeHtfCandles(
+  chartBars: readonly HtfBar[],
+  chartIntervalSec: number,
+  opts: HtfCandlesOptions,
+): HtfComputeResult {
+  const cmds: DrawCmd[] = [];
+  if (chartBars.length < 3 || chartIntervalSec <= 0) return { cmds };
+
+  const enabled = opts.slots.filter((s) => s.enable).slice(0, Math.max(1, Math.min(6, opts.limitHtf)));
+  if (enabled.length === 0) return { cmds };
+
+  const lastChartTime = chartBars[chartBars.length - 1]!.time;
+  const step = Math.max(1, chartIntervalSec);
+  const pad = Math.max(1, opts.paddingBars) * step;
+  const groupGap = Math.max(0, opts.groupGapBars) * step;
+
+  let cursor = lastChartTime + pad;
+  for (const slot of enabled) {
+    const all = aggregateHtfBars(chartBars, slot.htf, opts.dailyOpenMode, opts.timezoneOffset);
+    const n = Math.max(1, Math.min(40, slot.candleCount));
+    const slice = all.slice(-n);
+    const end = paintOneGroup(cmds, slice, cursor, step, opts, slot, lastChartTime);
+    cursor = end + groupGap;
+  }
+
+  return { cmds };
 }
 
 const linestyleMap = { solid: 0, dotted: 1, dashed: 2 } as const;
@@ -430,7 +466,7 @@ export async function paintHtfCandlesOnChart(
   options?: { readonly ownerStudyId?: EntityId; readonly maxDrawings?: number },
 ): Promise<EntityId[]> {
   const ids: EntityId[] = [];
-  const maxDrawings = options?.maxDrawings ?? 800;
+  const maxDrawings = options?.maxDrawings ?? 2_000;
   const limited = cmds.length > maxDrawings ? cmds.slice(0, maxDrawings) : cmds;
   const ownerStudyId = options?.ownerStudyId;
 

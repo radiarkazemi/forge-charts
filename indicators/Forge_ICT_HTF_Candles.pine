@@ -1,34 +1,69 @@
 // Forge ICT HTF Candles — TradingView companion for the Forge Charts port
-// of Fadi’s open-source ICT HTF Candles idea (side HTF candles + FVG/VI/timer).
+// of Fadi’s open-source ICT HTF Candles (up to 6 side HTF groups + FVG/VI/timer).
 // Forge Indicators → “ICT HTF Candles”. This Pine file is for TV.com parity.
 //@version=6
 indicator("Forge ICT HTF Candles", "Forge HTF", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
 
-htfChoice = input.string("1H", "HTF", options = ["5m", "15m", "30m", "1H", "4H", "1D", "1W", "1M"])
-maxN = input.int(5, "Candles to display", minval = 1, maxval = 20)
-pad = input.int(8, "Padding from chart", minval = 1)
-space = input.int(2, "Space between", minval = 0)
-width = input.int(3, "Candle width", minval = 1) * 2
-bullBody = input.color(color.new(#26a69a, 30), "Bull body")
-bearBody = input.color(color.new(#ef5350, 30), "Bear body")
-borderC = input.color(#787b86, "Border")
-bullWick = input.color(#26a69a, "Bull wick")
-bearWick = input.color(#ef5350, "Bear wick")
-showFvg = input.bool(true, "Show FVG")
-showVi = input.bool(true, "Show Volume Imbalance")
-showTimer = input.bool(true, "Show remaining time")
-showName = input.bool(true, "Show HTF name")
+tfOpts = array.from("5m", "15m", "30m", "1H", "4H", "1D", "1W", "1M")
 
-htf = switch htfChoice
-    "5m" => "5"
-    "15m" => "15"
-    "30m" => "30"
-    "1H" => "60"
-    "4H" => "240"
-    "1D" => "D"
-    "1W" => "W"
-    "1M" => "M"
-    => "60"
+htf1On = input.bool(true, "Enable", group = "HTF 1", inline = "h1")
+htf1Choice = input.string("15m", "", options = ["5m", "15m", "30m", "1H", "4H", "1D", "1W", "1M"], group = "HTF 1", inline = "h1")
+htf1N = input.int(20, "", minval = 1, maxval = 40, group = "HTF 1", inline = "h1")
+
+htf2On = input.bool(true, "Enable", group = "HTF 2", inline = "h2")
+htf2Choice = input.string("30m", "", options = ["5m", "15m", "30m", "1H", "4H", "1D", "1W", "1M"], group = "HTF 2", inline = "h2")
+htf2N = input.int(15, "", minval = 1, maxval = 40, group = "HTF 2", inline = "h2")
+
+htf3On = input.bool(true, "Enable", group = "HTF 3", inline = "h3")
+htf3Choice = input.string("1H", "", options = ["5m", "15m", "30m", "1H", "4H", "1D", "1W", "1M"], group = "HTF 3", inline = "h3")
+htf3N = input.int(10, "", minval = 1, maxval = 40, group = "HTF 3", inline = "h3")
+
+htf4On = input.bool(true, "Enable", group = "HTF 4", inline = "h4")
+htf4Choice = input.string("4H", "", options = ["5m", "15m", "30m", "1H", "4H", "1D", "1W", "1M"], group = "HTF 4", inline = "h4")
+htf4N = input.int(7, "", minval = 1, maxval = 40, group = "HTF 4", inline = "h4")
+
+htf5On = input.bool(false, "Enable", group = "HTF 5", inline = "h5")
+htf5Choice = input.string("1D", "", options = ["5m", "15m", "30m", "1H", "4H", "1D", "1W", "1M"], group = "HTF 5", inline = "h5")
+htf5N = input.int(10, "", minval = 1, maxval = 40, group = "HTF 5", inline = "h5")
+
+htf6On = input.bool(false, "Enable", group = "HTF 6", inline = "h6")
+htf6Choice = input.string("1W", "", options = ["5m", "15m", "30m", "1H", "4H", "1D", "1W", "1M"], group = "HTF 6", inline = "h6")
+htf6N = input.int(10, "", minval = 1, maxval = 40, group = "HTF 6", inline = "h6")
+
+limitHtf = input.int(6, "Limit to next HTFs only", minval = 1, maxval = 6, group = "General")
+pad = input.int(25, "Padding from current candles", minval = 1, group = "Styling")
+space = input.int(2, "Space between candles", minval = 0, group = "Styling")
+groupGap = input.int(10, "Space between Higher Timeframes", minval = 0, group = "Styling")
+width = input.int(1, "Candle width", minval = 1, group = "Styling") * 2
+bullBody = input.color(color.new(#26a69a, 30), "Bull body", group = "Styling")
+bearBody = input.color(color.new(#ef5350, 30), "Bear body", group = "Styling")
+borderC = input.color(#434651, "Border", group = "Styling")
+bullWick = input.color(#434651, "Bull wick", group = "Styling")
+bearWick = input.color(#434651, "Bear wick", group = "Styling")
+showFvg = input.bool(true, "Fair Value Gap", group = "Imbalance")
+showVi = input.bool(true, "Volume Imbalance", group = "Imbalance")
+showTimer = input.bool(true, "Remaining time", group = "Labels")
+showName = input.bool(true, "HTF name", group = "Labels")
+
+f_htf(string choice) =>
+    switch choice
+        "5m" => "5"
+        "15m" => "15"
+        "30m" => "30"
+        "1H" => "60"
+        "4H" => "240"
+        "1D" => "D"
+        "1W" => "W"
+        "1M" => "M"
+        => "60"
+
+// Note: Multi-group side strip (6 HTFs, FVG/VI, timers, backdrops) is fully painted
+// in the Forge TypeScript port (Indicators → ICT HTF Candles). This Pine sketch
+// mirrors Inputs for TV.com users; paint one primary enabled HTF as a preview.
+previewOn = htf1On ? true : htf2On ? true : htf3On ? true : htf4On ? true : htf5On ? true : htf6On
+previewChoice = htf1On ? htf1Choice : htf2On ? htf2Choice : htf3On ? htf3Choice : htf4On ? htf4Choice : htf5On ? htf5Choice : htf6Choice
+previewN = htf1On ? htf1N : htf2On ? htf2N : htf3On ? htf3N : htf4On ? htf4N : htf5On ? htf5N : htf6N
+htf = f_htf(previewChoice)
 
 [o, h, l, c] = request.security(syminfo.tickerid, htf, [open, high, low, close], lookahead = barmerge.lookahead_off)
 newHtf = ta.change(time(htf)) != 0
@@ -46,19 +81,19 @@ var array<C> candles = array.new<C>()
 var label nameLb = na
 var label timerLb = na
 
-if newHtf
+if previewOn and newHtf
     bull = c >= o
     bx = box.new(bar_index, math.max(o, c), bar_index + width, math.min(o, c), border_color = borderC, bgcolor = bull ? bullBody : bearBody, border_width = 1)
     wu = line.new(bar_index + width / 2, h, bar_index + width / 2, math.max(o, c), color = bull ? bullWick : bearWick)
     wd = line.new(bar_index + width / 2, math.min(o, c), bar_index + width / 2, l, color = bull ? bullWick : bearWick)
     array.unshift(candles, C.new(o, h, l, c, bx, wu, wd))
-    if array.size(candles) > maxN
+    if array.size(candles) > previewN
         old = array.pop(candles)
         box.delete(old.body)
         line.delete(old.wu)
         line.delete(old.wd)
 
-if array.size(candles) > 0
+if previewOn and array.size(candles) > 0
     cur = array.get(candles, 0)
     cur.h := math.max(cur.h, high)
     cur.l := math.min(cur.l, low)
@@ -74,7 +109,7 @@ if array.size(candles) > 0
     line.set_y2(cur.wd, cur.l)
     line.set_color(cur.wd, bull ? bullWick : bearWick)
 
-if barstate.islast and array.size(candles) > 0
+if previewOn and barstate.islast and array.size(candles) > 0
     sz = array.size(candles)
     float top = array.get(candles, 0).h
     float bot = array.get(candles, 0).l
@@ -93,10 +128,10 @@ if barstate.islast and array.size(candles) > 0
     left = bar_index + pad + width / 2
     if showName
         if na(nameLb)
-            nameLb := label.new(left, top, htfChoice, style = label.style_label_down, color = color.new(color.black, 100), textcolor = color.gray)
+            nameLb := label.new(left, top, previewChoice, style = label.style_label_down, color = color.new(color.black, 100), textcolor = color.gray)
         else
             label.set_xy(nameLb, left, top)
-            label.set_text(nameLb, htfChoice)
+            label.set_text(nameLb, previewChoice)
     if showTimer
         rem = math.max(0, (time_close(htf) - timenow) / 1000)
         mm = math.floor(rem / 60)
@@ -108,5 +143,4 @@ if barstate.islast and array.size(candles) > 0
             label.set_xy(timerLb, left, bot)
             label.set_text(timerLb, txt)
 
-// Note: FVG / VI for the side strip are fully painted in the Forge TypeScript port.
-plot(showFvg or showVi ? na : na, display = display.none)
+plot(showFvg or showVi or limitHtf > 0 or groupGap >= 0 ? na : na, display = display.none)
