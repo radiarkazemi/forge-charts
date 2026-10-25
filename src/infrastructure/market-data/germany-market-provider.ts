@@ -146,15 +146,39 @@ interface ForexXau {
   updated_at?: string;
 }
 
+/** Brokers that share the Germany FOREXCOM gold book (labels only for CFD venues). */
+const METAL_CFD_EXCHANGES = new Set([
+  "FOREXCOM",
+  "FXPRO",
+  "OANDA",
+  "PEPPERSTONE",
+  "IG",
+  "CAPITALCOM",
+]);
+
 function routeFor(symbol: SymbolInfo): Route | null {
   const byTicker = ROUTES[symbol.ticker.toUpperCase()];
   if (byTicker) {
     const ex = symbol.exchange.toUpperCase();
-    if (ex === "FXPRO" && byTicker.kind === "metal") return { ...byTicker, exchange: "FXPRO" };
-    if (ex === "FOREXCOM" && byTicker.kind === "metal") return { ...byTicker, exchange: "FOREXCOM" };
-    if (ex === "BINANCE" && byTicker.kind === "metal") {
-      // Explicit Binance gold listing uses PAXG, not XAU CFD.
-      return { ...byTicker, exchange: "BINANCE", apiSymbol: "PAXGUSDT", tickSymbol: "PAXGUSDT", kind: "crypto" };
+    if (byTicker.kind === "metal") {
+      if (ex === "BINANCE") {
+        // Explicit Binance gold listing uses PAXG, not XAU CFD.
+        return {
+          ...byTicker,
+          exchange: "BINANCE",
+          apiSymbol: "PAXGUSDT",
+          tickSymbol: "PAXGUSDT",
+          kind: "crypto",
+        };
+      }
+      if (!ex || METAL_CFD_EXCHANGES.has(ex)) {
+        return { ...byTicker, exchange: ex === "FXPRO" ? "FXPRO" : "FOREXCOM" };
+      }
+      return null;
+    }
+    if (byTicker.kind === "crypto") {
+      if (ex && ex !== "BINANCE") return null;
+      return byTicker;
     }
     return byTicker;
   }
@@ -164,7 +188,7 @@ function routeFor(symbol: SymbolInfo): Route | null {
     const api = t.endsWith("USDT") ? t : t.endsWith("USD") ? `${t.slice(0, -3)}USDT` : `${t}USDT`;
     return { apiSymbol: api, exchange: "BINANCE", kind: "crypto", tickSymbol: api };
   }
-  if (ex === "FXPRO" || ex === "FOREXCOM") {
+  if (METAL_CFD_EXCHANGES.has(ex)) {
     const t = symbol.ticker.toUpperCase();
     if (t === "XAUUSD" || t === "PAXGUSDT" || t === "GC1!") {
       return {

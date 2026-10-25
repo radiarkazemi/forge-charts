@@ -25,15 +25,33 @@ const YAHOO_BY_TICKER: Readonly<Record<string, string>> = {
   "CL1!": "CL=F",
   "ES1!": "ES=F",
   "NQ1!": "NQ=F",
+  "YM1!": "YM=F",
+  // FX majors / crosses (OANDA / Pepperstone / IG / Capital.com / FOREXCOM books)
   EURUSD: "EURUSD=X",
   GBPUSD: "GBPUSD=X",
   USDJPY: "USDJPY=X",
   AUDUSD: "AUDUSD=X",
   USDCHF: "USDCHF=X",
+  USDCAD: "USDCAD=X",
+  NZDUSD: "NZDUSD=X",
+  EURGBP: "EURGBP=X",
+  EURJPY: "EURJPY=X",
+  GBPJPY: "GBPJPY=X",
+  // CFD index cash names → continuous futures (near 24h) for broker books
+  NAS100: "NQ=F",
+  US30: "YM=F",
+  US500: "ES=F",
+  GER40: "^GDAXI",
+  UK100: "^FTSE",
+  JPN225: "^N225",
+  AUS200: "^AXJO",
+  // Cash index aliases
   SPX: "^GSPC",
   NDX: "^NDX",
   DJI: "^DJI",
   DAX: "^GDAXI",
+  FTSE: "^FTSE",
+  NI225: "^N225",
   AAPL: "AAPL",
   MSFT: "MSFT",
   NVDA: "NVDA",
@@ -177,7 +195,7 @@ export class YahooProvider implements MarketDataProvider {
   readonly isSynthetic = false;
 
   supports(symbol: SymbolInfo, interval: Interval): boolean {
-    if (!(symbol.ticker in YAHOO_BY_TICKER)) return false;
+    if (!(symbol.ticker.toUpperCase() in YAHOO_BY_TICKER)) return false;
     return this.spec(interval) !== null || this.aggregatePlan(interval) !== null;
   }
 
@@ -205,7 +223,8 @@ export class YahooProvider implements MarketDataProvider {
     if (range.to <= earliest) return [];
 
     const period1 = Math.max(range.from, earliest);
-    const url = buildUrl(`${CHART_BASE}/${encodeURIComponent(YAHOO_BY_TICKER[symbol.ticker] ?? symbol.ticker)}`, {
+    const yahooSym = YAHOO_BY_TICKER[symbol.ticker.toUpperCase()] ?? symbol.ticker;
+    const url = buildUrl(`${CHART_BASE}/${encodeURIComponent(yahooSym)}`, {
       interval: spec.yahoo,
       period1,
       period2: range.to,
@@ -245,9 +264,11 @@ export class YahooProvider implements MarketDataProvider {
   }
 
   async fetchQuotes(symbols: readonly SymbolInfo[]): Promise<Quote[]> {
-    const known = symbols.filter((s) => s.ticker in YAHOO_BY_TICKER);
+    const known = symbols.filter((s) => s.ticker.toUpperCase() in YAHOO_BY_TICKER);
     if (known.length === 0) return [];
-    const tickerByYahoo = new Map(known.map((s) => [YAHOO_BY_TICKER[s.ticker] ?? s.ticker, s.ticker]));
+    const tickerByYahoo = new Map(
+      known.map((s) => [YAHOO_BY_TICKER[s.ticker.toUpperCase()] ?? s.ticker, s.ticker]),
+    );
     const now = Math.floor(Date.now() / 1000);
 
     try {

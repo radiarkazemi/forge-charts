@@ -6,9 +6,49 @@ const UTC = "Etc/UTC";
 
 type Seed = [ticker: string, name: string, exchange: string, type: SymbolType, precision: number];
 
+/** CFD / FX brokers with Yahoo-backed underlyings (OANDA + 3). */
+const CFD_BROKERS = ["OANDA", "PEPPERSTONE", "IG", "CAPITALCOM"] as const;
+
+/** Shared FX / metal / index CFD books listed under each CFD broker. */
+const CFD_BOOK: readonly [ticker: string, name: string, type: SymbolType, precision: number][] = [
+  // Indices (NAS100 / Dow / …)
+  ["NAS100", "US 100 Cash (Nasdaq 100)", "index", 2],
+  ["US30", "US 30 Cash (Dow Jones)", "index", 2],
+  ["US500", "US 500 Cash (S&P 500)", "index", 2],
+  ["GER40", "Germany 40 Cash (DAX)", "index", 2],
+  ["UK100", "UK 100 Cash (FTSE 100)", "index", 2],
+  ["JPN225", "Japan 225 Cash (Nikkei)", "index", 2],
+  ["AUS200", "Australia 200 Cash", "index", 2],
+  // FX majors / crosses
+  ["EURUSD", "Euro / U.S. Dollar", "forex", 5],
+  ["GBPUSD", "British Pound / U.S. Dollar", "forex", 5],
+  ["USDJPY", "U.S. Dollar / Japanese Yen", "forex", 3],
+  ["AUDUSD", "Australian Dollar / U.S. Dollar", "forex", 5],
+  ["USDCHF", "U.S. Dollar / Swiss Franc", "forex", 5],
+  ["USDCAD", "U.S. Dollar / Canadian Dollar", "forex", 5],
+  ["NZDUSD", "New Zealand Dollar / U.S. Dollar", "forex", 5],
+  ["EURGBP", "Euro / British Pound", "forex", 5],
+  ["EURJPY", "Euro / Japanese Yen", "forex", 3],
+  ["GBPJPY", "British Pound / Japanese Yen", "forex", 3],
+  // Metals / energy
+  ["XAUUSD", "Gold Spot / U.S. Dollar", "forex", 2],
+  ["XAGUSD", "Silver Spot / U.S. Dollar", "commodity", 3],
+  ["USOIL", "WTI Crude Oil", "commodity", 2],
+];
+
+function cfdSeeds(): Seed[] {
+  const out: Seed[] = [];
+  for (const broker of CFD_BROKERS) {
+    for (const [ticker, name, type, precision] of CFD_BOOK) {
+      out.push([ticker, name, broker, type, precision]);
+    }
+  }
+  return out;
+}
+
 /**
  * Featured first — empty Symbol Search should surface live Forge markets
- * (Iran gold, XAU, majors) before sparse Yahoo demo equities.
+ * (Iran gold, XAU, majors, indices) before sparse Yahoo demo equities.
  */
 const SEEDS: readonly Seed[] = [
   // Iran domestic gold — Faraz
@@ -19,7 +59,7 @@ const SEEDS: readonly Seed[] = [
   ["NIM", "نیم سکه", "IRAN", "commodity", 0],
   ["ROB", "ربع سکه", "IRAN", "commodity", 0],
   ["ONS", "انس جهانی (بازار ایران)", "IRAN", "commodity", 2],
-  // Gold / FX
+  // Gold / FX — FOREXCOM / FXPRO (Germany live for XAU)
   ["XAUUSD", "Gold Spot / U.S. Dollar", "FOREXCOM", "forex", 2],
   ["XAUUSD", "Gold Spot / U.S. Dollar", "FXPRO", "forex", 2],
   ["XAUUSD", "Gold Spot / U.S. Dollar (PAXG)", "BINANCE", "forex", 2],
@@ -27,11 +67,27 @@ const SEEDS: readonly Seed[] = [
   ["EURUSD", "Euro / U.S. Dollar", "FOREXCOM", "forex", 5],
   ["GBPUSD", "British Pound / U.S. Dollar", "FOREXCOM", "forex", 5],
   ["USDJPY", "U.S. Dollar / Japanese Yen", "FOREXCOM", "forex", 3],
+  ["AUDUSD", "Australian Dollar / U.S. Dollar", "FOREXCOM", "forex", 5],
+  ["USDCHF", "U.S. Dollar / Swiss Franc", "FOREXCOM", "forex", 5],
+  ["USDCAD", "U.S. Dollar / Canadian Dollar", "FOREXCOM", "forex", 5],
+  ["NZDUSD", "New Zealand Dollar / U.S. Dollar", "FOREXCOM", "forex", 5],
   ["XAGUSD", "Silver Spot / U.S. Dollar", "FOREXCOM", "commodity", 3],
   ["EURUSD", "Euro / U.S. Dollar", "FXPRO", "forex", 5],
   ["GBPUSD", "British Pound / U.S. Dollar", "FXPRO", "forex", 5],
   ["USDJPY", "U.S. Dollar / Japanese Yen", "FXPRO", "forex", 3],
   ["XAGUSD", "Silver Spot / U.S. Dollar", "FXPRO", "commodity", 3],
+  // Indices aliases (cash) under TVC / SP
+  ["NAS100", "US 100 Cash (Nasdaq 100)", "TVC", "index", 2],
+  ["US30", "US 30 Cash (Dow Jones)", "TVC", "index", 2],
+  ["US500", "US 500 Cash (S&P 500)", "TVC", "index", 2],
+  ["GER40", "Germany 40 Cash (DAX)", "TVC", "index", 2],
+  ["UK100", "UK 100 Cash (FTSE 100)", "TVC", "index", 2],
+  ["JPN225", "Japan 225 Cash (Nikkei)", "TVC", "index", 2],
+  ["SPX", "S&P 500", "SP", "index", 2],
+  ["NDX", "Nasdaq 100", "NASDAQ", "index", 2],
+  ["DJI", "Dow Jones Industrial Average", "DJ", "index", 2],
+  // OANDA + Pepperstone + IG + Capital.com books
+  ...cfdSeeds(),
   // BINANCE — Germany market-api universe
   ["BTCUSDT", "Bitcoin / Tether", "BINANCE", "crypto", 2],
   ["ETHUSDT", "Ethereum / Tether", "BINANCE", "crypto", 2],
@@ -57,7 +113,6 @@ const SEEDS: readonly Seed[] = [
   ["BTCUSD", "Bitcoin / U.S. Dollar", "BINANCE", "crypto", 2],
   ["ETHUSD", "Ethereum / U.S. Dollar", "BINANCE", "crypto", 2],
   ["USOIL", "WTI Crude Oil", "TVC", "commodity", 2],
-  ["SPX", "S&P 500", "SP", "index", 2],
   // Sparse Yahoo demo equities last (sticky NASDAQ chip used to hide everything else).
   ["AAPL", "Apple Inc.", "NASDAQ", "stock", 2],
   ["MSFT", "Microsoft Corporation", "NASDAQ", "stock", 2],
@@ -66,7 +121,20 @@ const SEEDS: readonly Seed[] = [
 ];
 
 /** Prefer these venues in the Symbol Search exchange dropdown. */
-export const EXCHANGE_PRIORITY = ["IRAN", "FOREXCOM", "BINANCE", "FXPRO", "TVC", "SP", "NASDAQ"] as const;
+export const EXCHANGE_PRIORITY = [
+  "IRAN",
+  "OANDA",
+  "PEPPERSTONE",
+  "IG",
+  "CAPITALCOM",
+  "FOREXCOM",
+  "BINANCE",
+  "FXPRO",
+  "TVC",
+  "SP",
+  "DJ",
+  "NASDAQ",
+] as const;
 
 /** Empty-query ranking for Symbol Search (ticker upper-case). */
 const FEATURED_TICKERS = [
@@ -74,6 +142,9 @@ const FEATURED_TICKERS = [
   "G18",
   "SEKKE",
   "XAUUSD",
+  "NAS100",
+  "US30",
+  "US500",
   "BTCUSDT",
   "ETHUSDT",
   "EURUSD",
@@ -81,6 +152,9 @@ const FEATURED_TICKERS = [
   "G24",
   "NIM",
   "ROB",
+  "GER40",
+  "UK100",
+  "JPN225",
   "PAXGUSDT",
   "GBPUSD",
   "USDJPY",
@@ -89,7 +163,22 @@ const FEATURED_TICKERS = [
 
 const TEHRAN = "Asia/Tehran";
 
-function sessionFor(type: SymbolType): { session: string; timezone: string } {
+/** Broker CFD books trade FX-style sessions (near 24h weekdays). */
+const CFD_EXCHANGES = new Set<string>([
+  "OANDA",
+  "PEPPERSTONE",
+  "IG",
+  "CAPITALCOM",
+  "FOREXCOM",
+  "FXPRO",
+  "TVC",
+]);
+
+function sessionFor(type: SymbolType, exchange: string): { session: string; timezone: string } {
+  const ex = exchange.toUpperCase();
+  if (CFD_EXCHANGES.has(ex) && (type === "index" || type === "forex" || type === "commodity" || type === "futures")) {
+    return { session: SESSION_FX, timezone: UTC };
+  }
   switch (type) {
     case "stock":
     case "fund":
@@ -108,7 +197,7 @@ function sessionFor(type: SymbolType): { session: string; timezone: string } {
 }
 
 function toSymbol([ticker, name, exchange, type, pricePrecision]: Seed): SymbolInfo {
-  const base = { ticker, name, exchange, type, pricePrecision, ...sessionFor(type) };
+  const base = { ticker, name, exchange, type, pricePrecision, ...sessionFor(type, exchange) };
   // Iran gold quotes stream continuously from TGJU/Anil — keep session open for 1S ticks.
   if (exchange.toUpperCase() === "IRAN" || exchange.toUpperCase() === "TGJU") {
     return { ...base, session: SESSION_24X7, timezone: TEHRAN };
@@ -149,7 +238,7 @@ export class StaticSymbolRepository implements SymbolRepository {
     return this.symbols
       .filter((s) => symbolMatches(s, needle, type))
       .sort((a, b) => {
-        // Empty query: featured markets first (Iran / gold / crypto).
+        // Empty query: featured markets first (Iran / gold / crypto / indices).
         if (!needle) {
           const fa = featuredRank(a.ticker);
           const fb = featuredRank(b.ticker);
