@@ -162,7 +162,7 @@ export function mountHeaderToolbar(
       align: "left",
       useTradingViewStyle: true,
       text: "▶ Bar Replay",
-      title: "Bar Replay — select a bar and play history forward (build 1021v12)",
+      title: "Bar Replay — select a bar and play history forward (build 1021v13)",
       onClick: () => handlers.onEnterBarReplay(),
     });
 

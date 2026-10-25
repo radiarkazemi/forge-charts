@@ -8,10 +8,13 @@ import { useStore } from "@/shared/hooks/useStore";
 import type { EntityId } from "@/infrastructure/tradingview";
 import { barsFromChartExport } from "@/features/pine/orca-runtime";
 import {
+  clColor,
   computeSessions,
   mergeSessionDefs,
   paintSessionsOnChart,
   publishSessionsDashboard,
+  SESSION_COLOR_PALETTE,
+  SESSIONS_DEFAULTS,
   type SessionsOptions,
 } from "@/features/sessions/runtime";
 import {
@@ -20,17 +23,77 @@ import {
   SESSIONS_STUDY_DEFAULTS,
   SESSIONS_MAX_COUNT,
 } from "./sessions-indicator";
-import { SESSION_COLOR_PALETTE, SESSIONS_DEFAULTS } from "@/features/sessions/runtime";
 
 const MAX_BARS = 8_000;
 const STUDY_DEBOUNCE_MS = 450;
 const PRESENCE_POLL_MS = 6_000;
 
-function fingerprintCmds(cmds: readonly { kind: string; t1: number; p1: number }[]): string {
+function fingerprintCmds(
+  cmds: readonly { kind: string; t1: number; p1: number; color?: string; fill?: string }[],
+): string {
   if (cmds.length === 0) return "empty";
   const head = cmds.slice(0, 6);
   const tail = cmds.length > 6 ? cmds.slice(-6) : [];
-  return `${cmds.length}|${[...head, ...tail].map((c) => `${c.kind}:${c.t1}:${c.p1}`).join(";")}`;
+  const part = (c: (typeof cmds)[number]) =>
+    `${c.kind}:${c.t1}:${c.p1}:${c.color ?? ""}:${c.fill ?? ""}`;
+  return `${cmds.length}|${[...head, ...tail].map(part).join(";")}`;
+}
+
+/** Pull Style-tab plot color + transparency for session slots (boxes + labels). */
+function readStyleColors(
+  api: { getStyleValues?: () => unknown },
+  count: number,
+): { color: string; transparency: number }[] {
+  const out: { color: string; transparency: number }[] = [];
+  let styles: Record<string, unknown> = {};
+  try {
+    const raw = api.getStyleValues?.() as Record<string, unknown> | null;
+    if (raw && typeof raw === "object") {
+      const nested = raw.styles;
+      if (nested && typeof nested === "object") {
+        styles = nested as Record<string, unknown>;
+      } else {
+        // Some CL builds return the style map at the top level.
+        styles = raw;
+      }
+    }
+  } catch {
+    styles = {};
+  }
+  const slotLetters = "ABCDEFGHIJKL";
+  for (let i = 0; i < count; i += 1) {
+    const plotId = stylePlotIdForIndex(i);
+    const letter = slotLetters[i] ?? "A";
+    const fallbackHex = SESSION_COLOR_PALETTE[i % SESSION_COLOR_PALETTE.length] ?? "#ff5d00";
+    // Prefer exact plot id; also accept index / loose style_s* keys.
+    const looseKey = Object.keys(styles).find(
+      (k) => k === plotId || k.endsWith(`s${letter}`) || k === `style_s${letter}`,
+    );
+    const candidates: unknown[] = [
+      styles[plotId],
+      looseKey ? styles[looseKey] : undefined,
+      styles[String(i)],
+      styles[`plot_${i}`],
+    ];
+    let color: string = fallbackHex;
+    let transparency: number = SESSIONS_DEFAULTS.rangeTransparency;
+    for (const cand of candidates) {
+      if (!cand || typeof cand !== "object") continue;
+      const st = cand as { color?: string; transparency?: number };
+      if (typeof st.color === "string" && st.color.trim()) {
+        const norm = clColor(st.color, "");
+        if (norm) {
+          color = norm;
+          if (typeof st.transparency === "number" && Number.isFinite(st.transparency)) {
+            transparency = Math.max(0, Math.min(100, st.transparency));
+          }
+          break;
+        }
+      }
+    }
+    out.push({ color, transparency });
+  }
+  return out;
 }
 
 function defaultOpts(): SessionsOptions {
@@ -125,13 +188,45 @@ export function useSessionsStudy(enabled = true): void {
           return typeof v === "boolean" ? v : fallback;
         };
 
-        const sessionCount = Math.max(
+        // Inputs “+ Add session” / “− Remove” checkboxes (CL has no real + button).
+        let sessionCount = Math.max(
           1,
-          Math.min(
-            SESSIONS_MAX_COUNT,
-            Math.floor(num("sessionCount", 4)),
-          ),
+          Math.min(SESSIONS_MAX_COUNT, Math.floor(num("sessionCount", 4))),
         );
+        if (bool("addSession", false) && sessionCount < SESSIONS_MAX_COUNT) {
+          sessionCount += 1;
+          const labels = "ABCDEFGHIJKL";
+          const L = labels[sessionCount - 1]!;
+          try {
+            api.setInputValues([
+              { id: "sessionCount" as never, value: sessionCount },
+              { id: "addSession" as never, value: false },
+              { id: `s${L}Enable` as never, value: true },
+            ]);
+          } catch {
+            /* ignore */
+          }
+        } else if (bool("removeSession", false) && sessionCount > 1) {
+          sessionCount -= 1;
+          try {
+            api.setInputValues([
+              { id: "sessionCount" as never, value: sessionCount },
+              { id: "removeSession" as never, value: false },
+            ]);
+          } catch {
+            /* ignore */
+          }
+        } else if (bool("addSession", false) || bool("removeSession", false)) {
+          try {
+            api.setInputValues([
+              { id: "addSession" as never, value: false },
+              { id: "removeSession" as never, value: false },
+            ]);
+          } catch {
+            /* ignore */
+          }
+        }
+
         map.set("sessionCount", sessionCount);
         const slots = readSessionSlotsFromMap(map);
         const extra = str("extraSessions", str("sessionsText", ""));
@@ -143,30 +238,12 @@ export function useSessionsStudy(enabled = true): void {
           | 3
           | 4;
 
-        // Style tab palette colors + opacity (transparency) per session.
-        let styleMap: Record<string, { color?: string; transparency?: number }> = {};
-        try {
-          const styleValues = api.getStyleValues?.() as
-            | { styles?: Record<string, { color?: string; transparency?: number } | undefined> }
-            | undefined;
-          styleMap = styleValues?.styles ?? {};
-        } catch {
-          styleMap = {};
-        }
-
-        const coloredSlots = slots.map((slot, i) => {
-          const plotId = stylePlotIdForIndex(i);
-          const st = styleMap[plotId];
-          const color =
-            typeof st?.color === "string" && st.color.trim()
-              ? st.color
-              : (SESSION_COLOR_PALETTE[i % SESSION_COLOR_PALETTE.length] ?? slot.color);
-          const transparency =
-            typeof st?.transparency === "number" && Number.isFinite(st.transparency)
-              ? st.transparency
-              : SESSIONS_DEFAULTS.rangeTransparency;
-          return { ...slot, color, transparency };
-        });
+        const styleColors = readStyleColors(api, slots.length);
+        const coloredSlots = slots.map((slot, i) => ({
+          ...slot,
+          color: styleColors[i]?.color ?? slot.color,
+          transparency: styleColors[i]?.transparency ?? SESSIONS_DEFAULTS.rangeTransparency,
+        }));
 
         const sessions = mergeSessionDefs(coloredSlots, sessionCount, extra);
         console.info(

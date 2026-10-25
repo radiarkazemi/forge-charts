@@ -740,15 +740,18 @@ function buildDashboard(
   };
 }
 
-function clColor(color: string, fallback = "#888888"): string {
+/** Normalize Style-tab / input colors (#hex, rgb, rgba) to #rrggbb. */
+export function clColor(color: string, fallback = "#888888"): string {
   const c = (color || "").trim();
   if (/^#[0-9a-fA-F]{6}$/.test(c)) return c;
+  if (/^#[0-9a-fA-F]{8}$/.test(c)) return c.slice(0, 7);
   if (/^#[0-9a-fA-F]{3}$/.test(c)) {
     const r = c[1]!;
     const g = c[2]!;
     const b = c[3]!;
     return `#${r}${r}${g}${g}${b}${b}`;
   }
+  if (/^[0-9a-fA-F]{6}$/.test(c)) return `#${c}`;
   const m = c.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
   if (m) {
     const hex = (n: string) => Number(n).toString(16).padStart(2, "0");
@@ -846,9 +849,14 @@ export async function paintSessionsOnChart(
         );
         if (id) ids.push(id);
       } else if (cmd.kind === "rect" && cmd.t2 != null && cmd.p2 != null) {
-        // Match Dealing Ranges paint path (known-good CL rectangle overrides).
-        const { r, g, b, a } = parseRgba(cmd.fill, stroke);
-        const alpha = Math.max(0.12, Math.min(0.45, a > 0 ? a : 0.2));
+        // CL rectangles need solid hex + transparency (0–100). rgba fills were
+        // ignored so Style colors only tinted ownerStudyId labels.
+        const fillHex = clColor(cmd.fill ?? "", stroke);
+        const { a } = parseRgba(cmd.fill, stroke);
+        const transparency = Math.max(
+          0,
+          Math.min(100, Number.isFinite(a) ? Math.round((1 - a) * 100) : 80),
+        );
         const id = await chart.createMultipointShape(
           [
             { time: cmd.t1 as never, price: cmd.p1 },
@@ -858,12 +866,15 @@ export async function paintSessionsOnChart(
             ...common,
             shape: "rectangle",
             overrides: {
-              color: stroke,
-              backgroundColor: `rgba(${r}, ${g}, ${b}, ${alpha})`,
+              // Border + fill both follow Style color (not label-only).
+              color: fillHex,
+              linecolor: fillHex,
+              backgroundColor: fillHex,
               fillBackground: true,
               linewidth: optsShowOutline(cmd) ? 2 : 1,
               linestyle: linestyleMap[cmd.style ?? "dotted"],
-              transparency: Math.round((1 - alpha) * 100),
+              transparency,
+              filled: true,
             },
           },
         );

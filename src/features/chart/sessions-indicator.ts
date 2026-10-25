@@ -79,6 +79,8 @@ function buildSlotInputs(index: number): Array<Record<string, unknown>> {
 
 const slotInputDefaults: Record<string, string | number | boolean> = {
   sessionCount: 4,
+  addSession: false,
+  removeSession: false,
 };
 for (let i = 0; i < SESSIONS_MAX_COUNT; i += 1) {
   const d = defaultSlot(i);
@@ -214,11 +216,23 @@ export function createSessionsIndicator(PineJS: {
       inputs: [
         {
           id: "sessionCount",
-          name: "Sessions · count (use + below, or type 1–12)",
+          name: "Sessions · count (1–12)",
           defval: 4,
           type: "integer",
           min: 1,
           max: SESSIONS_MAX_COUNT,
+        },
+        {
+          id: "addSession",
+          name: "+ Add session",
+          defval: false,
+          type: "bool",
+        },
+        {
+          id: "removeSession",
+          name: "− Remove last session",
+          defval: false,
+          type: "bool",
         },
         ...slotInputs,
         {
