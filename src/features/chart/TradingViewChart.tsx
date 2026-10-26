@@ -25,6 +25,7 @@ import {
   CandleCountdownOverlay,
   useDemoChartLines,
 } from "@/features/demo-trading";
+import { RADIAR_LAYOUT_NAME } from "@/infrastructure/tradingview";
 
 interface TradingViewChartProps {
   readonly onCreateAlert: () => void;
@@ -210,6 +211,27 @@ export function TradingViewChart({
     onCreateAlert,
     onOpenProfile,
     getProfile: () => activeProfile(settings.settings.get()),
+    onSaveNamedLayout: () => {
+      const widget = controller.getWidget();
+      if (!widget) return;
+      const profile = activeProfile(settings.settings.get());
+      const layoutName = profile.displayName?.trim() || RADIAR_LAYOUT_NAME;
+      try {
+        widget.save((state) => {
+          void saveLoadAdapter.saveChart({
+            name: layoutName,
+            content: typeof state === "string" ? state : JSON.stringify(state),
+            symbol: controller.state.get().symbol || "XAUUSD",
+            resolution: String(controller.state.get().interval || "15"),
+            timestamp: Math.round(Date.now() / 1000),
+          });
+          storage.set("forge.tv.autosave.v3", state);
+          storage.set("forge.tv.autosave.v3.bak", state);
+        });
+      } catch {
+        /* ignore */
+      }
+    },
     onEnterBarReplay: () => {
       setForceReplayUi(true);
       const w = chart.getWidget();

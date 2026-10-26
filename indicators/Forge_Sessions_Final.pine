@@ -1,5 +1,5 @@
 // Forge Sessions — final zone + Midnight line port for TradingView.com
-// Mirrors Forge Charts “Forge Sessions” (BUILD 1021v17+).
+// Mirrors Forge Charts “Forge Sessions” (zones + 00:00 Midnight line).
 // Hours default to America/New_York (UTC−4 fixed offset in Forge).
 //
 //@version=6

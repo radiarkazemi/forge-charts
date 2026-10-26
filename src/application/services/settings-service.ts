@@ -74,12 +74,58 @@ export const AVATAR_COLORS = ["#9c27b0", "#2962ff", "#089981", "#f57c00", "#e91e
 
 export function createDefaultProfile(): UserProfile {
   return {
-    id: "local-1",
-    displayName: "Forge Trader",
-    username: "forge",
-    avatarInitial: "F",
+    id: "local-radiar",
+    displayName: "Radiar",
+    username: "radiar",
+    avatarInitial: "R",
     avatarColor: AVATAR_COLORS[0],
   };
+}
+
+/** Legacy default identity from earlier builds — migrate in place, keep id. */
+function isLegacyDefaultProfile(p: UserProfile): boolean {
+  const name = p.displayName.trim().toLowerCase();
+  const user = p.username.trim().toLowerCase();
+  return (
+    p.id === "local-1" ||
+    user === "forge" ||
+    name === "forge trader" ||
+    name === "forge" ||
+    name === "trader" ||
+    name === "layout"
+  );
+}
+
+function ensureRadiarProfile(profiles: readonly UserProfile[], activeId: string): {
+  profiles: readonly UserProfile[];
+  activeProfileId: string;
+} {
+  if (profiles.length === 0) {
+    const radiar = createDefaultProfile();
+    return { profiles: [radiar], activeProfileId: radiar.id };
+  }
+  const migrated = profiles.map((p) => {
+    if (!isLegacyDefaultProfile(p)) return p;
+    return {
+      ...p,
+      displayName: "Radiar",
+      username: "radiar",
+      avatarInitial: "R",
+    };
+  });
+  const hasRadiar = migrated.some(
+    (p) => p.displayName.trim().toLowerCase() === "radiar" || p.username === "radiar",
+  );
+  const next = hasRadiar ? migrated : [...migrated, createDefaultProfile()];
+  const radiar =
+    next.find((p) => p.displayName.trim().toLowerCase() === "radiar" || p.username === "radiar") ??
+    next[0]!;
+  const activeStill =
+    typeof activeId === "string" && next.some((p) => p.id === activeId) ? activeId : radiar.id;
+  // Prefer Radiar when still on a legacy default id.
+  const active = next.find((p) => p.id === activeStill)!;
+  const activeProfileId = isLegacyDefaultProfile(active) ? radiar.id : activeStill;
+  return { profiles: next, activeProfileId };
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -92,7 +138,7 @@ export const DEFAULT_SETTINGS: Settings = {
   lastInterval: "15",
   watchlist: DEFAULT_WATCHLIST,
   profiles: [createDefaultProfile()],
-  activeProfileId: "local-1",
+  activeProfileId: "local-radiar",
 };
 
 const VALID_LAYOUTS = new Set<ChartLayoutId>(["s", "2h", "2v", "3s", "3h", "3v", "2-1", "1-2", "4"]);
@@ -171,11 +217,11 @@ export function sanitizeSettings(raw: unknown): Settings {
       ? persisted.lastSymbol
       : DEFAULT_SETTINGS.lastSymbol;
   const paneSymbols = sanitizeStringList(persisted.paneSymbols, [lastSymbol]);
-  const profiles = sanitizeProfiles(persisted.profiles);
-  const activeProfileId =
-    typeof persisted.activeProfileId === "string" && profiles.some((p) => p.id === persisted.activeProfileId)
-      ? persisted.activeProfileId
-      : profiles[0]!.id;
+  const profilesRaw = sanitizeProfiles(persisted.profiles);
+  const { profiles, activeProfileId } = ensureRadiarProfile(
+    profilesRaw,
+    typeof persisted.activeProfileId === "string" ? persisted.activeProfileId : profilesRaw[0]!.id,
+  );
   return {
     theme: persisted.theme === "light" ? "light" : "dark",
     sidePanel: sanitizeSidePanel(persisted.sidePanel),
