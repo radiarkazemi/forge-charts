@@ -222,7 +222,7 @@ export function TradingViewChart({
             name: layoutName,
             content: typeof state === "string" ? state : JSON.stringify(state),
             symbol: controller.state.get().symbol || "XAUUSD",
-            resolution: String(controller.state.get().interval || "15"),
+            resolution: String(controller.state.get().interval || "15") as never,
             timestamp: Math.round(Date.now() / 1000),
           });
           storage.set("forge.tv.autosave.v3", state);

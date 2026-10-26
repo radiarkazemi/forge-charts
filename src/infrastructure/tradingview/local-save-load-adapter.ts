@@ -72,7 +72,7 @@ export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
         id: RADIAR_LAYOUT_ID,
         name: RADIAR_LAYOUT_NAME,
         symbol: "XAUUSD",
-        resolution: "15",
+        resolution: "15" as never,
         content: "",
         timestamp: Math.round(Date.now() / 1000),
       };

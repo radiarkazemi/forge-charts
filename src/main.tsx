@@ -1,10 +1,10 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
-import { createServices } from "./app/container";
 
 /**
- * Soft settings migration only.
+ * Soft settings migration only (pre-auth global keys).
+ * After login, migrateLegacyDataIfNeeded moves these into ScopedStorage.
  * Do NOT wipe forge.tv.autosave.* on deploy — that erased indicators,
  * drawings, theme, and the Radiar layout after hard refresh.
  */
@@ -157,14 +157,8 @@ function runBootRecovery(): void {
 
 runBootRecovery();
 
-const services = createServices();
-
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App services={services} />
+    <App />
   </StrictMode>,
 );
-
-if (import.meta.hot) {
-  import.meta.hot.dispose(() => services.dispose());
-}

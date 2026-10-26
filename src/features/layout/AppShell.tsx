@@ -15,11 +15,15 @@ import { MobileBottomBar } from "./MobileBottomBar";
 import { SidePanel } from "./SidePanel";
 import { SideRail } from "./SideRail";
 
+interface AppShellProps {
+  readonly onSignOut: () => void;
+}
+
 /**
  * Chart shell matching TradingView Supercharts.
  * Mobile: TV-app shell — no desktop header, full-bleed chart, bottom tool + app bars.
  */
-export function AppShell() {
+export function AppShell({ onSignOut }: AppShellProps) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const { settings, chart, alerts, demoTrading } = useServices();
@@ -193,6 +197,7 @@ export function AppShell() {
           setProfileMenuAnchor(null);
           setProfileOpen(true);
         }}
+        onSignOut={onSignOut}
         alertCount={alertCount}
       />
       <AlertToaster />
