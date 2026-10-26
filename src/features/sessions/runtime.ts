@@ -1023,7 +1023,7 @@ export async function paintSessionsOnChart(
     } catch {
       /* skip bad draw */
     }
-    if (i > 0 && i % 4 === 0) {
+    if (i > 0 && i % 20 === 0) {
       await new Promise<void>((r) => {
         window.setTimeout(r, 0);
       });

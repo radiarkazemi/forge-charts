@@ -24,12 +24,12 @@ import {
   SESSIONS_MAX_COUNT,
 } from "./sessions-indicator";
 
-const MAX_BARS = 8_000;
-const STUDY_DEBOUNCE_MS = 280;
+const MAX_BARS = 6_000;
+const STUDY_DEBOUNCE_MS = 400;
 /** Presence / cleanup when study removed. */
-const PRESENCE_POLL_MS = 4_000;
-/** Soft refresh so forming session boxes track live bars (fixes “stuck”). */
-const LIVE_REFRESH_MS = 2_000;
+const PRESENCE_POLL_MS = 6_000;
+/** Soft refresh so forming session boxes track live bars — keep light for chart FPS. */
+const LIVE_REFRESH_MS = 4_000;
 
 function fingerprintCmds(
   cmds: readonly { kind: string; t1: number; p1: number; color?: string; fill?: string }[],
@@ -337,12 +337,6 @@ export function useSessionsStudy(enabled = true): void {
         const key = `${optsKey}|${tip.time}:${tip.high}:${tip.low}:${tip.close}`;
 
         const { cmds, dashboard } = computeSessions(bars, opts);
-        const rects = cmds.filter((c) => c.kind === "rect").length;
-        console.info(
-          `[forge-sessions] bars=${bars.length} cmds=${cmds.length} rects=${rects}`,
-          `t=${bars[0]?.time}..${tip.time}`,
-        );
-
         const fp = fingerprintCmds(cmds);
         if (!force && fp === lastFpRef.current && lastKeyRef.current === key) {
           publishSessionsDashboard(dashboard);
@@ -370,7 +364,6 @@ export function useSessionsStudy(enabled = true): void {
         lastKeyRef.current = key;
         lastFpRef.current = fp;
         publishSessionsDashboard(dashboard);
-        console.info(`[forge-sessions] painted ${ids.length} shapes`);
         for (const id of prev) {
           try {
             chart.removeEntity(id);
