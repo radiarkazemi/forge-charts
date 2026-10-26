@@ -207,8 +207,10 @@ else
         label.delete(midnightLb)
         midnightLb := na
 
-// ── HTF candle remain (same math as Forge HtfCandleRemainLegend) ─────
-// UTC-aligned: remain = stepSec − (nowSec % stepSec)
+// ── HTF candle remain ───────────────────────────────────────────────
+// Use TradingView time_close(tf) so remain matches the real HTF candle
+// on this symbol (exchange/session aligned) — NOT raw UTC modulo.
+// UTC modulo was ~2h early/late on FX/metals 4H vs the chart’s true close.
 // Text: "4H Candle : HH:MM:SS - 1H Candle : MM:SS - 30m Candle : … - 15m Candle : …"
 f_pad2(int n) =>
     n < 10 ? "0" + str.tostring(n) : str.tostring(n)
@@ -219,9 +221,6 @@ f_fmt_remain(int totalSec) =>
     int m = int(math.floor((rem % 3600) / 60))
     int s = rem % 60
     h > 0 ? f_pad2(h) + ":" + f_pad2(m) + ":" + f_pad2(s) : f_pad2(m) + ":" + f_pad2(s)
-
-f_remain_step(int stepSec, int nowSec) =>
-    stepSec - (nowSec % stepSec)
 
 f_remain_size() =>
     switch candleRemainSize
@@ -234,12 +233,12 @@ var table remainTbl = na
 
 if barstate.islast
     if showCandleRemain
-        int nowSec = int(math.floor(timenow / 1000))
-        string t4h = f_fmt_remain(f_remain_step(4 * 3600, nowSec))
-        string t1h = f_fmt_remain(f_remain_step(3600, nowSec))
-        string t30 = f_fmt_remain(f_remain_step(30 * 60, nowSec))
-        string t15 = f_fmt_remain(f_remain_step(15 * 60, nowSec))
-        string txt = "4H Candle : " + t4h + " - 1H Candle : " + t1h + " - 30m Candle : " + t30 + " - 15m Candle : " + t15
+        // time_close("240"/…) follows this symbol’s real HTF session (not UTC clock math).
+        int rem4h = na(time_close("240")) ? 0 : int(math.max(0, math.floor((time_close("240") - timenow) / 1000)))
+        int rem1h = na(time_close("60")) ? 0 : int(math.max(0, math.floor((time_close("60") - timenow) / 1000)))
+        int rem30 = na(time_close("30")) ? 0 : int(math.max(0, math.floor((time_close("30") - timenow) / 1000)))
+        int rem15 = na(time_close("15")) ? 0 : int(math.max(0, math.floor((time_close("15") - timenow) / 1000)))
+        string txt = "4H Candle : " + f_fmt_remain(rem4h) + " - 1H Candle : " + f_fmt_remain(rem1h) + " - 30m Candle : " + f_fmt_remain(rem30) + " - 15m Candle : " + f_fmt_remain(rem15)
 
         if na(remainTbl)
             remainTbl := table.new(position.top_right, 1, 1, border_width = 0)
