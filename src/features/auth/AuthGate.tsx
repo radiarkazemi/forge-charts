@@ -84,7 +84,7 @@ export function AuthGate({ auth, onAuthenticated }: AuthGateProps) {
               Forge Charts
             </Typography>
             <Typography variant="body2" sx={{ color: "#787b86", mt: 0.75 }}>
-              Sign in to open your charts. Each account keeps its own data on this device.
+              Sign in with your email to open your charts. Other people need their own account.
             </Typography>
           </Box>
 
@@ -119,14 +119,16 @@ export function AuthGate({ auth, onAuthenticated }: AuthGateProps) {
               />
             ) : null}
             <TextField
-              label="Username"
+              label="Email"
+              type="email"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               autoComplete="username"
               required
               fullWidth
               size="small"
-              slotProps={{ htmlInput: { minLength: 3, maxLength: 32 } }}
+              placeholder="you@email.com"
+              slotProps={{ htmlInput: { minLength: 3, maxLength: 64 } }}
             />
             <TextField
               label="Password"
