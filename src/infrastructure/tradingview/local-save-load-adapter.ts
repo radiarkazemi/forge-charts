@@ -50,16 +50,42 @@ function deserializeLineTools(data: SerializedLineTools): Partial<LineToolsAndGr
   };
 }
 
+/** Stable id for the user’s primary named layout. */
+export const RADIAR_LAYOUT_ID = "radiar-layout";
+export const RADIAR_LAYOUT_NAME = "Radiar";
+
 /**
  * Implements TradingView's save/load contract on top of `KeyValueStorage`, so
  * layouts, study templates and drawings survive reloads with no backend.
  */
 export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
-  constructor(private readonly storage: KeyValueStorage) {}
+  constructor(private readonly storage: KeyValueStorage) {
+    this.ensureRadiarLayoutMeta();
+  }
+
+  /** Ensure a named “Radiar” layout always exists in Open layout… */
+  private ensureRadiarLayoutMeta(): void {
+    try {
+      const list = this.charts();
+      if (list.some((c) => c.id === RADIAR_LAYOUT_ID || c.name === RADIAR_LAYOUT_NAME)) return;
+      const record: ChartData = {
+        id: RADIAR_LAYOUT_ID,
+        name: RADIAR_LAYOUT_NAME,
+        symbol: "XAUUSD",
+        resolution: "15" as never,
+        content: "",
+        timestamp: Math.round(Date.now() / 1000),
+      };
+      this.storage.set(KEYS.charts, [...list, record]);
+    } catch {
+      /* ignore */
+    }
+  }
 
   /* ── chart layouts ─────────────────────────────────────────────────── */
 
   async getAllCharts(): Promise<ChartMetaInfo[]> {
+    this.ensureRadiarLayoutMeta();
     return this.charts().map(({ id, name, symbol, resolution, timestamp }) => ({
       id: id!,
       name,
@@ -70,6 +96,8 @@ export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
   }
 
   async removeChart(id: string | number): Promise<void> {
+    // Never delete the Radiar layout slot.
+    if (String(id) === RADIAR_LAYOUT_ID) return;
     this.storage.set(
       KEYS.charts,
       this.charts().filter((c) => c.id !== id),
@@ -77,9 +105,16 @@ export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
   }
 
   async saveChart(chartData: ChartData): Promise<string | number> {
-    const id = chartData.id ?? Date.now().toString(36);
-    const record: ChartData = { ...chartData, id, timestamp: Math.round(Date.now() / 1000) };
-    this.storage.set(KEYS.charts, [...this.charts().filter((c) => c.id !== id), record]);
+    const name = (chartData.name || "").trim() || RADIAR_LAYOUT_NAME;
+    const preferRadiar = name.toLowerCase() === "radiar" || !chartData.id;
+    const id = preferRadiar ? RADIAR_LAYOUT_ID : (chartData.id ?? Date.now().toString(36));
+    const record: ChartData = {
+      ...chartData,
+      id,
+      name: preferRadiar ? RADIAR_LAYOUT_NAME : name,
+      timestamp: Math.round(Date.now() / 1000),
+    };
+    this.storage.set(KEYS.charts, [...this.charts().filter((c) => c.id !== id && c.name !== record.name), record]);
     return id;
   }
 

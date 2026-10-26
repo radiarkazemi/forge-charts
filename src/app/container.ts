@@ -62,9 +62,12 @@ function buildProviders(config: AppConfig): MarketDataProvider[] {
 /**
  * Composition root. This is the only place that knows about concrete
  * infrastructure classes; everything else depends on ports and services.
+ * Pass a ScopedStorage when a user is signed in so accounts cannot share chart data.
  */
-export function createServices(config: AppConfig = readConfig()): Services {
-  const storage = new LocalStorageAdapter();
+export function createServices(
+  config: AppConfig = readConfig(),
+  storage: KeyValueStorage = new LocalStorageAdapter(),
+): Services {
   const notifier = new BrowserNotifier();
   const symbols = new StaticSymbolRepository();
   const providers = buildProviders(config);

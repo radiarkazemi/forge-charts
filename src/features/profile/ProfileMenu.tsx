@@ -28,6 +28,7 @@ interface ProfileMenuProps {
   readonly darkTheme: boolean;
   readonly onToggleTheme: () => void;
   readonly onOpenProfile: () => void;
+  readonly onSignOut: () => void;
   readonly alertCount?: number;
 }
 
@@ -40,6 +41,7 @@ export function ProfileMenu({
   darkTheme,
   onToggleTheme,
   onOpenProfile,
+  onSignOut,
   alertCount = 0,
 }: ProfileMenuProps) {
   return (
@@ -176,7 +178,7 @@ export function ProfileMenu({
       <ListItemButton
         onClick={() => {
           onClose();
-          onOpenProfile();
+          onSignOut();
         }}
         sx={{ color: "#f23645" }}
       >

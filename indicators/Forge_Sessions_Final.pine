@@ -1,5 +1,6 @@
-// Forge Sessions — final zone + Midnight line port for TradingView.com
-// Mirrors Forge Charts “Forge Sessions” (BUILD 1021v17+).
+// Forge Sessions — final zone + Midnight line + HTF candle remain timers
+// Mirrors Forge Charts “Forge Sessions” (zones + 00:00 Midnight line)
+// plus the blue 4H / 1H / 30m / 15m candle remain strip after OHLC.
 // Hours default to America/New_York (UTC−4 fixed offset in Forge).
 //
 //@version=6
@@ -16,6 +17,10 @@ tzIana = input.string("America/New_York", "Timezone · IANA (if Exchange on)")
 showOutline = input.bool(true, "Zones · Outline")
 showLabel = input.bool(true, "Zones · Label")
 fillTransp = input.int(88, "Zones · Fill transparency", minval = 0, maxval = 100)
+
+showCandleRemain = input.bool(true, "Candle remain · Enable (4H / 1H / 30m / 15m)")
+candleRemainColor = input.color(#4594dc, "Candle remain · Color")
+candleRemainSize = input.string("Normal", "Candle remain · Size", options = ["Tiny", "Small", "Normal", "Large"])
 
 string tz = useExchangeTz ? tzIana : str.format("UTC{0}{1}", tzOffset >= 0 ? "+" : "", tzOffset)
 
@@ -201,3 +206,44 @@ else
     if not na(midnightLb)
         label.delete(midnightLb)
         midnightLb := na
+
+// ── HTF candle remain ───────────────────────────────────────────────
+// Use TradingView time_close(tf) so remain matches the real HTF candle
+// on this symbol (exchange/session aligned) — NOT raw UTC modulo.
+// UTC modulo was ~2h early/late on FX/metals 4H vs the chart’s true close.
+// Text: "4H Candle : HH:MM:SS - 1H Candle : MM:SS - 30m Candle : … - 15m Candle : …"
+f_pad2(int n) =>
+    n < 10 ? "0" + str.tostring(n) : str.tostring(n)
+
+f_fmt_remain(int totalSec) =>
+    int rem = math.max(0, totalSec)
+    int h = int(math.floor(rem / 3600))
+    int m = int(math.floor((rem % 3600) / 60))
+    int s = rem % 60
+    h > 0 ? f_pad2(h) + ":" + f_pad2(m) + ":" + f_pad2(s) : f_pad2(m) + ":" + f_pad2(s)
+
+f_remain_size() =>
+    switch candleRemainSize
+        "Tiny" => size.tiny
+        "Small" => size.small
+        "Large" => size.large
+        => size.normal
+
+var table remainTbl = na
+
+if barstate.islast
+    if showCandleRemain
+        // time_close("240"/…) follows this symbol’s real HTF session (not UTC clock math).
+        int rem4h = na(time_close("240")) ? 0 : int(math.max(0, math.floor((time_close("240") - timenow) / 1000)))
+        int rem1h = na(time_close("60")) ? 0 : int(math.max(0, math.floor((time_close("60") - timenow) / 1000)))
+        int rem30 = na(time_close("30")) ? 0 : int(math.max(0, math.floor((time_close("30") - timenow) / 1000)))
+        int rem15 = na(time_close("15")) ? 0 : int(math.max(0, math.floor((time_close("15") - timenow) / 1000)))
+        string txt = "4H Candle : " + f_fmt_remain(rem4h) + " - 1H Candle : " + f_fmt_remain(rem1h) + " - 30m Candle : " + f_fmt_remain(rem30) + " - 15m Candle : " + f_fmt_remain(rem15)
+
+        if na(remainTbl)
+            remainTbl := table.new(position.top_right, 1, 1, border_width = 0)
+        table.cell(remainTbl, 0, 0, txt, text_color = candleRemainColor, text_size = f_remain_size(), bgcolor = color.new(color.black, 100), text_halign = text.align_right)
+    else
+        if not na(remainTbl)
+            table.delete(remainTbl)
+            remainTbl := na

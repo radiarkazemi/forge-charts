@@ -1,20 +1,20 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
-import { createServices } from "./app/container";
 
 /**
- * Soft settings migration only.
- * Do NOT wipe forge.tv.autosave.* on every deploy — that erased indicators,
- * drawings, and chart layout after hard refresh whenever BOOT_RECOVERY bumped.
+ * Soft settings migration only (pre-auth global keys).
+ * After login, migrateLegacyDataIfNeeded moves these into ScopedStorage.
+ * Do NOT wipe forge.tv.autosave.* on deploy — that erased indicators,
+ * drawings, theme, and the Radiar layout after hard refresh.
  */
-const SETTINGS_MIGRATE = "forge.settings.migrate.v1";
+const SETTINGS_MIGRATE = "forge.settings.migrate.v2-radiar";
 
 function runBootRecovery(): void {
   try {
     if (typeof localStorage === "undefined") return;
 
-    // One-time drop of ancient autosave keys only (never the current v3 key).
+    // One-time drop of ancient autosave keys only (never the current v3 / .bak keys).
     for (const legacy of [
       "forge.tv.autosave",
       "forge.tv.autosave.v2",
@@ -55,10 +55,98 @@ function runBootRecovery(): void {
           if (typeof ls.drawings !== "boolean") ls.drawings = true;
           if (typeof ls.symbol !== "boolean") ls.symbol = true;
         }
+        // Seed / rename layout profile → Radiar (never wipe chart autosave).
+        const profiles = Array.isArray(settings.profiles) ? [...settings.profiles] : [];
+        if (profiles.length === 0) {
+          settings.profiles = [
+            {
+              id: "local-radiar",
+              displayName: "Radiar",
+              username: "radiar",
+              avatarInitial: "R",
+              avatarColor: "#9c27b0",
+            },
+          ];
+          settings.activeProfileId = "local-radiar";
+        } else {
+          settings.profiles = profiles.map((item) => {
+            if (!item || typeof item !== "object") return item;
+            const p = item as Record<string, unknown>;
+            const name = String(p.displayName ?? "").trim().toLowerCase();
+            const user = String(p.username ?? "").trim().toLowerCase();
+            if (
+              p.id === "local-1" ||
+              user === "forge" ||
+              name === "forge trader" ||
+              name === "forge" ||
+              name === "trader" ||
+              name === "layout"
+            ) {
+              return {
+                ...p,
+                displayName: "Radiar",
+                username: "radiar",
+                avatarInitial: "R",
+              };
+            }
+            return p;
+          });
+          const hasRadiar = (settings.profiles as Record<string, unknown>[]).some((p) => {
+            const n = String(p?.displayName ?? "").trim().toLowerCase();
+            const u = String(p?.username ?? "").trim().toLowerCase();
+            return n === "radiar" || u === "radiar";
+          });
+          if (!hasRadiar) {
+            (settings.profiles as unknown[]).push({
+              id: "local-radiar",
+              displayName: "Radiar",
+              username: "radiar",
+              avatarInitial: "R",
+              avatarColor: "#9c27b0",
+            });
+          }
+          const radiar = (settings.profiles as Record<string, unknown>[]).find((p) => {
+            const n = String(p?.displayName ?? "").trim().toLowerCase();
+            const u = String(p?.username ?? "").trim().toLowerCase();
+            return n === "radiar" || u === "radiar";
+          });
+          if (radiar?.id) settings.activeProfileId = radiar.id;
+        }
         localStorage.setItem("forge.settings.v1", JSON.stringify(settings));
       } catch {
         /* keep broken blob — SettingsService will sanitize */
       }
+    } else {
+      localStorage.setItem(
+        "forge.settings.v1",
+        JSON.stringify({
+          theme: "dark",
+          sidePanel: null,
+          chartLayout: "s",
+          paneSymbols: ["XAUUSD"],
+          layoutSync: {
+            symbol: true,
+            interval: false,
+            crosshair: false,
+            time: false,
+            dateRange: false,
+            drawings: true,
+          },
+          lastSymbol: "XAUUSD",
+          lastInterval: "15",
+          watchlist: ["XAUUSD", "BTCUSD", "ETHUSD", "EURUSD", "SPX", "AAPL", "NVDA", "TSLA", "USOIL"],
+          profiles: [
+            {
+              id: "local-radiar",
+              displayName: "Radiar",
+              username: "radiar",
+              avatarInitial: "R",
+              avatarColor: "#9c27b0",
+            },
+          ],
+          activeProfileId: "local-radiar",
+        }),
+      );
     }
 
     localStorage.setItem(SETTINGS_MIGRATE, "1");
@@ -69,14 +157,8 @@ function runBootRecovery(): void {
 
 runBootRecovery();
 
-const services = createServices();
-
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App services={services} />
+    <App />
   </StrictMode>,
 );
-
-if (import.meta.hot) {
-  import.meta.hot.dispose(() => services.dispose());
-}

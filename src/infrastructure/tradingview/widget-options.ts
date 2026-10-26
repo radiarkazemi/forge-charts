@@ -299,10 +299,10 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
     user_id: secondary ? `local-pane-${input.symbol}` : "local",
     custom_indicators_getter: (PineJS) =>
       Promise.resolve([
-        createDealingRangesIndicator(PineJS) as CustomIndicator,
-        createStructureIntelligenceIndicator(PineJS) as CustomIndicator,
-        createSessionsIndicator(PineJS) as CustomIndicator,
-        createHtfCandlesIndicator(PineJS) as CustomIndicator,
+        createDealingRangesIndicator(PineJS as never) as CustomIndicator,
+        createStructureIntelligenceIndicator(PineJS as never) as CustomIndicator,
+        createSessionsIndicator(PineJS as never) as CustomIndicator,
+        createHtfCandlesIndicator(PineJS as never) as CustomIndicator,
       ]),
   };
 }
