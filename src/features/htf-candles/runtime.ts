@@ -466,7 +466,7 @@ export async function paintHtfCandlesOnChart(
   options?: { readonly ownerStudyId?: EntityId; readonly maxDrawings?: number },
 ): Promise<EntityId[]> {
   const ids: EntityId[] = [];
-  const maxDrawings = options?.maxDrawings ?? 2_000;
+  const maxDrawings = options?.maxDrawings ?? 900;
   const limited = cmds.length > maxDrawings ? cmds.slice(0, maxDrawings) : cmds;
   const ownerStudyId = options?.ownerStudyId;
 
@@ -550,7 +550,7 @@ export async function paintHtfCandlesOnChart(
     } catch {
       /* skip */
     }
-    if (i > 0 && i % 6 === 0) {
+    if (i > 0 && i % 24 === 0) {
       await new Promise<void>((r) => {
         window.setTimeout(r, 0);
       });

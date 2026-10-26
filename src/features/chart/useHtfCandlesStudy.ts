@@ -20,22 +20,31 @@ import {
   readHtfSlotsFromMap,
 } from "./htf-candles-indicator";
 
-const MAX_BARS = 12_000;
-const STUDY_DEBOUNCE_MS = 280;
-const LIVE_REFRESH_MS = 2_000;
-const PRESENCE_POLL_MS = 4_000;
+const MAX_BARS = 8_000;
+const STUDY_DEBOUNCE_MS = 400;
+/** Live tip refresh — keep light; timers alone must not force a full redraw. */
+const LIVE_REFRESH_MS = 5_000;
+const PRESENCE_POLL_MS = 6_000;
 
 const DAILY_SET = new Set<string>(["midnight", "830", "930", "exchange"]);
+
+/** HH:MM / HH:MM:SS countdown labels change every second — exclude from fingerprint. */
+function isVolatileTimerLabel(text: string | undefined): boolean {
+  if (!text) return false;
+  return /^\d{1,2}:\d{2}(:\d{2})?$/.test(text.trim()) || /^\d+D\s+\d{2}:\d{2}:\d{2}$/.test(text.trim());
+}
 
 function fingerprintCmds(
   cmds: readonly { kind: string; t1: number; p1: number; color?: string; fill?: string; text?: string }[],
 ): string {
   if (cmds.length === 0) return "empty";
-  const head = cmds.slice(0, 8);
-  const tail = cmds.length > 8 ? cmds.slice(-8) : [];
-  const part = (c: (typeof cmds)[number]) =>
+  const stable = cmds.filter((c) => !(c.kind === "label" && isVolatileTimerLabel(c.text)));
+  if (stable.length === 0) return "empty";
+  const head = stable.slice(0, 8);
+  const tail = stable.length > 8 ? stable.slice(-8) : [];
+  const part = (c: (typeof stable)[number]) =>
     `${c.kind}:${c.t1}:${c.p1}:${c.color ?? ""}:${c.fill ?? ""}:${c.text ?? ""}`;
-  return `${cmds.length}|${[...head, ...tail].map(part).join(";")}`;
+  return `${stable.length}|${[...head, ...tail].map(part).join(";")}`;
 }
 
 function intervalToSeconds(interval: string): number {
@@ -225,7 +234,9 @@ export function useHtfCandlesStudy(enabled = true): void {
           return;
         }
         const tip = bars[bars.length - 1]!;
-        const key = `${optsKey}|${tip.time}:${tip.close}:${tip.high}:${tip.low}`;
+        // Tip key ignores sub-tick noise; OHLC tip changes drive redraws.
+        const key = `${optsKey}|${tip.time}:${tip.close.toFixed(5)}:${tip.high.toFixed(5)}:${tip.low.toFixed(5)}`;
+        if (!force && lastKeyRef.current === key && lastFpRef.current) return;
         const chartIntervalSec = intervalToSeconds(interval);
         const { cmds } = computeHtfCandles(bars, chartIntervalSec, opts);
         const fp = fingerprintCmds(cmds);
@@ -234,7 +245,10 @@ export function useHtfCandlesStudy(enabled = true): void {
         const ids =
           cmds.length === 0
             ? ([] as EntityId[])
-            : await paintHtfCandlesOnChart(api, cmds, { ownerStudyId: studyId });
+            : await paintHtfCandlesOnChart(api, cmds, {
+                ownerStudyId: studyId,
+                maxDrawings: 900,
+              });
         if (cancelled || myGen !== genRef.current) {
           for (const id of ids) {
             try {

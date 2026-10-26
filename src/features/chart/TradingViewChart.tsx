@@ -17,6 +17,7 @@ import { useSessionsStudy } from "./useSessionsStudy";
 import { useHtfCandlesStudy } from "./useHtfCandlesStudy";
 import { useStructureIntelligenceStudy } from "./useStructureIntelligenceStudy";
 import { SessionsDashboard } from "@/features/sessions/SessionsDashboard";
+import { HtfCandleRemainLegend } from "@/features/sessions/HtfCandleRemainLegend";
 import { useTradingViewWidget } from "./useTradingViewWidget";
 import {
   QuickTradeOverlay,
@@ -267,6 +268,7 @@ export function TradingViewChart({
       {isPrimary ? <QuickTradeOverlay containerRef={containerRef} /> : null}
       {isPrimary ? <TradeLinesOverlay containerRef={containerRef} /> : null}
       {isPrimary && !showReplayToolbar ? <CandleCountdownOverlay /> : null}
+      {isPrimary ? <HtfCandleRemainLegend /> : null}
       <SessionsDashboard />
 
       {showReplayToolbar ? <BarReplayToolbar controller={barReplay} forceVisible={forceReplayUi} /> : null}

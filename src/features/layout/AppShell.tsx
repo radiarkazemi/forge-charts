@@ -49,7 +49,7 @@ export function AppShell() {
   }, [profileAnchorRef]);
 
   useEffect(() => {
-    document.title = `${symbol} — Forge Charts · 1021v19`;
+    document.title = `${symbol} — Forge Charts`;
   }, [symbol]);
 
   useEffect(() => {
@@ -98,33 +98,6 @@ export function AppShell() {
         overflow: "hidden",
       }}
     >
-      {/* Always-visible deploy marker — proves which bundle the browser loaded. */}
-      <Box
-        component="a"
-        href="https://forgechart.ir/charts/?v=1021v19"
-        data-testid="forge-build-badge"
-        sx={{
-          position: "fixed",
-          top: { xs: 6, md: 8 },
-          left: { xs: 8, md: 64 },
-          zIndex: 10000,
-          px: 1.1,
-          py: 0.35,
-          borderRadius: "6px",
-          bgcolor: "#00c853",
-          color: "#041208",
-          fontSize: 11,
-          fontWeight: 800,
-          letterSpacing: 0.4,
-          textDecoration: "none",
-          boxShadow: "0 2px 10px rgba(0,0,0,0.45)",
-          pointerEvents: "auto",
-          fontFamily: "ui-sans-serif, system-ui, sans-serif",
-        }}
-        title="Live deploy marker — if you do not see this green badge, your browser is on a cached build"
-      >
-        BUILD 1021v19
-      </Box>
       <Box component="main" sx={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
         <Box sx={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
           <Box sx={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0, position: "relative" }}>
