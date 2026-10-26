@@ -34,6 +34,8 @@ export interface HeaderToolbarHandlers {
   readonly getLayoutSync?: () => LayoutSyncSettings;
   readonly getLastPrice: () => number | null;
   readonly getProfile: () => UserProfile;
+  /** Persist current chart into the named Radiar layout (+ autosave). */
+  readonly onSaveNamedLayout?: () => void;
   readonly themeLabel: string;
   readonly alertCount: number;
   /**
@@ -212,7 +214,7 @@ export function mountHeaderToolbar(
   }
 
   // Named layout menu (TradingView: layout name immediately left of Select Layout / profile).
-  const layoutName = handlers.getProfile().displayName || "Layout";
+  const layoutName = handlers.getProfile().displayName || "Radiar";
   if (!handlers.mobile) {
     void widget.createDropdown({
       title: layoutName,
@@ -223,9 +225,7 @@ export function mountHeaderToolbar(
           title: "Save layout    Ctrl + S",
           onSelect: () => {
             try {
-              widget.save(() => {
-                /* persisted via save_load_adapter */
-              });
+              handlers.onSaveNamedLayout?.();
             } catch {
               /* ignore */
             }
@@ -241,9 +241,7 @@ export function mountHeaderToolbar(
           title: "Make a copy…",
           onSelect: () => {
             try {
-              widget.save(() => {
-                /* copy via autosave snapshot */
-              });
+              handlers.onSaveNamedLayout?.();
             } catch {
               /* ignore */
             }
@@ -257,7 +255,7 @@ export function mountHeaderToolbar(
           title: "Create new layout…",
           onSelect: () => {
             try {
-              widget.activeChart().resetData();
+              handlers.onOpenProfile();
             } catch {
               /* ignore */
             }

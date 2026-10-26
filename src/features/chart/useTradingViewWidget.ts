@@ -45,6 +45,7 @@ export interface TradingViewWidgetDeps {
   readonly onOpenObjectTree: () => void;
   readonly onOpenProfile: () => void;
   readonly getProfile: () => UserProfile;
+  readonly onSaveNamedLayout?: () => void;
   readonly onEnterBarReplay: () => void;
   readonly onSetChartLayout: (layout: ChartLayoutId) => void;
   readonly onToggleLayoutSync?: (
@@ -74,7 +75,9 @@ const LEGACY_AUTOSAVE_KEYS = [
   "forge.tv.autosave.pane.2",
   "forge.tv.autosave.pane.3",
 ] as const;
-const READY_TIMEOUT_MS = 12_000;
+/** Soft timeout only — never wipe autosave (slow feeds after deploy must not erase layouts). */
+const READY_TIMEOUT_MS = 45_000;
+const AUTOSAVE_BAK_KEY = `${AUTOSAVE_KEY}.bak`;
 
 function purgeLegacyAutosaves(storage: KeyValueStorage): void {
   for (const key of LEGACY_AUTOSAVE_KEYS) {
@@ -89,16 +92,27 @@ function purgeLegacyAutosaves(storage: KeyValueStorage): void {
 /** Reject corrupt / incomplete library snapshots that leave the chart spinning forever. */
 function readAutosave(storage: KeyValueStorage): object | undefined {
   purgeLegacyAutosaves(storage);
-  const raw = storage.get<unknown>(AUTOSAVE_KEY, undefined);
-  if (!raw || typeof raw !== "object") return undefined;
-  const record = raw as Record<string, unknown>;
-  const hasCharts = Array.isArray(record.charts) || Array.isArray(record.content);
-  const hasLayout = typeof record.layout === "string" || typeof record.name === "string";
-  if (!hasCharts && !hasLayout) {
-    storage.remove(AUTOSAVE_KEY);
-    return undefined;
+  const tryParse = (raw: unknown): object | undefined => {
+    if (!raw || typeof raw !== "object") return undefined;
+    const record = raw as Record<string, unknown>;
+    const hasCharts = Array.isArray(record.charts) || Array.isArray(record.content);
+    const hasLayout = typeof record.layout === "string" || typeof record.name === "string";
+    if (!hasCharts && !hasLayout) return undefined;
+    return raw as object;
+  };
+  const primary = tryParse(storage.get<unknown>(AUTOSAVE_KEY, undefined));
+  if (primary) return primary;
+  const bak = tryParse(storage.get<unknown>(AUTOSAVE_BAK_KEY, undefined));
+  if (bak) {
+    // Restore backup into the live key so the next refresh keeps it.
+    try {
+      storage.set(AUTOSAVE_KEY, bak);
+    } catch {
+      /* ignore */
+    }
+    return bak;
   }
-  return raw as object;
+  return undefined;
 }
 
 /**
@@ -118,6 +132,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
   const onOpenObjectTree = useEffectEvent(() => deps.onOpenObjectTree());
   const onOpenProfile = useEffectEvent(() => deps.onOpenProfile());
   const getProfile = useEffectEvent(() => deps.getProfile());
+  const onSaveNamedLayout = useEffectEvent(() => deps.onSaveNamedLayout?.());
   const onEnterBarReplay = useEffectEvent(() => deps.onEnterBarReplay());
   const onHeaderReady = useEffectEvent((api: HeaderToolbarApi) => deps.onHeaderReady?.(api));
   const onWidgetReady = useEffectEvent((widget: IChartingLibraryWidget) => deps.onWidgetReady?.(widget));
@@ -192,14 +207,17 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
       window.clearTimeout(readyTimer);
       readyTimer = window.setTimeout(() => {
         if (cancelled || ready) return;
-        // Corrupt saved_data often leaves the iframe alive but never fires onChartReady.
+        // Slow feed after deploy: keep waiting with saved_data intact.
+        // Never remount blank + persist — that overwrote indicators/layout/profile.
         if (savedState) {
-          storage.remove(autosaveKey);
           try {
-            mount(Widget, undefined);
-          } catch (error) {
-            if (!cancelled) controller.fail(error instanceof Error ? error.message : String(error));
+            storage.set(AUTOSAVE_BAK_KEY, savedState);
+          } catch {
+            /* ignore */
           }
+          console.warn(
+            "[forge-charts] chart ready timed out; keeping autosave (Radiar layout) for next load",
+          );
         }
       }, READY_TIMEOUT_MS);
 
@@ -251,7 +269,15 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         if (isPrimary) {
           const persistChart = () => {
             try {
-              widget?.save((state) => storage.set(autosaveKey, state));
+              widget?.save((state) => {
+                if (!state || typeof state !== "object") return;
+                storage.set(autosaveKey, state);
+                try {
+                  storage.set(AUTOSAVE_BAK_KEY, state);
+                } catch {
+                  /* ignore */
+                }
+              });
             } catch {
               /* ignore */
             }
@@ -315,6 +341,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
             getLayoutSync,
             getLastPrice,
             getProfile,
+            onSaveNamedLayout,
             themeLabel: initial.theme === "dark" ? "Dark" : "Light",
             alertCount: initial.alertCount,
             compact: false,
@@ -332,7 +359,14 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         try {
           mount(Widget, saved);
         } catch {
-          storage.remove(autosaveKey);
+          // Keep autosave; blank mount this session only.
+          if (saved) {
+            try {
+              storage.set(AUTOSAVE_BAK_KEY, saved);
+            } catch {
+              /* ignore */
+            }
+          }
           mount(Widget, undefined);
         }
       })
