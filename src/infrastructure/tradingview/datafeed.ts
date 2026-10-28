@@ -93,6 +93,11 @@ function stripExchange(symbolName: string): string {
   return idx >= 0 ? symbolName.slice(idx + 1) : symbolName;
 }
 
+/** Case-fold resolution so "30S" / "30s" pins match subscribeBars keys. */
+function normalizeReplayResolution(resolution: string): string {
+  return String(resolution).trim().toUpperCase();
+}
+
 function parseExchangePrefix(symbolName: string): string | undefined {
   const idx = symbolName.lastIndexOf(":");
   return idx >= 0 ? symbolName.slice(0, idx) : undefined;
@@ -143,13 +148,15 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     this.replayBuffer = null;
     this.replayBufferResolution = null;
     this.replayPushTicker = opts?.ticker ? normalizeTicker(stripExchange(opts.ticker)) : null;
-    this.replayPushResolution = opts?.resolution ? String(opts.resolution) : null;
+    this.replayPushResolution = opts?.resolution
+      ? normalizeReplayResolution(opts.resolution)
+      : null;
   }
 
   /** Narrow which pane subscriptions receive forming/stepped replay ticks. */
   setReplayPushTarget(ticker: string | null, resolution: string | null): void {
     this.replayPushTicker = ticker ? normalizeTicker(stripExchange(ticker)) : null;
-    this.replayPushResolution = resolution ? String(resolution) : null;
+    this.replayPushResolution = resolution ? normalizeReplayResolution(resolution) : null;
   }
 
   /** Hide bars with time (unix sec) strictly after cutoff. Also drives getServerTime fallback. */
@@ -190,14 +197,30 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     if (this.barSubs.size === 0) return;
     const tvBar = toTvBar(bar);
     const wantTicker = this.replayPushTicker;
-    const wantRes = this.replayPushResolution;
+    const wantRes = this.replayPushResolution
+      ? normalizeReplayResolution(this.replayPushResolution)
+      : null;
+    let delivered = 0;
     for (const sub of this.barSubs.values()) {
       if (wantTicker && normalizeTicker(stripExchange(sub.ticker)) !== wantTicker) continue;
-      if (wantRes && String(sub.resolution) !== wantRes) continue;
+      if (wantRes && normalizeReplayResolution(sub.resolution) !== wantRes) continue;
       try {
         sub.onTick(tvBar);
+        delivered += 1;
       } catch {
         /* ignore */
+      }
+    }
+    // Resolution pin mismatch (e.g. "30S" vs "30s") used to drop every tick —
+    // fall back to same-ticker subscribers so 30S forming bars are not cut off.
+    if (delivered === 0 && wantRes) {
+      for (const sub of this.barSubs.values()) {
+        if (wantTicker && normalizeTicker(stripExchange(sub.ticker)) !== wantTicker) continue;
+        try {
+          sub.onTick(tvBar);
+        } catch {
+          /* ignore */
+        }
       }
     }
   }

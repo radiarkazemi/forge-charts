@@ -341,6 +341,23 @@ class LayoutSyncBus {
         }
       }
     }
+    // Late-ready panes (common for layers 2–3) must inherit the armed tool,
+    // otherwise Long/Trend/Fib stay dead on half the 4-pane layout.
+    const tool = this.sharedTool;
+    if (
+      tool &&
+      tool !== "cursor" &&
+      tool !== "arrow_cursor" &&
+      tool !== "dot" &&
+      paneIndex < this.activeCount
+    ) {
+      void this.applyToolToPane(paneIndex, tool);
+      // Hit-testing needs a real size before CL accepts the tool on secondaries.
+      window.setTimeout(() => entry?.controller.requestResize(), 120);
+      window.setTimeout(() => {
+        if (this.sharedTool === tool) void this.applyToolToPane(paneIndex, tool);
+      }, 350);
+    }
   }
 
   reflowVisible(): void {
@@ -356,15 +373,11 @@ class LayoutSyncBus {
     this.sharedTool = tool;
     // Cursor / eraser: mirror to all panes so every layer returns to Cross.
     if (!tool || tool === "cursor" || tool === "arrow_cursor" || tool === "dot") {
-      for (const { index } of this.panes.values()) {
-        if (index >= this.activeCount) continue;
-        void this.applyToolToPane(index, tool ?? "cursor");
-      }
+      void this.applyToolToAllPanes(tool ?? "cursor");
       return;
     }
-    // Drawing tools: arm the active / draw-target pane (including pane 0).
-    // Previously we skipped pane 0 and only armed one secondary — leaving 2 of 4
-    // layers without the selected tool after a layout switch or focus change.
+    // Drawing tools: arm EVERY visible layer. Arming only the focused pane left
+    // 2 of 4 layers without the tool (focus races / late-ready secondaries).
     const target =
       this.drawTargetPane >= 0 && this.drawTargetPane < this.activeCount
         ? this.drawTargetPane
@@ -373,7 +386,12 @@ class LayoutSyncBus {
     this.activePane = pane;
     this.drawTargetPane = pane;
     this.emitActive();
-    void this.applyToolToPane(pane, tool);
+    void this.applyToolToAllPanes(tool);
+    // Secondaries often need a resize before selectLineTool sticks.
+    window.setTimeout(() => this.reflowVisible(), 80);
+    window.setTimeout(() => {
+      if (this.sharedTool === tool) void this.applyToolToAllPanes(tool);
+    }, 280);
   }
 
   focusPane(paneIndex: number): void {
@@ -447,6 +465,23 @@ class LayoutSyncBus {
     this.applyingTool = true;
     try {
       await entry.controller.selectLineTool(tool);
+    } finally {
+      this.applyingTool = false;
+    }
+  }
+
+  /** Arm the same line tool on every visible pane (4-layer layouts). */
+  private async applyToolToAllPanes(tool: string): Promise<void> {
+    this.applyingTool = true;
+    try {
+      for (const { index, controller } of this.panes.values()) {
+        if (index >= this.activeCount || !controller.isReady) continue;
+        try {
+          await controller.selectLineTool(tool);
+        } catch {
+          /* pane may still be mounting */
+        }
+      }
     } finally {
       this.applyingTool = false;
     }
@@ -602,15 +637,7 @@ class LayoutSyncBus {
   /** After one drawing completes, return every pane to the Cross tool. */
   async resetToolsToCursor(): Promise<void> {
     this.sharedTool = "cursor";
-    this.applyingTool = true;
-    try {
-      for (const { index, controller } of this.panes.values()) {
-        if (index >= this.activeCount || !controller.isReady) continue;
-        await controller.selectLineTool("cursor");
-      }
-    } finally {
-      this.applyingTool = false;
-    }
+    await this.applyToolToAllPanes("cursor");
   }
 
   recordPaneInterval(paneIndex: number, interval: Interval): void {
