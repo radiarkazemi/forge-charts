@@ -147,7 +147,13 @@ export class BarReplayController {
       /* ignore */
     }
 
-    datafeed.beginReplay();
+    let ticker = "";
+    try {
+      ticker = String(widget.activeChart().symbol() || "");
+    } catch {
+      /* ignore */
+    }
+    datafeed.beginReplay({ ticker: ticker || undefined, resolution });
     this.buffer = [];
     this.microBuffer = [];
     this.state.set({
@@ -453,6 +459,12 @@ export class BarReplayController {
     datafeed.setReplayBuffer(buffer, resolution);
     datafeed.setReplayCutoff(buffer[index]!.time);
     datafeed.setReplayClock(buffer[index]!.time);
+    try {
+      const ticker = String(widget.activeChart().symbol() || "");
+      datafeed.setReplayPushTarget(ticker || null, resolution);
+    } catch {
+      datafeed.setReplayPushTarget(null, resolution);
+    }
     await this.removeMarker();
     await this.drawMarker(buffer[index]!.time);
     this.reloadSeries();
@@ -736,7 +748,8 @@ function mergeBarsPreferPrimary(primary: readonly Bar[], fill: readonly Bar[]): 
  */
 function fillShortReplayGaps(bars: readonly Bar[], stepSec: number): Bar[] {
   if (bars.length < 2 || stepSec <= 0) return [...bars];
-  const maxFill = stepSec < 60 ? 180 : stepSec <= 300 ? 60 : 12;
+  // 30S/10S need denser gap fill — 180 steps (~90m) left long holes that looked “cut off”.
+  const maxFill = stepSec <= 30 ? 1_200 : stepSec < 60 ? 480 : stepSec <= 300 ? 60 : 12;
   const out: Bar[] = [bars[0]!];
   for (let i = 1; i < bars.length; i += 1) {
     const prev = out[out.length - 1]!;

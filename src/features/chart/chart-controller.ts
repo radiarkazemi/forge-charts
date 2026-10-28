@@ -351,6 +351,20 @@ export class ChartController {
     } catch {
       /* ignore */
     }
+    const widget = this.widget;
+    if (!widget) return;
+    // Charting Library often ignores window.resize for hidden→shown iframes
+    // (bottom layers in 4-pane layouts). Hit the widget + iframe directly.
+    try {
+      const anyWidget = widget as unknown as {
+        resize?: (width?: number, height?: number) => void;
+        _iFrame?: HTMLIFrameElement;
+      };
+      anyWidget.resize?.();
+      anyWidget._iFrame?.contentWindow?.dispatchEvent(new Event("resize"));
+    } catch {
+      /* ignore */
+    }
   }
 
   /** Turn off sticky drawing mode so tools return to Cross after one use. */

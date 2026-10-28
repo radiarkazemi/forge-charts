@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
@@ -8,7 +8,6 @@ import { useServices } from "@/app/use-services";
 import { activeProfile } from "@/application";
 import { ChartController } from "@/features/chart/chart-controller";
 import { useStore } from "@/shared/hooks/useStore";
-import { BarReplayToolbar } from "./bar-replay/BarReplayToolbar";
 import type { HeaderToolbarApi } from "./header-toolbar";
 import { layoutSyncBus } from "./layout-sync";
 import { useChartAlertLines } from "./useChartAlertLines";
@@ -56,9 +55,8 @@ export function TradingViewChart({
   const headerApiRef = useRef<HeaderToolbarApi | null>(null);
   const theme = useStore(settings.settings, (s) => s.theme);
   const profile = useStore(settings.settings, (s) => activeProfile(s));
-  const replayActive = useStore(barReplay.state, (s) => s.active);
-  const [forceReplayUi, setForceReplayUi] = useState(false);
   const isPrimary = paneIndex === 0;
+  const replayActive = useStore(barReplay.state, (s) => s.active);
 
   const localController = useMemo(
     () => (isPrimary ? null : new ChartController(initialSymbol ?? "XAUUSD", settings.settings.get().lastInterval)),
@@ -172,10 +170,6 @@ export function TradingViewChart({
   }, [profile]);
 
   useEffect(() => {
-    if (!replayActive) setForceReplayUi(false);
-  }, [replayActive]);
-
-  useEffect(() => {
     if (!isPrimary) return;
     return () => {
       barReplay.pause();
@@ -186,7 +180,6 @@ export function TradingViewChart({
   useEffect(() => {
     if (!isPrimary) return;
     const onReplay = () => {
-      setForceReplayUi(true);
       const w = chart.getWidget() ?? controller.getWidget();
       if (w) barReplay.attach(w, datafeed);
       void barReplay.enter();
@@ -233,7 +226,6 @@ export function TradingViewChart({
       }
     },
     onEnterBarReplay: () => {
-      setForceReplayUi(true);
       const w = chart.getWidget();
       if (w) barReplay.attach(w, datafeed);
       void barReplay.enter();
@@ -267,8 +259,6 @@ export function TradingViewChart({
   useSessionsStudy(true);
   useHtfCandlesStudy(true);
 
-  const showReplayToolbar = isPrimary && (replayActive || forceReplayUi);
-
   return (
     <Box
       sx={{
@@ -289,11 +279,9 @@ export function TradingViewChart({
 
       {isPrimary ? <QuickTradeOverlay containerRef={containerRef} /> : null}
       {isPrimary ? <TradeLinesOverlay containerRef={containerRef} /> : null}
-      {isPrimary && !showReplayToolbar ? <CandleCountdownOverlay /> : null}
+      {isPrimary && !replayActive ? <CandleCountdownOverlay /> : null}
       {isPrimary ? <HtfCandleRemainLegend /> : null}
       <SessionsDashboard />
-
-      {showReplayToolbar ? <BarReplayToolbar controller={barReplay} forceVisible={forceReplayUi} /> : null}
 
       {!ready && !error ? (
         <Box

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useServices } from "@/app/use-services";
 import type { ChartLayoutId } from "@/application";
 import { useStore } from "@/shared/hooks/useStore";
+import { BarReplayToolbar } from "./bar-replay/BarReplayToolbar";
 import {
   clearPrimaryLayoutClip,
   clipPathExcludingHole,
@@ -32,11 +33,12 @@ const DEFAULT_CHROME: ChromeInsets = { headerHeight: 38, leftToolbarWidth: 52, p
  * and layer headerless secondary widgets in the remaining slots underneath.
  */
 export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceProps) {
-  const { settings } = useServices();
+  const { settings, barReplay } = useServices();
   const chartLayout = useStore(settings.settings, (s) => s.chartLayout ?? "s");
   const paneSymbols = useStore(settings.settings, (s) => (Array.isArray(s.paneSymbols) ? s.paneSymbols : []));
   const lastSymbol = useStore(settings.settings, (s) => s.lastSymbol || "XAUUSD");
   const layoutSync = useStore(settings.settings, (s) => s.layoutSync);
+  const replayActive = useStore(barReplay.state, (s) => s.active);
   const grid = getChartLayoutGrid(chartLayout ?? "s");
   const multi = grid.count > 1;
   const [activePane, setActivePane] = useState(0);
@@ -68,14 +70,14 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
 
   useEffect(() => {
     layoutSyncBus.setActiveCount(grid.count);
-    // One reflow after layout paint — avoid stacked resize storms (lag).
-    const t1 = window.setTimeout(() => layoutSyncBus.reflowVisible(), 80);
-    const t2 = window.setTimeout(() => layoutSyncBus.reflowVisible(), 400);
+    // Reflow every visible pane after layout paint — panes 2–3 often stay at 1×1
+    // until a real resize hits their iframe (tools/hit-test then fail on those layers).
+    const delays = [50, 150, 400, 900, 1600];
+    const timers = delays.map((ms) => window.setTimeout(() => layoutSyncBus.reflowVisible(), ms));
     return () => {
-      window.clearTimeout(t1);
-      window.clearTimeout(t2);
+      for (const t of timers) window.clearTimeout(t);
     };
-  }, [chartLayout, grid.count]);
+  }, [chartLayout, grid.count, workspaceSize.width, workspaceSize.height]);
 
   useEffect(() => layoutSyncBus.subscribeActivePane(setActivePane), []);
 
@@ -290,6 +292,23 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
             );
           })()
         : null}
+
+      {/* Replay strip above all multipane layers (primary host is zIndex 1). */}
+      {replayActive ? (
+        <Box
+          sx={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 50,
+            pointerEvents: "none",
+            "& > *": { pointerEvents: "auto" },
+          }}
+        >
+          <BarReplayToolbar controller={barReplay} />
+        </Box>
+      ) : null}
     </Box>
   );
 }
