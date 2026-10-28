@@ -748,8 +748,9 @@ function mergeBarsPreferPrimary(primary: readonly Bar[], fill: readonly Bar[]): 
  */
 function fillShortReplayGaps(bars: readonly Bar[], stepSec: number): Bar[] {
   if (bars.length < 2 || stepSec <= 0) return [...bars];
-  // 30S/10S need denser gap fill — 180 steps (~90m) left long holes that looked “cut off”.
-  const maxFill = stepSec <= 30 ? 1_200 : stepSec < 60 ? 480 : stepSec <= 300 ? 60 : 12;
+  // 30S/10S: fill aggressively — short maxFill left multi-hour holes that looked “cut off”.
+  const maxFill =
+    stepSec <= 10 ? 3_600 : stepSec <= 30 ? 2_400 : stepSec < 60 ? 720 : stepSec <= 300 ? 60 : 12;
   const out: Bar[] = [bars[0]!];
   for (let i = 1; i < bars.length; i += 1) {
     const prev = out[out.length - 1]!;
@@ -758,6 +759,9 @@ function fillShortReplayGaps(bars: readonly Bar[], stepSec: number): Bar[] {
     if (gap > stepSec * 1.5) {
       let t = Number(prev.time) + stepSec;
       let n = 0;
+      // Align synthetic opens to the TF grid so TV does not drop mid-bucket bars.
+      const grid = Math.floor(t / stepSec) * stepSec;
+      if (grid > Number(prev.time) && grid < Number(cur.time)) t = grid;
       while (t < Number(cur.time) - stepSec * 0.25 && n < maxFill) {
         out.push({
           time: t,
@@ -785,7 +789,8 @@ function densifyReplayBuffer(buffer: readonly Bar[], micro: readonly Bar[], step
       next = next.length === 0 ? fromMicro : mergeBarsPreferPrimary(next, fromMicro);
     }
   }
-  if (hasReplayHoles(next, stepSec)) {
+  // Always bridge on sub-minute — sparse 30S feeds look “cut off” mid-session.
+  if (stepSec < 60 || hasReplayHoles(next, stepSec)) {
     next = fillShortReplayGaps(next, stepSec);
   }
   return next;
