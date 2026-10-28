@@ -1,5 +1,5 @@
 import type { Interval } from "@/domain";
-import type { EntityId } from "@/infrastructure/tradingview";
+import type { EntityId, IChartWidgetApi } from "@/infrastructure/tradingview";
 import type { ChartController } from "./chart-controller";
 import {
   applyShapeSnapshot,
@@ -7,6 +7,7 @@ import {
   normalizeShapeName,
   readAllShapeSnapshots,
   readShapeSnapshotRetry,
+  type ShapeSnapshot,
 } from "./drawing-sync";
 
 export interface LayoutSyncFlags {
@@ -353,23 +354,26 @@ class LayoutSyncBus {
     if (this.applyingTool) return;
     if (sourceIndex !== 0) return;
     this.sharedTool = tool;
-    // Cursor / eraser: mirror to all panes. Drawing tools: only the active draw target.
+    // Cursor / eraser: mirror to all panes so every layer returns to Cross.
     if (!tool || tool === "cursor" || tool === "arrow_cursor" || tool === "dot") {
       for (const { index } of this.panes.values()) {
-        if (index === 0 || index >= this.activeCount) continue;
+        if (index >= this.activeCount) continue;
         void this.applyToolToPane(index, tool ?? "cursor");
       }
       return;
     }
+    // Drawing tools: arm the active / draw-target pane (including pane 0).
+    // Previously we skipped pane 0 and only armed one secondary — leaving 2 of 4
+    // layers without the selected tool after a layout switch or focus change.
     const target =
-      this.drawTargetPane > 0 && this.drawTargetPane < this.activeCount
+      this.drawTargetPane >= 0 && this.drawTargetPane < this.activeCount
         ? this.drawTargetPane
         : this.activePane;
-    if (target > 0) {
-      this.activePane = target;
-      this.emitActive();
-      void this.applyToolToPane(target, tool);
-    }
+    const pane = Math.max(0, Math.min(this.activeCount - 1, target));
+    this.activePane = pane;
+    this.drawTargetPane = pane;
+    this.emitActive();
+    void this.applyToolToPane(pane, tool);
   }
 
   focusPane(paneIndex: number): void {
@@ -386,8 +390,8 @@ class LayoutSyncBus {
       this.emitPaneState();
     }
     const tool = this.sharedTool;
-    // Only re-apply an active drawing tool (not cursor) when focusing a secondary pane.
-    if (tool && tool !== "cursor" && tool !== "arrow_cursor" && paneIndex > 0) {
+    // Re-apply the shared drawing tool onto whichever pane the user just focused.
+    if (tool && tool !== "cursor" && tool !== "arrow_cursor" && tool !== "dot") {
       void this.applyToolToPane(paneIndex, tool);
     }
   }
@@ -716,7 +720,7 @@ class LayoutSyncBus {
           if (group.entities.has(index)) continue;
           const destChart = controller.getWidget()?.activeChart();
           if (!destChart) continue;
-          const created = await createShapeFromSnapshot(destChart, snap);
+          const created = await this.createShapeWithRetry(destChart, snap);
           if (created) {
             this.mirrorIds.add(String(created));
             group.entities.set(index, created);
@@ -727,6 +731,20 @@ class LayoutSyncBus {
     } finally {
       this.syncingDrawings = false;
     }
+  }
+
+  /** CL sometimes rejects the first create on a freshly resized secondary pane. */
+  private async createShapeWithRetry(
+    destChart: IChartWidgetApi,
+    snap: ShapeSnapshot,
+  ): Promise<EntityId | null> {
+    let created = await createShapeFromSnapshot(destChart, snap);
+    if (created) return created;
+    await new Promise((r) => window.setTimeout(r, 80));
+    created = await createShapeFromSnapshot(destChart, snap);
+    if (created) return created;
+    await new Promise((r) => window.setTimeout(r, 160));
+    return createShapeFromSnapshot(destChart, snap);
   }
 
   private async onDrawingEvent(
@@ -747,10 +765,23 @@ class LayoutSyncBus {
     if (this.syncingDrawings) return;
     if (paneIndex >= this.activeCount) return;
 
-    // Ignore events from shapes we created as mirrors (prevents sync loops / UI lock).
+    // Mirrors: allow the user to edit on the focused pane (promote out of mirror set),
+    // otherwise ignore to prevent sync loops. Without promote, drawings on 2 of 4
+    // layers felt “dead” after seed/sync.
     if (this.mirrorIds.has(idKey)) {
-      if (eventType === "remove") this.mirrorIds.delete(idKey);
-      else return;
+      if (eventType === "remove") {
+        this.mirrorIds.delete(idKey);
+      } else if (
+        paneIndex === this.activePane &&
+        (eventType === "points_changed" ||
+          eventType === "move" ||
+          eventType === "properties_changed" ||
+          eventType === "click")
+      ) {
+        this.mirrorIds.delete(idKey);
+      } else {
+        return;
+      }
     }
 
     if (eventType === "remove") {
@@ -862,7 +893,7 @@ class LayoutSyncBus {
             }
             this.entityToGroup.delete(String(existing));
             group.entities.delete(index);
-            const created = await createShapeFromSnapshot(destChart, snap);
+            const created = await this.createShapeWithRetry(destChart, snap);
             if (created) {
               this.mirrorIds.add(String(created));
               group.entities.set(index, created);
@@ -873,7 +904,7 @@ class LayoutSyncBus {
             applyShapeSnapshot(destChart, existing, snap);
           }
         } else {
-          const created = await createShapeFromSnapshot(destChart, snap);
+          const created = await this.createShapeWithRetry(destChart, snap);
           if (created) {
             this.mirrorIds.add(String(created));
             group.entities.set(index, created);

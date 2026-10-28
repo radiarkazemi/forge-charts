@@ -114,11 +114,21 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   /** Advancing clock for candle countdown during demo/replay (unix sec). */
   private replayClockSec: number | null = null;
   private replayActive = false;
-  private replayOnTick: SubscribeBarsCallback | null = null;
+  /**
+   * All live bar subscribers. Multipane layouts share one datafeed — a single
+   * `replayOnTick` let the last pane steal forming-candle ticks (30S looked cut off).
+   */
+  private readonly barSubs = new Map<
+    string,
+    { readonly ticker: string; readonly resolution: string; readonly onTick: SubscribeBarsCallback }
+  >();
   /** Prefetched bars for replay/demo — served from memory so past cutoffs don't re-fetch live-only OHLC. */
   private replayBuffer: Bar[] | null = null;
   /** Resolution the replay buffer was built for — reject mismatches after TF changes. */
   private replayBufferResolution: string | null = null;
+  /** Optional pin so pushReplayBar only feeds matching ticker/TF (set by BarReplayController). */
+  private replayPushTicker: string | null = null;
+  private replayPushResolution: string | null = null;
 
   constructor(
     private readonly marketData: MarketDataService,
@@ -126,12 +136,20 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   ) {}
 
   /** Enable Bar Replay truncation (mute live, filter getBars). */
-  beginReplay(): void {
+  beginReplay(opts?: { ticker?: string; resolution?: string }): void {
     this.replayActive = true;
     this.replayCutoffSec = null;
     this.replayClockSec = null;
     this.replayBuffer = null;
     this.replayBufferResolution = null;
+    this.replayPushTicker = opts?.ticker ? normalizeTicker(stripExchange(opts.ticker)) : null;
+    this.replayPushResolution = opts?.resolution ? String(opts.resolution) : null;
+  }
+
+  /** Narrow which pane subscriptions receive forming/stepped replay ticks. */
+  setReplayPushTarget(ticker: string | null, resolution: string | null): void {
+    this.replayPushTicker = ticker ? normalizeTicker(stripExchange(ticker)) : null;
+    this.replayPushResolution = resolution ? String(resolution) : null;
   }
 
   /** Hide bars with time (unix sec) strictly after cutoff. Also drives getServerTime fallback. */
@@ -169,11 +187,18 @@ export class TradingViewDatafeed implements IBasicDataFeed {
 
   /** Push one synthetic realtime bar while live feed is muted. */
   pushReplayBar(bar: Bar): void {
-    if (!this.replayOnTick) return;
-    try {
-      this.replayOnTick(toTvBar(bar));
-    } catch {
-      /* ignore */
+    if (this.barSubs.size === 0) return;
+    const tvBar = toTvBar(bar);
+    const wantTicker = this.replayPushTicker;
+    const wantRes = this.replayPushResolution;
+    for (const sub of this.barSubs.values()) {
+      if (wantTicker && normalizeTicker(stripExchange(sub.ticker)) !== wantTicker) continue;
+      if (wantRes && String(sub.resolution) !== wantRes) continue;
+      try {
+        sub.onTick(tvBar);
+      } catch {
+        /* ignore */
+      }
     }
   }
 
@@ -183,6 +208,8 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     this.replayClockSec = null;
     this.replayBuffer = null;
     this.replayBufferResolution = null;
+    this.replayPushTicker = null;
+    this.replayPushResolution = null;
   }
 
   /** Prefetch a deep history buffer for stepping (before cutoff is applied). */
@@ -370,9 +397,14 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   ): void {
     this.unsubscribeBars(listenerGuid);
     const symbol = this.requireSymbol(symbolInfo);
+    const resKey = String(resolution);
 
-    // Always keep the library callback so pushReplayBar can feed stepped candles.
-    this.replayOnTick = onTick;
+    // Keep every pane’s callback so multipane layouts don’t steal replay ticks.
+    this.barSubs.set(listenerGuid, {
+      ticker: symbol.ticker,
+      resolution: resKey,
+      onTick,
+    });
 
     const unsubscribe = this.marketData.subscribe(symbol, resolution, (bar) => {
       if (this.replayActive) return; // muted during Bar Replay
@@ -384,13 +416,14 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     });
     this.subscriptions.set(listenerGuid, () => {
       unsubscribe();
-      if (this.replayOnTick === onTick) this.replayOnTick = null;
+      this.barSubs.delete(listenerGuid);
     });
   }
 
   unsubscribeBars(listenerGuid: string): void {
     this.subscriptions.get(listenerGuid)?.();
     this.subscriptions.delete(listenerGuid);
+    this.barSubs.delete(listenerGuid);
   }
 
   getServerTime(callback: ServerTimeCallback): void {
