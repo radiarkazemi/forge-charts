@@ -75,9 +75,10 @@ echo "Syncing Forge web root → ${REMOTE_FORGE_WEB}"
 set -euo pipefail
 ANIL_DIST='/var/www/anil/frontend/dist'
 REMOTE_FORGE_WEB='${REMOTE_FORGE_WEB}'
+REMOTE_APP='${REMOTE_APP}'
 mkdir -p "\${REMOTE_FORGE_WEB}/charts" "\${REMOTE_FORGE_WEB}/assets/forge"
 if [[ -d "\${ANIL_DIST}/charts" && -d "\${ANIL_DIST}/assets/forge" ]]; then
-  # Keep the large Charting Library tree already on forge-web; sync app files only.
+  # Sync app files only — never delete an existing charting_library tree.
   rsync -a --delete --exclude charting_library "\${ANIL_DIST}/charts/" "\${REMOTE_FORGE_WEB}/charts/"
   rsync -a --delete "\${ANIL_DIST}/assets/forge/" "\${REMOTE_FORGE_WEB}/assets/forge/"
   if [[ -d "\${ANIL_DIST}/charts/brand" ]]; then
@@ -87,6 +88,30 @@ if [[ -d "\${ANIL_DIST}/charts" && -d "\${ANIL_DIST}/assets/forge" ]]; then
   echo "Synced forge-web from Anil dist"
 else
   echo "WARN: Anil dist missing charts/assets" >&2
+fi
+
+# Nginx serves /charting_library/ from forge-web. Always restore it from the
+# full tree under forge-charts (deploys historically left forge-web without it,
+# which produced “Failed to load TradingView library from /charting_library/”).
+CLIB_SRC=""
+for candidate in \
+  "\${REMOTE_APP}/charting_library" \
+  /var/www/forge-charts/charting_library \
+  /var/www/forge-charts-src/public/charting_library
+do
+  if [[ -f "\${candidate}/charting_library.js" ]]; then
+    CLIB_SRC="\${candidate}"
+    break
+  fi
+done
+if [[ -n "\${CLIB_SRC}" ]]; then
+  mkdir -p "\${REMOTE_FORGE_WEB}/charts"
+  rsync -a --delete "\${CLIB_SRC}/" "\${REMOTE_FORGE_WEB}/charts/charting_library/"
+  chown -R www-data:www-data "\${REMOTE_FORGE_WEB}/charts/charting_library"
+  chmod -R a+rX "\${REMOTE_FORGE_WEB}/charts/charting_library"
+  echo "Ensured charting_library → \${REMOTE_FORGE_WEB}/charts/charting_library (from \${CLIB_SRC})"
+else
+  echo "ERROR: charting_library.js not found on server — charts will fail to load" >&2
 fi
 REMOTE
 
@@ -98,9 +123,19 @@ cat > "$SNIP" <<'EOF'
 # Charting Library at /charting_library/ → /var/www/forge-web/charts/charting_library/
 location ^~ /charting_library/ {
     root /var/www/forge-web/charts;
-    expires 7d;
-    add_header Cache-Control "public";
+    expires 5m;
+    add_header Cache-Control "public, max-age=300, must-revalidate" always;
     add_header X-Content-Type-Options nosniff always;
+    try_files $uri =404;
+}
+# Entry script: avoid Cloudflare caching a temporary 404 for hours.
+location = /charting_library/charting_library.js {
+    root /var/www/forge-web/charts;
+    default_type application/javascript;
+    expires -1;
+    add_header Cache-Control "no-cache, must-revalidate" always;
+    add_header X-Content-Type-Options nosniff always;
+    try_files /charting_library/charting_library.js =404;
 }
 EOF
 for conf in /etc/nginx/sites-enabled/forgechart /etc/nginx/sites-enabled/forge-landing-8088; do
