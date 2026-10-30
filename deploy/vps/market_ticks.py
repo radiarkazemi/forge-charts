@@ -3008,14 +3008,22 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
     return ws
 
 
-async def fetch_tv_history_bars(symbol: str, resolution: str, count: int) -> list[list[float]]:
-    """Pull OHLC from TradingView’s chart socket for an EX:SYMBOL broker book."""
+async def fetch_tv_history_bars(
+    symbol: str,
+    resolution: str,
+    count: int,
+    before: float | None = None,
+) -> list[list[float]]:
+    """Pull OHLC from TradingView’s chart socket for an EX:SYMBOL broker book.
+
+    Pages backward with `request_more_data` so replay cutoffs and deep countBack
+    are real history — not only the latest window filtered empty by `before`.
+    """
     from cp_fetcher.config import load_settings
     from cp_fetcher.protocol import is_heartbeat, iter_json_messages
     from cp_fetcher.tvws import (
         authorize,
         connect_with_retry,
-        create_message,
         generate_chart_session,
         reply_heartbeat,
         resolve_symbol_arg,
@@ -3024,7 +3032,9 @@ async def fetch_tv_history_bars(symbol: str, resolution: str, count: int) -> lis
     from cp_fetcher.protocol import candle_values
 
     settings = load_settings()
-    bars_n = max(50, min(int(count), 5_000))
+    want = max(50, min(int(count), 10_000))
+    # TV create_series pages are most reliable under ~3k; we merge pages ourselves.
+    page_n = max(100, min(want, 3_000))
     tv_res = str(resolution or "1")
     # Map Forge-style ids onto TV series resolutions.
     res_map = {
@@ -3044,6 +3054,7 @@ async def fetch_tv_history_bars(symbol: str, resolution: str, count: int) -> lis
         "m": "1M",
     }
     tv_res = res_map.get(tv_res, tv_res)
+    before_t = float(before) if before is not None and before > 0 else None
 
     ws = await connect_with_retry(settings)
     try:
@@ -3051,12 +3062,41 @@ async def fetch_tv_history_bars(symbol: str, resolution: str, count: int) -> lis
         chart = generate_chart_session()
         await send(ws, "chart_create_session", [chart, ""])
         await send(ws, "resolve_symbol", [chart, "symbol_1", resolve_symbol_arg(symbol)])
-        await send(ws, "create_series", [chart, "s1", "s1", "symbol_1", tv_res, bars_n])
+        await send(ws, "create_series", [chart, "s1", "s1", "symbol_1", tv_res, page_n])
 
-        out: list[list[float]] = []
-        deadline = time.monotonic() + 25.0
+        by_t: dict[float, list[float]] = {}
+        pending_more = False
+        stagnant = 0
+        oldest_seen: float | None = None
+        # Deep replay windows need more wall time than a live quote pull.
+        deadline = time.monotonic() + (90.0 if before_t is not None or want > 1_000 else 35.0)
+
+        def merge_candles(candles: list) -> None:
+            for c in candles:
+                try:
+                    t = float(c[0])
+                    by_t[t] = [
+                        t,
+                        float(c[1]),
+                        float(c[2]),
+                        float(c[3]),
+                        float(c[4]),
+                        float(c[5] if len(c) > 5 else 0),
+                    ]
+                except (TypeError, ValueError, IndexError):
+                    continue
+
+        def need_more() -> bool:
+            if not by_t:
+                return False
+            times = sorted(by_t)
+            if before_t is not None and times[0] >= before_t:
+                return True
+            usable = [t for t in times if before_t is None or t < before_t]
+            return len(usable) < want
+
         while time.monotonic() < deadline:
-            raw = await asyncio.wait_for(ws.recv(), timeout=8.0)
+            raw = await asyncio.wait_for(ws.recv(), timeout=10.0)
             if isinstance(raw, bytes):
                 try:
                     await ws.pong(raw)
@@ -3076,20 +3116,33 @@ async def fetch_tv_history_bars(symbol: str, resolution: str, count: int) -> lis
                 if kind in {"du", "timescale_update"} and params and params[0] == chart:
                     candles, _ = candle_values(data)
                     if candles:
-                        out = [
-                            [
-                                float(c[0]),
-                                float(c[1]),
-                                float(c[2]),
-                                float(c[3]),
-                                float(c[4]),
-                                float(c[5] if len(c) > 5 else 0),
-                            ]
-                            for c in candles
-                        ]
+                        merge_candles(candles)
                 if kind == "series_completed" and params and params[0] == chart:
-                    return out
-        return out
+                    if not by_t:
+                        return []
+                    cur_oldest = min(by_t)
+                    if oldest_seen is not None and cur_oldest >= oldest_seen - 1e-9:
+                        stagnant += 1
+                    else:
+                        stagnant = 0
+                    oldest_seen = cur_oldest if oldest_seen is None else min(oldest_seen, cur_oldest)
+
+                    if need_more() and stagnant < 3:
+                        pending_more = True
+                        await send(ws, "request_more_data", [chart, "s1", page_n])
+                        continue
+                    # Done paging.
+                    pending_more = False
+                    out = [by_t[t] for t in sorted(by_t)]
+                    if before_t is not None:
+                        out = [b for b in out if b[0] < before_t]
+                    return out[-want:]
+            if pending_more:
+                continue
+        out = [by_t[t] for t in sorted(by_t)]
+        if before_t is not None:
+            out = [b for b in out if b[0] < before_t]
+        return out[-want:]
     finally:
         try:
             await ws.close()
@@ -3121,13 +3174,11 @@ async def tv_history(request: web.Request) -> web.Response:
     before = float(before_raw) if before_raw not in (None, "") else None
 
     try:
-        bars = await fetch_tv_history_bars(symbol, resolution, count)
+        bars = await fetch_tv_history_bars(symbol, resolution, count, before=before)
     except Exception as exc:
         LOG.warning("tv-history %s %s: %s", symbol, resolution, exc)
         return web.json_response({"detail": str(exc), "symbol": symbol, "bars": []}, status=502)
 
-    if before is not None and before > 0:
-        bars = [b for b in bars if b[0] < before]
     return web.json_response(
         {
             "symbol": symbol,

@@ -108,6 +108,13 @@ export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
     const name = (chartData.name || "").trim() || RADIAR_LAYOUT_NAME;
     const preferRadiar = name.toLowerCase() === "radiar" || !chartData.id;
     const id = preferRadiar ? RADIAR_LAYOUT_ID : (chartData.id ?? Date.now().toString(36));
+    const content = typeof chartData.content === "string" ? chartData.content.trim() : "";
+    // Never overwrite a saved layout / template with an empty payload (blank chart
+    // after a failed history fetch used to wipe study templates + drawings).
+    if (!content || content === "{}" || content === "null") {
+      const existing = this.charts().find((c) => c.id === id || c.name === (preferRadiar ? RADIAR_LAYOUT_NAME : name));
+      if (existing?.content) return existing.id ?? id;
+    }
     const record: ChartData = {
       ...chartData,
       id,
@@ -138,6 +145,8 @@ export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
   }
 
   async saveStudyTemplate(template: StudyTemplateData): Promise<void> {
+    const content = typeof template.content === "string" ? template.content.trim() : "";
+    if (!content || content === "{}" || content === "null") return;
     this.storage.set(KEYS.studyTemplates, [...this.studyTemplates().filter((t) => t.name !== template.name), template]);
   }
 

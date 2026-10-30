@@ -15,7 +15,9 @@ import { aggregateBars, synthesizeFromMinuteBars, SYNTH_SECONDS_INTERVALS } from
 import { isTvBrokerSymbol, marketTicksChannelFor, tradingViewSymbolFor } from "./tv-broker-symbols";
 
 const HISTORY_BASE = "/tv-history";
+/** Live quotes stay snappy; replay/deep history may page on the VPS. */
 const REQUEST_TIMEOUT_MS = 25_000;
+const DEEP_HISTORY_TIMEOUT_MS = 95_000;
 const LIVE_POLL_MS = 2_000;
 
 const NATIVE_INTERVALS: readonly Interval[] = [
@@ -166,7 +168,8 @@ export class TradingViewBrokerProvider implements MarketDataProvider {
     }
 
     const { request, group } = this.tvHistoryPlan(interval);
-    const count = Math.min(5_000, Math.max((range.countBack + 50) * Math.max(group, 1), 300));
+    const count = Math.min(10_000, Math.max((range.countBack + 50) * Math.max(group, 1), 300));
+    const deep = count > 1_000 || (range.to > 0 && range.to < Math.floor(Date.now() / 1000) - 3_600);
     const url = buildUrl(HISTORY_BASE, {
       symbol: tvSymbol,
       resolution: request,
@@ -175,19 +178,22 @@ export class TradingViewBrokerProvider implements MarketDataProvider {
     });
 
     try {
-      const json = await fetchJson<TvHistoryResponse>(url, { timeoutMs: REQUEST_TIMEOUT_MS });
+      const json = await fetchJson<TvHistoryResponse>(url, {
+        timeoutMs: deep ? DEEP_HISTORY_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
+      });
       let bars = (json.bars ?? []).map(parseBar).filter((b): b is Bar => b !== null);
       if (group > 1) {
         bars = aggregateBars(bars, intervalSeconds(interval));
       }
       const before = range.to > 0 ? range.to : Number.POSITIVE_INFINITY;
       const filtered = bars.filter((b) => b.time < before).sort((a, b) => a.time - b.time);
-      if (!filtered.length) {
-        throw new Error(`tv_broker: empty history for ${tvSymbol} @ ${interval}`);
-      }
+      // Empty → fall through to Yahoo/other providers (replay must not blank the chart).
+      if (!filtered.length) return [];
       return filtered.slice(-Math.max(range.countBack, 1));
     } catch (error) {
       if (error instanceof HttpError && error.status >= 400 && error.status < 500) return [];
+      // 502 / timeout: let the chain try Yahoo rather than wiping the chart.
+      if (error instanceof HttpError && error.status >= 500) return [];
       throw error;
     }
   }

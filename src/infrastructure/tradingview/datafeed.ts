@@ -241,7 +241,12 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     resolution: string,
     countBack = 5_000,
   ): Promise<readonly Bar[]> {
-    const symbol = this.symbols.findByTicker(normalizeTicker(stripExchange(ticker)));
+    // Keep EX:TICKER so broker-specific TV books (CAPITALCOM vs OANDA) are used.
+    const exchange = parseExchangePrefix(ticker);
+    const symbol =
+      this.symbols.findByTicker(ticker, exchange) ??
+      this.symbols.findByTicker(normalizeTicker(stripExchange(ticker)), exchange) ??
+      this.symbols.findByTicker(normalizeTicker(stripExchange(ticker)));
     if (!symbol) return [];
     const to = Math.floor(Date.now() / 1000) + 60;
     const { bars } = await this.marketData.fetchHistory(symbol, resolution, {
