@@ -86,7 +86,13 @@ export function synthesizeSecondsFromMinute(parent: Bar): Bar[] {
 /** Expand 1m parents into `stepSec` second candles (1S…45S). */
 export function synthesizeFromMinuteBars(parents: readonly Bar[], stepSec: number): Bar[] {
   const ones: Bar[] = [];
-  for (const parent of parents) ones.push(...synthesizeSecondsFromMinute(parent));
+  for (const parent of parents) {
+    // Yahoo (and some brokers) stamp 1m bars off the :00 grid — snap before synth
+    // so 5S buckets align with TradingView’s seconds timeline.
+    const aligned =
+      parent.time % 60 === 0 ? parent : { ...parent, time: Math.floor(parent.time / 60) * 60 };
+    ones.push(...synthesizeSecondsFromMinute(aligned));
+  }
   return stepSec <= 1 ? ones : aggregateBars(ones, stepSec);
 }
 
