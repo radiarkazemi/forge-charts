@@ -203,7 +203,11 @@ export function DrawingToolbar({ engine }: { engine: ChartEngine | null }) {
           <path d="M7 4h3v8M14 4h3v8" />
         </I>
       </button>
-      <button className={snap.stayMode ? "tool on" : "tool"} title="Stay in drawing mode" onClick={() => engine?.toggle("stayMode")}>
+      <button
+        className={snap.stayMode ? "tool on" : "tool"}
+        title={snap.stayMode ? "Stay in drawing mode (ON) — click to draw once" : "Stay in drawing mode (OFF)"}
+        onClick={() => engine?.toggle("stayMode")}
+      >
         <I>
           <rect x="7" y="11" width="10" height="8" rx="1" />
           <path d="M9 11V8a3 3 0 0 1 6 0" />

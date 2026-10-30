@@ -18,7 +18,7 @@ export default function App() {
   const feedGen = useRef(0);
   const [engine, setEngine] = useState<ChartEngine | null>(null);
   const [live, setLive] = useState(false);
-  const [status, setStatus] = useState("Loading BINANCE + FOREXCOM…");
+  const [status, setStatus] = useState("Loading BINANCE + FOREXCOM + FXCM…");
   const [universe, setUniverse] = useState<SymbolInfo[]>(UNIVERSE);
   const [symbolOpen, setSymbolOpen] = useState(false);
   const [compareOpen, setCompareOpen] = useState(false);
@@ -108,7 +108,8 @@ export default function App() {
   const counts = useMemo(() => {
     const binance = universe.filter((s) => s.exchange === "BINANCE").length;
     const forex = universe.filter((s) => s.exchange === "FOREXCOM").length;
-    return { binance, forex };
+    const fxcm = universe.filter((s) => s.exchange === "FXCM").length;
+    return { binance, forex, fxcm };
   }, [universe]);
 
   return (
@@ -119,6 +120,7 @@ export default function App() {
         <nav>
           <span>BINANCE {counts.binance}</span>
           <span>FOREXCOM {counts.forex}</span>
+          <span>FXCM {counts.fxcm}</span>
         </nav>
         <span className="spacer" />
         <button onClick={() => setSearchOpen(true)}>Search</button>

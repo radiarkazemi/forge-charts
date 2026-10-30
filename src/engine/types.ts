@@ -1,4 +1,19 @@
-export type Interval = "1" | "5" | "15" | "30" | "60" | "120" | "240" | "1D" | "1W" | "1M";
+export type Interval =
+  | "1S"
+  | "5S"
+  | "10S"
+  | "15S"
+  | "30S"
+  | "1"
+  | "5"
+  | "15"
+  | "30"
+  | "60"
+  | "120"
+  | "240"
+  | "1D"
+  | "1W"
+  | "1M";
 
 export type ChartType =
   | "candle"

@@ -16,7 +16,7 @@ export function SymbolModal({
   universe?: SymbolInfo[];
 }) {
   const [q, setQ] = useState("");
-  const [exchange, setExchange] = useState<"ALL" | "BINANCE" | "FOREXCOM">("ALL");
+  const [exchange, setExchange] = useState<"ALL" | (typeof EXCHANGES)[number]>("ALL");
   const list = useMemo(() => {
     const query = q.trim().toLowerCase();
     return universe
@@ -39,7 +39,7 @@ export function SymbolModal({
             </button>
           ))}
         </div>
-        <input autoFocus placeholder="Search BINANCE or FOREXCOM" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input autoFocus placeholder="Search BINANCE, FOREXCOM, or FXCM" value={q} onChange={(e) => setQ(e.target.value)} />
         <ul>
           {list.map((s) => (
             <li key={`${s.exchange}:${s.ticker}`} onClick={() => onPick(s)}>
