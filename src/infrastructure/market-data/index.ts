@@ -12,3 +12,9 @@ export {
   mongoHistoryPlan,
 } from "./cp-chart-history";
 export { startPolling } from "./polling";
+export {
+  aggregateBars,
+  synthesizeFromMinuteBars,
+  synthesizeSecondsFromMinute,
+  SYNTH_SECONDS_INTERVALS,
+} from "./synthesize-seconds";

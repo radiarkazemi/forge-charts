@@ -1,8 +1,9 @@
-import { parseInterval, type Bar, type BarRange, type Interval, type Quote, type SymbolInfo } from "@/domain";
+import { intervalSeconds, parseInterval, type Bar, type BarRange, type Interval, type Quote, type SymbolInfo } from "@/domain";
 import type { MarketDataProvider, Unsubscribe } from "@/application";
 import { buildUrl, fetchJson } from "../http/fetch-json";
 import { startPolling } from "./polling";
 import { fetchCpChartHistory, mongoHistoryPlan } from "./cp-chart-history";
+import { synthesizeFromMinuteBars, SYNTH_SECONDS_INTERVALS } from "./synthesize-seconds";
 
 /** Proxied by Vite / nginx. Health still hits Germany crypto-api; history uses Mongo chart_ws. */
 const BASE = "/api/crypto";
@@ -12,6 +13,7 @@ const HEALTH_TTL_MS = 60_000;
 const LIVE_POLL_MS = 3_000;
 
 const NATIVE_INTERVALS: readonly Interval[] = [
+  ...SYNTH_SECONDS_INTERVALS,
   "1",
   "2",
   "3",
@@ -32,6 +34,10 @@ const NATIVE_INTERVALS: readonly Interval[] = [
   "1M",
 ];
 
+/**
+ * Only tickers that actually exist in VPS Mongo. Indices (NAS100/US30/…) are
+ * Yahoo-backed — listing them here returned empty history and blocked the chain.
+ */
 const CP_SYMBOL_BY_TICKER: Readonly<Record<string, string>> = {
   BTCUSD: "BTCUSDT",
   BTCUSDT: "BTCUSDT",
@@ -55,12 +61,6 @@ const CP_SYMBOL_BY_TICKER: Readonly<Record<string, string>> = {
   EURJPY: "EURJPY",
   GBPJPY: "GBPJPY",
   USOIL: "USOIL",
-  NAS100: "NAS100",
-  US30: "US30",
-  US500: "US500",
-  GER40: "GER40",
-  UK100: "UK100",
-  JPN225: "JPN225",
   "GC1!": "XAUUSD",
   "CL1!": "USOIL",
   PAXGUSDT: "PAXGUSDT",
@@ -95,6 +95,7 @@ function latestToBar(latest: Latest): Bar {
 /**
  * Self-hosted cp_fetcher Mongo history (via chart_ws) + optional Germany crypto quotes.
  * Deep bars: 20k @ 1m, 10k @ 5m, 5k on other intervals (as stored in Mongo).
+ * Seconds are synthesized from 1m parents (same path as Germany/Yahoo).
  */
 export class CpFetcherProvider implements MarketDataProvider {
   readonly id = "cp_fetcher";
@@ -104,6 +105,8 @@ export class CpFetcherProvider implements MarketDataProvider {
 
   supports(symbol: SymbolInfo, interval: Interval): boolean {
     if (!(symbol.ticker.toUpperCase() in CP_SYMBOL_BY_TICKER)) return false;
+    const { unit, count } = parseInterval(interval);
+    if (unit === "seconds") return count >= 1 && count <= 45;
     return mongoHistoryPlan(interval) !== null || interval === "1" || interval === "60" || interval === "1D";
   }
 
@@ -113,14 +116,52 @@ export class CpFetcherProvider implements MarketDataProvider {
 
   async fetchBars(symbol: SymbolInfo, interval: Interval, range: BarRange): Promise<Bar[]> {
     await this.assertHealthy();
+    const { unit } = parseInterval(interval);
+    if (unit === "seconds") {
+      const step = intervalSeconds(interval);
+      const parentNeed = Math.min(20_000, Math.ceil((Math.max(range.countBack, 50) * step) / 60) + 50);
+      const parents = await fetchCpChartHistory(this.cpSymbol(symbol), "1", {
+        from: 0,
+        to: range.to > 0 ? range.to : Math.floor(Date.now() / 1000) + 60,
+        countBack: parentNeed,
+      });
+      if (!parents.length) {
+        throw new Error(`cp_fetcher: no 1m parents for ${symbol.ticker}`);
+      }
+      const now = Math.floor(Date.now() / 1000);
+      const before = range.to > 0 ? Math.min(range.to, now + 1) : now + 1;
+      const bars = synthesizeFromMinuteBars(parents, step).filter((bar) => bar.time < before);
+      if (!bars.length) throw new Error(`cp_fetcher: empty seconds for ${symbol.ticker}`);
+      return bars.slice(-Math.max(range.countBack, 1));
+    }
+
     const bars = await fetchCpChartHistory(this.cpSymbol(symbol), interval, range);
-    return bars.filter((bar) => bar.time < range.to);
+    const filtered = bars.filter((bar) => bar.time < range.to);
+    // Empty Mongo must not win the chain — let Yahoo / other providers answer.
+    if (!filtered.length) {
+      throw new Error(`cp_fetcher: empty history for ${symbol.ticker} @ ${interval}`);
+    }
+    return filtered;
   }
 
   subscribeBars(symbol: SymbolInfo, interval: Interval, onBar: (bar: Bar) => void): Unsubscribe {
     const { unit, count } = parseInterval(interval);
+    const step = intervalSeconds(interval);
+    if (unit === "seconds") {
+      const pollMs = Math.min(LIVE_POLL_MS, Math.max(1_000, step * 1_000));
+      return startPolling(async () => {
+        const to = Math.floor(Date.now() / 1000) + step;
+        const bars = await this.fetchBars(symbol, interval, {
+          from: to - Math.max(60, step * 24),
+          to,
+          countBack: Math.max(24, Math.ceil(120 / step)),
+        });
+        const last = bars.at(-1);
+        if (last) onBar(last);
+      }, pollMs);
+    }
+
     const timeframe = unit === "days" ? "1d" : count >= 60 ? "1h" : "1m";
-    const step = unit === "minutes" ? count * 60 : unit === "days" ? 86_400 : 60;
     return startPolling(async () => {
       const latest = await fetchJson<Latest>(
         buildUrl(`${BASE}/prices/${encodeURIComponent(this.cpSymbol(symbol))}/`, { timeframe }),

@@ -59,12 +59,15 @@ const SEEDS: readonly Seed[] = [
   ["NIM", "نیم سکه", "IRAN", "commodity", 0],
   ["ROB", "ربع سکه", "IRAN", "commodity", 0],
   ["ONS", "انس جهانی (بازار ایران)", "IRAN", "commodity", 2],
-  // Gold / FX — FOREXCOM / FXPRO / FXCM (Germany live for XAU)
+  // Gold / FX / indices — FOREXCOM / FXPRO / FXCM (Germany live for XAU; Yahoo for indices)
   ["XAUUSD", "Gold Spot / U.S. Dollar", "FOREXCOM", "forex", 2],
   ["XAUUSD", "Gold Spot / U.S. Dollar", "FXPRO", "forex", 2],
   ["XAUUSD", "Gold Spot / U.S. Dollar", "FXCM", "forex", 2],
   ["XAUUSD", "Gold Spot / U.S. Dollar (PAXG)", "BINANCE", "forex", 2],
   ["GC1!", "Gold Futures", "FOREXCOM", "futures", 2],
+  ["NAS100", "US 100 Cash (Nasdaq 100)", "FOREXCOM", "index", 2],
+  ["US30", "US 30 Cash (Dow Jones)", "FOREXCOM", "index", 2],
+  ["US500", "US 500 Cash (S&P 500)", "FOREXCOM", "index", 2],
   ["EURUSD", "Euro / U.S. Dollar", "FOREXCOM", "forex", 5],
   ["GBPUSD", "British Pound / U.S. Dollar", "FOREXCOM", "forex", 5],
   ["USDJPY", "U.S. Dollar / Japanese Yen", "FOREXCOM", "forex", 3],

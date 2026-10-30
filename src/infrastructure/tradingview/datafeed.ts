@@ -479,8 +479,10 @@ export class TradingViewDatafeed implements IBasicDataFeed {
 
   private toLibrarySymbolInfo(symbol: SymbolInfo): LibrarySymbolInfo {
     const native = this.marketData.describe(symbol).nativeIntervals;
-    const hasSeconds = native.some((iv) => parseInterval(iv).unit === "seconds");
     const hasIntraday = native.some((iv) => parseInterval(iv).unit === "minutes");
+    // Any feed that can serve 1m can synthesize 5S (Yahoo / cp / Binance / Germany).
+    const hasSeconds =
+      native.some((iv) => parseInterval(iv).unit === "seconds") || hasIntraday;
     const sessionOpen = isMarketSessionOpen(symbol);
 
     return {
