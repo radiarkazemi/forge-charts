@@ -6,7 +6,7 @@ const UTC = "Etc/UTC";
 
 type Seed = [ticker: string, name: string, exchange: string, type: SymbolType, precision: number];
 
-/** CFD / FX brokers with Yahoo-backed underlyings (OANDA + 3). */
+/** CFD / FX brokers served from each venue’s TradingView book (not Yahoo proxies). */
 const CFD_BROKERS = ["OANDA", "PEPPERSTONE", "IG", "CAPITALCOM"] as const;
 
 /** Shared FX / metal / index CFD books listed under each CFD broker. */
@@ -59,7 +59,7 @@ const SEEDS: readonly Seed[] = [
   ["NIM", "نیم سکه", "IRAN", "commodity", 0],
   ["ROB", "ربع سکه", "IRAN", "commodity", 0],
   ["ONS", "انس جهانی (بازار ایران)", "IRAN", "commodity", 2],
-  // Gold / FX / indices — FOREXCOM / FXPRO / FXCM (Germany live for XAU; Yahoo for indices)
+  // Gold / FX / indices — FOREXCOM / FXPRO / FXCM (Germany live for XAU; TV broker books for indices/FX)
   ["XAUUSD", "Gold Spot / U.S. Dollar", "FOREXCOM", "forex", 2],
   ["XAUUSD", "Gold Spot / U.S. Dollar", "FXPRO", "forex", 2],
   ["XAUUSD", "Gold Spot / U.S. Dollar", "FXCM", "forex", 2],

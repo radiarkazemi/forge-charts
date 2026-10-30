@@ -166,7 +166,7 @@ def mongo_client() -> Any:
     _MONGO_CLIENT = MongoClient(MONGO_URI, serverSelectionTimeoutMS=3000, maxPoolSize=8)
     return _MONGO_CLIENT
 
-# channel prefix -> TradingView symbol
+# channel prefix -> TradingView symbol (static seeds; dynamic forex:* also supported)
 CHANNEL_TO_TV: dict[str, str] = {
     "crypto:btcusdt": "BINANCE:BTCUSDT",
     "crypto:ethusdt": "BINANCE:ETHUSDT",
@@ -192,10 +192,58 @@ CHANNEL_TO_TV: dict[str, str] = {
     "forex:xauusd": "FOREXCOM:XAUUSD",
     "forex:xauusd:forexcom": "FOREXCOM:XAUUSD",
     "forex:xauusd:fxpro": "FOREXCOM:XAUUSD",
+    # FXCM TV resolve is currently invalid — use FOREXCOM book for live ticks.
+    "forex:xauusd:fxcm": "FOREXCOM:XAUUSD",
     "forex:xagusd": "FOREXCOM:XAGUSD",
     "forex:eurusd": "FOREXCOM:EURUSD",
     "forex:gbpusd": "FOREXCOM:GBPUSD",
     "forex:usdjpy": "FOREXCOM:USDJPY",
+}
+
+# Venues whose TV resolve is invalid → nearest live TV book.
+TV_EXCHANGE_FALLBACK: dict[str, str] = {
+    "FXCM": "FOREXCOM",
+    "FXPRO": "FOREXCOM",
+    "TVC": "FOREXCOM",
+    "DJ": "FOREXCOM",
+    "SP": "FOREXCOM",
+    "NASDAQ": "FOREXCOM",
+}
+
+# Forge ticker → TradingView ticker on a given data exchange.
+TV_TICKER_ALIAS: dict[str, dict[str, str]] = {
+    "OANDA": {
+        "NAS100": "NAS100USD",
+        "US30": "US30USD",
+        "US500": "SPX500USD",
+        "SPX500": "SPX500USD",
+        "GER40": "DE30EUR",
+        "UK100": "UK100GBP",
+        "JPN225": "JP225USD",
+        "AUS200": "AU200AUD",
+    },
+    "FOREXCOM": {
+        "US500": "SPX500",
+        "SPX500": "SPX500",
+    },
+    "CAPITALCOM": {
+        "SPX500": "US500",
+    },
+    # IG uses its own TV tickers (NASDAQ / DOW / …), not NAS100 / US30.
+    "IG": {
+        "NAS100": "NASDAQ",
+        "US30": "DOW",
+        "US500": "SPX500",
+        "SPX500": "SPX500",
+        "GER40": "DAX",
+        "UK100": "FTSE",
+        "JPN225": "NIKKEI",
+        "AUS200": "ASX",
+    },
+    "PEPPERSTONE": {
+        "SPX500": "US500",
+        "US500": "US500",
+    },
 }
 
 # reverse: TV symbol -> channels that should receive the tick
@@ -224,11 +272,14 @@ def normalize_channel(raw: str) -> str | None:
     channel = raw.strip().lower()
     if not channel:
         return None
-    if channel.startswith("forex:xauusd"):
-        parts = channel.split(":")
-        return "forex:xauusd" if len(parts) < 3 else f"forex:xauusd:{parts[2].upper()}"
     if channel.startswith("forex:"):
-        return channel
+        parts = channel.split(":")
+        if len(parts) < 2 or not parts[1]:
+            return None
+        ticker = parts[1].lower()
+        if len(parts) >= 3 and parts[2]:
+            return f"forex:{ticker}:{parts[2].upper()}"
+        return f"forex:{ticker}"
     if channel.startswith("crypto:"):
         return f"crypto:{channel.split(':', 1)[1].lower()}"
     if channel.startswith("iran:"):
@@ -236,13 +287,32 @@ def normalize_channel(raw: str) -> str | None:
     return None
 
 
+def resolve_tv_broker_symbol(exchange: str, ticker: str) -> str:
+    """Map Forge exchange+ticker onto a resolvable TradingView EX:SYMBOL."""
+    forge_ex = (exchange or "FOREXCOM").upper()
+    forge_ticker = (ticker or "").upper()
+    forge_alias = TV_TICKER_ALIAS.get(forge_ex, {}).get(forge_ticker)
+    # Prefer native broker books when TV resolve works (IG:NAS100 → IG:NASDAQ).
+    if forge_alias is not None and forge_ex not in TV_EXCHANGE_FALLBACK:
+        return f"{forge_ex}:{forge_alias}"
+    data_ex = TV_EXCHANGE_FALLBACK.get(forge_ex, forge_ex)
+    alias = TV_TICKER_ALIAS.get(data_ex, {}).get(forge_ticker)
+    if alias is None:
+        alias = forge_alias if forge_alias is not None else forge_ticker
+    return f"{data_ex}:{alias}"
+
+
 def tv_symbol_for_channel(channel: str) -> str | None:
     key = channel.lower()
     if key in CHANNEL_TO_TV:
         return CHANNEL_TO_TV[key]
-    # forex:xauusd:FXPRO → try base
-    if key.startswith("forex:xauusd"):
-        return "FOREXCOM:XAUUSD"
+    if key.startswith("forex:"):
+        parts = key.split(":")
+        ticker = parts[1] if len(parts) >= 2 else ""
+        ex = parts[2] if len(parts) >= 3 else "FOREXCOM"
+        if not ticker:
+            return None
+        return resolve_tv_broker_symbol(ex, ticker)
     if key.startswith("crypto:"):
         sym = key.split(":", 1)[1].upper()
         return f"BINANCE:{sym}"
@@ -2938,6 +3008,136 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
     return ws
 
 
+async def fetch_tv_history_bars(symbol: str, resolution: str, count: int) -> list[list[float]]:
+    """Pull OHLC from TradingView’s chart socket for an EX:SYMBOL broker book."""
+    from cp_fetcher.config import load_settings
+    from cp_fetcher.protocol import is_heartbeat, iter_json_messages
+    from cp_fetcher.tvws import (
+        authorize,
+        connect_with_retry,
+        create_message,
+        generate_chart_session,
+        reply_heartbeat,
+        resolve_symbol_arg,
+        send,
+    )
+    from cp_fetcher.protocol import candle_values
+
+    settings = load_settings()
+    bars_n = max(50, min(int(count), 5_000))
+    tv_res = str(resolution or "1")
+    # Map Forge-style ids onto TV series resolutions.
+    res_map = {
+        "1m": "1",
+        "5m": "5",
+        "15m": "15",
+        "30m": "30",
+        "60": "60",
+        "1h": "60",
+        "240": "240",
+        "4h": "240",
+        "1d": "1D",
+        "d": "1D",
+        "1w": "1W",
+        "w": "1W",
+        "1M": "1M",
+        "m": "1M",
+    }
+    tv_res = res_map.get(tv_res, tv_res)
+
+    ws = await connect_with_retry(settings)
+    try:
+        await authorize(ws)
+        chart = generate_chart_session()
+        await send(ws, "chart_create_session", [chart, ""])
+        await send(ws, "resolve_symbol", [chart, "symbol_1", resolve_symbol_arg(symbol)])
+        await send(ws, "create_series", [chart, "s1", "s1", "symbol_1", tv_res, bars_n])
+
+        out: list[list[float]] = []
+        deadline = time.monotonic() + 25.0
+        while time.monotonic() < deadline:
+            raw = await asyncio.wait_for(ws.recv(), timeout=8.0)
+            if isinstance(raw, bytes):
+                try:
+                    await ws.pong(raw)
+                except Exception:
+                    pass
+                continue
+            for payload, data in iter_json_messages(raw):
+                if is_heartbeat(payload):
+                    await reply_heartbeat(ws, payload)
+                    continue
+                if not data:
+                    continue
+                kind = data.get("m")
+                params = data.get("p") or []
+                if kind == "symbol_error" and params and params[0] == chart:
+                    raise RuntimeError(f"invalid symbol: {symbol}")
+                if kind in {"du", "timescale_update"} and params and params[0] == chart:
+                    candles, _ = candle_values(data)
+                    if candles:
+                        out = [
+                            [
+                                float(c[0]),
+                                float(c[1]),
+                                float(c[2]),
+                                float(c[3]),
+                                float(c[4]),
+                                float(c[5] if len(c) > 5 else 0),
+                            ]
+                            for c in candles
+                        ]
+                if kind == "series_completed" and params and params[0] == chart:
+                    return out
+        return out
+    finally:
+        try:
+            await ws.close()
+        except Exception:
+            pass
+
+
+async def tv_history(request: web.Request) -> web.Response:
+    """HTTP history for TradingView broker books used by Forge charts.
+
+    Query:
+      symbol=FOREXCOM:NAS100|CAPITALCOM:US30|OANDA:NAS100USD|…
+      resolution=1|5|15|30|60|240|1D|1W|1M
+      count=500
+      before=<unix sec exclusive> (optional)
+    """
+    raw_symbol = str(request.query.get("symbol") or "").strip()
+    if not raw_symbol or ":" not in raw_symbol:
+        return web.json_response({"detail": "symbol must be EXCHANGE:TICKER"}, status=400)
+    # Allow Forge-style exchange/ticker with aliases (FXCM → FOREXCOM, OANDA NAS100 → NAS100USD).
+    ex, ticker = raw_symbol.split(":", 1)
+    symbol = resolve_tv_broker_symbol(ex, ticker)
+    resolution = str(request.query.get("resolution") or "1")
+    try:
+        count = int(request.query.get("count") or 500)
+    except ValueError:
+        count = 500
+    before_raw = request.query.get("before")
+    before = float(before_raw) if before_raw not in (None, "") else None
+
+    try:
+        bars = await fetch_tv_history_bars(symbol, resolution, count)
+    except Exception as exc:
+        LOG.warning("tv-history %s %s: %s", symbol, resolution, exc)
+        return web.json_response({"detail": str(exc), "symbol": symbol, "bars": []}, status=502)
+
+    if before is not None and before > 0:
+        bars = [b for b in bars if b[0] < before]
+    return web.json_response(
+        {
+            "symbol": symbol,
+            "resolution": resolution,
+            "count": len(bars),
+            "bars": bars,
+        }
+    )
+
+
 async def health(_request: web.Request) -> web.Response:
     return web.json_response(
         {
@@ -3011,6 +3211,7 @@ def main() -> None:
     app.router.add_get("/market-ticks", ws_handler)
     app.router.add_get("/iran-gold/history", iran_gold_history)
     app.router.add_get("/iran-gold/quote", iran_gold_quote)
+    app.router.add_get("/tv-history", tv_history)
     app.router.add_get("/health", health)
     app.on_startup.append(start_background)
     app.on_cleanup.append(cleanup)

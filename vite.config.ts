@@ -48,6 +48,11 @@ function buildProxy(env: Record<string, string>): Record<string, ProxyOptions> {
       changeOrigin: true,
       ws: true,
     },
+    // TradingView broker OHLC (same books as TV Supercharts) via market_ticks.py
+    "/tv-history": {
+      target: vpsOrigin,
+      changeOrigin: true,
+    },
   };
 }
 

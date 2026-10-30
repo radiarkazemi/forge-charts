@@ -20,6 +20,7 @@ import {
   LocalStorageAdapter,
   StaticSymbolRepository,
   SyntheticProvider,
+  TradingViewBrokerProvider,
   TradingViewDatafeed,
   YahooProvider,
   type IExternalSaveLoadAdapter,
@@ -51,7 +52,13 @@ export interface Services {
 
 function buildProviders(config: AppConfig): MarketDataProvider[] {
   // Iran domestic gold (آبشده / گرم ۱۸ / سکه) before international feeds.
-  const providers: MarketDataProvider[] = [new IranGoldProvider(), new GermanyMarketProvider()];
+  // TradingView broker books (FOREXCOM/CAPITALCOM/OANDA/…) before Mongo/Yahoo
+  // so NAS100/US30/FX match each exchange’s TV source — not NQ=F/YM=F proxies.
+  const providers: MarketDataProvider[] = [
+    new IranGoldProvider(),
+    new GermanyMarketProvider(),
+    new TradingViewBrokerProvider(),
+  ];
   if (config.cpFetcherEnabled) providers.push(new CpFetcherProvider());
   // Direct Binance is often geo-blocked from the VPS; Yahoo is delayed fallback.
   providers.push(new BinanceProvider(), new YahooProvider());

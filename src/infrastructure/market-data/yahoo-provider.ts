@@ -12,6 +12,7 @@ import type { MarketDataProvider, Unsubscribe } from "@/application";
 import { buildUrl, fetchJson, HttpError } from "../http/fetch-json";
 import { startPolling } from "./polling";
 import { aggregateBars, synthesizeFromMinuteBars, SYNTH_SECONDS_INTERVALS } from "./synthesize-seconds";
+import { tradingViewSymbolFor } from "./tv-broker-symbols";
 
 const CHART_BASE = "/api/yahoo/v8/finance/chart";
 const SPARK_URL = "/api/yahoo/v8/finance/spark";
@@ -27,7 +28,7 @@ const YAHOO_BY_TICKER: Readonly<Record<string, string>> = {
   "ES1!": "ES=F",
   "NQ1!": "NQ=F",
   "YM1!": "YM=F",
-  // FX majors / crosses (OANDA / Pepperstone / IG / Capital.com / FOREXCOM books)
+  // FX majors / crosses — Yahoo FX only when no TV broker book owns the listing.
   EURUSD: "EURUSD=X",
   GBPUSD: "GBPUSD=X",
   USDJPY: "USDJPY=X",
@@ -38,7 +39,8 @@ const YAHOO_BY_TICKER: Readonly<Record<string, string>> = {
   EURGBP: "EURGBP=X",
   EURJPY: "EURJPY=X",
   GBPJPY: "GBPJPY=X",
-  // CFD index cash names → continuous futures (near 24h) for broker books
+  // Index cash names → futures/cash. TV broker exchanges never reach Yahoo
+  // (see supports); these remain for generic/non-broker search hits.
   NAS100: "NQ=F",
   US30: "YM=F",
   US500: "ES=F",
@@ -171,6 +173,9 @@ export class YahooProvider implements MarketDataProvider {
   readonly isSynthetic = false;
 
   supports(symbol: SymbolInfo, interval: Interval): boolean {
+    // Per-broker CFD books (FOREXCOM / CAPITALCOM / OANDA / …) must stay on
+    // TradingViewBrokerProvider — never NQ=F / YM=F proxies for those venues.
+    if (tradingViewSymbolFor(symbol)) return false;
     if (!(symbol.ticker.toUpperCase() in YAHOO_BY_TICKER)) return false;
     const { unit, count } = parseInterval(interval);
     if (unit === "seconds") return count >= 1 && count <= 45;
