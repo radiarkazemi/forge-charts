@@ -44,10 +44,14 @@ export function formatVolume(value: number): string {
 export function formatTime(unix: number, interval: string): string {
   const d = new Date(unix * 1000);
   const pad = (n: number) => String(n).padStart(2, "0");
-  if (interval === "1D" || interval === "1W") {
+  if (interval === "1D" || interval === "1W" || interval === "1M") {
     return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
   }
-  return `${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  const hm = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  if (interval.endsWith("S") || interval.endsWith("s")) {
+    return `${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${hm}:${pad(d.getUTCSeconds())}`;
+  }
+  return `${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${hm}`;
 }
 
 export function hashString(input: string): number {

@@ -1,10 +1,18 @@
 import type { Bar, Interval, SymbolInfo } from "../engine/types";
 import { chartApiBase, chartApiWsUrl, chartFastBase } from "./config";
+import { INTERVAL_SEC } from "./feed";
+import { expandBarsToStep, fillBarGaps, finiteOr, normalizeOhlc } from "./ohlc";
 
 export type Quote = { price: number; change: number };
 
 /** Chart interval -> cp_fetcher Mongo timeframe + aggregation group. */
 const HISTORY_TF: Record<Interval, { tf: "1m" | "1h" | "1d"; group: number }> = {
+  // Seconds: pull 1m parents, expand client-side so wicks stay faithful.
+  "1S": { tf: "1m", group: 1 },
+  "5S": { tf: "1m", group: 1 },
+  "10S": { tf: "1m", group: 1 },
+  "15S": { tf: "1m", group: 1 },
+  "30S": { tf: "1m", group: 1 },
   "1": { tf: "1m", group: 1 },
   "5": { tf: "1m", group: 5 },
   "15": { tf: "1m", group: 15 },
@@ -18,6 +26,11 @@ const HISTORY_TF: Record<Interval, { tf: "1m" | "1h" | "1d"; group: number }> = 
 };
 
 const LIVE_TF: Record<Interval, "1m" | "1h" | "1d"> = {
+  "1S": "1m",
+  "5S": "1m",
+  "10S": "1m",
+  "15S": "1m",
+  "30S": "1m",
   "1": "1m",
   "5": "1m",
   "15": "1m",
@@ -29,6 +42,18 @@ const LIVE_TF: Record<Interval, "1m" | "1h" | "1d"> = {
   "1W": "1d",
   "1M": "1d",
 };
+
+function finalizeBars(bars: Bar[], interval: Interval): Bar[] {
+  const step = INTERVAL_SEC[interval];
+  let next = bars.map((b) => normalizeOhlc(b));
+  if (step < 60 && next.length) {
+    next = expandBarsToStep(next, 60, step);
+    next = fillBarGaps(next, step, step <= 5 ? 720 : 240);
+  } else if (step <= 60) {
+    next = fillBarGaps(next, step, 60);
+  }
+  return next;
+}
 
 /** Target candles on screen — server aggregates, so payload stays tiny. */
 const DISPLAY_BARS = 350;
@@ -76,14 +101,16 @@ function historyToBars(results: unknown[]): Bar[] {
     const open = num(r.open);
     const close = num(r.close);
     if (!Number.isFinite(time) || !Number.isFinite(open) || !Number.isFinite(close)) continue;
-    bars.push({
-      time,
-      open,
-      high: num(r.high) || Math.max(open, close),
-      low: num(r.low) || Math.min(open, close),
-      close,
-      volume: num(r.volume) || 0,
-    });
+    bars.push(
+      normalizeOhlc({
+        time,
+        open,
+        high: finiteOr(r.high, Math.max(open, close)),
+        low: finiteOr(r.low, Math.min(open, close)),
+        close,
+        volume: finiteOr(r.volume, 0),
+      }),
+    );
   }
   return bars.sort((a, b) => a.time - b.time);
 }
@@ -97,16 +124,18 @@ function compactToBars(rows: unknown[]): Bar[] {
     const high = num(row[2]);
     const low = num(row[3]);
     const close = num(row[4]);
-    const volume = num(row[5]) || 0;
+    const volume = finiteOr(row[5], 0);
     if (!Number.isFinite(time) || !Number.isFinite(open) || !Number.isFinite(close)) continue;
-    bars.push({
-      time: time > 1e12 ? Math.floor(time / 1000) : time,
-      open,
-      high: Number.isFinite(high) ? high : Math.max(open, close),
-      low: Number.isFinite(low) ? low : Math.min(open, close),
-      close,
-      volume,
-    });
+    bars.push(
+      normalizeOhlc({
+        time: time > 1e12 ? Math.floor(time / 1000) : time,
+        open,
+        high: Number.isFinite(high) ? high : Math.max(open, close),
+        low: Number.isFinite(low) ? low : Math.min(open, close),
+        close,
+        volume,
+      }),
+    );
   }
   return bars;
 }
@@ -135,17 +164,25 @@ function aggregateBars(bars: Bar[], group: number, stepSec: number): Bar[] {
 }
 
 function precisionFromPrice(price: number, exchange: string): number {
-  if (!Number.isFinite(price) || price === 0) return exchange === "FOREXCOM" ? 5 : 4;
+  const fx = exchange === "FOREXCOM" || exchange === "FXCM";
+  if (!Number.isFinite(price) || price === 0) return fx ? 5 : 4;
   if (price >= 1000) return 2;
-  if (price >= 1) return exchange === "FOREXCOM" ? 5 : 4;
+  if (price >= 1) return fx ? 5 : 4;
   if (price >= 0.01) return 6;
   return 8;
 }
 
 function symbolType(ticker: string, exchange: string): SymbolInfo["type"] {
   if (exchange === "BINANCE") return "crypto";
-  if (ticker.startsWith("XAU") || ticker.startsWith("XAG")) return "metal";
+  if (ticker.startsWith("XAU") || ticker.startsWith("XAG") || ticker.includes("OIL")) return "metal";
+  if (ticker.includes("SPX") || ticker.includes("NAS") || ticker.includes("US30")) return "index";
   return "fx";
+}
+
+function normalizeExchange(raw: string): string {
+  const ex = raw.toUpperCase();
+  if (ex === "FOREXCOM" || ex === "FXCM" || ex === "BINANCE") return ex;
+  return ex;
 }
 
 export async function chartApiHealth(): Promise<boolean> {
@@ -176,12 +213,13 @@ export async function fetchChartApiSymbols(exchanges: string[]): Promise<SymbolI
         const ticker = String(row.symbol ?? "").toUpperCase();
         if (!ticker) continue;
         const price = num(row.price);
+        const ex = normalizeExchange(exchange);
         out.push({
           ticker,
           name: ticker,
-          exchange: exchange.toUpperCase() === "FOREXCOM" ? "FOREXCOM" : "BINANCE",
-          type: symbolType(ticker, exchange.toUpperCase()),
-          pricePrecision: precisionFromPrice(price, exchange.toUpperCase()),
+          exchange: ex,
+          type: symbolType(ticker, ex),
+          pricePrecision: precisionFromPrice(price, ex),
         });
       }
     } catch {
@@ -193,7 +231,9 @@ export async function fetchChartApiSymbols(exchanges: string[]): Promise<SymbolI
 
 async function fetchCompactHistory(symbol: SymbolInfo, interval: Interval): Promise<Bar[] | null> {
   const { tf, group } = HISTORY_TF[interval];
-  const limit = DISPLAY_BARS;
+  const step = INTERVAL_SEC[interval];
+  // Seconds need more parent 1m bars so expand covers a useful window.
+  const limit = step < 60 ? Math.min(500, Math.max(DISPLAY_BARS, Math.ceil(DISPLAY_BARS / (60 / step)))) : DISPLAY_BARS;
   const url =
     `${chartFastBase()}/history?symbol=${encodeURIComponent(symbol.ticker.toLowerCase())}` +
     `&timeframe=${tf}&limit=${limit}&group=${group}`;
@@ -229,6 +269,7 @@ export async function fetchChartApiHistory(symbol: SymbolInfo, interval: Interva
   if (!bars.length) {
     bars = await fetchVerboseHistory(symbol, interval);
   }
+  bars = finalizeBars(bars, interval);
   if (bars.length) historyCache.set(cacheKey, { at: Date.now(), bars });
   return bars;
 }
@@ -275,14 +316,14 @@ function barFromWs(msg: unknown): Bar | null {
     const close = num(src.c ?? src.close ?? src.price);
     if (!Number.isFinite(time) || !Number.isFinite(close)) return null;
     const o = Number.isFinite(open) ? open : close;
-    return {
+    return normalizeOhlc({
       time: time > 1e12 ? Math.floor(time / 1000) : time,
       open: o,
-      high: num(src.h ?? src.high) || Math.max(o, close),
-      low: num(src.l ?? src.low) || Math.min(o, close),
+      high: finiteOr(src.h ?? src.high, Math.max(o, close)),
+      low: finiteOr(src.l ?? src.low, Math.min(o, close)),
       close,
-      volume: num(src.v ?? src.volume) || 0,
-    };
+      volume: finiteOr(src.v ?? src.volume, 0),
+    });
   }
   return null;
 }
@@ -312,14 +353,17 @@ export function subscribeChartApi(
         const close = num(json.price);
         if (!Number.isFinite(time) || !Number.isFinite(close)) return;
         const open = num(json.open);
-        onBar({
-          time,
-          open: Number.isFinite(open) ? open : close,
-          high: num(json.high) || Math.max(open || close, close),
-          low: num(json.low) || Math.min(open || close, close),
-          close,
-          volume: num(json.volume) || 0,
-        });
+        const o = Number.isFinite(open) ? open : close;
+        onBar(
+          normalizeOhlc({
+            time,
+            open: o,
+            high: finiteOr(json.high ?? json.pmax, Math.max(o, close)),
+            low: finiteOr(json.low ?? json.pmin, Math.min(o, close)),
+            close,
+            volume: finiteOr(json.volume ?? json.vol, 0),
+          }),
+        );
       } catch {
         /* ignore */
       }

@@ -185,6 +185,10 @@ export class ChartEngine {
     this.tool = tool;
     if (extra?.text) this.glyph = extra.text;
     this.draft = null;
+    // Picking Cross / Arrow always leaves one-shot drawing mode.
+    if (tool === "cursor" || tool === "crosshair" || tool === "dot" || tool === "eraser") {
+      this.stayMode = false;
+    }
     this.emit();
     this.draw();
   }
@@ -305,7 +309,16 @@ export class ChartEngine {
     const last = this.bars.at(-1);
     const follow = this.viewEnd >= this.bars.length - 1;
     if (last && bar.time === last.time) {
-      this.bars = [...this.bars.slice(0, -1), bar];
+      // Merge OHLC so a price-only poll cannot erase source shadows/wicks.
+      const merged: Bar = {
+        time: last.time,
+        open: Number.isFinite(last.open) ? last.open : bar.open,
+        high: Math.max(last.high, bar.high, last.open, bar.open, last.close, bar.close),
+        low: Math.min(last.low, bar.low, last.open, bar.open, last.close, bar.close),
+        close: Number.isFinite(bar.close) ? bar.close : last.close,
+        volume: Math.max(last.volume || 0, bar.volume || 0),
+      };
+      this.bars = [...this.bars.slice(0, -1), merged];
     } else if (!last || bar.time > last.time) {
       this.bars = [...this.bars, bar];
     } else {
@@ -1036,7 +1049,13 @@ export class ChartEngine {
     this.pushUndo();
     this.drawings.push(this.draft);
     this.draft = null;
-    if (!this.stayMode) this.tool = "crosshair";
+    // One-shot drawing by default (TradingView). Stay-in-draw only when lock is ON.
+    if (!this.stayMode) {
+      this.tool = "crosshair";
+      this.selectedId = this.drawings.at(-1)?.id ?? null;
+    }
+    this.emit();
+    this.draw();
   }
 
   private hitZone(x: number, y: number): "price" | "time" | "chart" {

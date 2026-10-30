@@ -8,17 +8,21 @@ import {
   subscribeChartApi,
 } from "./chartApi";
 import { FOREXCOM_UNIVERSE, FOREXCOM_WATCH } from "./forexcom";
+import { FXCM_UNIVERSE, FXCM_WATCH } from "./fxcm";
 import { generateBars, setUniverse, UNIVERSE, watchlistSymbols } from "./feed";
+import { isSecondsInterval, subscribeMarketTicksBars } from "./marketTicks";
 import { fetchYahooHistory, fetchYahooQuotes, subscribeYahooBar } from "./yahoo";
 
 export type FeedMeta = {
   bars: Bar[];
   live: boolean;
-  source: "chart-api" | "binance" | "forexcom" | "demo";
+  source: "chart-api" | "binance" | "forexcom" | "fxcm" | "demo";
 };
 
 let chartApiReady: boolean | null = null;
 let detectPromise: Promise<boolean> | null = null;
+
+const KNOWN = new Set(["BINANCE", "FOREXCOM", "FXCM"]);
 
 export async function detectChartApi(): Promise<boolean> {
   if (chartApiReady != null) return chartApiReady;
@@ -40,24 +44,20 @@ export async function loadCatalog(): Promise<SymbolInfo[]> {
   const byKey = new Map<string, SymbolInfo>();
   const add = (rows: SymbolInfo[]) => {
     for (const s of rows) {
-      const exchange =
-        s.exchange.toUpperCase() === "FOREXCOM"
-          ? "FOREXCOM"
-          : s.exchange.toUpperCase() === "BINANCE"
-            ? "BINANCE"
-            : s.exchange;
-      if (exchange !== "BINANCE" && exchange !== "FOREXCOM") continue;
+      const exchange = s.exchange.toUpperCase();
+      if (!KNOWN.has(exchange)) continue;
       byKey.set(`${exchange}:${s.ticker}`, { ...s, exchange });
     }
   };
 
   add(BINANCE_UNIVERSE);
   add(FOREXCOM_UNIVERSE);
+  add(FXCM_UNIVERSE);
   setUniverse([...byKey.values()]);
 
   const apiOk = await detectChartApi();
   if (apiOk) {
-    const apiSymbols = await fetchChartApiSymbols(["BINANCE", "FOREXCOM"]).catch(() => []);
+    const apiSymbols = await fetchChartApiSymbols(["BINANCE", "FOREXCOM", "FXCM"]).catch(() => []);
     if (apiSymbols.length) {
       add(apiSymbols);
       setUniverse(
@@ -87,8 +87,12 @@ export async function fetchHistory(symbol: SymbolInfo, interval: Interval): Prom
       if (bars.length) return { bars, live: true, source: "binance" };
     }
     if (symbol.exchange === "FOREXCOM") {
-      const bars = await fetchYahooHistory(symbol.ticker, interval);
+      const bars = await fetchYahooHistory(symbol.ticker, interval, "FOREXCOM");
       if (bars.length) return { bars, live: true, source: "forexcom" };
+    }
+    if (symbol.exchange === "FXCM") {
+      const bars = await fetchYahooHistory(symbol.ticker, interval, "FXCM");
+      if (bars.length) return { bars, live: true, source: "fxcm" };
     }
   } catch (err) {
     console.warn("exchange history failed, using demo", err);
@@ -102,24 +106,37 @@ export function subscribeLive(
   interval: Interval,
   onBar: (bar: Bar) => void,
 ): () => void {
+  // Sub-minute: always prefer tick aggregation so forming candles keep real wicks.
+  if (isSecondsInterval(interval)) {
+    return subscribeMarketTicksBars(symbol, interval, onBar);
+  }
+
   if (chartApiReady) {
     return subscribeChartApi(symbol, interval, onBar);
   }
   if (symbol.exchange === "BINANCE") return subscribeBinanceKline(symbol.ticker, interval, onBar);
-  if (symbol.exchange === "FOREXCOM") return subscribeYahooBar(symbol, interval, onBar);
+  if (symbol.exchange === "FOREXCOM" || symbol.exchange === "FXCM") {
+    // Also fan ticks for denser FX updates alongside Yahoo poll.
+    const stopTicks = subscribeMarketTicksBars(symbol, interval, onBar);
+    const stopYahoo = subscribeYahooBar(symbol, interval, onBar);
+    return () => {
+      stopTicks();
+      stopYahoo();
+    };
+  }
   return () => {};
 }
 
 export async function fetchQuotes(universe: SymbolInfo[] = UNIVERSE): Promise<Record<string, { price: number; change: number }>> {
   const out: Record<string, { price: number; change: number }> = {};
-  const focus = watchlistSymbols(universe).slice(0, 40);
+  const focus = watchlistSymbols(universe).slice(0, 48);
   const binance = focus.filter((s) => s.exchange === "BINANCE").map((s) => s.ticker);
-  const forex = focus.filter((s) => s.exchange === "FOREXCOM").map((s) => s.ticker);
+  const forex = focus.filter((s) => s.exchange === "FOREXCOM" || s.exchange === "FXCM").map((s) => s.ticker);
   const forexTickers = (
-    FOREXCOM_WATCH.filter((t) => forex.includes(t)).length
-      ? FOREXCOM_WATCH.filter((t) => forex.includes(t))
+    [...FOREXCOM_WATCH, ...FXCM_WATCH].filter((t) => forex.includes(t)).length
+      ? [...FOREXCOM_WATCH, ...FXCM_WATCH].filter((t) => forex.includes(t))
       : forex
-  ).slice(0, 16);
+  ).slice(0, 20);
 
   const jobs: Array<Promise<void>> = [];
   if (chartApiReady) {

@@ -1,6 +1,11 @@
 import type { ChartType, IndicatorKind, Interval, Tool } from "./engine/types";
 
 export const INTERVALS: { id: Interval; label: string; short: string }[] = [
+  { id: "1S", label: "1 second", short: "1s" },
+  { id: "5S", label: "5 seconds", short: "5s" },
+  { id: "10S", label: "10 seconds", short: "10s" },
+  { id: "15S", label: "15 seconds", short: "15s" },
+  { id: "30S", label: "30 seconds", short: "30s" },
   { id: "1", label: "1 minute", short: "1m" },
   { id: "5", label: "5 minutes", short: "5m" },
   { id: "15", label: "15 minutes", short: "15m" },
@@ -13,7 +18,7 @@ export const INTERVALS: { id: Interval; label: string; short: string }[] = [
   { id: "1M", label: "1 month", short: "M" },
 ];
 
-export const QUICK_INTERVALS: Interval[] = ["1", "5", "15", "30", "60", "240", "1D", "1W", "1M"];
+export const QUICK_INTERVALS: Interval[] = ["5S", "1", "5", "15", "30", "60", "240", "1D", "1W"];
 
 export const CHART_TYPES: { id: ChartType; label: string }[] = [
   { id: "candle", label: "Candles" },

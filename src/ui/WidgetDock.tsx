@@ -29,7 +29,7 @@ type Props = {
 export function WidgetDock({ engine, active, onActive, quotes, universe, onPick, alerts }: Props) {
   const snap = useEngine(engine);
   const bar = snap?.hover ?? snap?.last;
-  const [exchange, setExchange] = useState<"ALL" | "BINANCE" | "FOREXCOM">("ALL");
+  const [exchange, setExchange] = useState<"ALL" | (typeof EXCHANGES)[number]>("ALL");
   const [q, setQ] = useState("");
   const rows = useMemo(() => {
     const query = q.trim().toLowerCase();

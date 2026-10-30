@@ -2,13 +2,19 @@ import { hashString, mulberry32 } from "../engine/math";
 import type { Bar, Interval, SymbolInfo } from "../engine/types";
 import { BINANCE_UNIVERSE, BINANCE_WATCH } from "./binance";
 import { FOREXCOM_UNIVERSE, FOREXCOM_WATCH } from "./forexcom";
+import { FXCM_UNIVERSE, FXCM_WATCH } from "./fxcm";
 
-export const EXCHANGES = ["BINANCE", "FOREXCOM"] as const;
+export const EXCHANGES = ["BINANCE", "FOREXCOM", "FXCM"] as const;
 export type ExchangeId = (typeof EXCHANGES)[number];
 
-export let UNIVERSE: SymbolInfo[] = [...BINANCE_UNIVERSE, ...FOREXCOM_UNIVERSE];
+export let UNIVERSE: SymbolInfo[] = [...BINANCE_UNIVERSE, ...FOREXCOM_UNIVERSE, ...FXCM_UNIVERSE];
 
 export const INTERVAL_SEC: Record<Interval, number> = {
+  "1S": 1,
+  "5S": 5,
+  "10S": 10,
+  "15S": 15,
+  "30S": 30,
   "1": 60,
   "5": 300,
   "15": 900,
@@ -61,7 +67,7 @@ export function findSymbol(ticker: string, exchange?: string): SymbolInfo {
 }
 
 export function watchlistSymbols(universe: SymbolInfo[] = UNIVERSE): SymbolInfo[] {
-  const wanted = new Set([...BINANCE_WATCH, ...FOREXCOM_WATCH]);
+  const wanted = new Set([...BINANCE_WATCH, ...FOREXCOM_WATCH, ...FXCM_WATCH]);
   const picked = universe.filter((s) => wanted.has(s.ticker));
   return picked.length ? picked : universe.slice(0, 40);
 }

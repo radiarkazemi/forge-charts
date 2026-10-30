@@ -49,6 +49,12 @@ export default defineConfig(({ mode }) => ({
         ws: true,
         changeOrigin: true,
       },
+      "/market-ticks": {
+        // Same VPS as /crypto-ws — set VPS_HOST when developing against the relay.
+        target: `ws://${process.env.VPS_HOST || "127.0.0.1"}`,
+        ws: true,
+        changeOrigin: true,
+      },
       "/binance": {
         target: "https://data-api.binance.vision",
         changeOrigin: true,

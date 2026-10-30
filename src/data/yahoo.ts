@@ -1,7 +1,15 @@
 import type { Bar, Interval, SymbolInfo } from "../engine/types";
 import { FOREXCOM_YAHOO } from "./forexcom";
+import { FXCM_YAHOO } from "./fxcm";
+import { INTERVAL_SEC } from "./feed";
+import { expandBarsToStep, fillBarGaps, finiteOr, normalizeOhlc } from "./ohlc";
 
 export const YAHOO_IV: Record<Interval, { interval: string; range: string }> = {
+  "1S": { interval: "1m", range: "1d" },
+  "5S": { interval: "1m", range: "1d" },
+  "10S": { interval: "1m", range: "1d" },
+  "15S": { interval: "1m", range: "1d" },
+  "30S": { interval: "1m", range: "1d" },
   "1": { interval: "1m", range: "1d" },
   "5": { interval: "5m", range: "5d" },
   "15": { interval: "15m", range: "5d" },
@@ -14,12 +22,17 @@ export const YAHOO_IV: Record<Interval, { interval: string; range: string }> = {
   "1M": { interval: "1mo", range: "max" },
 };
 
-export function yahooSymbol(ticker: string): string | undefined {
-  return FOREXCOM_YAHOO[ticker];
+export function yahooSymbol(ticker: string, exchange?: string): string | undefined {
+  if (exchange === "FXCM") return FXCM_YAHOO[ticker] ?? FOREXCOM_YAHOO[ticker];
+  return FOREXCOM_YAHOO[ticker] ?? FXCM_YAHOO[ticker];
 }
 
-export async function fetchYahooHistory(ticker: string, interval: Interval): Promise<Bar[]> {
-  const y = yahooSymbol(ticker);
+export async function fetchYahooHistory(
+  ticker: string,
+  interval: Interval,
+  exchange?: string,
+): Promise<Bar[]> {
+  const y = yahooSymbol(ticker, exchange);
   if (!y) throw new Error(`no yahoo map for ${ticker}`);
   const { interval: iv, range } = YAHOO_IV[interval];
   const url = `/yahoo/v8/finance/chart/${encodeURIComponent(y)}?interval=${iv}&range=${range}`;
@@ -30,19 +43,26 @@ export async function fetchYahooHistory(ticker: string, interval: Interval): Pro
   if (!result) throw new Error("yahoo empty");
   const ts: number[] = result.timestamp ?? [];
   const q = result.indicators?.quote?.[0] ?? {};
-  const bars: Bar[] = [];
+  let bars: Bar[] = [];
   for (let i = 0; i < ts.length; i++) {
     const open = q.open?.[i];
     const close = q.close?.[i];
     if (!Number.isFinite(open) || !Number.isFinite(close)) continue;
-    bars.push({
-      time: ts[i],
-      open,
-      high: q.high?.[i] ?? Math.max(open, close),
-      low: q.low?.[i] ?? Math.min(open, close),
-      close,
-      volume: q.volume?.[i] || 0,
-    });
+    bars.push(
+      normalizeOhlc({
+        time: ts[i],
+        open,
+        high: finiteOr(q.high?.[i], Math.max(open, close)),
+        low: finiteOr(q.low?.[i], Math.min(open, close)),
+        close,
+        volume: finiteOr(q.volume?.[i], 0),
+      }),
+    );
+  }
+  const step = INTERVAL_SEC[interval];
+  if (step < 60 && bars.length) {
+    bars = expandBarsToStep(bars, 60, step);
+    bars = fillBarGaps(bars, step, step <= 5 ? 720 : 240);
   }
   return bars;
 }
@@ -87,7 +107,8 @@ export function subscribeYahooBar(
     if (closed) return;
     try {
       // Short range for live updates — full history is only needed once at attach.
-      const y = yahooSymbol(symbol.ticker);
+      if (INTERVAL_SEC[interval] < 60) return; // seconds live via market-ticks
+      const y = yahooSymbol(symbol.ticker, symbol.exchange);
       if (!y) return;
       const { interval: iv } = YAHOO_IV[interval];
       const res = await fetch(
@@ -103,14 +124,16 @@ export function subscribeYahooBar(
       const open = q.open?.[i];
       const close = q.close?.[i];
       if (!Number.isFinite(open) || !Number.isFinite(close) || closed) return;
-      onBar({
-        time: ts[i],
-        open,
-        high: q.high?.[i] ?? Math.max(open, close),
-        low: q.low?.[i] ?? Math.min(open, close),
-        close,
-        volume: q.volume?.[i] || 0,
-      });
+      onBar(
+        normalizeOhlc({
+          time: ts[i],
+          open,
+          high: finiteOr(q.high?.[i], Math.max(open, close)),
+          low: finiteOr(q.low?.[i], Math.min(open, close)),
+          close,
+          volume: finiteOr(q.volume?.[i], 0),
+        }),
+      );
     } catch {
       /* keep previous */
     }
