@@ -69,7 +69,7 @@ function clickAllExchanges(doc: Document): boolean {
   // Exchange filter control currently showing NASDAQ / BINANCE / etc. — open then pick All.
   const filterBtn = candidates.find((el) => {
     const t = (el.textContent ?? "").trim();
-    return /^(NASDAQ|BINANCE|FOREXCOM|FXPRO|IRAN|TVC|SP|DJ|NYSE|OANDA|PEPPERSTONE|IG|CAPITALCOM)$/i.test(
+    return /^(NASDAQ|BINANCE|FOREXCOM|FXCM|FXPRO|IRAN|TVC|SP|DJ|NYSE|OANDA|PEPPERSTONE|IG|CAPITALCOM)$/i.test(
       t,
     );
   });
@@ -107,7 +107,7 @@ export function mountSymbolSearchExchangeReset(container: HTMLElement): () => vo
     if (!dialog) return;
     // Already on All exchanges?
     const chip = (dialog.textContent ?? "").match(
-      /\b(NASDAQ|BINANCE|FOREXCOM|FXPRO|IRAN|TVC|SP|DJ|OANDA|PEPPERSTONE|IG|CAPITALCOM)\b/,
+      /\b(NASDAQ|BINANCE|FOREXCOM|FXCM|FXPRO|IRAN|TVC|SP|DJ|OANDA|PEPPERSTONE|IG|CAPITALCOM)\b/,
     );
     const hasAll = /All exchanges/i.test(dialog.textContent ?? "");
     if (!chip && hasAll) return;

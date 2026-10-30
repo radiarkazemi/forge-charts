@@ -39,6 +39,17 @@ export function normalizeBars(bars: readonly Bar[]): Bar[] {
 export function upsertBar(bars: readonly Bar[], incoming: Bar): Bar[] {
   const last = bars.at(-1);
   if (!last || incoming.time > last.time) return [...bars, incoming];
-  if (incoming.time === last.time) return [...bars.slice(0, -1), incoming];
+  if (incoming.time === last.time) {
+    // Preserve prior shadows when a flat tick/seed would otherwise wipe them.
+    const merged: Bar = {
+      time: last.time,
+      open: Number.isFinite(last.open) ? last.open : incoming.open,
+      high: Math.max(last.high, incoming.high, last.open, incoming.open, last.close, incoming.close),
+      low: Math.min(last.low, incoming.low, last.open, incoming.open, last.close, incoming.close),
+      close: Number.isFinite(incoming.close) ? incoming.close : last.close,
+      volume: Math.max(last.volume || 0, incoming.volume || 0),
+    };
+    return [...bars.slice(0, -1), merged];
+  }
   return [...bars];
 }

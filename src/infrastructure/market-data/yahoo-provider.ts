@@ -167,13 +167,16 @@ function resultToBars(result: ChartResult): Bar[] {
     const close = quote.close?.[i];
     const time = timestamps[i];
     if (open == null || close == null || time == null) continue;
+    const highRaw = quote.high?.[i];
+    const lowRaw = quote.low?.[i];
+    const volRaw = quote.volume?.[i];
     bars.push({
       time,
       open,
-      high: quote.high?.[i] ?? Math.max(open, close),
-      low: quote.low?.[i] ?? Math.min(open, close),
+      high: Number.isFinite(highRaw) ? Number(highRaw) : Math.max(open, close),
+      low: Number.isFinite(lowRaw) ? Number(lowRaw) : Math.min(open, close),
       close,
-      volume: quote.volume?.[i] ?? 0,
+      volume: Number.isFinite(volRaw) ? Number(volRaw) : 0,
     });
   }
   return bars;

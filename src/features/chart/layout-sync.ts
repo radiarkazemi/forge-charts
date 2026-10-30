@@ -637,7 +637,18 @@ class LayoutSyncBus {
   /** After one drawing completes, return every pane to the Cross tool. */
   async resetToolsToCursor(): Promise<void> {
     this.sharedTool = "cursor";
+    for (const { index, controller } of this.panes.values()) {
+      if (index >= this.activeCount || !controller.isReady) continue;
+      controller.ensureStayInDrawingModeOff();
+    }
     await this.applyToolToAllPanes("cursor");
+    // CL can flip stay-in-draw back on after create — kill it again.
+    window.setTimeout(() => {
+      for (const { index, controller } of this.panes.values()) {
+        if (index >= this.activeCount) continue;
+        controller.ensureStayInDrawingModeOff();
+      }
+    }, 50);
   }
 
   recordPaneInterval(paneIndex: number, interval: Interval): void {

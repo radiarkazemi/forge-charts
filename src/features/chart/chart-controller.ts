@@ -385,6 +385,16 @@ export class ChartController {
     }
   }
 
+  /** Force Cross tool + stay-in-draw OFF (TradingView one-shot default). */
+  async exitDrawingTool(): Promise<void> {
+    this.ensureStayInDrawingModeOff();
+    try {
+      await this.widget?.selectLineTool("cursor" as never);
+    } catch {
+      /* ignore */
+    }
+  }
+
   /** Switch theme now, or as soon as the widget becomes ready. */
   async changeTheme(mode: ThemeMode): Promise<void> {
     this.desiredTheme = mode;
@@ -566,7 +576,16 @@ export class ChartController {
   /** Select a drawing tool (same as left toolbar click). */
   async selectLineTool(tool: string): Promise<void> {
     try {
+      // Cross / eraser always leave sticky draw mode.
+      if (tool === "cursor" || tool === "arrow_cursor" || tool === "eraser" || tool === "dot") {
+        this.ensureStayInDrawingModeOff();
+      }
       await this.widget?.selectLineTool(tool as never);
+      // CL sometimes re-enables stay-in-draw when arming a shape — force off again.
+      if (tool !== "cursor" && tool !== "arrow_cursor" && tool !== "dot") {
+        window.setTimeout(() => this.ensureStayInDrawingModeOff(), 0);
+        window.setTimeout(() => this.ensureStayInDrawingModeOff(), 120);
+      }
     } catch {
       /* ignore */
     }

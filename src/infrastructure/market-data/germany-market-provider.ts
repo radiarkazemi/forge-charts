@@ -75,11 +75,18 @@ function ohlcPlan(interval: Interval): { request: string; aggregateStep: number 
 
 type Route = {
   apiSymbol: string;
-  exchange: "BINANCE" | "FOREXCOM" | "FXPRO";
+  exchange: "BINANCE" | "FOREXCOM" | "FXPRO" | "FXCM";
   kind: "crypto" | "metal";
   /** Binance stream symbol for tick proxy (e.g. PAXGUSDT for XAUUSD). */
   tickSymbol?: string;
 };
+
+function metalBrokerTag(ex: string): "FOREXCOM" | "FXPRO" | "FXCM" {
+  const u = ex.toUpperCase();
+  if (u === "FXPRO") return "FXPRO";
+  if (u === "FXCM") return "FXCM";
+  return "FOREXCOM";
+}
 
 const ROUTES: Readonly<Record<string, Route>> = {
   BTCUSD: { apiSymbol: "BTCUSDT", exchange: "BINANCE", kind: "crypto", tickSymbol: "BTCUSDT" },
@@ -150,6 +157,7 @@ interface ForexXau {
 const METAL_CFD_EXCHANGES = new Set([
   "FOREXCOM",
   "FXPRO",
+  "FXCM",
   "OANDA",
   "PEPPERSTONE",
   "IG",
@@ -172,7 +180,7 @@ function routeFor(symbol: SymbolInfo): Route | null {
         };
       }
       if (!ex || METAL_CFD_EXCHANGES.has(ex)) {
-        return { ...byTicker, exchange: ex === "FXPRO" ? "FXPRO" : "FOREXCOM" };
+        return { ...byTicker, exchange: metalBrokerTag(ex || "FOREXCOM") };
       }
       return null;
     }
@@ -193,7 +201,7 @@ function routeFor(symbol: SymbolInfo): Route | null {
     if (t === "XAUUSD" || t === "PAXGUSDT" || t === "GC1!") {
       return {
         apiSymbol: "XAUUSD",
-        exchange: ex === "FXPRO" ? "FXPRO" : "FOREXCOM",
+        exchange: metalBrokerTag(ex),
         kind: "metal",
       };
     }
