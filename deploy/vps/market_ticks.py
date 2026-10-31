@@ -1793,6 +1793,127 @@ def _expand_coarser_bar_to_step(
     return out
 
 
+def _fill_iran_from_finer_faraz(
+    client: Any,
+    channel: str,
+    buckets: dict[int, dict[str, float]],
+    step: int,
+    *,
+    limit: int,
+    before: int | None,
+    wall_t: int,
+) -> int:
+    """Fill missing coarser buckets by aggregating real finer Faraz OHLC (1m→1h).
+
+    Unlike coarser→finer path expansion, this preserves genuine O/H/L/C so G18/ABSHODE
+    1h/4h charts look like Faraz instead of sparse tick folds with overnight holes only.
+    """
+    if client is None or step < 300 or step >= 86_400:
+        return 0
+    # Prefer densest finer TF that divides evenly into `step`.
+    finer: tuple[str, int] | None = None
+    for res, child in (("1", 60), ("5", 300), ("15", 900)):
+        if step % child == 0 and step > child:
+            finer = (res, child)
+            break
+    if finer is None:
+        return 0
+    child_res, child_step = finer
+    end_t = before if before is not None else wall_t + step
+    start_t = end_t - max(limit, 500) * step
+    if buckets:
+        ordered = sorted(t for t in buckets if t < end_t)
+        if ordered:
+            start_t = min(start_t, ordered[0] - max(limit // 2, 50) * step)
+
+    # Only pull children for empty parent buckets (or scarce regions).
+    missing_parents: list[int] = []
+    t = _align_iran_bar_time(start_t, step)
+    while t < end_t and t <= wall_t:
+        if t not in buckets:
+            missing_parents.append(t)
+        t += step
+    if not missing_parents:
+        return 0
+    # Cap work — recent missing first.
+    missing_parents = missing_parents[-min(len(missing_parents), max(limit, 400)) :]
+    win_lo = missing_parents[0] - child_step
+    win_hi = missing_parents[-1] + step
+    kids = list(
+        client["anil_gold"]["faraz_ohlc"]
+        .find(
+            {
+                "channel": channel,
+                "resolution": child_res,
+                "c": {"$gt": 0},
+                "t": {"$gte": win_lo, "$lt": win_hi},
+            },
+            {"t": 1, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1, "src": 1},
+        )
+        .sort("t", 1)
+        .limit(min(80_000, max(limit * (step // child_step) * 2, 4_000)))
+    )
+    if not kids:
+        # Fallback: anil ohlc_1m for 1h+ when faraz_ohlc 1m is thin.
+        if child_step == 60:
+            kids = list(
+                client["anil_gold"]["ohlc_1m"]
+                .find(
+                    {"channel": channel, "c": {"$gt": 0}, "t": {"$gte": win_lo, "$lt": win_hi}},
+                    {"t": 1, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1},
+                )
+                .sort("t", 1)
+                .limit(min(80_000, max(limit * (step // child_step) * 2, 4_000)))
+            )
+        if not kids:
+            return 0
+
+    by_parent: dict[int, list[dict[str, float]]] = {}
+    for doc in kids:
+        try:
+            src = str(doc.get("src") or "")
+            # Prefer real Faraz / ohlc rows; tick folds OK when that's all we have.
+            ct = _align_iran_bar_time(int(doc["t"]), child_step)
+            pt = _align_iran_bar_time(ct, step)
+            if pt not in buckets:  # only fill holes
+                by_parent.setdefault(pt, []).append(
+                    {
+                        "t": ct,
+                        "o": float(doc["o"]),
+                        "h": float(doc["h"]),
+                        "l": float(doc["l"]),
+                        "c": float(doc["c"]),
+                        "v": float(doc.get("v") or 0),
+                    }
+                )
+                del src  # lint calm
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    filled = 0
+    for pt, series in by_parent.items():
+        if pt in buckets or pt > wall_t:
+            continue
+        series.sort(key=lambda b: b["t"])
+        if not series:
+            continue
+        o = float(series[0]["o"])
+        c = float(series[-1]["c"])
+        h = max(float(b["h"]) for b in series)
+        l = min(float(b["l"]) for b in series)
+        v = sum(float(b.get("v") or 0) for b in series)
+        buckets[pt] = {
+            "t": pt,
+            "o": _iran_toman_round(o),
+            "h": _iran_toman_round(h),
+            "l": _iran_toman_round(l),
+            "c": _iran_toman_round(c),
+            "v": v,
+        }
+        filled += 1
+    return filled
+
+
 def _fill_iran_from_coarser_faraz(
     client: Any,
     channel: str,
@@ -2750,6 +2871,21 @@ def _load_iran_history_mongo(
 
         if rows:
             _bucket_ticks_fill_missing(rows)
+
+        # Prefer aggregating finer real OHLC into missing coarser buckets (1m→1h)
+        # — this matches Faraz continuity without inventing path candles.
+        if step >= 300 and step < 86_400:
+            agg = _fill_iran_from_finer_faraz(
+                client,
+                channel,
+                buckets,
+                step,
+                limit=limit,
+                before=before,
+                wall_t=wall_t if before is None else (before - step),
+            )
+            if agg:
+                sources.append(f"agg-{agg}")
 
         # Historical holes (e.g. G18 Apr 2026 has 5m but no 1m): expand coarser Faraz.
         # Auth-off: synthetic path candles from 5m→1m look wrong vs real Faraz —

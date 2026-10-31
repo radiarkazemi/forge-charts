@@ -91,8 +91,8 @@ button#header-toolbar-symbol-search {
 }
 
 /*
- * Legend: Iran gold OHLC (IRR) is long — never clip O/H/L/C.
- * Keep values on the title line fully visible.
+ * Legend: Iran gold OHLC (IRR) is long — never clip O/H/L/C on the main series.
+ * Study rows must stay compact so gear / eye / × stay clickable.
  */
 [data-name="legend"] {
   max-width: min(980px, calc(100% - 72px)) !important;
@@ -100,21 +100,43 @@ button#header-toolbar-symbol-search {
 }
 
 [data-name="legend"] [class*="legendMainSourceWrapper"],
-[data-name="legend"] [data-name="legend-series-item"],
-[data-name="legend"] [class*="titlesWrapper"],
-[data-name="legend"] [class*="sourcesWrapper"] {
+[data-name="legend"] [data-name="legend-series-item"] {
   max-width: none !important;
   overflow: visible !important;
   flex-wrap: nowrap !important;
 }
 
-[data-name="legend"] [class*="valueItem"],
-[data-name="legend"] [class*="valueTitle"],
-[data-name="legend"] [class*="valuesAdditionalWrapper"],
-[data-name="legend"] [class*="listContainer"] {
+[data-name="legend"] [class*="legendMainSourceWrapper"] [class*="valueItem"],
+[data-name="legend"] [class*="legendMainSourceWrapper"] [class*="valueTitle"],
+[data-name="legend"] [class*="legendMainSourceWrapper"] [class*="valuesAdditionalWrapper"],
+[data-name="legend"] [data-name="legend-series-item"] [class*="listContainer"] {
   overflow: visible !important;
   text-overflow: clip !important;
   max-width: none !important;
+}
+
+/* Study legend rows — truncate long titles; keep buttons in view */
+[data-name="legend"] [data-name="legend-source-item"],
+[data-name="legend"] [class*="sourcesWrapper"] > div {
+  max-width: min(360px, 48vw) !important;
+  overflow: hidden !important;
+}
+
+[data-name="legend"] [data-name="legend-source-item"] [class*="titlesWrapper"],
+[data-name="legend"] [data-name="legend-source-item"] [class*="title"] {
+  max-width: 200px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+[data-name="legend"] [data-name="legend-source-item"] [class*="buttons"],
+[data-name="legend"] [data-name="legend-source-item"] [class*="button"],
+[data-name="legend"] [data-name="legend-source-item"] [class*="controls"] {
+  flex-shrink: 0 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
 }
 
 /* Hide native TV Symbol Search when Forge picker is active */

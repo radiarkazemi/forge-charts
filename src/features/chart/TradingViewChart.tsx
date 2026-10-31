@@ -17,9 +17,7 @@ import { useHtfCandlesStudy } from "./useHtfCandlesStudy";
 import { useStructureIntelligenceStudy } from "./useStructureIntelligenceStudy";
 import { useReplayMentorStudy } from "./useReplayMentorStudy";
 import { SessionsDashboard } from "@/features/sessions/SessionsDashboard";
-import { HtfCandleRemainLegend } from "@/features/sessions/HtfCandleRemainLegend";
 import { useTradingViewWidget } from "./useTradingViewWidget";
-import { CandleCountdownOverlay } from "@/features/demo-trading";
 import { RADIAR_LAYOUT_NAME } from "@/infrastructure/tradingview";
 
 interface TradingViewChartProps {
@@ -52,7 +50,6 @@ export function TradingViewChart({
   const theme = useStore(settings.settings, (s) => s.theme);
   const profile = useStore(settings.settings, (s) => activeProfile(s));
   const isPrimary = paneIndex === 0;
-  const replayActive = useStore(barReplay.state, (s) => s.active);
 
   const localController = useMemo(
     () => (isPrimary ? null : new ChartController(initialSymbol ?? "XAUUSD", settings.settings.get().lastInterval)),
@@ -274,8 +271,8 @@ export function TradingViewChart({
     >
       <Box ref={containerRef} sx={{ position: "absolute", inset: 0 }} />
 
-      {isPrimary && !replayActive ? <CandleCountdownOverlay /> : null}
-      {isPrimary ? <HtfCandleRemainLegend /> : null}
+      {/* Main candle countdown = TV native price-scale countdown (showCountdown).
+          Do NOT mount blue overlay / HTF remain strip — they duplicate & bleed into OHLC. */}
       <SessionsDashboard />
 
       {!ready && !error ? (

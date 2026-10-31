@@ -70,7 +70,8 @@ export const HTF_CANDLES_DEFAULTS: HtfCandlesOptions = {
   showVi: true,
   showTrace: false,
   showLabels: false,
-  showTimer: true,
+  // Off by default — HTF remain timers looked like a second blue countdown.
+  showTimer: false,
   showHtfName: true,
   showGroupBackdrop: true,
   dailyOpenMode: "midnight",
