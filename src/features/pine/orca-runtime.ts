@@ -166,7 +166,7 @@ interface CircleEvent {
 }
 
 export interface DrawCmd {
-  kind: "line" | "rect" | "dot" | "label" | "vline";
+  kind: "line" | "rect" | "dot" | "label" | "vline" | "position";
   t1: number;
   p1: number;
   t2?: number;
@@ -176,10 +176,18 @@ export interface DrawCmd {
   style?: "solid" | "dashed" | "dotted";
   text?: string;
   fill?: string;
-  /** Rectangle fill alpha 0–1 (default 0.2). Lower = lighter overlays. */
+  /** Rectangle / position fill alpha 0–1 (default 0.2). Lower = lighter overlays. */
   fillAlpha?: number;
   /** Border linewidth for rects (default 2). */
   borderWidth?: number;
+  /** `position` only: 1 = long_position, -1 = short_position. */
+  dir?: 1 | -1;
+  /** `position` only: take-profit price (converted to ticks at paint). */
+  profitPrice?: number;
+  /** `position` only: stop-loss price (converted to ticks at paint). */
+  stopPrice?: number;
+  /** `position` only: stop-zone fill (#hex). `fill` is the target/profit fill. */
+  stopFill?: string;
 }
 
 function pivotHigh(bars: readonly OrcaBar[], i: number, left: number, right: number): number | null {
@@ -633,6 +641,30 @@ function clColor(color: string, fallback = "#787B86"): string {
   return fallback;
 }
 
+/** Symbol min tick (price units). Used to convert TP/SL distances → CL ticks. */
+function resolveMinTick(chart: IChartWidgetApi): number {
+  try {
+    const ext = chart.symbolExt() as {
+      pricescale?: number;
+      minmov?: number;
+    } | null;
+    const scale = Number(ext?.pricescale);
+    const minmov = Number(ext?.minmov);
+    if (Number.isFinite(scale) && scale > 0) {
+      const move = Number.isFinite(minmov) && minmov > 0 ? minmov : 1;
+      return move / scale;
+    }
+  } catch {
+    /* fall through */
+  }
+  return 0.01;
+}
+
+function priceToTicks(priceDiff: number, minTick: number): number {
+  const tick = minTick > 0 ? minTick : 0.01;
+  return Math.max(1, Math.round(Math.abs(priceDiff) / tick));
+}
+
 /** Draw computed commands onto a Charting Library chart; returns entity ids. */
 export async function paintOrcaOnChart(
   chart: IChartWidgetApi,
@@ -643,6 +675,7 @@ export async function paintOrcaOnChart(
   // Cap drawing volume for CL performance (rangesOnly ≈ 4 cmds each).
   const limited = cmds.length > 80 ? cmds.slice(cmds.length - 80) : cmds;
   const ownerStudyId = options?.ownerStudyId;
+  const minTick = resolveMinTick(chart);
 
   for (let i = 0; i < limited.length; i += 1) {
     const cmd = limited[i]!;
@@ -655,7 +688,61 @@ export async function paintOrcaOnChart(
       ...(ownerStudyId ? { ownerStudyId } : {}),
     } as const;
     try {
-      if (cmd.kind === "line" && cmd.t2 != null && cmd.p2 != null) {
+      if (
+        cmd.kind === "position" &&
+        (cmd.dir === 1 || cmd.dir === -1) &&
+        Number.isFinite(cmd.profitPrice) &&
+        Number.isFinite(cmd.stopPrice)
+      ) {
+        // Native TV Long/Short Position (RiskReward) — Target / Stop / R:R labels.
+        const shape = cmd.dir === 1 ? "long_position" : "short_position";
+        const profitLevel = priceToTicks(cmd.profitPrice! - cmd.p1, minTick);
+        const stopLevel = priceToTicks(cmd.stopPrice! - cmd.p1, minTick);
+        const alpha = Math.max(0.05, Math.min(0.55, cmd.fillAlpha ?? 0.2));
+        // CL transparency: 0 = opaque … 100 = invisible (TV default ≈ 80).
+        const transparency = Math.round((1 - alpha) * 100);
+        const profitHex = clColor(cmd.fill ?? "#089981", "#089981");
+        const stopHex = clColor(cmd.stopFill ?? "#F23645", "#F23645");
+        const id = await chart.createShape(
+          { time: cmd.t1 as never, price: cmd.p1 },
+          {
+            ...common,
+            shape: shape as never,
+            overrides: {
+              profitLevel,
+              stopLevel,
+              profitBackground: profitHex,
+              stopBackground: stopHex,
+              profitBackgroundTransparency: transparency,
+              stopBackgroundTransparency: transparency,
+              fillBackground: true,
+              fillLabelBackground: true,
+              showPriceLabels: true,
+              alwaysShowStats: true,
+              linewidth: 1,
+              linecolor: "#808080",
+              borderColor: "#667b8b",
+              drawBorder: false,
+              fontsize: 12,
+              textcolor: "#ffffff",
+            } as never,
+          },
+        );
+        if (id) {
+          // Stretch box to signal end (or last bar) so it reads like a drawn position.
+          if (cmd.t2 != null && cmd.t2 > cmd.t1) {
+            try {
+              chart.getShapeById(id).setPoints([
+                { time: cmd.t1 as never, price: cmd.p1 },
+                { time: cmd.t2 as never, price: cmd.p1 },
+              ]);
+            } catch {
+              /* keep default width */
+            }
+          }
+          ids.push(id);
+        }
+      } else if (cmd.kind === "line" && cmd.t2 != null && cmd.p2 != null) {
         const label = (cmd.text ?? "").trim();
         const id = await chart.createMultipointShape(
           [

@@ -42,6 +42,10 @@ export interface FtaInputs {
   /** Min bars between two signals (cooldown). */
   readonly cooldownBars: number;
   readonly showZones: boolean;
+  /**
+   * When true: paint native TV Long/Short Position boxes (Target + Stop + R:R).
+   * When false: only BUY/SELL signal pills on the signal candles.
+   */
   readonly showTradeBox: boolean;
   readonly showStructure: boolean;
   readonly showHistory: boolean;
@@ -49,11 +53,11 @@ export interface FtaInputs {
   readonly bullColor: string;
   /** Pill + short accent (#hex). */
   readonly bearColor: string;
-  /** Long trade-box fill (#hex) — light green by default. */
+  /** Target (TP) zone fill for Long/Short Position (#hex) — TV green. */
   readonly longBoxColor: string;
-  /** Short trade-box fill (#hex) — light red by default. */
+  /** Stop (SL) zone fill for Long/Short Position (#hex) — TV red. */
   readonly shortBoxColor: string;
-  /** Trade-box fill opacity 0–100 (lower = lighter). */
+  /** Position-box fill opacity 0–100 (lower = lighter; TV-like ≈ 20). */
   readonly boxOpacity: number;
 }
 
@@ -78,9 +82,10 @@ export const FTA_DEFAULTS: FtaInputs = {
   showHistory: true,
   bullColor: "#43A047",
   bearColor: "#E53935",
-  longBoxColor: "#A5D6A7",
-  shortBoxColor: "#EF9A9A",
-  boxOpacity: 14,
+  // Match TradingView Long/Short Position defaults.
+  longBoxColor: "#089981",
+  shortBoxColor: "#F23645",
+  boxOpacity: 20,
 };
 
 function normalizeHex(raw: string, fallback: string): string {
@@ -555,8 +560,9 @@ function signalPillText(s: FtaSignal): string {
 }
 
 /**
- * Primary visual = compact Texas-style signal pills.
- * Optional trade box / POI / structure stay behind the labels.
+ * Draw FTA signals.
+ * - `showTradeBox` on → native TV Long/Short Position (Target + Stop + R:R).
+ * - `showTradeBox` off → only BUY/SELL pills on the signal candles.
  */
 export function tradingAssistantDrawCmds(
   result: FtaResult,
@@ -585,18 +591,16 @@ export function tradingAssistantDrawCmds(
 
   const bullPill = normalizeHex(cfg.bullColor, FTA_DEFAULTS.bullColor);
   const bearPill = normalizeHex(cfg.bearColor, FTA_DEFAULTS.bearColor);
-  const longBox = normalizeHex(cfg.longBoxColor, FTA_DEFAULTS.longBoxColor);
-  const shortBox = normalizeHex(cfg.shortBoxColor, FTA_DEFAULTS.shortBoxColor);
+  const targetFill = normalizeHex(cfg.longBoxColor, FTA_DEFAULTS.longBoxColor);
+  const stopFill = normalizeHex(cfg.shortBoxColor, FTA_DEFAULTS.shortBoxColor);
   const boxAlpha = Math.max(0.05, Math.min(0.45, Number(cfg.boxOpacity) / 100));
-  const riskAlpha = Math.max(0.04, boxAlpha * 0.7);
-  const rewardAlpha = boxAlpha;
+  const zoneAlpha = Math.max(0.04, boxAlpha * 0.7);
 
   for (const s of result.signals) {
     if (!cfg.showHistory && !s.active) continue;
     const bull = s.dir === 1;
     const pill = bull ? bullPill : bearPill;
-    const box = bull ? longBox : shortBox;
-    const extend = Math.max(endT, s.time);
+    const extend = Math.max(endT, s.labelTime || s.time, s.time);
 
     if (cfg.showZones) {
       cmds.push({
@@ -606,60 +610,39 @@ export function tradingAssistantDrawCmds(
         t2: extend,
         p2: s.zlo,
         color: pill,
-        fill: box,
-        fillAlpha: riskAlpha,
+        fill: pill,
+        fillAlpha: zoneAlpha,
         borderWidth: 1,
         style: "dashed",
       });
     }
 
-    // Light long/short trade box — risk (entry↔SL) softer, reward (entry↔TP2) clearer.
     if (cfg.showTradeBox) {
+      // Exact TradingView Long/Short Position tool (green Target + red Stop + labels).
       cmds.push({
-        kind: "rect",
-        t1: s.time,
-        p1: Math.max(s.entry, s.stop),
-        t2: extend,
-        p2: Math.min(s.entry, s.stop),
-        color: box,
-        fill: box,
-        fillAlpha: riskAlpha,
-        borderWidth: 1,
-        style: "dashed",
-      });
-      cmds.push({
-        kind: "rect",
-        t1: s.time,
-        p1: Math.max(s.entry, s.tp2),
-        t2: extend,
-        p2: Math.min(s.entry, s.tp2),
-        color: box,
-        fill: box,
-        fillAlpha: rewardAlpha,
-        borderWidth: 1,
-        style: "solid",
-      });
-      cmds.push({
-        kind: "line",
+        kind: "position",
         t1: s.time,
         p1: s.entry,
         t2: extend,
-        p2: s.entry,
+        dir: s.dir,
+        profitPrice: s.tp2,
+        stopPrice: s.stop,
         color: pill,
-        width: 1,
-        style: "dashed",
+        fill: targetFill,
+        stopFill,
+        fillAlpha: boxAlpha,
+      });
+    } else {
+      // Labels only — Texas-style pill on the signal / outcome candle.
+      cmds.push({
+        kind: "label",
+        t1: s.labelTime || s.time,
+        p1: s.labelPrice || s.entry,
+        color: pill,
+        fill: pill,
+        text: signalPillText(s),
       });
     }
-
-    // Hero visual: red/green pill like Texas "SELL - TP2 hit"
-    cmds.push({
-      kind: "label",
-      t1: s.labelTime || s.time,
-      p1: s.labelPrice || s.entry,
-      color: pill,
-      fill: pill,
-      text: signalPillText(s),
-    });
   }
 
   return cmds;
