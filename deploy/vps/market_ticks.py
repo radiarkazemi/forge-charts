@@ -1839,6 +1839,7 @@ def _fill_iran_from_finer_faraz(
     missing_parents = missing_parents[-min(len(missing_parents), max(limit, 400)) :]
     win_lo = missing_parents[0] - child_step
     win_hi = missing_parents[-1] + step
+    kid_limit = min(80_000, max(limit * (step // child_step) * 2, 4_000))
     kids = list(
         client["anil_gold"]["faraz_ohlc"]
         .find(
@@ -1851,22 +1852,24 @@ def _fill_iran_from_finer_faraz(
             {"t": 1, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1, "src": 1},
         )
         .sort("t", 1)
-        .limit(min(80_000, max(limit * (step // child_step) * 2, 4_000)))
+        .limit(kid_limit)
     )
-    if not kids:
-        # Fallback: anil ohlc_1m for 1h+ when faraz_ohlc 1m is thin.
-        if child_step == 60:
-            kids = list(
-                client["anil_gold"]["ohlc_1m"]
-                .find(
-                    {"channel": channel, "c": {"$gt": 0}, "t": {"$gte": win_lo, "$lt": win_hi}},
-                    {"t": 1, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1},
-                )
-                .sort("t", 1)
-                .limit(min(80_000, max(limit * (step // child_step) * 2, 4_000)))
+    # Always supplement 1m children from anil ohlc_1m — faraz_ohlc can be sparse
+    # across multi-day outages while ohlc_1m stayed dense (Faraz no-gap source).
+    if child_step == 60:
+        extra = list(
+            client["anil_gold"]["ohlc_1m"]
+            .find(
+                {"channel": channel, "c": {"$gt": 0}, "t": {"$gte": win_lo, "$lt": win_hi}},
+                {"t": 1, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1},
             )
-        if not kids:
-            return 0
+            .sort("t", 1)
+            .limit(kid_limit)
+        )
+        if extra:
+            kids = list(kids) + extra
+    if not kids:
+        return 0
 
     by_parent: dict[int, list[dict[str, float]]] = {}
     for doc in kids:
