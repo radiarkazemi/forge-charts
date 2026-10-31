@@ -235,9 +235,39 @@ export class IranGoldProvider implements MarketDataProvider {
       .filter((b) => b.time < before)
       .sort((a, b) => a.time - b.time);
     if (!bars.length) return [];
-    const aligned = bars.map((b) => ({ ...b, time: alignTime(b.time, step) }));
+    // Prefer the bar with real range when two stamps collapse onto one bucket —
+    // never let a flat overwrite a ranged candle (killed 15S scroll-back).
     const byTime = new Map<number, Bar>();
-    for (const b of aligned) byTime.set(b.time, b);
+    for (const b of bars) {
+      const t = alignTime(b.time, step);
+      const next = { ...b, time: t };
+      const prev = byTime.get(t);
+      if (!prev) {
+        byTime.set(t, next);
+        continue;
+      }
+      const prevRange = prev.high - prev.low;
+      const nextRange = next.high - next.low;
+      if (nextRange > prevRange || (nextRange === prevRange && (next.volume || 0) >= (prev.volume || 0))) {
+        byTime.set(t, {
+          time: t,
+          open: prev.open,
+          high: Math.max(prev.high, next.high),
+          low: Math.min(prev.low, next.low),
+          close: next.close,
+          volume: (prev.volume || 0) + (next.volume || 0),
+        });
+      } else {
+        byTime.set(t, {
+          time: t,
+          open: prev.open,
+          high: Math.max(prev.high, next.high),
+          low: Math.min(prev.low, next.low),
+          close: prev.close,
+          volume: (prev.volume || 0) + (next.volume || 0),
+        });
+      }
+    }
     return [...byTime.values()].sort((a, b) => a.time - b.time).slice(-Math.max(range.countBack, 1));
   }
 

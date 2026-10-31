@@ -2540,8 +2540,9 @@ def _load_iran_history_mongo(
                 for bar in candidates:
                     ingest(bar, exact=exact_faraz)
                     kept += 1
-                # Trim to newest `limit` after filter.
-                if len(buckets) > limit:
+                # Sub-minute: do NOT trim here — tick_1s still needs room to
+                # extend older 10S/15S history. Minute+ can trim to limit now.
+                if step >= 60 and len(buckets) > limit:
                     keep_ts = sorted(buckets)[-limit:]
                     buckets = {t: buckets[t] for t in keep_ts}
                 LOG.debug(
@@ -2930,20 +2931,9 @@ async def iran_gold_history(request: web.Request) -> web.Response:
     ordered = sorted(buckets.values(), key=lambda b: b["t"])
     if before is not None:
         ordered = [b for b in ordered if b["t"] < before]
-    # Drop internal flat carry-forwards (o=h=l=c) when Faraz auth is down — they
-    # dominate G18 charts and hide real tick OHLC. Keep the live tip.
-    if _FARAZ_CUSTOMER_AUTH_OK is not True and step < 86_400 and len(ordered) > 8:
-        cleaned: list[dict[str, float]] = []
-        last_i = len(ordered) - 1
-        for i, b in enumerate(ordered):
-            o, h, l, c = float(b["o"]), float(b["h"]), float(b["l"]), float(b["c"])
-            is_flat = abs(h - l) < 1e-9 and abs(o - c) < 1e-9 and abs(o - h) < 1e-9
-            if is_flat and i < last_i - 1 and float(b.get("v") or 0) <= 0:
-                continue
-            cleaned.append(b)
-        if len(cleaned) >= max(20, len(ordered) // 5):
-            ordered = cleaned
-            sources.append("drop-flat-gapfill")
+    # Keep the series continuous — dropping flats created gaps that made
+    # TradingView stop left-paging (15S “no previous history”). Prefer denser
+    # real bars via reduced gapfill above instead.
     ordered = ordered[-limit:]
     bars = [[int(b["t"]), b["o"], b["h"], b["l"], b["c"], b["v"]] for b in ordered]
     return web.json_response(

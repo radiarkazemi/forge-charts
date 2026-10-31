@@ -188,7 +188,10 @@ export class YahooProvider implements MarketDataProvider {
     const { unit } = parseInterval(interval);
     if (unit === "seconds") {
       const step = intervalSeconds(interval);
-      const parentNeed = Math.min(7 * 1_440, Math.ceil((Math.max(range.countBack, 50) * step) / 60) + 40);
+      const parentNeed = Math.min(
+        7 * 1_440,
+        Math.max(300, Math.ceil((Math.max(range.countBack, 200) * step) / 60) + 80),
+      );
       const parents = await this.fetchBars(symbol, "1", {
         from: 0,
         to: range.to > 0 ? range.to : Math.floor(Date.now() / 1000) + 60,
@@ -197,9 +200,9 @@ export class YahooProvider implements MarketDataProvider {
       if (!parents.length) return [];
       const now = Math.floor(Date.now() / 1000);
       const before = range.to > 0 ? Math.min(range.to, now + 1) : now + 1;
-      return synthesizeFromMinuteBars(parents, step)
-        .filter((bar) => bar.time < before)
-        .slice(-Math.max(range.countBack, 1));
+      const bars = synthesizeFromMinuteBars(parents, step).filter((bar) => bar.time < before);
+      if (!bars.length) return [];
+      return bars.slice(-Math.max(range.countBack, 1));
     }
 
     const plan = this.aggregatePlan(interval);
