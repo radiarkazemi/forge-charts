@@ -23,6 +23,7 @@ export const REPLAY_MENTOR_DEFAULTS = {
   showBpr: MENTOR_DEFAULTS.showBpr,
   showIof: MENTOR_DEFAULTS.showIof,
   showIfvg: MENTOR_DEFAULTS.showIfvg,
+  /** Fewer overlays = readable for beginners (was 8). */
   maxItems: MENTOR_DEFAULTS.maxItems,
 } as const;
 

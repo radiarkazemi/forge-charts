@@ -5,7 +5,7 @@
  */
 
 import type { EntityId, IChartWidgetApi } from "@/infrastructure/tradingview";
-import { paintOrcaOnChart, type DrawCmd, type OrcaBar } from "@/features/pine/orca-runtime";
+import type { DrawCmd, OrcaBar } from "@/features/pine/orca-runtime";
 
 export type MentorBar = OrcaBar;
 
@@ -39,21 +39,21 @@ export const MENTOR_DEFAULTS: MentorInputs = {
   showFvg: true,
   showOrderBlocks: true,
   showLiquidity: true,
-  showBpr: true,
+  showBpr: false, // off by default — overlaps muddy the chart for beginners
   showIof: true,
   showIfvg: true,
-  maxItems: 8,
-  // Clean beginner palette (teal / coral / blue / amber / slate)
-  bullColor: "#26A69A",
-  bearColor: "#EF5350",
-  fvgBull: "#26A69A",
-  fvgBear: "#EF5350",
-  obBull: "#42A5F5",
-  obBear: "#FFA726",
-  liqColor: "#F9A825",
-  bprColor: "#78909C",
-  iofColor: "#90A4AE",
-  ifvgColor: "#5C6BC0",
+  maxItems: 3,
+  // High-contrast on light & dark chart backgrounds
+  bullColor: "#00796B",
+  bearColor: "#C62828",
+  fvgBull: "#00897B",
+  fvgBear: "#E53935",
+  obBull: "#1565C0",
+  obBear: "#EF6C00",
+  liqColor: "#E65100",
+  bprColor: "#455A64",
+  iofColor: "#546E7A",
+  ifvgColor: "#303F9F",
 };
 
 interface Swing {
@@ -397,7 +397,7 @@ export function computeReplayMentor(
     }
   }
 
-  // Stretch live zones to the replay edge
+  // Stretch live zones just to the replay edge (single right rail for labels)
   for (const z of fvgs) {
     if (z.valid || z.inverted) z.t1 = Math.max(z.t1, lastT);
   }
@@ -405,12 +405,69 @@ export function computeReplayMentor(
     if (!ob.mitigated) ob.t1 = Math.max(ob.t1, lastT);
   }
 
-  // —— Draw: Structure ————————————————————————————————
+  const atrEnd = atrApprox(bars, bars.length - 1);
+  const near = (a: number, b: number) => Math.abs(a - b) <= atrEnd * 0.15;
+
+  const pushZone = (
+    t0: number,
+    t1: number,
+    lo: number,
+    hi: number,
+    color: string,
+    tag: string,
+  ) => {
+    out.push({
+      kind: "rect",
+      t1: t0,
+      p1: hi,
+      t2: t1,
+      p2: lo,
+      color,
+      fill: color,
+    });
+    // One chip label at the right edge mid — no mid-line clutter
+    out.push({
+      kind: "label",
+      t1: t1,
+      p1: (lo + hi) / 2,
+      color,
+      text: tag,
+    });
+  };
+
+  const pushLevel = (
+    t0: number,
+    price: number,
+    color: string,
+    tag: string,
+    width: number,
+    style: "solid" | "dashed" | "dotted",
+  ) => {
+    out.push({
+      kind: "line",
+      t1: t0,
+      p1: price,
+      t2: lastT,
+      p2: price,
+      color,
+      width,
+      style,
+    });
+    out.push({
+      kind: "label",
+      t1: lastT,
+      p1: price,
+      color,
+      text: tag,
+    });
+  };
+
+  // —— Structure: last few only, bold short rails ——————————
   if (cfg.showStructure) {
-    for (const ev of keepTail(structures, maxN)) {
+    for (const ev of keepTail(structures, Math.min(4, maxN + 1))) {
       const bull = ev.dir === 1;
       const color = bull ? cfg.bullColor : cfg.bearColor;
-      const tag = ev.kind === "MSS" ? (bull ? "MSS +" : "MSS −") : bull ? "BOS +" : "BOS −";
+      const tag = ev.kind === "MSS" ? (bull ? "MSS+" : "MSS−") : bull ? "BOS+" : "BOS−";
       out.push({
         kind: "line",
         t1: ev.t1,
@@ -418,110 +475,70 @@ export function computeReplayMentor(
         t2: ev.t2,
         p2: ev.price,
         color,
-        width: ev.kind === "MSS" ? 2 : 1,
-        style: ev.kind === "MSS" ? "dashed" : "dotted",
+        width: ev.kind === "MSS" ? 3 : 2,
+        style: ev.kind === "MSS" ? "dashed" : "solid",
+      });
+      out.push({
+        kind: "label",
+        t1: ev.t2,
+        p1: ev.price,
+        color,
         text: tag,
       });
     }
   }
 
-  // —— Draw: Liquidity (nearest BSL / SSL + recent sweeps) ———
+  // —— Liquidity: exactly one BSL + one SSL (+ optional latest sweep) ———
+  const liqPrices: number[] = [];
   if (cfg.showLiquidity) {
     const highs = swings.filter((s) => s.kind === "high");
     const lows = swings.filter((s) => s.kind === "low");
     const liveHigh = [...highs].reverse().find((s) => !s.broken);
     const liveLow = [...lows].reverse().find((s) => !s.broken);
-    const sweeps = keepTail(
-      swings.filter((s) => s.swept),
-      Math.min(4, maxN),
-    );
-    const liq: Swing[] = [];
-    if (liveHigh) liq.push(liveHigh);
-    if (liveLow) liq.push(liveLow);
-    for (const s of sweeps) {
-      if (!liq.includes(s)) liq.push(s);
+    const latestSweep = [...swings].reverse().find((s) => s.swept);
+    if (liveHigh) {
+      pushLevel(liveHigh.time, liveHigh.price, cfg.liqColor, "BSL", 2, "dashed");
+      liqPrices.push(liveHigh.price);
     }
-    for (const sw of liq) {
-      const tag =
-        sw.kind === "high" ? (sw.swept ? "BSL Sweep" : "BSL") : sw.swept ? "SSL Sweep" : "SSL";
-      out.push({
-        kind: "line",
-        t1: sw.time,
-        p1: sw.price,
-        t2: lastT,
-        p2: sw.price,
-        color: cfg.liqColor,
-        width: 1,
-        style: sw.swept ? "solid" : "dashed",
-        text: tag,
-      });
+    if (liveLow) {
+      pushLevel(liveLow.time, liveLow.price, cfg.liqColor, "SSL", 2, "dashed");
+      liqPrices.push(liveLow.price);
+    }
+    if (
+      latestSweep &&
+      latestSweep !== liveHigh &&
+      latestSweep !== liveLow &&
+      !liqPrices.some((p) => near(p, latestSweep.price))
+    ) {
+      const tag = latestSweep.kind === "high" ? "BSL Sweep" : "SSL Sweep";
+      pushLevel(latestSweep.time, latestSweep.price, cfg.liqColor, tag, 2, "solid");
+      liqPrices.push(latestSweep.price);
     }
   }
 
-  // —— Draw: FVG (valid once) ———————————————————————————
+  // —— FVG: at most one live bull + one live bear ——————————
+  const fvgDrawn: GapZone[] = [];
   if (cfg.showFvg) {
-    const live = keepTail(
-      fvgs.filter((z) => z.valid),
-      maxN,
-    );
-    for (const z of live) {
-      const color = z.dir === 1 ? cfg.fvgBull : cfg.fvgBear;
-      out.push({
-        kind: "rect",
-        t1: z.t0,
-        p1: z.hi,
-        t2: z.t1,
-        p2: z.lo,
-        color,
-        fill: color,
-      });
-      out.push({
-        kind: "line",
-        t1: z.t0,
-        p1: z.mid,
-        t2: z.t1,
-        p2: z.mid,
-        color,
-        width: 1,
-        style: "dotted",
-        text: z.dir === 1 ? "FVG +" : "FVG −",
-      });
+    const liveBull = [...fvgs].reverse().find((z) => z.valid && z.dir === 1);
+    const liveBear = [...fvgs].reverse().find((z) => z.valid && z.dir === -1);
+    for (const z of [liveBull, liveBear]) {
+      if (!z) continue;
+      fvgDrawn.push(z);
+      pushZone(z.t0, z.t1, z.lo, z.hi, z.dir === 1 ? cfg.fvgBull : cfg.fvgBear, z.dir === 1 ? "FVG+" : "FVG−");
     }
   }
 
-  // —— Draw: IFVG ——————————————————————————————————————
+  // —— IFVG: newest one only ——————————————————————————————
   if (cfg.showIfvg) {
-    const inv = keepTail(
-      fvgs.filter((z) => z.inverted && z.invertFrom != null),
-      Math.max(2, Math.floor(maxN / 2)),
-    );
-    for (const z of inv) {
-      out.push({
-        kind: "rect",
-        t1: z.invertFrom!,
-        p1: z.hi,
-        t2: lastT,
-        p2: z.lo,
-        color: cfg.ifvgColor,
-        fill: cfg.ifvgColor,
-      });
-      out.push({
-        kind: "line",
-        t1: z.invertFrom!,
-        p1: z.mid,
-        t2: lastT,
-        p2: z.mid,
-        color: cfg.ifvgColor,
-        width: 1,
-        style: "dashed",
-        text: z.dir === 1 ? "IFVG +" : "IFVG −",
-      });
+    const inv = [...fvgs].reverse().find((z) => z.inverted && z.invertFrom != null);
+    if (inv) {
+      pushZone(inv.invertFrom!, lastT, inv.lo, inv.hi, cfg.ifvgColor, inv.dir === 1 ? "IFVG+" : "IFVG−");
     }
   }
 
-  // —— Draw: BPR (overlap of opposite FVGs) ——————————————
+  // —— BPR: single clearest overlap (optional) ————————————
   if (cfg.showBpr) {
-    const bprs: DrawCmd[] = [];
+    let best: { t0: number; lo: number; hi: number; size: number } | null = null;
     const candidates = fvgs.filter((z) => z.valid || z.inverted);
     for (let a = 0; a < candidates.length; a += 1) {
       for (let b = a + 1; b < candidates.length; b += 1) {
@@ -530,88 +547,157 @@ export function computeReplayMentor(
         if (A.dir === B.dir) continue;
         const ov = overlaps(A.lo, A.hi, B.lo, B.hi);
         if (!ov) continue;
-        const t0 = Math.max(A.t0, B.t0);
-        bprs.push({
-          kind: "rect",
-          t1: t0,
-          p1: ov.hi,
-          t2: lastT,
-          p2: ov.lo,
-          color: cfg.bprColor,
-          fill: cfg.bprColor,
-        });
-        bprs.push({
-          kind: "line",
-          t1: t0,
-          p1: (ov.lo + ov.hi) / 2,
-          t2: lastT,
-          p2: (ov.lo + ov.hi) / 2,
-          color: cfg.bprColor,
-          width: 1,
-          style: "solid",
-          text: "BPR",
-        });
+        const size = ov.hi - ov.lo;
+        if (!best || size > best.size) {
+          best = { t0: Math.max(A.t0, B.t0), lo: ov.lo, hi: ov.hi, size };
+        }
       }
     }
-    out.push(...keepTail(bprs, maxN * 2));
+    if (best) pushZone(best.t0, lastT, best.lo, best.hi, cfg.bprColor, "BPR");
   }
 
-  // —— Draw: Order Blocks ——————————————————————————————
+  // —— Order Blocks: one per side; skip if ≈ same as a drawn FVG ———
   if (cfg.showOrderBlocks) {
-    const liveOb = keepTail(
-      obs.filter((o) => !o.mitigated),
-      maxN,
-    );
-    for (const ob of liveOb) {
-      const color = ob.dir === 1 ? cfg.obBull : cfg.obBear;
-      out.push({
-        kind: "rect",
-        t1: ob.t0,
-        p1: ob.hi,
-        t2: ob.t1,
-        p2: ob.lo,
-        color,
-        fill: color,
-      });
-      out.push({
-        kind: "line",
-        t1: ob.t0,
-        p1: (ob.lo + ob.hi) / 2,
-        t2: ob.t1,
-        p2: (ob.lo + ob.hi) / 2,
-        color,
-        width: 1,
-        style: "dotted",
-        text: ob.dir === 1 ? "OB +" : "OB −",
-      });
+    const bullOb = [...obs].reverse().find((o) => !o.mitigated && o.dir === 1);
+    const bearOb = [...obs].reverse().find((o) => !o.mitigated && o.dir === -1);
+    for (const ob of [bullOb, bearOb]) {
+      if (!ob) continue;
+      const overlapsFvg = fvgDrawn.some(
+        (z) => z.dir === ob.dir && overlaps(ob.lo, ob.hi, z.lo, z.hi) != null,
+      );
+      if (overlapsFvg) continue;
+      pushZone(
+        ob.t0,
+        ob.t1,
+        ob.lo,
+        ob.hi,
+        ob.dir === 1 ? cfg.obBull : cfg.obBear,
+        ob.dir === 1 ? "OB+" : "OB−",
+      );
     }
   }
 
-  // —— Draw: IOF (inducement) ————————————————————————————
+  // —— IOF: newest untaken (or latest taken), not stacked on BSL/SSL ———
   if (cfg.showIof) {
-    const recent = keepTail(inducements, maxN);
-    for (const ind of recent) {
-      out.push({
-        kind: "line",
-        t1: ind.time,
-        p1: ind.price,
-        t2: lastT,
-        p2: ind.price,
-        color: cfg.iofColor,
-        width: 1,
-        style: ind.taken ? "solid" : "dashed",
-        text: ind.taken ? "IOF taken" : "IOF",
-      });
+    const pick =
+      [...inducements].reverse().find((i) => !i.taken) ??
+      [...inducements].reverse()[0];
+    if (pick && !liqPrices.some((p) => near(p, pick.price))) {
+      pushLevel(
+        pick.time,
+        pick.price,
+        cfg.iofColor,
+        pick.taken ? "IOF taken" : "IOF",
+        2,
+        pick.taken ? "solid" : "dashed",
+      );
     }
   }
 
   return out;
 }
 
+function clHex(color: string, fallback = "#333333"): string {
+  const c = color.trim();
+  if (/^#[0-9A-Fa-f]{6}$/.test(c)) return c;
+  if (/^#[0-9A-Fa-f]{3}$/.test(c)) {
+    return `#${c[1]}${c[1]}${c[2]}${c[2]}${c[3]}${c[3]}`;
+  }
+  return fallback;
+}
+
+/** Mentor-specific painter: soft fills, bold borders, readable chip labels. */
 export async function paintReplayMentor(
   chart: IChartWidgetApi,
   cmds: readonly DrawCmd[],
   options?: { readonly ownerStudyId?: EntityId },
 ): Promise<EntityId[]> {
-  return paintOrcaOnChart(chart, cmds, options);
+  const ids: EntityId[] = [];
+  const limited = cmds.length > 48 ? cmds.slice(cmds.length - 48) : cmds;
+  const ownerStudyId = options?.ownerStudyId;
+  const common = {
+    disableSelection: true,
+    disableSave: true,
+    disableUndo: true,
+    showInObjectsTree: false,
+    ...(ownerStudyId ? { ownerStudyId } : {}),
+  } as const;
+  const styleMap = { solid: 0, dotted: 1, dashed: 2 } as const;
+
+  for (let i = 0; i < limited.length; i += 1) {
+    const cmd = limited[i]!;
+    const stroke = clHex(cmd.color);
+    try {
+      if (cmd.kind === "line" && cmd.t2 != null && cmd.p2 != null) {
+        const id = await chart.createMultipointShape(
+          [
+            { time: cmd.t1 as never, price: cmd.p1 },
+            { time: cmd.t2 as never, price: cmd.p2 },
+          ],
+          {
+            ...common,
+            shape: "trend_line",
+            overrides: {
+              linecolor: stroke,
+              linewidth: Math.max(2, cmd.width ?? 2),
+              linestyle: styleMap[cmd.style ?? "solid"],
+              showLabel: false,
+            },
+          },
+        );
+        if (id) ids.push(id);
+      } else if (cmd.kind === "rect" && cmd.t2 != null && cmd.p2 != null) {
+        const fillHex = clHex(cmd.fill ?? cmd.color, stroke);
+        const r = Number.parseInt(fillHex.slice(1, 3), 16);
+        const g = Number.parseInt(fillHex.slice(3, 5), 16);
+        const b = Number.parseInt(fillHex.slice(5, 7), 16);
+        const id = await chart.createMultipointShape(
+          [
+            { time: cmd.t1 as never, price: cmd.p1 },
+            { time: cmd.t2 as never, price: cmd.p2 },
+          ],
+          {
+            ...common,
+            shape: "rectangle",
+            overrides: {
+              color: stroke,
+              backgroundColor: `rgba(${r}, ${g}, ${b}, 0.12)`,
+              fillBackground: true,
+              linewidth: 2,
+              transparency: 0,
+            },
+          },
+        );
+        if (id) ids.push(id);
+      } else if (cmd.kind === "label" && (cmd.text ?? "").trim()) {
+        const id = await chart.createShape(
+          { time: cmd.t1 as never, price: cmd.p1 },
+          {
+            ...common,
+            shape: "text",
+            text: ` ${cmd.text!.trim()} `,
+            overrides: {
+              color: stroke,
+              fontsize: 13,
+              bold: true,
+              fillBackground: true,
+              backgroundColor: "rgba(255,255,255,0.92)",
+              drawBorder: true,
+              borderColor: stroke,
+              borderWidth: 1,
+            },
+          },
+        );
+        if (id) ids.push(id);
+      }
+    } catch {
+      /* skip bad draw */
+    }
+    if (i > 0 && i % 4 === 0) {
+      await new Promise<void>((r) => {
+        window.setTimeout(r, 0);
+      });
+    }
+  }
+  return ids;
 }
