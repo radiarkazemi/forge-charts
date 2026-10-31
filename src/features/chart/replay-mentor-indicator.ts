@@ -7,8 +7,11 @@
 import type { CustomIndicator } from "@/infrastructure/tradingview";
 import { MENTOR_DEFAULTS } from "@/features/replay-mentor/runtime";
 
+/** Shown in Indicators dialog (search: Mentor / ICT / Replay). */
 export const REPLAY_MENTOR_STUDY_NAME = "Forge Replay Mentor";
 export const REPLAY_MENTOR_STUDY_ID = "ForgeReplayMentor@tv-basicstudies-1";
+/** Extra search aliases CL indexes via description. */
+export const REPLAY_MENTOR_DESCRIPTION = "Forge Replay Mentor";
 
 export const REPLAY_MENTOR_DEFAULTS = {
   swingLeft: MENTOR_DEFAULTS.swingLeft,
@@ -33,8 +36,8 @@ export function createReplayMentorIndicator(PineJS: {
       _metainfoVersion: 53,
       id: REPLAY_MENTOR_STUDY_ID as never,
       name: REPLAY_MENTOR_STUDY_NAME,
-      description: REPLAY_MENTOR_STUDY_NAME,
-      shortDescription: "ICT practice · BOS/MSS/FVG/OB (Replay)",
+      description: REPLAY_MENTOR_DESCRIPTION,
+      shortDescription: "ICT · BOS MSS FVG OB · Replay practice",
       isCustomIndicator: true,
       is_price_study: true,
       linkedToSeries: true,

@@ -293,6 +293,14 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
       intervals: FAVORITE_INTERVALS,
       chartTypes: ["Candles", "Heiken Ashi", "Line", "Area", "Bars"],
       drawingTools: FAVORITE_DRAWING_TOOLS,
+      // Titles must match study `description` / UI name exactly.
+      indicators: [
+        "Forge Replay Mentor",
+        "Forge Structure Intelligence",
+        "Dealing Ranges",
+        "ICT HTF Candles",
+        "Forge Sessions",
+      ],
     },
     time_frames: TIME_FRAMES,
     loading_screen: { backgroundColor: tokens.background, foregroundColor: tokens.accent },
