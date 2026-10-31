@@ -150,13 +150,17 @@ export class ChartController {
     this.bindStudyBridge(widget);
     // Match TradingView default: one-shot drawings (return to Cross after each shape).
     this.ensureStayInDrawingModeOff();
+    window.setTimeout(() => this.ensureStayInDrawingModeOff(), 200);
+    window.setTimeout(() => this.ensureStayInDrawingModeOff(), 800);
     // Belt-and-suspenders: any finished shape on this pane returns to Cross even
     // if layout-sync missed the create event (multipane races).
     if (!this.oneShotDrawingHandler) {
       this.oneShotDrawingHandler = (_id, eventType) => {
         if (eventType !== "create") return;
         void this.exitDrawingTool();
-        window.setTimeout(() => void this.exitDrawingTool(), 80);
+        window.setTimeout(() => void this.exitDrawingTool(), 50);
+        window.setTimeout(() => void this.exitDrawingTool(), 180);
+        window.setTimeout(() => void this.exitDrawingTool(), 450);
       };
       this.drawingHandlers.add(this.oneShotDrawingHandler);
     }
@@ -383,12 +387,14 @@ export class ChartController {
     try {
       const chart = this.activeChart() as
         | (IChartWidgetApi & {
-            getCheckableActionState?: (id: string) => boolean;
+            getCheckableActionState?: (id: string) => boolean | null;
             executeActionById: (id: string) => void;
           })
         | null;
-      if (!chart?.getCheckableActionState) return;
-      if (chart.getCheckableActionState("stayInDrawingModeAction")) {
+      if (!chart?.executeActionById) return;
+      const state = chart.getCheckableActionState?.("stayInDrawingModeAction");
+      // true = sticky draw ON; null/undefined = unknown — only toggle when ON.
+      if (state === true) {
         chart.executeActionById("stayInDrawingModeAction");
       }
     } catch {
@@ -399,11 +405,19 @@ export class ChartController {
   /** Force Cross tool + stay-in-draw OFF (TradingView one-shot default). */
   async exitDrawingTool(): Promise<void> {
     this.ensureStayInDrawingModeOff();
-    try {
-      await this.widget?.selectLineTool("cursor" as never);
-    } catch {
-      /* ignore */
-    }
+    const pickCursor = async () => {
+      this.ensureStayInDrawingModeOff();
+      try {
+        await this.widget?.selectLineTool("cursor" as never);
+      } catch {
+        try {
+          await this.widget?.selectLineTool("arrow_cursor" as never);
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+    await pickCursor();
   }
 
   /** Switch theme now, or as soon as the widget becomes ready. */
@@ -592,11 +606,11 @@ export class ChartController {
         this.ensureStayInDrawingModeOff();
       }
       await this.widget?.selectLineTool(tool as never);
-      // CL sometimes re-enables stay-in-draw when arming a shape — force off again.
-      if (tool !== "cursor" && tool !== "arrow_cursor" && tool !== "dot") {
-        window.setTimeout(() => this.ensureStayInDrawingModeOff(), 0);
-        window.setTimeout(() => this.ensureStayInDrawingModeOff(), 120);
-      }
+      // Always keep stay-in-draw OFF so finished shapes return to Cross (TV default).
+      this.ensureStayInDrawingModeOff();
+      window.setTimeout(() => this.ensureStayInDrawingModeOff(), 0);
+      window.setTimeout(() => this.ensureStayInDrawingModeOff(), 120);
+      window.setTimeout(() => this.ensureStayInDrawingModeOff(), 320);
     } catch {
       /* ignore */
     }

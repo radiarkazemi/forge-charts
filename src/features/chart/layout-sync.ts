@@ -92,6 +92,11 @@ class LayoutSyncBus {
   private restorePrimaryTimer = 0;
   /** Pending re-arm timeouts for drawing tools — must cancel on one-shot reset. */
   private toolReapplyTimers: number[] = [];
+  /**
+   * After a shape finishes, ignore non-cursor tool echoes from CL for this window.
+   * Without it, onSelectedLineToolChanged / stay-in-draw re-arms rectangle after Cross.
+   */
+  private oneShotLockUntil = 0;
 
   private clearToolReapplyTimers(): void {
     for (const id of this.toolReapplyTimers) window.clearTimeout(id);
@@ -100,6 +105,21 @@ class LayoutSyncBus {
 
   private scheduleToolReapply(fn: () => void, ms: number): void {
     this.toolReapplyTimers.push(window.setTimeout(fn, ms));
+  }
+
+  private isCursorTool(tool: string | null | undefined): boolean {
+    return !tool || tool === "cursor" || tool === "arrow_cursor" || tool === "dot";
+  }
+
+  private isOneShotLocked(): boolean {
+    return Date.now() < this.oneShotLockUntil;
+  }
+
+  /** Lock tool selection to Cross so CL / multipane echoes cannot re-arm a shape. */
+  private beginOneShotLock(ms = 900): void {
+    this.oneShotLockUntil = Date.now() + ms;
+    this.clearToolReapplyTimers();
+    this.sharedTool = "cursor";
   }
 
   setFlags(flags: LayoutSyncFlags): void {
@@ -357,15 +377,16 @@ class LayoutSyncBus {
     const tool = this.sharedTool;
     if (
       tool &&
-      tool !== "cursor" &&
-      tool !== "arrow_cursor" &&
-      tool !== "dot" &&
+      !this.isCursorTool(tool) &&
+      tool !== "eraser" &&
+      !this.isOneShotLocked() &&
       paneIndex < this.activeCount
     ) {
       void this.applyToolToPane(paneIndex, tool);
       // Hit-testing needs a real size before CL accepts the tool on secondaries.
       this.scheduleToolReapply(() => entry?.controller.requestResize(), 120);
       this.scheduleToolReapply(() => {
+        if (this.isOneShotLocked()) return;
         if (this.sharedTool === tool) void this.applyToolToPane(paneIndex, tool);
       }, 350);
     }
@@ -381,13 +402,21 @@ class LayoutSyncBus {
   notifyToolSelected(sourceIndex: number, tool: string | null): void {
     if (this.applyingTool) return;
     if (sourceIndex !== 0) return;
+    const isCursor = this.isCursorTool(tool);
+    // One-shot lock: drop CL echoes that re-select rectangle/trend after Cross.
+    // Real toolbar picks after the lock window still work normally.
+    if (!isCursor && this.isOneShotLocked()) {
+      void this.applyToolToAllPanes("cursor");
+      return;
+    }
     this.clearToolReapplyTimers();
     this.sharedTool = tool;
     // Cursor / eraser: mirror to all panes so every layer returns to Cross.
-    if (!tool || tool === "cursor" || tool === "arrow_cursor" || tool === "dot") {
+    if (isCursor || !tool) {
       void this.applyToolToAllPanes(tool ?? "cursor");
       return;
     }
+    const drawingTool = tool;
     // Drawing tools: arm EVERY visible layer. Arming only the focused pane left
     // 2 of 4 layers without the tool (focus races / late-ready secondaries).
     const target =
@@ -398,11 +427,12 @@ class LayoutSyncBus {
     this.activePane = pane;
     this.drawTargetPane = pane;
     this.emitActive();
-    void this.applyToolToAllPanes(tool);
+    void this.applyToolToAllPanes(drawingTool);
     // Secondaries often need a resize before selectLineTool sticks.
     this.scheduleToolReapply(() => this.reflowVisible(), 80);
     this.scheduleToolReapply(() => {
-      if (this.sharedTool === tool) void this.applyToolToAllPanes(tool);
+      if (this.isOneShotLocked()) return;
+      if (this.sharedTool === drawingTool) void this.applyToolToAllPanes(drawingTool);
     }, 280);
   }
 
@@ -419,9 +449,11 @@ class LayoutSyncBus {
       this.emitActive();
       this.emitPaneState();
     }
+    // Do not re-arm a shape while one-shot lock is holding Cross.
+    if (this.isOneShotLocked()) return;
     const tool = this.sharedTool;
     // Re-apply the shared drawing tool onto whichever pane the user just focused.
-    if (tool && tool !== "cursor" && tool !== "arrow_cursor" && tool !== "dot") {
+    if (tool && !this.isCursorTool(tool) && tool !== "eraser") {
       void this.applyToolToPane(paneIndex, tool);
     }
   }
@@ -648,26 +680,26 @@ class LayoutSyncBus {
 
   /** After one drawing completes, return every pane to the Cross tool. */
   async resetToolsToCursor(): Promise<void> {
-    // Cancel any pending "re-arm rectangle" timeouts from notifyToolSelected —
-    // those were re-selecting the shape after one-shot reset.
-    this.clearToolReapplyTimers();
-    this.sharedTool = "cursor";
+    // Cancel pending "re-arm rectangle" timeouts and lock out tool echoes.
+    this.beginOneShotLock(900);
     for (const { index, controller } of this.panes.values()) {
       if (index >= this.activeCount || !controller.isReady) continue;
       controller.ensureStayInDrawingModeOff();
     }
     await this.applyToolToAllPanes("cursor");
     // CL can flip stay-in-draw / tool back on after create — force Cross again.
-    this.scheduleToolReapply(() => {
-      for (const { index, controller } of this.panes.values()) {
-        if (index >= this.activeCount) continue;
-        controller.ensureStayInDrawingModeOff();
-      }
-      void this.applyToolToAllPanes("cursor");
-    }, 50);
-    this.scheduleToolReapply(() => {
-      void this.applyToolToAllPanes("cursor");
-    }, 200);
+    for (const delay of [0, 50, 150, 350, 700]) {
+      this.scheduleToolReapply(() => {
+        if (!this.isOneShotLocked() && this.sharedTool !== "cursor") return;
+        this.sharedTool = "cursor";
+        for (const { index, controller } of this.panes.values()) {
+          if (index >= this.activeCount) continue;
+          controller.ensureStayInDrawingModeOff();
+          void controller.exitDrawingTool();
+        }
+        void this.applyToolToAllPanes("cursor");
+      }, delay);
+    }
   }
 
   recordPaneInterval(paneIndex: number, interval: Interval): void {
@@ -810,14 +842,20 @@ class LayoutSyncBus {
     eventType: string,
   ): Promise<void> {
     const idKey = String(entityId);
+    // Do NOT gate on applyingTool — exitDrawingTool / multipane apply often
+    // sets it true during create, which previously skipped the Cross reset and
+    // left the toolbar stuck on rectangle/trend. Skip mirrors / in-flight sync copies.
     const shouldResetTool =
-      eventType === "create" && !this.applyingTool && !this.mirrorIds.has(idKey);
+      eventType === "create" &&
+      !this.mirrorIds.has(idKey) &&
+      !this.syncingDrawings;
 
     // Drop the armed tool immediately so delayed re-apply timers cannot stick
     // on rectangle/trend after the shape is finished.
     if (shouldResetTool) {
-      this.clearToolReapplyTimers();
-      this.sharedTool = "cursor";
+      this.beginOneShotLock(900);
+      // Kick Cross ASAP; full reset still runs at the end of this handler.
+      void this.resetToolsToCursor();
     }
 
     // Single-pane (or drawings sync off): still return to Cross after one use.
