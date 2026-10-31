@@ -16,6 +16,7 @@ import { useSessionsStudy } from "./useSessionsStudy";
 import { useHtfCandlesStudy } from "./useHtfCandlesStudy";
 import { useStructureIntelligenceStudy } from "./useStructureIntelligenceStudy";
 import { useReplayMentorStudy } from "./useReplayMentorStudy";
+import { ForgeWatermark } from "./ForgeWatermark";
 import { SessionsDashboard } from "@/features/sessions/SessionsDashboard";
 import { HtfCandleRemainLegend } from "@/features/sessions/HtfCandleRemainLegend";
 import { useTradingViewWidget } from "./useTradingViewWidget";
@@ -281,6 +282,7 @@ export function TradingViewChart({
     >
       <Box ref={containerRef} sx={{ position: "absolute", inset: 0 }} />
 
+      {isPrimary ? <ForgeWatermark /> : null}
       {isPrimary ? <QuickTradeOverlay containerRef={containerRef} /> : null}
       {isPrimary ? <TradeLinesOverlay containerRef={containerRef} /> : null}
       {isPrimary && !replayActive ? <CandleCountdownOverlay /> : null}

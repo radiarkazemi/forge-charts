@@ -4,10 +4,9 @@ import type { IChartingLibraryWidget } from "@/infrastructure/tradingview";
 import { CHART_LAYOUT_CHOICES } from "./chart-layouts";
 import { activateDealingRange } from "./dealing-range";
 
-function avatarIcon(profile: UserProfile): string {
-  const initial = (profile.avatarInitial || "F").slice(0, 2).replace(/[<>&"']/g, "");
-  const color = /^#[0-9a-fA-F]{6}$/.test(profile.avatarColor) ? profile.avatarColor : "#9c27b0";
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28"><circle cx="14" cy="14" r="14" fill="${color}"/><text x="14" y="18.5" text-anchor="middle" fill="#fff" font-size="12" font-weight="700" font-family="Arial,sans-serif">${initial}</text></svg>`;
+/** Faraz / TV-style person silhouette (not first-letter chip). */
+function profilePersonIcon(): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.4"/><path d="M5.2 19.2c.8-3.2 3.2-5 6.8-5s6 1.8 6.8 5"/></svg>`;
 }
 
 /**
@@ -294,30 +293,32 @@ export function mountHeaderToolbar(
       layoutDropdown = api as DropdownApi;
     });
 
-  // Profile avatar → React ProfileMenu (far-right, TradingView account button).
+  // Profile person icon → left of Symbol Search (Faraz / TV layout).
   const profile = handlers.getProfile();
   const profileBtn = widget.createButton({
-    align: "right",
+    align: "left",
     useTradingViewStyle: false,
   });
+  profileBtn.classList.add("forge-header-profile");
   profileBtn.setAttribute("title", `${profile.displayName} (@${profile.username})`);
   profileBtn.setAttribute("aria-label", "Account menu");
   Object.assign(profileBtn.style, {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    width: "36px",
-    height: "36px",
-    minWidth: "36px",
+    width: "32px",
+    height: "32px",
+    minWidth: "32px",
     padding: "0",
-    margin: "0 4px",
+    margin: "0 2px 0 6px",
     cursor: "pointer",
     borderRadius: "50%",
     overflow: "hidden",
-    background: "transparent",
+    background: "rgba(120, 123, 134, 0.12)",
     border: "0",
+    color: "inherit",
   });
-  profileBtn.innerHTML = avatarIcon(profile);
+  profileBtn.innerHTML = profilePersonIcon();
   const openProfileMenu = (e: Event) => {
     e.preventDefault();
     e.stopPropagation();
@@ -326,10 +327,30 @@ export function mountHeaderToolbar(
   profileBtn.addEventListener("click", openProfileMenu);
   profileBtn.addEventListener("pointerdown", openProfileMenu);
 
+  // Place profile immediately before Symbol Search (Faraz: avatar → search pill).
+  const placeProfileNearSearch = () => {
+    try {
+      const doc = (widget as unknown as { _iFrame?: HTMLIFrameElement })._iFrame?.contentDocument;
+      if (!doc) return;
+      const sym = doc.getElementById("header-toolbar-symbol-search");
+      sym?.classList.add("forge-symbol-search-pill");
+      if (!sym || !profileBtn.isConnected) return;
+      const parent = sym.parentElement;
+      if (parent && profileBtn.parentElement) {
+        parent.insertBefore(profileBtn, sym);
+      }
+    } catch {
+      /* iframe may not be ready */
+    }
+  };
+  placeProfileNearSearch();
+  window.setTimeout(placeProfileNearSearch, 400);
+  window.setTimeout(placeProfileNearSearch, 1_200);
+
   return {
     updateProfile: (next) => {
       try {
-        profileBtn.innerHTML = avatarIcon(next);
+        // Keep person icon; only refresh tooltip with name.
         profileBtn.setAttribute("title", `${next.displayName} (@${next.username})`);
       } catch {
         /* ignore */

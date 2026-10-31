@@ -8,6 +8,7 @@ import Menu from "@mui/material/Menu";
 import Switch from "@mui/material/Switch";
 import Typography from "@mui/material/Typography";
 import Avatar from "@mui/material/Avatar";
+import PersonOutlinedIcon from "@mui/icons-material/PersonOutlined";
 import HomeOutlinedIcon from "@mui/icons-material/HomeOutlined";
 import HelpOutlineOutlinedIcon from "@mui/icons-material/HelpOutlineOutlined";
 import EmailOutlinedIcon from "@mui/icons-material/EmailOutlined";
@@ -76,8 +77,15 @@ export function ProfileMenu({
         sx={{ py: 1.25 }}
       >
         <ListItemIcon sx={{ minWidth: 44 }}>
-          <Avatar sx={{ width: 32, height: 32, bgcolor: profile.avatarColor, fontSize: 14, fontWeight: 700 }}>
-            {profile.avatarInitial}
+          <Avatar
+            sx={{
+              width: 32,
+              height: 32,
+              bgcolor: "action.hover",
+              color: "text.primary",
+            }}
+          >
+            <PersonOutlinedIcon fontSize="small" />
           </Avatar>
         </ListItemIcon>
         <ListItemText primary={<Typography sx={{ fontWeight: 600 }}>{profile.username}</Typography>} />

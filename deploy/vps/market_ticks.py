@@ -2616,10 +2616,11 @@ def _load_iran_history_mongo(
             if not built:
                 return
             # Median adjacent move → wick cap (stops single bad ticks from huge shadows).
+            # ×3.5 keeps Faraz G18 readable; ×8 still left tall "shadow" spikes.
             moves = [abs(closes[i] - closes[i - 1]) for i in range(1, len(closes))]
             moves.sort()
             med_move = moves[len(moves) // 2] if moves else 0.0
-            max_range = max(med_move * 8.0, abs(closes[-1]) * 2e-4, 1.0)
+            max_range = max(med_move * 3.5, abs(closes[-1]) * 1.5e-4, 1.0)
             for t0, bar in built.items():
                 clamped = _clamp_iran_tick_wicks(bar, max_range)
                 existing = buckets.get(t0)
@@ -2754,7 +2755,8 @@ def _load_iran_history_mongo(
         if step <= 1_800:
             gap_wall = wall_t if before is None else min(wall_t, before - step)
             auth_ok = _FARAZ_CUSTOMER_AUTH_OK is True
-            max_steps = (12 if step <= 60 else 8) if not auth_ok else (90 if step <= 60 else 45)
+            # Auth-off still fills short Faraz poll holes (G18 gaps); keep overnight empty.
+            max_steps = (36 if step <= 60 else 20) if not auth_ok else (90 if step <= 60 else 45)
             filled = _fill_iran_session_gaps(
                 buckets,
                 step,

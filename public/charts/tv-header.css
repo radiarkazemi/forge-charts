@@ -1,0 +1,215 @@
+/* TradingView / Faraz-style header + Symbol Search polish (CL iframe). */
+
+.tv-header {
+  border-bottom: 1px solid rgba(120, 123, 134, 0.22) !important;
+}
+
+/* ── Navbar symbol search → smooth pill ─────────────────────────── */
+#header-toolbar-symbol-search,
+button#header-toolbar-symbol-search {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  min-width: 148px !important;
+  max-width: 220px !important;
+  height: 32px !important;
+  margin: 0 4px 0 2px !important;
+  padding: 0 12px 0 14px !important;
+  border-radius: 999px !important;
+  border: 0 !important;
+  background: rgba(120, 123, 134, 0.12) !important;
+  box-shadow: none !important;
+  transition: background 0.15s ease, box-shadow 0.15s ease !important;
+}
+
+#header-toolbar-symbol-search:hover {
+  background: rgba(120, 123, 134, 0.18) !important;
+}
+
+#header-toolbar-symbol-search .js-button-text {
+  flex: 1 1 auto !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.01em !important;
+}
+
+/* Magnifier on the right of the pill (matches Faraz) */
+#header-toolbar-symbol-search::after {
+  content: "";
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  opacity: 0.7;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'><circle cx='11' cy='11' r='7'/><path d='M20 20l-3.5-3.5'/></svg>") center / contain no-repeat;
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'><circle cx='11' cy='11' r='7'/><path d='M20 20l-3.5-3.5'/></svg>") center / contain no-repeat;
+}
+
+/* Hide default CL search glyph if present inside the button */
+#header-toolbar-symbol-search svg {
+  display: none !important;
+}
+
+/* ── Profile (person) chip near search ──────────────────────────── */
+.forge-header-profile {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  margin: 0 2px 0 6px !important;
+  padding: 0 !important;
+  border-radius: 50% !important;
+  border: 0 !important;
+  background: rgba(120, 123, 134, 0.12) !important;
+  color: inherit !important;
+  cursor: pointer !important;
+  transition: background 0.15s ease !important;
+}
+
+.forge-header-profile:hover {
+  background: rgba(120, 123, 134, 0.2) !important;
+}
+
+.forge-header-profile svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+/* Interval active pill — softer radius */
+#header-toolbar-intervals button.isActive,
+#header-toolbar-intervals button[aria-checked="true"],
+#header-toolbar-intervals .isActive-GwQQdU8S {
+  border-radius: 8px !important;
+  background: rgba(120, 123, 134, 0.14) !important;
+}
+
+/* ── Symbol Search dialog — Faraz-smooth chrome ─────────────────── */
+[data-name="symbol-search-items-dialog"],
+[data-dialog-name="Symbol Search"],
+div[class*="dialog"][class*="symbolSearch"],
+div[data-name="symbol-search-dialog"] {
+  border-radius: 16px !important;
+  overflow: hidden !important;
+  box-shadow: 0 12px 40px rgba(15, 20, 30, 0.18) !important;
+}
+
+/* Search field inside dialog */
+[data-name="symbol-search-items-dialog"] input,
+[data-dialog-name="Symbol Search"] input,
+[data-name="symbol-search-items-dialog"] [class*="input"],
+[data-dialog-name="Symbol Search"] [class*="search"] input {
+  border-radius: 10px !important;
+  border: 1px solid rgba(38, 166, 154, 0.45) !important;
+  height: 40px !important;
+  padding-left: 36px !important;
+  font-size: 14px !important;
+}
+
+/* Exchange / type filter chips */
+[data-name="symbol-search-items-dialog"] [class*="tabs"] button,
+[data-name="symbol-search-items-dialog"] [role="tab"],
+[data-dialog-name="Symbol Search"] [role="tab"],
+[data-name="symbol-search-items-dialog"] button[class*="chip"],
+[data-dialog-name="Symbol Search"] button[class*="chip"] {
+  border-radius: 999px !important;
+  padding: 4px 12px !important;
+  font-size: 12px !important;
+}
+
+[data-name="symbol-search-items-dialog"] [role="tab"][aria-selected="true"],
+[data-dialog-name="Symbol Search"] [role="tab"][aria-selected="true"],
+[data-name="symbol-search-items-dialog"] button[aria-pressed="true"] {
+  background: rgba(41, 98, 255, 0.12) !important;
+  color: #2962ff !important;
+}
+
+/* Result rows — breathe */
+[data-name="symbol-search-items-dialog"] [class*="item"],
+[data-dialog-name="Symbol Search"] [class*="item"],
+[data-name="symbol-search-items-dialog"] [role="option"],
+[data-dialog-name="Symbol Search"] [role="option"] {
+  border-radius: 10px !important;
+  margin: 2px 8px !important;
+  padding: 8px 10px !important;
+}
+
+[data-name="symbol-search-items-dialog"] [role="option"]:hover,
+[data-dialog-name="Symbol Search"] [role="option"]:hover {
+  background: rgba(120, 123, 134, 0.1) !important;
+}
+
+/* Keep custom avatar/trade/publish buttons compact */
+.forge-header-avatar {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: 0 6px 0 8px;
+  border-radius: 50%;
+  border: none;
+  background: #9c27b0;
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  position: relative;
+}
+
+.forge-header-avatar__badge {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #f23645;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.forge-header-publish {
+  font-weight: 700 !important;
+}
+
+@media (max-width: 900px) {
+  .tv-header {
+    min-height: 38px !important;
+    max-height: 42px !important;
+  }
+
+  #header-toolbar-symbol-search,
+  button#header-toolbar-symbol-search {
+    min-width: 96px !important;
+    max-width: 140px !important;
+    height: 28px !important;
+    padding: 0 10px !important;
+  }
+
+  .layout__area--left .tv-group {
+    min-width: 40px;
+  }
+
+  .tv-header .js-button-text,
+  .tv-header .apply-common-tooltip {
+    font-size: 12px !important;
+  }
+
+  .chart-controls-bar {
+    bottom: 4px !important;
+  }
+
+  .legend-source-item {
+    font-size: 11px !important;
+  }
+}
