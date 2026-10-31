@@ -199,7 +199,7 @@ export function createForgeTradingAssistantIndicator(PineJS: {
         },
         {
           id: "showTradeBox",
-          name: "Show Long/Short Position box (off = labels only)",
+          name: "Show Target/Stop boxes (off keeps BUY/SELL labels)",
           defval: FTA_STUDY_DEFAULTS.showTradeBox,
           type: "bool",
         },

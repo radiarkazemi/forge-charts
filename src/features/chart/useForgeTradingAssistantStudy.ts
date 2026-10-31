@@ -20,11 +20,15 @@ const MAX_BARS = 4_000;
 const STUDY_DEBOUNCE_MS = 450;
 const PRESENCE_POLL_MS = 6_000;
 
-function fingerprint(cmds: readonly { kind: string; t1: number; p1: number }[]): string {
+function fingerprint(
+  cmds: readonly { kind: string; t1: number; p1: number; t2?: number; p2?: number; text?: string }[],
+): string {
   if (cmds.length === 0) return "empty";
   const head = cmds.slice(0, 4);
   const tail = cmds.length > 4 ? cmds.slice(-4) : [];
-  return `${cmds.length}|${[...head, ...tail].map((c) => `${c.kind}:${c.t1}:${c.p1}`).join(";")}`;
+  const part = (c: (typeof cmds)[number]) =>
+    `${c.kind}:${c.t1}:${c.p1}:${c.t2 ?? ""}:${c.p2 ?? ""}:${c.text ?? ""}`;
+  return `${cmds.length}|${[...head, ...tail].map(part).join(";")}`;
 }
 
 export function useForgeTradingAssistantStudy(enabled = true): void {
@@ -90,7 +94,14 @@ export function useForgeTradingAssistantStudy(enabled = true): void {
         };
         const bool = (id: string, fallback: boolean) => {
           const v = map.get(id);
-          return typeof v === "boolean" ? v : fallback;
+          if (typeof v === "boolean") return v;
+          if (typeof v === "number") return v !== 0;
+          if (typeof v === "string") {
+            const s = v.trim().toLowerCase();
+            if (s === "true" || s === "1") return true;
+            if (s === "false" || s === "0") return false;
+          }
+          return fallback;
         };
         const biasRaw = Math.floor(num("biasMode", FTA_STUDY_DEFAULTS.biasMode));
         const biasMode = (biasRaw === 1 ? 1 : biasRaw === 2 ? 2 : 0) as 0 | 1 | 2;

@@ -684,11 +684,23 @@ function signalPillText(s: FtaSignal): string {
   return `${tag} - LIVE`;
 }
 
+function fmtDist(n: number): string {
+  const a = Math.abs(n);
+  if (a >= 100) return a.toFixed(2);
+  if (a >= 1) return a.toFixed(3);
+  return a.toFixed(5);
+}
+
+function fmtPct(entry: number, other: number): string {
+  if (!Number.isFinite(entry) || entry === 0) return "0.00";
+  return ((Math.abs(other - entry) / Math.abs(entry)) * 100).toFixed(2);
+}
+
 /**
  * Draw FTA signals.
  * - Last confirmed Dealing Range (optional)
- * - `showTradeBox` on → native TV Long/Short Position (Target + Stop + R:R)
- * - `showTradeBox` off → only BUY/SELL pills on the signal candles
+ * - `showTradeBox` on → TV-style green Target + red Stop boxes + Target/Stop/R:R labels
+ * - Signal BUY/SELL pills always drawn on the signal candle (even when boxes off)
  */
 export function tradingAssistantDrawCmds(
   result: FtaResult,
@@ -717,10 +729,14 @@ export function tradingAssistantDrawCmds(
 
   const bullPill = normalizeHex(cfg.bullColor, FTA_DEFAULTS.bullColor);
   const bearPill = normalizeHex(cfg.bearColor, FTA_DEFAULTS.bearColor);
+  // TV Long/Short Position defaults: green Target, red Stop (both directions).
   const targetFill = normalizeHex(cfg.longBoxColor, FTA_DEFAULTS.longBoxColor);
   const stopFill = normalizeHex(cfg.shortBoxColor, FTA_DEFAULTS.shortBoxColor);
-  const boxAlpha = Math.max(0.05, Math.min(0.45, Number(cfg.boxOpacity) / 100));
+  const boxAlpha = Math.max(0.08, Math.min(0.35, Number(cfg.boxOpacity) / 100));
   const zoneAlpha = Math.max(0.04, boxAlpha * 0.7);
+  // Solid label chips like the TV position tool.
+  const targetLabelBg = "#089981";
+  const stopLabelBg = "#F23645";
 
   // Last confirmed Dealing Range on this timeframe (EQ + OTE).
   if (cfg.showDealingRange && result.lastDealingRange) {
@@ -796,31 +812,89 @@ export function tradingAssistantDrawCmds(
     }
 
     if (cfg.showTradeBox) {
-      // Exact TradingView Long/Short Position tool (green Target + red Stop + labels).
+      // TradingView Long/Short Position look:
+      // green Target zone + red Stop zone + Target / Stop / R:R pills.
+      const rewardLo = Math.min(s.entry, s.tp2);
+      const rewardHi = Math.max(s.entry, s.tp2);
+      const riskLo = Math.min(s.entry, s.stop);
+      const riskHi = Math.max(s.entry, s.stop);
+
       cmds.push({
-        kind: "position",
+        kind: "rect",
+        t1: s.time,
+        p1: rewardHi,
+        t2: extend,
+        p2: rewardLo,
+        color: targetFill,
+        fill: targetFill,
+        fillAlpha: boxAlpha,
+        borderWidth: 1,
+        style: "solid",
+      });
+      cmds.push({
+        kind: "rect",
+        t1: s.time,
+        p1: riskHi,
+        t2: extend,
+        p2: riskLo,
+        color: stopFill,
+        fill: stopFill,
+        fillAlpha: boxAlpha,
+        borderWidth: 1,
+        style: "solid",
+      });
+      // Entry divider
+      cmds.push({
+        kind: "line",
         t1: s.time,
         p1: s.entry,
         t2: extend,
-        dir: s.dir,
-        profitPrice: s.tp2,
-        stopPrice: s.stop,
-        color: pill,
-        fill: targetFill,
-        stopFill,
-        fillAlpha: boxAlpha,
+        p2: s.entry,
+        color: "#808080",
+        width: 1,
+        style: "solid",
       });
-    } else {
-      // Labels only — Texas-style pill on the signal / outcome candle.
+
+      const targetDist = Math.abs(s.tp2 - s.entry);
+      const stopDist = Math.abs(s.stop - s.entry);
+      const rr = stopDist > 0 ? targetDist / stopDist : s.rr;
+      const midT = s.time + Math.max(1, Math.floor((extend - s.time) / 2));
+
       cmds.push({
         kind: "label",
-        t1: s.labelTime || s.time,
-        p1: s.labelPrice || s.entry,
-        color: pill,
-        fill: pill,
-        text: signalPillText(s),
+        t1: midT,
+        p1: s.tp2,
+        color: targetLabelBg,
+        fill: targetLabelBg,
+        text: `Target: ${fmtDist(targetDist)} (${fmtPct(s.entry, s.tp2)}%)`,
+      });
+      cmds.push({
+        kind: "label",
+        t1: midT,
+        p1: s.stop,
+        color: stopLabelBg,
+        fill: stopLabelBg,
+        text: `Stop: ${fmtDist(stopDist)} (${fmtPct(s.entry, s.stop)}%)`,
+      });
+      cmds.push({
+        kind: "label",
+        t1: midT,
+        p1: s.entry,
+        color: targetLabelBg,
+        fill: targetLabelBg,
+        text: `Risk/Reward Ratio: ${rr.toFixed(1)}`,
       });
     }
+
+    // Always keep the signal pill on the right candle (boxes are optional).
+    cmds.push({
+      kind: "label",
+      t1: s.labelTime || s.time,
+      p1: s.labelPrice || s.entry,
+      color: pill,
+      fill: pill,
+      text: signalPillText(s),
+    });
   }
 
   return cmds;
