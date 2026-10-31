@@ -1,6 +1,9 @@
 /**
  * Watches Indicators “Forge Replay Mentor” and paints beginner ICT overlays
- * only while Bar Replay is active — drawings advance with the replay cursor.
+ * only while Bar Replay is active.
+ *
+ * Updates on closed candles only (cursor advance) — never on forming ticks —
+ * so prior BOS/FVG/OB stay put and only new/invalidated structures change.
  */
 
 import { useEffect, useRef } from "react";
@@ -17,15 +20,19 @@ import {
 import { REPLAY_MENTOR_DEFAULTS } from "./replay-mentor-indicator";
 
 const MAX_BARS = 4_000;
-const STUDY_DEBOUNCE_MS = 280;
-const PLAY_DEBOUNCE_MS = 160;
-const PRESENCE_POLL_MS = 5_000;
+const STUDY_DEBOUNCE_MS = 320;
+const PRESENCE_POLL_MS = 6_000;
 
-function fingerprint(cmds: readonly { kind: string; t1: number; p1: number }[]): string {
+function fingerprint(
+  cmds: readonly { kind: string; t1: number; p1: number; t2?: number; p2?: number; text?: string }[],
+): string {
   if (cmds.length === 0) return "empty";
-  const head = cmds.slice(0, 4);
-  const tail = cmds.length > 4 ? cmds.slice(-4) : [];
-  return `${cmds.length}|${[...head, ...tail].map((c) => `${c.kind}:${c.t1}:${c.p1}`).join(";")}`;
+  return cmds
+    .map(
+      (c) =>
+        `${c.kind}:${c.t1}:${c.p1}:${c.t2 ?? ""}:${c.p2 ?? ""}:${c.text ?? ""}`,
+    )
+    .join("|");
 }
 
 export function useReplayMentorStudy(enabled = true): void {
@@ -33,15 +40,14 @@ export function useReplayMentorStudy(enabled = true): void {
   const ready = useStore(chart.state, (s) => s.ready);
   const symbol = useStore(chart.state, (s) => s.symbol);
   const interval = useStore(chart.state, (s) => s.interval);
+  // Only coarse replay presence in React deps — cursor ticks use store.subscribe
+  // so we do NOT tear down / clear drawings on every forming candle update.
   const replayActive = useStore(barReplay.state, (s) => s.active);
-  const replayPhase = useStore(barReplay.state, (s) => s.phase);
-  const cursorIndex = useStore(barReplay.state, (s) => s.cursorIndex);
-  const formProgress = useStore(barReplay.state, (s) => Math.floor(s.formProgress * 8));
 
   const entityIdsRef = useRef<EntityId[]>([]);
   const busyRef = useRef(false);
-  const lastKeyRef = useRef("");
   const lastFpRef = useRef("");
+  const lastClosedCursorRef = useRef(-1);
   const genRef = useRef(0);
   const pendingRef = useRef(false);
 
@@ -63,6 +69,7 @@ export function useReplayMentorStudy(enabled = true): void {
           /* ignore */
         }
       }
+      lastFpRef.current = "";
     };
 
     const findStudyIds = (): EntityId[] => {
@@ -125,35 +132,33 @@ export function useReplayMentorStudy(enabled = true): void {
       }
     };
 
-    const replayLive =
-      replayActive && (replayPhase === "ready" || replayPhase === "playing");
-
-    const repaint = async (force = false) => {
+    const repaint = async (reason: "close" | "study" | "kickoff") => {
       if (cancelled) return;
       if (busyRef.current) {
         pendingRef.current = true;
         return;
       }
+
+      const replay = barReplay.state.get();
+      const replayLive =
+        replay.active && (replay.phase === "ready" || replay.phase === "playing");
       const studyIds = findStudyIds();
+
       if (studyIds.length === 0 || !replayLive) {
         genRef.current += 1;
         clearDrawings();
-        lastKeyRef.current = "";
-        lastFpRef.current = "";
+        lastClosedCursorRef.current = -1;
         return;
       }
+
+      // Forming ticks must not recompute — wait for the next closed candle.
+      if (reason === "close" && replay.formProgress > 0 && replay.phase === "playing") {
+        // Still mid-candle; ignore (cursor may have moved at form start — wait commit).
+        if (replay.cursorIndex === lastClosedCursorRef.current) return;
+      }
+
       const studyId = studyIds[0]!;
       const opts = readOptions(studyId);
-      const key = JSON.stringify({
-        symbol,
-        interval,
-        opts,
-        cursorIndex,
-        formProgress,
-        studies: studyIds,
-      });
-      if (!force && key === lastKeyRef.current && entityIdsRef.current.length > 0) return;
-
       const myGen = ++genRef.current;
       busyRef.current = true;
       try {
@@ -165,16 +170,25 @@ export function useReplayMentorStudy(enabled = true): void {
           includedStudies: [],
         });
         if (cancelled || myGen !== genRef.current) return;
+
         let bars = barsFromChartExport(exported);
-        if (bars.length > MAX_BARS) bars = bars.slice(bars.length - MAX_BARS);
-        if (bars.length < 30) {
-          if (entityIdsRef.current.length === 0) lastKeyRef.current = "";
-          return;
+        // Drop the live forming candle so ICT only reacts to closes.
+        const live = barReplay.state.get();
+        if (live.phase === "playing" && live.formProgress > 0 && bars.length > 0) {
+          bars = bars.slice(0, -1);
         }
+        if (bars.length > MAX_BARS) bars = bars.slice(bars.length - MAX_BARS);
+        if (bars.length < 30) return;
+
         const cmds = computeReplayMentor(bars, opts);
         const fp = fingerprint(cmds);
-        if (!force && fp === lastFpRef.current && lastKeyRef.current === key) return;
+        // Nothing new / removed — keep existing drawings (no flicker).
+        if (fp === lastFpRef.current && entityIdsRef.current.length > 0) {
+          lastClosedCursorRef.current = live.cursorIndex;
+          return;
+        }
         if (cancelled || myGen !== genRef.current) return;
+
         const ids =
           cmds.length === 0
             ? ([] as EntityId[])
@@ -191,8 +205,8 @@ export function useReplayMentorStudy(enabled = true): void {
         }
         const prev = entityIdsRef.current;
         entityIdsRef.current = ids;
-        lastKeyRef.current = key;
         lastFpRef.current = fp;
+        lastClosedCursorRef.current = barReplay.state.get().cursorIndex;
         for (const id of prev) {
           try {
             chart.removeEntity(id);
@@ -207,16 +221,16 @@ export function useReplayMentorStudy(enabled = true): void {
         if (!cancelled && pendingRef.current) {
           pendingRef.current = false;
           window.setTimeout(() => {
-            void repaint(false);
+            void repaint("close");
           }, 0);
         }
       }
     };
 
-    const scheduleRepaint = (ms = STUDY_DEBOUNCE_MS) => {
+    const scheduleRepaint = (reason: "close" | "study" | "kickoff", ms = STUDY_DEBOUNCE_MS) => {
       window.clearTimeout(studyTimer);
       studyTimer = window.setTimeout(() => {
-        void repaint(true);
+        void repaint(reason);
       }, ms);
     };
 
@@ -227,22 +241,60 @@ export function useReplayMentorStudy(enabled = true): void {
         if (findStudyIds().length === 0) {
           genRef.current += 1;
           clearDrawings();
-          lastKeyRef.current = "";
-          lastFpRef.current = "";
+          lastClosedCursorRef.current = -1;
           return;
         }
       }
-      if (/^(create|remove|price_scale|properties)/i.test(eventType)) scheduleRepaint();
+      if (/^(create|remove|price_scale|properties)/i.test(eventType)) {
+        scheduleRepaint("study");
+      }
     };
 
     const onStudyProperties = (...args: unknown[]) => {
       const id = String(args[0] ?? "");
       if (!id) return;
-      if (findStudyIds().some((s) => String(s) === id)) scheduleRepaint();
+      if (findStudyIds().some((s) => String(s) === id)) scheduleRepaint("study");
     };
 
+    // Closed-candle updates only: cursorIndex advances when a bar commits.
+    let prevCursor = barReplay.state.get().cursorIndex;
+    let prevActive = barReplay.state.get().active;
+    let prevPhase = barReplay.state.get().phase;
+    const unsubReplay = barReplay.state.subscribe(() => {
+      if (cancelled) return;
+      const s = barReplay.state.get();
+      if (!s.active) {
+        if (prevActive) {
+          clearDrawings();
+          lastClosedCursorRef.current = -1;
+        }
+        prevActive = s.active;
+        prevPhase = s.phase;
+        prevCursor = s.cursorIndex;
+        return;
+      }
+      const activated = !prevActive && s.active;
+      const cursorMoved = s.cursorIndex !== prevCursor;
+      const becameReady =
+        (prevPhase === "selecting" || prevPhase === "idle") &&
+        (s.phase === "ready" || s.phase === "playing");
+      prevActive = s.active;
+      prevPhase = s.phase;
+      prevCursor = s.cursorIndex;
+
+      // Ignore formProgress-only ticks — no scheduleRepaint here.
+      if (activated || becameReady) {
+        scheduleRepaint("kickoff", 200);
+        return;
+      }
+      if (cursorMoved && (s.phase === "ready" || s.phase === "playing")) {
+        // Bar closed / stepped — recompute once.
+        scheduleRepaint("close", 80);
+      }
+    });
+
     const kickoff = () => {
-      void repaint(true);
+      void repaint("kickoff");
     };
     try {
       widget.activeChart()?.dataReady(kickoff);
@@ -253,16 +305,14 @@ export function useReplayMentorStudy(enabled = true): void {
     const poll = window.setInterval(() => {
       if (cancelled || busyRef.current) return;
       const ids = findStudyIds();
-      if (ids.length === 0 || !replayLive) {
-        if (entityIdsRef.current.length > 0 || lastKeyRef.current) {
-          genRef.current += 1;
-          clearDrawings();
-          lastKeyRef.current = "";
-          lastFpRef.current = "";
-        }
+      const live = barReplay.state.get().active;
+      if (ids.length === 0 || !live) {
+        if (entityIdsRef.current.length > 0) clearDrawings();
         return;
       }
-      if (lastKeyRef.current === "") void repaint(false);
+      if (entityIdsRef.current.length === 0 && lastFpRef.current === "") {
+        void repaint("kickoff");
+      }
     }, PRESENCE_POLL_MS);
 
     try {
@@ -272,15 +322,13 @@ export function useReplayMentorStudy(enabled = true): void {
       /* ignore */
     }
 
-    // Replay cursor / phase changes → refresh overlays as candles form.
-    scheduleRepaint(replayPhase === "playing" ? PLAY_DEBOUNCE_MS : STUDY_DEBOUNCE_MS);
-
     return () => {
       cancelled = true;
       genRef.current += 1;
       window.clearTimeout(studyTimer);
       window.clearTimeout(kickoffTimer);
       window.clearInterval(poll);
+      unsubReplay();
       try {
         widget.unsubscribe("study_event", onStudyEvent as never);
         widget.unsubscribe("study_properties_changed", onStudyProperties as never);
@@ -288,18 +336,7 @@ export function useReplayMentorStudy(enabled = true): void {
         /* ignore */
       }
       clearDrawings();
-      lastKeyRef.current = "";
-      lastFpRef.current = "";
+      lastClosedCursorRef.current = -1;
     };
-  }, [
-    chart,
-    enabled,
-    ready,
-    symbol,
-    interval,
-    replayActive,
-    replayPhase,
-    cursorIndex,
-    formProgress,
-  ]);
+  }, [chart, barReplay, enabled, ready, symbol, interval, replayActive]);
 }
