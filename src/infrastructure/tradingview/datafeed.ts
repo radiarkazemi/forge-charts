@@ -241,9 +241,27 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     resolution: string,
     countBack = 5_000,
   ): Promise<readonly Bar[]> {
-    const symbol = this.symbols.findByTicker(normalizeTicker(stripExchange(ticker)));
+    return this.fetchReplayBufferBefore(ticker, resolution, countBack, Math.floor(Date.now() / 1000) + 60);
+  }
+
+  /**
+   * Prefetch history ending at `beforeSec` (exclusive). Used when the user
+   * selects a bar older than the latest provider page so prior candles exist.
+   */
+  async fetchReplayBufferBefore(
+    ticker: string,
+    resolution: string,
+    countBack = 5_000,
+    beforeSec: number,
+  ): Promise<readonly Bar[]> {
+    // Keep EX:TICKER so broker-specific TV books (CAPITALCOM vs OANDA) are used.
+    const exchange = parseExchangePrefix(ticker);
+    const symbol =
+      this.symbols.findByTicker(ticker, exchange) ??
+      this.symbols.findByTicker(normalizeTicker(stripExchange(ticker)), exchange) ??
+      this.symbols.findByTicker(normalizeTicker(stripExchange(ticker)));
     if (!symbol) return [];
-    const to = Math.floor(Date.now() / 1000) + 60;
+    const to = Number.isFinite(beforeSec) && beforeSec > 0 ? Math.floor(beforeSec) : Math.floor(Date.now() / 1000) + 60;
     const { bars } = await this.marketData.fetchHistory(symbol, resolution, {
       from: 0,
       to,
@@ -479,8 +497,10 @@ export class TradingViewDatafeed implements IBasicDataFeed {
 
   private toLibrarySymbolInfo(symbol: SymbolInfo): LibrarySymbolInfo {
     const native = this.marketData.describe(symbol).nativeIntervals;
-    const hasSeconds = native.some((iv) => parseInterval(iv).unit === "seconds");
     const hasIntraday = native.some((iv) => parseInterval(iv).unit === "minutes");
+    // Any feed that can serve 1m can synthesize 5S (Yahoo / cp / Binance / Germany).
+    const hasSeconds =
+      native.some((iv) => parseInterval(iv).unit === "seconds") || hasIntraday;
     const sessionOpen = isMarketSessionOpen(symbol);
 
     return {
@@ -509,9 +529,10 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       supported_resolutions: SUPPORTED_RESOLUTIONS,
       volume_precision: symbol.type === "crypto" ? 3 : 0,
       visible_plots_set: "ohlcv",
-      // Demo/replay must stay "streaming" so candle countdown runs; otherwise
-      // endofday freezes the timer when the real FX session is closed.
-      data_status: this.replayActive || sessionOpen ? "streaming" : "endofday",
+      // Keep streaming whenever we can serve historical intraday/seconds (5S
+      // synth from 1m). `endofday` made CL skip history loads on weekends.
+      data_status:
+        this.replayActive || sessionOpen || hasSeconds || hasIntraday ? "streaming" : "endofday",
     };
   }
 }

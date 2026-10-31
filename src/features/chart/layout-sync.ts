@@ -90,6 +90,17 @@ class LayoutSyncBus {
   private ignoringPrimaryInterval = false;
   private ignorePrimaryIntervalTimer = 0;
   private restorePrimaryTimer = 0;
+  /** Pending re-arm timeouts for drawing tools — must cancel on one-shot reset. */
+  private toolReapplyTimers: number[] = [];
+
+  private clearToolReapplyTimers(): void {
+    for (const id of this.toolReapplyTimers) window.clearTimeout(id);
+    this.toolReapplyTimers = [];
+  }
+
+  private scheduleToolReapply(fn: () => void, ms: number): void {
+    this.toolReapplyTimers.push(window.setTimeout(fn, ms));
+  }
 
   setFlags(flags: LayoutSyncFlags): void {
     // Always keep drawings ON unless the user explicitly turns them off.
@@ -353,8 +364,8 @@ class LayoutSyncBus {
     ) {
       void this.applyToolToPane(paneIndex, tool);
       // Hit-testing needs a real size before CL accepts the tool on secondaries.
-      window.setTimeout(() => entry?.controller.requestResize(), 120);
-      window.setTimeout(() => {
+      this.scheduleToolReapply(() => entry?.controller.requestResize(), 120);
+      this.scheduleToolReapply(() => {
         if (this.sharedTool === tool) void this.applyToolToPane(paneIndex, tool);
       }, 350);
     }
@@ -370,6 +381,7 @@ class LayoutSyncBus {
   notifyToolSelected(sourceIndex: number, tool: string | null): void {
     if (this.applyingTool) return;
     if (sourceIndex !== 0) return;
+    this.clearToolReapplyTimers();
     this.sharedTool = tool;
     // Cursor / eraser: mirror to all panes so every layer returns to Cross.
     if (!tool || tool === "cursor" || tool === "arrow_cursor" || tool === "dot") {
@@ -388,8 +400,8 @@ class LayoutSyncBus {
     this.emitActive();
     void this.applyToolToAllPanes(tool);
     // Secondaries often need a resize before selectLineTool sticks.
-    window.setTimeout(() => this.reflowVisible(), 80);
-    window.setTimeout(() => {
+    this.scheduleToolReapply(() => this.reflowVisible(), 80);
+    this.scheduleToolReapply(() => {
       if (this.sharedTool === tool) void this.applyToolToAllPanes(tool);
     }, 280);
   }
@@ -636,8 +648,26 @@ class LayoutSyncBus {
 
   /** After one drawing completes, return every pane to the Cross tool. */
   async resetToolsToCursor(): Promise<void> {
+    // Cancel any pending "re-arm rectangle" timeouts from notifyToolSelected —
+    // those were re-selecting the shape after one-shot reset.
+    this.clearToolReapplyTimers();
     this.sharedTool = "cursor";
+    for (const { index, controller } of this.panes.values()) {
+      if (index >= this.activeCount || !controller.isReady) continue;
+      controller.ensureStayInDrawingModeOff();
+    }
     await this.applyToolToAllPanes("cursor");
+    // CL can flip stay-in-draw / tool back on after create — force Cross again.
+    this.scheduleToolReapply(() => {
+      for (const { index, controller } of this.panes.values()) {
+        if (index >= this.activeCount) continue;
+        controller.ensureStayInDrawingModeOff();
+      }
+      void this.applyToolToAllPanes("cursor");
+    }, 50);
+    this.scheduleToolReapply(() => {
+      void this.applyToolToAllPanes("cursor");
+    }, 200);
   }
 
   recordPaneInterval(paneIndex: number, interval: Interval): void {
@@ -782,6 +812,13 @@ class LayoutSyncBus {
     const idKey = String(entityId);
     const shouldResetTool =
       eventType === "create" && !this.applyingTool && !this.mirrorIds.has(idKey);
+
+    // Drop the armed tool immediately so delayed re-apply timers cannot stick
+    // on rectangle/trend after the shape is finished.
+    if (shouldResetTool) {
+      this.clearToolReapplyTimers();
+      this.sharedTool = "cursor";
+    }
 
     // Single-pane (or drawings sync off): still return to Cross after one use.
     if (this.activeCount < 2 || !this.flags.drawings) {

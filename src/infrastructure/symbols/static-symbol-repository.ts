@@ -6,7 +6,7 @@ const UTC = "Etc/UTC";
 
 type Seed = [ticker: string, name: string, exchange: string, type: SymbolType, precision: number];
 
-/** CFD / FX brokers with Yahoo-backed underlyings (OANDA + 3). */
+/** CFD / FX brokers served from each venue’s TradingView book (not Yahoo proxies). */
 const CFD_BROKERS = ["OANDA", "PEPPERSTONE", "IG", "CAPITALCOM"] as const;
 
 /** Shared FX / metal / index CFD books listed under each CFD broker. */
@@ -59,11 +59,15 @@ const SEEDS: readonly Seed[] = [
   ["NIM", "نیم سکه", "IRAN", "commodity", 0],
   ["ROB", "ربع سکه", "IRAN", "commodity", 0],
   ["ONS", "انس جهانی (بازار ایران)", "IRAN", "commodity", 2],
-  // Gold / FX — FOREXCOM / FXPRO (Germany live for XAU)
+  // Gold / FX / indices — FOREXCOM / FXPRO / FXCM (Germany live for XAU; TV broker books for indices/FX)
   ["XAUUSD", "Gold Spot / U.S. Dollar", "FOREXCOM", "forex", 2],
   ["XAUUSD", "Gold Spot / U.S. Dollar", "FXPRO", "forex", 2],
+  ["XAUUSD", "Gold Spot / U.S. Dollar", "FXCM", "forex", 2],
   ["XAUUSD", "Gold Spot / U.S. Dollar (PAXG)", "BINANCE", "forex", 2],
   ["GC1!", "Gold Futures", "FOREXCOM", "futures", 2],
+  ["NAS100", "US 100 Cash (Nasdaq 100)", "FOREXCOM", "index", 2],
+  ["US30", "US 30 Cash (Dow Jones)", "FOREXCOM", "index", 2],
+  ["US500", "US 500 Cash (S&P 500)", "FOREXCOM", "index", 2],
   ["EURUSD", "Euro / U.S. Dollar", "FOREXCOM", "forex", 5],
   ["GBPUSD", "British Pound / U.S. Dollar", "FOREXCOM", "forex", 5],
   ["USDJPY", "U.S. Dollar / Japanese Yen", "FOREXCOM", "forex", 3],
@@ -76,6 +80,23 @@ const SEEDS: readonly Seed[] = [
   ["GBPUSD", "British Pound / U.S. Dollar", "FXPRO", "forex", 5],
   ["USDJPY", "U.S. Dollar / Japanese Yen", "FXPRO", "forex", 3],
   ["XAGUSD", "Silver Spot / U.S. Dollar", "FXPRO", "commodity", 3],
+  ["EURUSD", "Euro / U.S. Dollar", "FXCM", "forex", 5],
+  ["GBPUSD", "British Pound / U.S. Dollar", "FXCM", "forex", 5],
+  ["USDJPY", "U.S. Dollar / Japanese Yen", "FXCM", "forex", 3],
+  ["AUDUSD", "Australian Dollar / U.S. Dollar", "FXCM", "forex", 5],
+  ["USDCHF", "U.S. Dollar / Swiss Franc", "FXCM", "forex", 5],
+  ["USDCAD", "U.S. Dollar / Canadian Dollar", "FXCM", "forex", 5],
+  ["NZDUSD", "New Zealand Dollar / U.S. Dollar", "FXCM", "forex", 5],
+  ["EURGBP", "Euro / British Pound", "FXCM", "forex", 5],
+  ["EURJPY", "Euro / Japanese Yen", "FXCM", "forex", 3],
+  ["GBPJPY", "British Pound / Japanese Yen", "FXCM", "forex", 3],
+  ["XAGUSD", "Silver Spot / U.S. Dollar", "FXCM", "commodity", 3],
+  ["USOIL", "WTI Crude Oil", "FXCM", "commodity", 2],
+  ["SPX500", "S&P 500", "FXCM", "index", 2],
+  ["NAS100", "US 100", "FXCM", "index", 2],
+  ["US30", "Dow Jones 30", "FXCM", "index", 2],
+  ["GER40", "Germany 40", "FXCM", "index", 2],
+  ["UK100", "UK 100", "FXCM", "index", 2],
   // Indices aliases (cash) under TVC / SP
   ["NAS100", "US 100 Cash (Nasdaq 100)", "TVC", "index", 2],
   ["US30", "US 30 Cash (Dow Jones)", "TVC", "index", 2],
@@ -128,6 +149,7 @@ export const EXCHANGE_PRIORITY = [
   "IG",
   "CAPITALCOM",
   "FOREXCOM",
+  "FXCM",
   "BINANCE",
   "FXPRO",
   "TVC",
@@ -170,6 +192,7 @@ const CFD_EXCHANGES = new Set<string>([
   "IG",
   "CAPITALCOM",
   "FOREXCOM",
+  "FXCM",
   "FXPRO",
   "TVC",
 ]);

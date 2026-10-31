@@ -271,6 +271,10 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
             try {
               widget?.save((state) => {
                 if (!state || typeof state !== "object") return;
+                // Refuse to persist a hollow layout (no panes / charts) — protects
+                // study templates and drawings when history temporarily returns noData.
+                const charts = (state as { charts?: unknown }).charts;
+                if (Array.isArray(charts) && charts.length === 0) return;
                 storage.set(autosaveKey, state);
                 try {
                   storage.set(AUTOSAVE_BAK_KEY, state);

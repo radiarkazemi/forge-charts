@@ -11,6 +11,7 @@ import {
 import type { MarketDataProvider, Unsubscribe } from "@/application";
 import { buildUrl, fetchJson, HttpError } from "../http/fetch-json";
 import { startPolling } from "./polling";
+import { aggregateBars, synthesizeFromMinuteBars, SYNTH_SECONDS_INTERVALS } from "./synthesize-seconds";
 
 const CHART_BASE = "/api/yahoo/v8/finance/chart";
 const SPARK_URL = "/api/yahoo/v8/finance/spark";
@@ -26,7 +27,7 @@ const YAHOO_BY_TICKER: Readonly<Record<string, string>> = {
   "ES1!": "ES=F",
   "NQ1!": "NQ=F",
   "YM1!": "YM=F",
-  // FX majors / crosses (OANDA / Pepperstone / IG / Capital.com / FOREXCOM books)
+  // FX majors / crosses — Yahoo FX only when no TV broker book owns the listing.
   EURUSD: "EURUSD=X",
   GBPUSD: "GBPUSD=X",
   USDJPY: "USDJPY=X",
@@ -37,10 +38,12 @@ const YAHOO_BY_TICKER: Readonly<Record<string, string>> = {
   EURGBP: "EURGBP=X",
   EURJPY: "EURJPY=X",
   GBPJPY: "GBPJPY=X",
-  // CFD index cash names → continuous futures (near 24h) for broker books
+  // Index cash names → futures/cash. Used when TradingView broker history
+  // is empty (deep replay gaps / TV outage); TV provider still wins first.
   NAS100: "NQ=F",
   US30: "YM=F",
   US500: "ES=F",
+  SPX500: "ES=F",
   GER40: "^GDAXI",
   UK100: "^FTSE",
   JPN225: "^N225",
@@ -49,6 +52,7 @@ const YAHOO_BY_TICKER: Readonly<Record<string, string>> = {
   SPX: "^GSPC",
   NDX: "^NDX",
   DJI: "^DJI",
+  DOW: "YM=F",
   DAX: "^GDAXI",
   FTSE: "^FTSE",
   NI225: "^N225",
@@ -101,40 +105,10 @@ const AGGREGATE_FROM: ReadonlyArray<{ interval: Interval; parent: Interval; grou
 ];
 
 const NATIVE_INTERVALS: readonly Interval[] = [
+  ...SYNTH_SECONDS_INTERVALS,
   ...YAHOO_INTERVALS.map((i) => i.interval),
   ...AGGREGATE_FROM.map((i) => i.interval),
 ];
-
-function alignTime(tsSec: number, step: number): number {
-  return Math.floor(tsSec / step) * step;
-}
-
-/** Aggregate lower-TF bars into `stepSec` candles (standard OHLCV rollup). */
-function aggregateBars(bars: readonly Bar[], stepSec: number): Bar[] {
-  if (stepSec <= 1 || bars.length === 0) return [...bars];
-  const out: Bar[] = [];
-  let cur: Bar | null = null;
-  let bucket = -1;
-  for (const bar of bars) {
-    const start = alignTime(bar.time, stepSec);
-    if (!cur || start !== bucket) {
-      if (cur) out.push(cur);
-      bucket = start;
-      cur = { time: start, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume };
-    } else {
-      cur = {
-        time: start,
-        open: cur.open,
-        high: Math.max(cur.high, bar.high),
-        low: Math.min(cur.low, bar.low),
-        close: bar.close,
-        volume: cur.volume + bar.volume,
-      };
-    }
-  }
-  if (cur) out.push(cur);
-  return out;
-}
 
 interface ChartQuote {
   open?: (number | null)[];
@@ -167,13 +141,16 @@ function resultToBars(result: ChartResult): Bar[] {
     const close = quote.close?.[i];
     const time = timestamps[i];
     if (open == null || close == null || time == null) continue;
+    const highRaw = quote.high?.[i];
+    const lowRaw = quote.low?.[i];
+    const volRaw = quote.volume?.[i];
     bars.push({
       time,
       open,
-      high: quote.high?.[i] ?? Math.max(open, close),
-      low: quote.low?.[i] ?? Math.min(open, close),
+      high: Number.isFinite(highRaw) ? Number(highRaw) : Math.max(open, close),
+      low: Number.isFinite(lowRaw) ? Number(lowRaw) : Math.min(open, close),
       close,
-      volume: quote.volume?.[i] ?? 0,
+      volume: Number.isFinite(volRaw) ? Number(volRaw) : 0,
     });
   }
   return bars;
@@ -195,7 +172,11 @@ export class YahooProvider implements MarketDataProvider {
   readonly isSynthetic = false;
 
   supports(symbol: SymbolInfo, interval: Interval): boolean {
+    // Yahoo stays behind TradingViewBrokerProvider in the chain so broker books
+    // win when available; Yahoo only fills replay/deep gaps if TV history fails.
     if (!(symbol.ticker.toUpperCase() in YAHOO_BY_TICKER)) return false;
+    const { unit, count } = parseInterval(interval);
+    if (unit === "seconds") return count >= 1 && count <= 45;
     return this.spec(interval) !== null || this.aggregatePlan(interval) !== null;
   }
 
@@ -204,6 +185,26 @@ export class YahooProvider implements MarketDataProvider {
   }
 
   async fetchBars(symbol: SymbolInfo, interval: Interval, range: BarRange): Promise<Bar[]> {
+    const { unit } = parseInterval(interval);
+    if (unit === "seconds") {
+      const step = intervalSeconds(interval);
+      const parentNeed = Math.min(
+        7 * 1_440,
+        Math.max(300, Math.ceil((Math.max(range.countBack, 200) * step) / 60) + 80),
+      );
+      const parents = await this.fetchBars(symbol, "1", {
+        from: 0,
+        to: range.to > 0 ? range.to : Math.floor(Date.now() / 1000) + 60,
+        countBack: parentNeed,
+      });
+      if (!parents.length) return [];
+      const now = Math.floor(Date.now() / 1000);
+      const before = range.to > 0 ? Math.min(range.to, now + 1) : now + 1;
+      const bars = synthesizeFromMinuteBars(parents, step).filter((bar) => bar.time < before);
+      if (!bars.length) return [];
+      return bars.slice(-Math.max(range.countBack, 1));
+    }
+
     const plan = this.aggregatePlan(interval);
     if (plan) {
       // Fetch denser parent bars, then roll up (e.g. 60m → 4h for AAPL).
@@ -245,11 +246,19 @@ export class YahooProvider implements MarketDataProvider {
 
   subscribeBars(symbol: SymbolInfo, interval: Interval, onBar: (bar: Bar) => void): Unsubscribe {
     const step = intervalSeconds(interval);
+    const { unit } = parseInterval(interval);
+    // Seconds need a faster poll so 5S candles advance between Yahoo 1m refreshes.
+    const pollMs = unit === "seconds" ? Math.min(LIVE_POLL_MS, Math.max(1_000, step * 1_000)) : LIVE_POLL_MS;
     let lastTime = -1;
     return startPolling(async () => {
       if (!isMarketSessionOpen(symbol)) return;
       const to = Math.floor(Date.now() / 1000) + step;
-      const bars = await this.fetchBars(symbol, interval, { from: to - step * 4, to, countBack: 3 });
+      const lookback = unit === "seconds" ? Math.max(60, step * 24) : step * 4;
+      const bars = await this.fetchBars(symbol, interval, {
+        from: to - lookback,
+        to,
+        countBack: unit === "seconds" ? Math.max(24, Math.ceil(120 / step)) : 3,
+      });
       const last = bars.at(-1);
       if (!last) return;
       // Do not invent new periods when Yahoo has no fresh bar.
@@ -260,7 +269,7 @@ export class YahooProvider implements MarketDataProvider {
       }
       lastTime = last.time;
       onBar(last);
-    }, LIVE_POLL_MS);
+    }, pollMs);
   }
 
   async fetchQuotes(symbols: readonly SymbolInfo[]): Promise<Quote[]> {

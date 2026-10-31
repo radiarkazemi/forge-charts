@@ -396,18 +396,28 @@ export class BarReplayController {
     const parentNeed = stepSec < 60 ? 20_000 : 8_000;
     const microNeed = stepSec < 60 ? 50_000 : 20_000;
 
-    let buffer = await datafeed.fetchReplayBuffer(symbol, resolution, parentNeed);
-    if (buffer.length === 0) {
-      try {
-        const exported = await chart.exportData({
+    // Chart export first — keeps candles the user already sees (including those
+    // before the click). A fresh provider page often starts after the selection
+    // and used to snap the cutoff to buffer[0], wiping prior history.
+    let exported: Bar[] = [];
+    try {
+      exported = barsFromExport(
+        await chart.exportData({
           includeTime: true,
           includeSeries: true,
           includedStudies: [],
-        });
-        buffer = barsFromExport(exported);
-      } catch {
-        buffer = [];
-      }
+        }),
+      );
+    } catch {
+      exported = [];
+    }
+
+    let buffer = await datafeed.fetchReplayBuffer(symbol, resolution, parentNeed);
+    if (buffer.length === 0) {
+      buffer = [...exported];
+    } else if (exported.length > 0) {
+      // Fetched OHLC wins on overlap; exported fills older visible bars.
+      buffer = mergeBarsPreferPrimary(buffer, exported);
     }
 
     // Prefer a denser TF for true intra-bar paths; also use it to synthesize
@@ -428,12 +438,42 @@ export class BarReplayController {
     if (buffer.length === 0) return false;
 
     const prev = this.state.get();
-    const anchor =
+    // requestSelectBar may return ms on some CL builds — normalize to unix sec.
+    const rawAnchor =
       anchorTimeSec != null && Number.isFinite(anchorTimeSec)
         ? Number(anchorTimeSec)
         : Number(this.buffer[Math.max(0, prev.cursorIndex)]?.time ?? buffer[0]!.time);
+    const anchor = rawAnchor > 1e12 ? Math.floor(rawAnchor / 1000) : Math.floor(rawAnchor);
+
+    // If the selection is older than anything we fetched, page history ending
+    // at the click so prior candles exist in the replay buffer.
+    if (anchor + stepSec < Number(buffer[0]!.time)) {
+      try {
+        const older = await datafeed.fetchReplayBufferBefore(
+          symbol,
+          resolution,
+          parentNeed,
+          anchor + stepSec,
+        );
+        if (older.length > 0) {
+          buffer = densifyReplayBuffer(mergeBarsPreferPrimary(older, buffer), micro, stepSec);
+        }
+      } catch {
+        /* keep current buffer */
+      }
+    }
+
     let index = nearestBarIndex(buffer, anchor);
     if (index < 0) index = 0;
+    // Never snap a mid-chart click onto the first buffer bar when the click is
+    // clearly older — that erased all "before selection" candles.
+    if (
+      index === 0 &&
+      buffer.length > 1 &&
+      anchor + stepSec < Number(buffer[0]!.time) - stepSec
+    ) {
+      // Still no coverage: keep index 0 but we already tried older fetch above.
+    }
 
     let startIndex = index;
     if (!opts.resetStart && prev.startIndex >= 0 && this.buffer[prev.startIndex]) {
@@ -468,6 +508,16 @@ export class BarReplayController {
     await this.removeMarker();
     await this.drawMarker(buffer[index]!.time);
     this.reloadSeries();
+    // Pin the viewport so the selection sits at the right edge with history
+    // to the left (TradingView Bar Replay behavior).
+    try {
+      const end = Number(buffer[index]!.time) + stepSec;
+      const visible = Math.max(80, Math.min(400, index + 1));
+      const start = Number(buffer[Math.max(0, index - visible + 1)]!.time);
+      void chart.setVisibleRange({ from: start, to: end });
+    } catch {
+      /* ignore */
+    }
     return true;
   }
 

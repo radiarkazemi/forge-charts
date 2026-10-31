@@ -1,6 +1,8 @@
-import { parseInterval, type Bar, type BarRange, type Interval, type Quote, type SymbolInfo } from "@/domain";
+import { intervalSeconds, parseInterval, type Bar, type BarRange, type Interval, type Quote, type SymbolInfo } from "@/domain";
 import type { MarketDataProvider, Unsubscribe } from "@/application";
 import { buildUrl, fetchJson, HttpError } from "../http/fetch-json";
+import { startPolling } from "./polling";
+import { synthesizeFromMinuteBars, SYNTH_SECONDS_INTERVALS } from "./synthesize-seconds";
 
 const REST_BASE = "/api/binance/api/v3";
 const WS_BASE = "wss://stream.binance.com:9443/ws";
@@ -28,7 +30,7 @@ const KLINE_BY_INTERVAL: Readonly<Record<string, string>> = {
   "1M": "1M",
 };
 
-const NATIVE_INTERVALS: readonly Interval[] = Object.keys(KLINE_BY_INTERVAL);
+const NATIVE_INTERVALS: readonly Interval[] = [...SYNTH_SECONDS_INTERVALS, ...Object.keys(KLINE_BY_INTERVAL)];
 
 type Kline = [openTime: number, open: string, high: string, low: string, close: string, volume: string];
 
@@ -56,7 +58,10 @@ export class BinanceProvider implements MarketDataProvider {
   private geoBlocked = false;
 
   supports(symbol: SymbolInfo, interval: Interval): boolean {
-    return !this.geoBlocked && symbol.ticker in PAIR_BY_TICKER && this.klineInterval(interval) !== null;
+    if (this.geoBlocked || !(symbol.ticker in PAIR_BY_TICKER)) return false;
+    const { unit, count } = parseInterval(interval);
+    if (unit === "seconds") return count >= 1 && count <= 45;
+    return this.klineInterval(interval) !== null;
   }
 
   nativeIntervals(): readonly Interval[] {
@@ -64,6 +69,23 @@ export class BinanceProvider implements MarketDataProvider {
   }
 
   async fetchBars(symbol: SymbolInfo, interval: Interval, range: BarRange): Promise<Bar[]> {
+    const { unit } = parseInterval(interval);
+    if (unit === "seconds") {
+      const step = intervalSeconds(interval);
+      const parentNeed = Math.min(MAX_LIMIT, Math.ceil((Math.max(range.countBack, 50) * step) / 60) + 40);
+      const parents = await this.fetchBars(symbol, "1", {
+        from: 0,
+        to: range.to > 0 ? range.to : Math.floor(Date.now() / 1000) + 60,
+        countBack: parentNeed,
+      });
+      if (!parents.length) return [];
+      const now = Math.floor(Date.now() / 1000);
+      const before = range.to > 0 ? Math.min(range.to, now + 1) : now + 1;
+      return synthesizeFromMinuteBars(parents, step)
+        .filter((bar) => bar.time < before)
+        .slice(-Math.max(range.countBack, 1));
+    }
+
     const url = buildUrl(`${REST_BASE}/klines`, {
       symbol: this.pair(symbol),
       interval: this.klineInterval(interval) ?? "1m",
@@ -75,6 +97,22 @@ export class BinanceProvider implements MarketDataProvider {
   }
 
   subscribeBars(symbol: SymbolInfo, interval: Interval, onBar: (bar: Bar) => void): Unsubscribe {
+    const { unit } = parseInterval(interval);
+    if (unit === "seconds") {
+      const step = intervalSeconds(interval);
+      const pollMs = Math.min(3_000, Math.max(1_000, step * 1_000));
+      return startPolling(async () => {
+        const to = Math.floor(Date.now() / 1000) + step;
+        const bars = await this.fetchBars(symbol, interval, {
+          from: to - Math.max(60, step * 24),
+          to,
+          countBack: Math.max(24, Math.ceil(120 / step)),
+        });
+        const last = bars.at(-1);
+        if (last) onBar(last);
+      }, pollMs);
+    }
+
     const stream = `${this.pair(symbol).toLowerCase()}@kline_${this.klineInterval(interval) ?? "1m"}`;
     let socket: WebSocket | null = null;
     let closed = false;

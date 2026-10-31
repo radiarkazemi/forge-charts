@@ -12,6 +12,7 @@ import { MOBILE_APP_NAV_HEIGHT, MOBILE_CHART_BAR_HEIGHT } from "./mobile-chrome"
 
 const QUICK_IV: ReadonlyArray<{ readonly value: Interval; readonly label: string }> = [
   { value: "1S", label: "1s" },
+  { value: "5S", label: "5s" },
   { value: "1", label: "1m" },
   { value: "5", label: "5m" },
   { value: "15", label: "15m" },

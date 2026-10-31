@@ -110,8 +110,20 @@ const NO_HEADER_DISABLED: ChartingLibraryFeatureset[] = [
   ...HEADER_FEATURES,
 ];
 
-/** Match TradingView's common top-bar favorites: 1m 5m 15m 30m 1h 4h D W M 3M */
-const FAVORITE_INTERVALS = ["1", "5", "15", "30", "60", "240", "1D", "1W", "1M", "3M"] as ResolutionString[];
+/** Top-bar favorites — include 5S so seconds are one click away. */
+const FAVORITE_INTERVALS = [
+  "5S",
+  "1",
+  "5",
+  "15",
+  "30",
+  "60",
+  "240",
+  "1D",
+  "1W",
+  "1M",
+  "3M",
+] as ResolutionString[];
 
 /**
  * Stars in the left drawing toolbar flyouts — match tradingview.com Supercharts

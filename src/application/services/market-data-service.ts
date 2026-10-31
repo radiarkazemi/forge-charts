@@ -48,6 +48,7 @@ export class MarketDataService {
   async fetchHistory(symbol: SymbolInfo, interval: Interval, range: BarRange): Promise<HistoryResult> {
     let lastError: unknown = null;
     let sawRealProvider = false;
+    let emptyRealId: string | null = null;
 
     for (const provider of this.providers) {
       if (!provider.supports(symbol, interval)) continue;
@@ -62,11 +63,23 @@ export class MarketDataService {
       if (!provider.isSynthetic) sawRealProvider = true;
       try {
         const bars = normalizeBars(await provider.fetchBars(symbol, interval, range));
+        // Empty real history must not stop the chain (e.g. missing Mongo → Yahoo).
+        // If every real feed is empty (end of paging), return noData — not an error.
+        if (bars.length === 0 && !provider.isSynthetic) {
+          emptyRealId = provider.id;
+          lastError = new Error(`${provider.id}: empty history for ${symbol.ticker} @ ${interval}`);
+          this.logger.warn(`[market-data] ${provider.id} empty for ${symbol.ticker} @ ${interval}`);
+          continue;
+        }
         return { bars, providerId: provider.id, isSynthetic: provider.isSynthetic };
       } catch (error) {
         lastError = error;
         this.logger.warn(`[market-data] ${provider.id} failed for ${symbol.ticker} @ ${interval}`, error);
       }
+    }
+
+    if (emptyRealId) {
+      return { bars: [], providerId: emptyRealId, isSynthetic: false };
     }
 
     throw lastError ?? new Error(`No data for ${symbol.ticker} @ ${interval}`);

@@ -72,6 +72,7 @@ export class ChartController {
   private syncHooks: ChartSyncHooks = {};
   private orcaEntityIds: EntityId[] = [];
   private readonly drawingHandlers = new Set<(entityId: EntityId, eventType: string) => void>();
+  private oneShotDrawingHandler: ((entityId: EntityId, eventType: string) => void) | null = null;
   private drawingBridge: ((entityId: EntityId, eventType: string) => void) | null = null;
   private readonly mouseDownHandlers = new Set<(params: MouseEventParams) => void>();
   private mouseDownBridge: ((params: MouseEventParams) => void) | null = null;
@@ -149,6 +150,16 @@ export class ChartController {
     this.bindStudyBridge(widget);
     // Match TradingView default: one-shot drawings (return to Cross after each shape).
     this.ensureStayInDrawingModeOff();
+    // Belt-and-suspenders: any finished shape on this pane returns to Cross even
+    // if layout-sync missed the create event (multipane races).
+    if (!this.oneShotDrawingHandler) {
+      this.oneShotDrawingHandler = (_id, eventType) => {
+        if (eventType !== "create") return;
+        void this.exitDrawingTool();
+        window.setTimeout(() => void this.exitDrawingTool(), 80);
+      };
+      this.drawingHandlers.add(this.oneShotDrawingHandler);
+    }
   }
 
   private bindDrawingBridge(widget: IChartingLibraryWidget): void {
@@ -385,6 +396,16 @@ export class ChartController {
     }
   }
 
+  /** Force Cross tool + stay-in-draw OFF (TradingView one-shot default). */
+  async exitDrawingTool(): Promise<void> {
+    this.ensureStayInDrawingModeOff();
+    try {
+      await this.widget?.selectLineTool("cursor" as never);
+    } catch {
+      /* ignore */
+    }
+  }
+
   /** Switch theme now, or as soon as the widget becomes ready. */
   async changeTheme(mode: ThemeMode): Promise<void> {
     this.desiredTheme = mode;
@@ -566,7 +587,16 @@ export class ChartController {
   /** Select a drawing tool (same as left toolbar click). */
   async selectLineTool(tool: string): Promise<void> {
     try {
+      // Cross / eraser always leave sticky draw mode.
+      if (tool === "cursor" || tool === "arrow_cursor" || tool === "eraser" || tool === "dot") {
+        this.ensureStayInDrawingModeOff();
+      }
       await this.widget?.selectLineTool(tool as never);
+      // CL sometimes re-enables stay-in-draw when arming a shape — force off again.
+      if (tool !== "cursor" && tool !== "arrow_cursor" && tool !== "dot") {
+        window.setTimeout(() => this.ensureStayInDrawingModeOff(), 0);
+        window.setTimeout(() => this.ensureStayInDrawingModeOff(), 120);
+      }
     } catch {
       /* ignore */
     }
