@@ -1936,12 +1936,22 @@ def _fill_iran_session_gaps(
     return filled
 
 
+def _iran_toman_round(px: float) -> float:
+    """Iran gold prints are whole toman — never emit fractional clamp artifacts."""
+    if not isinstance(px, (int, float)) or px <= 0:
+        return float(px) if isinstance(px, (int, float)) else 0.0
+    # Ounce USD stays fractional; toman fields are >> 1000.
+    if px >= 1_000:
+        return float(int(round(px)))
+    return float(px)
+
+
 def _clamp_iran_tick_wicks(bar: dict[str, float], max_range: float) -> dict[str, float]:
     """Keep open/close; shrink wild tick H/L toward a Faraz-like envelope."""
-    o = float(bar["o"])
-    c = float(bar["c"])
-    h = float(bar["h"])
-    l = float(bar["l"])
+    o = _iran_toman_round(float(bar["o"]))
+    c = _iran_toman_round(float(bar["c"]))
+    h = _iran_toman_round(float(bar["h"]))
+    l = _iran_toman_round(float(bar["l"]))
     body_hi = max(o, c)
     body_lo = min(o, c)
     # Always keep the body; allow at most max_range total span.
@@ -1957,8 +1967,8 @@ def _clamp_iran_tick_wicks(bar: dict[str, float], max_range: float) -> dict[str,
     return {
         "t": int(bar["t"]),
         "o": o,
-        "h": h2,
-        "l": l2,
+        "h": _iran_toman_round(h2),
+        "l": _iran_toman_round(l2),
         "c": c,
         "v": float(bar.get("v") or 0),
     }
@@ -2518,10 +2528,12 @@ def _load_iran_history_mongo(
                         is_tick_fold = src in {"faraz", "faraz-tick"} or src.startswith(
                             "faraz-tick"
                         )
-                        # Minute+: closed tick folds hide real Faraz OHLC — drop them.
-                        # Sub-minute: Faraz has no archive; closed faraz-tick bars ARE
-                        # the history (and the only feed for 10S replay densify).
-                        if step >= 60 and is_tick_fold and t0 < wall_t:
+                        # Minute+: when Faraz customer auth works, drop closed tick
+                        # folds so live Faraz OHLC wins. When auth is dead (401),
+                        # tick folds ARE the only intraday history — keep them or
+                        # G18/ABSHODE charts go incomplete / gapfilled-wrong.
+                        auth_ok = _FARAZ_CUSTOMER_AUTH_OK is True
+                        if step >= 60 and is_tick_fold and t0 < wall_t and auth_ok:
                             continue
                         candidates.append(
                             {
@@ -2675,10 +2687,14 @@ def _load_iran_history_mongo(
                 sources.append("anil_gold.tick_1s")
                 if tip_rebuild_from is None:
                     _merge_tick_into_forming(recent)
-                # Patch / rebuild holes behind the tip when Faraz customer auth is stale.
-                _bucket_ticks_fill_missing(recent, overwrite_from=tip_rebuild_from)
-                if tip_rebuild_from is not None:
+                # Auth-off: never wipe stored tick-fold OHLC (they're the history).
+                # Only fill empty buckets. Auth-on: tip rebuild may overwrite junk.
+                overwrite = tip_rebuild_from if _FARAZ_CUSTOMER_AUTH_OK is True else None
+                _bucket_ticks_fill_missing(recent, overwrite_from=overwrite)
+                if tip_rebuild_from is not None and overwrite is not None:
                     sources.append("tick-rebuild")
+                elif tip_rebuild_from is not None:
+                    sources.append("tick-fill")
         else:
             parent_coll = None
             if step >= 86_400:
@@ -2750,13 +2766,12 @@ def _load_iran_history_mongo(
                 sources.append(f"derived-{derived}")
 
         # Faraz-like continuity: fill short intraday holes (missed poll minutes).
-        # When Faraz customer auth is dead, skip aggressive gapfill — long flat
-        # carry-forwards made G18 look broken on every TF.
+        # Auth-off: almost no gapfill — flat carry-forwards looked like broken
+        # G18/ABSHODE candles. Prefer real tick / Faraz bars with natural gaps.
         if step <= 1_800:
             gap_wall = wall_t if before is None else min(wall_t, before - step)
             auth_ok = _FARAZ_CUSTOMER_AUTH_OK is True
-            # Auth-off still fills short Faraz poll holes (G18 gaps); keep overnight empty.
-            max_steps = (36 if step <= 60 else 20) if not auth_ok else (90 if step <= 60 else 45)
+            max_steps = (3 if step <= 60 else 2) if not auth_ok else (90 if step <= 60 else 45)
             filled = _fill_iran_session_gaps(
                 buckets,
                 step,
@@ -2937,7 +2952,17 @@ async def iran_gold_history(request: web.Request) -> web.Response:
     # TradingView stop left-paging (15S “no previous history”). Prefer denser
     # real bars via reduced gapfill above instead.
     ordered = ordered[-limit:]
-    bars = [[int(b["t"]), b["o"], b["h"], b["l"], b["c"], b["v"]] for b in ordered]
+    bars = [
+        [
+            int(b["t"]),
+            _iran_toman_round(float(b["o"])),
+            _iran_toman_round(float(b["h"])),
+            _iran_toman_round(float(b["l"])),
+            _iran_toman_round(float(b["c"])),
+            float(b.get("v") or 0),
+        ]
+        for b in ordered
+    ]
     return web.json_response(
         {
             "symbol": channel,

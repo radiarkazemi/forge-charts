@@ -312,10 +312,14 @@ export function SymbolSearchDialog({ open, onClose }: SymbolSearchDialogProps) {
       <List dense disablePadding sx={{ overflowY: "auto", flex: 1, pb: 1 }}>
         {filtered.map((s) => {
           const av = avatarFor(s);
-          const title = language === "fa" && /[\u0600-\u06FF]/.test(s.name) ? s.name : s.ticker;
+          // Iran: always show Faraz Farsi title (آبشده نقدی, گرم طلا ۱۸, …).
+          const title =
+            s.exchange.toUpperCase() === "IRAN" || /[\u0600-\u06FF]/.test(s.name) ? s.name : s.ticker;
           const sub =
-            language === "fa" && s.exchange === "IRAN"
-              ? "محاسبه اختصاصی فورج"
+            s.exchange.toUpperCase() === "IRAN"
+              ? language === "fa"
+                ? `${s.ticker} — محاسبه اختصاصی فورج`
+                : `${s.ticker} — Faraz`
               : `${s.exchange} — ${s.name}`;
           return (
             <ListItemButton

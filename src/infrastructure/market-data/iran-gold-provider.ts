@@ -124,38 +124,26 @@ function parsePackedBar(row: unknown): Bar | null {
   return { time, open, high, low, close, volume: Number.isFinite(volume) ? volume : 0 };
 }
 
+/** Iran gold is whole toman — strip fractional clamp artifacts from older servers. */
+function toman(px: number): number {
+  if (!Number.isFinite(px) || px <= 0) return px;
+  return px >= 1_000 ? Math.round(px) : px;
+}
+
 /**
- * Only crush absurd outlier wicks (bad Faraz ticks). Do NOT invent gapfill
- * bars on the client — that flattened آبشده / G18 and looked “messed up”.
- * Server already gapfills; we only drop non-positive prints + extreme spikes.
+ * Trust server OHLC. Only drop non-positive prints and round toman; do not
+ * invent gapfill or crush real Faraz wicks on the client.
  */
 function sanitizeIranBars(bars: readonly Bar[]): Bar[] {
   if (bars.length === 0) return [];
-  const closes = bars.map((b) => b.close).filter((c) => c > 0);
-  const moves: number[] = [];
-  for (let i = 1; i < closes.length; i += 1) {
-    moves.push(Math.abs(closes[i]! - closes[i - 1]!));
-  }
-  moves.sort((a, b) => a - b);
-  const med = moves.length ? moves[Math.floor(moves.length / 2)]! : 0;
-  const lastPx = closes[closes.length - 1] ?? 0;
-  // Only clip spikes far beyond normal Faraz motion (leave real wicks alone).
-  const maxRange = Math.max(med * 12, lastPx * 4e-4, 1);
-
   return bars
     .filter((b) => b.close > 0 && b.open > 0)
     .map((b) => {
-      const bodyHi = Math.max(b.open, b.close);
-      const bodyLo = Math.min(b.open, b.close);
-      const rng = b.high - b.low;
-      if (rng <= maxRange) return b;
-      const mid = (bodyHi + bodyLo) / 2;
-      const half = maxRange / 2;
-      return {
-        ...b,
-        high: Math.max(bodyHi, Math.min(b.high, mid + half)),
-        low: Math.min(bodyLo, Math.max(b.low, mid - half)),
-      };
+      const open = toman(b.open);
+      const close = toman(b.close);
+      const high = Math.max(open, close, toman(b.high));
+      const low = Math.min(open, close, toman(b.low));
+      return { ...b, open, high, low, close };
     });
 }
 

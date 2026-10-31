@@ -505,10 +505,10 @@ export class TradingViewDatafeed implements IBasicDataFeed {
 
     const iran = symbol.exchange.toUpperCase() === "IRAN" || symbol.exchange.toUpperCase() === "TGJU";
     return {
-      name: symbol.ticker,
+      // Iran: show Faraz Farsi titles in the legend (آبشده نقدی, گرم طلا ۱۸, …).
+      name: iran ? symbol.name : symbol.ticker,
       ticker: `${symbol.exchange}:${symbol.ticker}`,
-      description: symbol.name,
-      // Search / details row — keep Faraz provenance visible without bloating the legend title.
+      description: iran ? symbol.ticker : symbol.name,
       ...(iran
         ? {
             listed_exchange: "Faraz",
