@@ -127,6 +127,8 @@ export function TradingViewChart({
   useEffect(() => {
     if (!ready || !isPrimary) return;
     const sync = () => {
+      // layoutSyncBus one-shot lock drops drawing-tool echoes after a create
+      // so Cross sticks (TV default) instead of re-arming rectangle/trend.
       layoutSyncBus.notifyToolSelected(paneIndex, controller.selectedLineTool());
     };
     sync();
