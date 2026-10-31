@@ -42,7 +42,7 @@ export function createForgeTradingAssistantIndicator(PineJS: {
       id: FTA_STUDY_ID as never,
       name: FTA_STUDY_NAME,
       description: FTA_STUDY_NAME,
-      shortDescription: "Forge TA · Manual Buy/Sell · TP1/TP2",
+      shortDescription: "Forge TA · SELL/BUY pills · TP/SL",
       isCustomIndicator: true,
       is_price_study: true,
       linkedToSeries: true,

@@ -715,6 +715,31 @@ export async function paintOrcaOnChart(
           },
         );
         if (id) ids.push(id);
+      } else if (cmd.kind === "label" && (cmd.text ?? "").trim()) {
+        // Pill-style signal tags (Texas-like): filled badge + contrasting text.
+        const label = ` ${cmd.text!.trim()} `;
+        const bg = clColor(cmd.fill ?? cmd.color, stroke);
+        const id = await chart.createShape(
+          { time: cmd.t1 as never, price: cmd.p1 },
+          {
+            ...common,
+            shape: "text",
+            text: label,
+            overrides: {
+              color: "#FFFFFF",
+              fontsize: 12,
+              bold: true,
+              fillBackground: true,
+              backgroundColor: bg,
+              drawBorder: false,
+              borderColor: bg,
+              borderWidth: 0,
+              horzLabelsAlign: "center",
+              vertLabelsAlign: "middle",
+            },
+          },
+        );
+        if (id) ids.push(id);
       }
     } catch {
       /* skip bad draw */

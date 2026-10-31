@@ -68,12 +68,12 @@ export const FTA_DEFAULTS: FtaInputs = {
   maxSignals: 8,
   maxSignalsPerDay: 5,
   cooldownBars: 8,
-  showZones: true,
+  showZones: false,
   showTradeBox: true,
-  showStructure: true,
+  showStructure: false,
   showHistory: true,
   bullColor: "#00C853",
-  bearColor: "#FF1744",
+  bearColor: "#E53935",
   tpColor: "#26A69A",
   slColor: "#EF5350",
   riskFill: "#546E7A",
@@ -102,6 +102,10 @@ export interface FtaSignal {
   readonly outcome: FtaOutcome;
   /** Highest TP reached before SL (for labels). */
   readonly tpHit: 0 | 1 | 2;
+  /** When the signal resolved (TP/SL); entry time while live. */
+  readonly labelTime: number;
+  /** Price the pill is anchored to (entry / TP / SL). */
+  readonly labelPrice: number;
 }
 
 export interface FtaResult {
@@ -452,6 +456,8 @@ export function computeTradingAssistant(
             active: true,
             outcome: "open",
             tpHit: 0,
+            labelTime: bar.time,
+            labelPrice: entry,
           });
           lastSignalBarIdx = i;
           dayCounts.set(day, usedToday + 1);
@@ -468,34 +474,45 @@ export function computeTradingAssistant(
         if (bar.low <= s.stop) {
           s.active = false;
           s.outcome = "sl";
+          s.labelTime = bar.time;
+          s.labelPrice = s.stop;
         } else {
-          if (s.tpHit < 1 && bar.high >= s.tp1) s.tpHit = 1;
+          if (s.tpHit < 1 && bar.high >= s.tp1) {
+            s.tpHit = 1;
+            s.labelTime = bar.time;
+            s.labelPrice = s.tp1;
+          }
           if (bar.high >= s.tp2) {
             s.tpHit = 2;
             s.active = false;
             s.outcome = "tp2";
-          } else if (s.tpHit === 1 && !s.active) {
-            /* keep */
-          } else if (s.tpHit === 1 && bar.low <= s.entry) {
-            // optional: leave open until TP2 or SL
+            s.labelTime = bar.time;
+            s.labelPrice = s.tp2;
           }
         }
+      } else if (bar.high >= s.stop) {
+        s.active = false;
+        s.outcome = "sl";
+        s.labelTime = bar.time;
+        s.labelPrice = s.stop;
       } else {
-        if (bar.high >= s.stop) {
+        if (s.tpHit < 1 && bar.low <= s.tp1) {
+          s.tpHit = 1;
+          s.labelTime = bar.time;
+          s.labelPrice = s.tp1;
+        }
+        if (bar.low <= s.tp2) {
+          s.tpHit = 2;
           s.active = false;
-          s.outcome = "sl";
-        } else {
-          if (s.tpHit < 1 && bar.low <= s.tp1) s.tpHit = 1;
-          if (bar.low <= s.tp2) {
-            s.tpHit = 2;
-            s.active = false;
-            s.outcome = "tp2";
-          }
+          s.outcome = "tp2";
+          s.labelTime = bar.time;
+          s.labelPrice = s.tp2;
         }
       }
-      // If TP1 hit but still open, surface as tp1 outcome once closed by time window end —
-      // leave active until TP2/SL for live management.
-      if (!s.active && s.outcome === "open" && s.tpHit === 1) s.outcome = "tp1";
+      if (!s.active && s.outcome === "open" && s.tpHit === 1) {
+        s.outcome = "tp1";
+        s.labelPrice = s.tp1;
+      }
     }
   }
 
@@ -514,14 +531,20 @@ export function computeTradingAssistant(
   };
 }
 
-function outcomeLabel(s: FtaSignal): string {
-  if (s.outcome === "tp2" || s.tpHit >= 2) return "TP2 hit";
-  if (s.outcome === "tp1" || s.tpHit >= 1) return s.active ? "TP1 hit" : "TP1 hit";
-  if (s.outcome === "sl") return "SL hit";
-  return "LIVE";
+/** Texas pill text: "SELL - TP2 hit" / "BUY - SL hit" / "SELL - LIVE". */
+function signalPillText(s: FtaSignal): string {
+  const tag = s.dir === 1 ? "BUY" : "SELL";
+  if (s.outcome === "tp2" || s.tpHit >= 2) return `${tag} - TP2 hit`;
+  if (s.outcome === "sl") return `${tag} - SL hit`;
+  if (s.outcome === "tp1" || (s.tpHit >= 1 && !s.active)) return `${tag} - TP1 hit`;
+  if (s.tpHit >= 1 && s.active) return `${tag} - TP1 hit`;
+  return `${tag} - LIVE`;
 }
 
-/** Texas-like drawings: trade box (risk/reward) + Entry/SL/TP1/TP2 + labels. */
+/**
+ * Primary visual = compact Texas-style signal pills.
+ * Optional trade box / POI / structure stay behind the labels.
+ */
 export function tradingAssistantDrawCmds(
   result: FtaResult,
   inputs: Partial<FtaInputs> = {},
@@ -543,7 +566,6 @@ export function tradingAssistantDrawCmds(
         color: c,
         width: ev.kind === "MSS" ? 2 : 1,
         style: ev.kind === "MSS" ? "solid" : "dashed",
-        text: `${ev.kind}`,
       });
     }
   }
@@ -552,10 +574,8 @@ export function tradingAssistantDrawCmds(
     if (!cfg.showHistory && !s.active) continue;
     const bull = s.dir === 1;
     const c = bull ? cfg.bullColor : cfg.bearColor;
-    const tag = bull ? "BUY" : "SELL";
     const extend = Math.max(endT, s.time);
 
-    // POI zone (OB/FVG)
     if (cfg.showZones) {
       cmds.push({
         kind: "rect",
@@ -568,7 +588,7 @@ export function tradingAssistantDrawCmds(
       });
     }
 
-    // Texas-style trade box: risk (entry↔SL) + reward (entry↔TP2)
+    // Subtle risk/reward box (Texas shaded block) — entry midline dashed.
     if (cfg.showTradeBox) {
       cmds.push({
         kind: "rect",
@@ -588,95 +608,27 @@ export function tradingAssistantDrawCmds(
         color: cfg.rewardFill,
         fill: cfg.rewardFill,
       });
-    }
-
-    cmds.push({
-      kind: "line",
-      t1: s.time,
-      p1: s.entry,
-      t2: extend,
-      p2: s.entry,
-      color: c,
-      width: 2,
-      style: "dotted",
-      text: "Entry",
-    });
-    cmds.push({
-      kind: "line",
-      t1: s.time,
-      p1: s.stop,
-      t2: extend,
-      p2: s.stop,
-      color: cfg.slColor,
-      width: 2,
-      style: "dashed",
-      text: "SL",
-    });
-    cmds.push({
-      kind: "line",
-      t1: s.time,
-      p1: s.tp1,
-      t2: extend,
-      p2: s.tp1,
-      color: cfg.tpColor,
-      width: 1,
-      style: "dotted",
-      text: `TP1 1:${cfg.tp1R}`,
-    });
-    cmds.push({
-      kind: "line",
-      t1: s.time,
-      p1: s.tp2,
-      t2: extend,
-      p2: s.tp2,
-      color: cfg.tpColor,
-      width: 2,
-      style: "solid",
-      text: `TP2 1:${cfg.tp2R}`,
-    });
-
-    const status = outcomeLabel(s);
-    cmds.push({
-      kind: "dot",
-      t1: s.time,
-      p1: s.entry,
-      color: c,
-      text: `${tag} · ${status} · ${s.reason}`,
-    });
-
-    // Extra Texas-style hit marker when TP2 completed
-    if (s.tpHit >= 2 || s.outcome === "tp2") {
       cmds.push({
-        kind: "dot",
+        kind: "line",
         t1: s.time,
-        p1: s.tp2,
-        color: cfg.tpColor,
-        text: `${tag} - TP2 hit`,
-      });
-    } else if (s.tpHit >= 1) {
-      cmds.push({
-        kind: "dot",
-        t1: s.time,
-        p1: s.tp1,
-        color: cfg.tpColor,
-        text: "TP1 hit",
+        p1: s.entry,
+        t2: extend,
+        p2: s.entry,
+        color: "#455A64",
+        width: 1,
+        style: "dashed",
       });
     }
-  }
 
-  // Bias watermark-style label on last bar
-  if (endT > 0) {
-    const last = result.signals[result.signals.length - 1];
-    const px = last?.entry ?? 0;
-    if (px > 0) {
-      cmds.push({
-        kind: "dot",
-        t1: endT,
-        p1: px,
-        color: "#2962FF",
-        text: `Forge TA · ${result.biasLabel}`,
-      });
-    }
+    // Hero visual: red/green pill like Texas "SELL - TP2 hit"
+    cmds.push({
+      kind: "label",
+      t1: s.labelTime || s.time,
+      p1: s.labelPrice || s.entry,
+      color: c,
+      fill: c,
+      text: signalPillText(s),
+    });
   }
 
   return cmds;
