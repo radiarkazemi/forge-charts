@@ -2752,18 +2752,23 @@ def _load_iran_history_mongo(
             _bucket_ticks_fill_missing(rows)
 
         # Historical holes (e.g. G18 Apr 2026 has 5m but no 1m): expand coarser Faraz.
+        # Auth-off: synthetic path candles from 5m→1m look wrong vs real Faraz —
+        # only expand when native/tick history is still scarce.
         if step >= 60 and step < 86_400:
-            derived = _fill_iran_from_coarser_faraz(
-                client,
-                channel,
-                buckets,
-                step,
-                limit=limit,
-                before=before,
-                wall_t=wall_t if before is None else (before - step),
-            )
-            if derived:
-                sources.append(f"derived-{derived}")
+            auth_ok = _FARAZ_CUSTOMER_AUTH_OK is True
+            scarce = len(buckets) < min(limit, 120)
+            if auth_ok or scarce:
+                derived = _fill_iran_from_coarser_faraz(
+                    client,
+                    channel,
+                    buckets,
+                    step,
+                    limit=limit,
+                    before=before,
+                    wall_t=wall_t if before is None else (before - step),
+                )
+                if derived:
+                    sources.append(f"derived-{derived}")
 
         # Faraz-like continuity: fill short intraday holes (missed poll minutes).
         # Auth-off: almost no gapfill — flat carry-forwards looked like broken
