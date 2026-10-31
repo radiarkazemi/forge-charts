@@ -13,7 +13,6 @@ import {
   paintTradingAssistant,
   tradingAssistantDrawCmds,
   type FtaInputs,
-  FTA_DEFAULTS,
 } from "@/features/trading-assistant/runtime";
 import { FTA_STUDY_DEFAULTS } from "./forge-trading-assistant-indicator";
 
@@ -123,12 +122,14 @@ export function useForgeTradingAssistantStudy(enabled = true): void {
           showTradeBox: bool("showTradeBox", FTA_STUDY_DEFAULTS.showTradeBox),
           showStructure: bool("showStructure", FTA_STUDY_DEFAULTS.showStructure),
           showHistory: bool("showHistory", FTA_STUDY_DEFAULTS.showHistory),
-          bullColor: FTA_DEFAULTS.bullColor,
-          bearColor: FTA_DEFAULTS.bearColor,
-          tpColor: FTA_DEFAULTS.tpColor,
-          slColor: FTA_DEFAULTS.slColor,
-          riskFill: FTA_DEFAULTS.riskFill,
-          rewardFill: FTA_DEFAULTS.rewardFill,
+          bullColor: String(map.get("bullColor") ?? FTA_STUDY_DEFAULTS.bullColor),
+          bearColor: String(map.get("bearColor") ?? FTA_STUDY_DEFAULTS.bearColor),
+          longBoxColor: String(map.get("longBoxColor") ?? FTA_STUDY_DEFAULTS.longBoxColor),
+          shortBoxColor: String(map.get("shortBoxColor") ?? FTA_STUDY_DEFAULTS.shortBoxColor),
+          boxOpacity: Math.min(
+            40,
+            Math.max(4, Math.floor(num("boxOpacity", FTA_STUDY_DEFAULTS.boxOpacity))),
+          ),
         };
       } catch {
         return {};

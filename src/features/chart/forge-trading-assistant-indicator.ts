@@ -29,6 +29,11 @@ export const FTA_STUDY_DEFAULTS = {
   showTradeBox: FTA_DEFAULTS.showTradeBox,
   showStructure: FTA_DEFAULTS.showStructure,
   showHistory: FTA_DEFAULTS.showHistory,
+  bullColor: FTA_DEFAULTS.bullColor,
+  bearColor: FTA_DEFAULTS.bearColor,
+  longBoxColor: FTA_DEFAULTS.longBoxColor,
+  shortBoxColor: FTA_DEFAULTS.shortBoxColor,
+  boxOpacity: FTA_DEFAULTS.boxOpacity,
 } as const;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -193,6 +198,38 @@ export function createForgeTradingAssistantIndicator(PineJS: {
           name: "Show closed signals (TP/SL)",
           defval: FTA_STUDY_DEFAULTS.showHistory,
           type: "bool",
+        },
+        {
+          id: "bullColor",
+          name: "Style · Long pill (#hex)",
+          defval: FTA_STUDY_DEFAULTS.bullColor,
+          type: "text",
+        },
+        {
+          id: "bearColor",
+          name: "Style · Short pill (#hex)",
+          defval: FTA_STUDY_DEFAULTS.bearColor,
+          type: "text",
+        },
+        {
+          id: "longBoxColor",
+          name: "Style · Long box light green (#hex)",
+          defval: FTA_STUDY_DEFAULTS.longBoxColor,
+          type: "text",
+        },
+        {
+          id: "shortBoxColor",
+          name: "Style · Short box light red (#hex)",
+          defval: FTA_STUDY_DEFAULTS.shortBoxColor,
+          type: "text",
+        },
+        {
+          id: "boxOpacity",
+          name: "Style · Box opacity % (lower = lighter)",
+          defval: FTA_STUDY_DEFAULTS.boxOpacity,
+          type: "integer",
+          min: 4,
+          max: 40,
         },
       ],
     } as never,

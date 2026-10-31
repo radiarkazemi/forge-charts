@@ -176,6 +176,10 @@ export interface DrawCmd {
   style?: "solid" | "dashed" | "dotted";
   text?: string;
   fill?: string;
+  /** Rectangle fill alpha 0–1 (default 0.2). Lower = lighter overlays. */
+  fillAlpha?: number;
+  /** Border linewidth for rects (default 2). */
+  borderWidth?: number;
 }
 
 function pivotHigh(bars: readonly OrcaBar[], i: number, left: number, right: number): number | null {
@@ -681,6 +685,10 @@ export async function paintOrcaOnChart(
         const r = Number.parseInt(fillHex.slice(1, 3), 16);
         const g = Number.parseInt(fillHex.slice(3, 5), 16);
         const b = Number.parseInt(fillHex.slice(5, 7), 16);
+        const alpha = Math.max(0.04, Math.min(0.85, cmd.fillAlpha ?? 0.2));
+        // CL `transparency` is 0=opaque … 100=invisible.
+        const transparency = Math.round((1 - alpha) * 100);
+        const border = Math.max(0, Math.min(4, cmd.borderWidth ?? 1));
         const id = await chart.createMultipointShape(
           [
             { time: cmd.t1 as never, price: cmd.p1 },
@@ -691,10 +699,11 @@ export async function paintOrcaOnChart(
             shape: "rectangle",
             overrides: {
               color: stroke,
-              backgroundColor: `rgba(${r}, ${g}, ${b}, 0.2)`,
+              backgroundColor: `rgba(${r}, ${g}, ${b}, ${alpha})`,
               fillBackground: true,
-              linewidth: 2,
-              transparency: 50,
+              linewidth: border,
+              transparency,
+              linestyle: linestyleMap[cmd.style ?? "solid"],
             },
           },
         );

@@ -45,12 +45,16 @@ export interface FtaInputs {
   readonly showTradeBox: boolean;
   readonly showStructure: boolean;
   readonly showHistory: boolean;
+  /** Pill + long accent (#hex). */
   readonly bullColor: string;
+  /** Pill + short accent (#hex). */
   readonly bearColor: string;
-  readonly tpColor: string;
-  readonly slColor: string;
-  readonly riskFill: string;
-  readonly rewardFill: string;
+  /** Long trade-box fill (#hex) — light green by default. */
+  readonly longBoxColor: string;
+  /** Short trade-box fill (#hex) — light red by default. */
+  readonly shortBoxColor: string;
+  /** Trade-box fill opacity 0–100 (lower = lighter). */
+  readonly boxOpacity: number;
 }
 
 export const FTA_DEFAULTS: FtaInputs = {
@@ -72,13 +76,22 @@ export const FTA_DEFAULTS: FtaInputs = {
   showTradeBox: true,
   showStructure: false,
   showHistory: true,
-  bullColor: "#00C853",
+  bullColor: "#43A047",
   bearColor: "#E53935",
-  tpColor: "#26A69A",
-  slColor: "#EF5350",
-  riskFill: "#546E7A",
-  rewardFill: "#00897B",
+  longBoxColor: "#A5D6A7",
+  shortBoxColor: "#EF9A9A",
+  boxOpacity: 14,
 };
+
+function normalizeHex(raw: string, fallback: string): string {
+  const t = (raw || "").trim();
+  if (/^#([0-9a-fA-F]{6})$/.test(t)) return t;
+  if (/^#([0-9a-fA-F]{3})$/.test(t)) {
+    return `#${t[1]}${t[1]}${t[2]}${t[2]}${t[3]}${t[3]}`;
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(t)) return `#${t}`;
+  return fallback;
+}
 
 export type FtaOutcome = "open" | "tp1" | "tp2" | "sl";
 
@@ -570,10 +583,19 @@ export function tradingAssistantDrawCmds(
     }
   }
 
+  const bullPill = normalizeHex(cfg.bullColor, FTA_DEFAULTS.bullColor);
+  const bearPill = normalizeHex(cfg.bearColor, FTA_DEFAULTS.bearColor);
+  const longBox = normalizeHex(cfg.longBoxColor, FTA_DEFAULTS.longBoxColor);
+  const shortBox = normalizeHex(cfg.shortBoxColor, FTA_DEFAULTS.shortBoxColor);
+  const boxAlpha = Math.max(0.05, Math.min(0.45, Number(cfg.boxOpacity) / 100));
+  const riskAlpha = Math.max(0.04, boxAlpha * 0.7);
+  const rewardAlpha = boxAlpha;
+
   for (const s of result.signals) {
     if (!cfg.showHistory && !s.active) continue;
     const bull = s.dir === 1;
-    const c = bull ? cfg.bullColor : cfg.bearColor;
+    const pill = bull ? bullPill : bearPill;
+    const box = bull ? longBox : shortBox;
     const extend = Math.max(endT, s.time);
 
     if (cfg.showZones) {
@@ -583,12 +605,15 @@ export function tradingAssistantDrawCmds(
         p1: s.zhi,
         t2: extend,
         p2: s.zlo,
-        color: c,
-        fill: c,
+        color: pill,
+        fill: box,
+        fillAlpha: riskAlpha,
+        borderWidth: 1,
+        style: "dashed",
       });
     }
 
-    // Subtle risk/reward box (Texas shaded block) — entry midline dashed.
+    // Light long/short trade box — risk (entry↔SL) softer, reward (entry↔TP2) clearer.
     if (cfg.showTradeBox) {
       cmds.push({
         kind: "rect",
@@ -596,8 +621,11 @@ export function tradingAssistantDrawCmds(
         p1: Math.max(s.entry, s.stop),
         t2: extend,
         p2: Math.min(s.entry, s.stop),
-        color: cfg.riskFill,
-        fill: cfg.riskFill,
+        color: box,
+        fill: box,
+        fillAlpha: riskAlpha,
+        borderWidth: 1,
+        style: "dashed",
       });
       cmds.push({
         kind: "rect",
@@ -605,8 +633,11 @@ export function tradingAssistantDrawCmds(
         p1: Math.max(s.entry, s.tp2),
         t2: extend,
         p2: Math.min(s.entry, s.tp2),
-        color: cfg.rewardFill,
-        fill: cfg.rewardFill,
+        color: box,
+        fill: box,
+        fillAlpha: rewardAlpha,
+        borderWidth: 1,
+        style: "solid",
       });
       cmds.push({
         kind: "line",
@@ -614,7 +645,7 @@ export function tradingAssistantDrawCmds(
         p1: s.entry,
         t2: extend,
         p2: s.entry,
-        color: "#455A64",
+        color: pill,
         width: 1,
         style: "dashed",
       });
@@ -625,8 +656,8 @@ export function tradingAssistantDrawCmds(
       kind: "label",
       t1: s.labelTime || s.time,
       p1: s.labelPrice || s.entry,
-      color: c,
-      fill: c,
+      color: pill,
+      fill: pill,
       text: signalPillText(s),
     });
   }
