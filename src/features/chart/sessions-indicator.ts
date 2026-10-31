@@ -146,15 +146,18 @@ export function createSessionsIndicator(PineJS: {
   ).flat();
 
   const stylePlots = SLOT_IDS.map((L) => ({ id: stylePlotId(L), type: "line" as const }));
-  const stylesMeta: Record<string, { title: string; histogramBase: number }> = {};
+  const stylesMeta: Record<string, { title: string; histogramBase: number; isHidden?: boolean }> = {};
   const stylesDefaults: Record<string, Record<string, unknown>> = {};
   for (let i = 0; i < SESSIONS_MAX_COUNT; i += 1) {
     const L = SLOT_IDS[i]!;
     const d = defaultSlot(i);
     const id = stylePlotId(L);
+    // isHidden: keep Style-tab colors, but NEVER dump LQ/Open/NY… into the legend
+    // title row (that made gear/eye/× unreachable and looked “broken”).
     stylesMeta[id] = {
       title: i < DEFAULT_ZONE_COUNT ? d.name : `Session ${L}`,
       histogramBase: 0,
+      isHidden: true,
     };
     stylesDefaults[id] = {
       linestyle: 0,

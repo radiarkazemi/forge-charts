@@ -4,6 +4,9 @@ import { createPersistentStore, type Store } from "../store";
 
 export type ThemeMode = "dark" | "light";
 
+/** UI language for Forge chrome (profile menu, symbol picker, …). */
+export type UiLanguage = "en" | "fa";
+
 export type SidePanelId = "watchlist" | "alerts" | "data" | "pine";
 
 
@@ -31,6 +34,8 @@ export interface UserProfile {
 
 export interface Settings {
   readonly theme: ThemeMode;
+  /** Profile / symbol-picker copy language (English or فارسی). */
+  readonly language: UiLanguage;
   readonly sidePanel: SidePanelId | null;
   readonly chartLayout: ChartLayoutId;
   /** Per-pane symbols for multi-chart (index 0 = primary). */
@@ -130,6 +135,7 @@ function ensureRadiarProfile(profiles: readonly UserProfile[], activeId: string)
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: "dark",
+  language: "en",
   sidePanel: null,
   chartLayout: "s",
   paneSymbols: ["XAUUSD"],
@@ -224,6 +230,7 @@ export function sanitizeSettings(raw: unknown): Settings {
   );
   return {
     theme: persisted.theme === "light" ? "light" : "dark",
+    language: persisted.language === "fa" ? "fa" : "en",
     sidePanel: sanitizeSidePanel(persisted.sidePanel),
     chartLayout: sanitizeLayout(persisted.chartLayout),
     paneSymbols,
@@ -260,6 +267,14 @@ export class SettingsService {
 
   toggleTheme(): void {
     this.setTheme(this.settings.get().theme === "dark" ? "light" : "dark");
+  }
+
+  setLanguage(language: UiLanguage): void {
+    this.patch({ language: language === "fa" ? "fa" : "en" });
+  }
+
+  cycleLanguage(): void {
+    this.setLanguage(this.settings.get().language === "fa" ? "en" : "fa");
   }
 
   setSidePanel(sidePanel: SidePanelId | null): void {

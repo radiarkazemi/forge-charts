@@ -124,6 +124,29 @@ function parsePackedBar(row: unknown): Bar | null {
   return { time, open, high, low, close, volume: Number.isFinite(volume) ? volume : 0 };
 }
 
+/** Iran gold is whole toman — strip fractional clamp artifacts from older servers. */
+function toman(px: number): number {
+  if (!Number.isFinite(px) || px <= 0) return px;
+  return px >= 1_000 ? Math.round(px) : px;
+}
+
+/**
+ * Trust server OHLC. Only drop non-positive prints and round toman; do not
+ * invent gapfill or crush real Faraz wicks on the client.
+ */
+function sanitizeIranBars(bars: readonly Bar[]): Bar[] {
+  if (bars.length === 0) return [];
+  return bars
+    .filter((b) => b.close > 0 && b.open > 0)
+    .map((b) => {
+      const open = toman(b.open);
+      const close = toman(b.close);
+      const high = Math.max(open, close, toman(b.high));
+      const low = Math.min(open, close, toman(b.low));
+      return { ...b, open, high, low, close };
+    });
+}
+
 interface HistoryResponse {
   bars?: unknown[];
   detail?: string;
@@ -268,7 +291,9 @@ export class IranGoldProvider implements MarketDataProvider {
         });
       }
     }
-    return [...byTime.values()].sort((a, b) => a.time - b.time).slice(-Math.max(range.countBack, 1));
+    const merged = [...byTime.values()].sort((a, b) => a.time - b.time);
+    const clean = sanitizeIranBars(merged);
+    return clean.slice(-Math.max(range.countBack, 1));
   }
 
   subscribeBars(symbol: SymbolInfo, interval: Interval, onBar: (bar: Bar) => void): Unsubscribe {
@@ -304,22 +329,25 @@ export class IranGoldProvider implements MarketDataProvider {
         if (pending.length > 50) pending.shift();
         return;
       }
-      // If the feed skipped buckets (sparse Faraz polls), bridge with carry-forward
-      // closes so 10S/15S charts stay continuous — never invent a second clock path.
+      // Sparse Faraz polls: short bridge only (do not invent long flat series).
       const next = applyTick(current, price, ts, step);
       if (current && next.time > current.time + step) {
         const bridgePx = current.close;
-        for (let t = current.time + step; t < next.time; t += step) {
-          emit({
-            time: t,
-            open: bridgePx,
-            high: bridgePx,
-            low: bridgePx,
-            close: bridgePx,
-            volume: 0,
-          });
+        const maxBridge = step * (step <= 60 ? 8 : 4);
+        if (next.time - current.time <= maxBridge) {
+          for (let t = current.time + step; t < next.time; t += step) {
+            emit({
+              time: t,
+              open: bridgePx,
+              high: bridgePx,
+              low: bridgePx,
+              close: bridgePx,
+              volume: 0,
+            });
+          }
         }
       }
+      // Leave live wicks alone — history sanitize already crushes absurd spikes.
       emit(next);
     };
 

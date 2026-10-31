@@ -1,0 +1,170 @@
+/* Forge header + chart chrome (Charting Library iframe). Keep overrides light. */
+
+.tv-header {
+  border-bottom: 1px solid rgba(120, 123, 134, 0.22) !important;
+}
+
+/* Symbol search — Faraz pill: one left search icon + truncated ticker */
+#header-toolbar-symbol-search,
+button#header-toolbar-symbol-search {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  min-width: 72px !important;
+  width: auto !important;
+  max-width: min(220px, 28vw) !important;
+  height: 30px !important;
+  margin: 0 4px 0 2px !important;
+  padding: 0 12px 0 10px !important;
+  border-radius: 999px !important;
+  border: 0 !important;
+  background: rgba(120, 123, 134, 0.12) !important;
+  box-shadow: none !important;
+  cursor: pointer !important;
+  pointer-events: auto !important;
+  flex: 0 1 auto !important;
+}
+
+#header-toolbar-symbol-search:hover {
+  background: rgba(120, 123, 134, 0.18) !important;
+}
+
+#header-toolbar-symbol-search .js-button-text {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
+}
+
+/* Keep TradingView's native left search icon; no second pseudo-icon */
+#header-toolbar-symbol-search::after,
+#header-toolbar-symbol-search::before {
+  content: none !important;
+  display: none !important;
+}
+
+#header-toolbar-symbol-search > svg,
+#header-toolbar-symbol-search svg {
+  display: block !important;
+  flex: 0 0 auto !important;
+  width: 14px !important;
+  height: 14px !important;
+  opacity: 0.72 !important;
+}
+
+/* Profile person chip next to search */
+.forge-header-profile {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 30px !important;
+  height: 30px !important;
+  min-width: 30px !important;
+  margin: 0 2px 0 4px !important;
+  padding: 0 !important;
+  border-radius: 50% !important;
+  border: 0 !important;
+  background: rgba(120, 123, 134, 0.12) !important;
+  color: inherit !important;
+  cursor: pointer !important;
+}
+
+.forge-header-profile:hover {
+  background: rgba(120, 123, 134, 0.2) !important;
+}
+
+.forge-header-profile svg {
+  display: block;
+  width: 17px;
+  height: 17px;
+}
+
+/* Soft interval active state */
+#header-toolbar-intervals button.isActive,
+#header-toolbar-intervals button[aria-checked="true"],
+#header-toolbar-intervals .isActive-GwQQdU8S {
+  border-radius: 8px !important;
+  background: rgba(120, 123, 134, 0.14) !important;
+}
+
+/*
+ * Legend: Iran gold OHLC (IRR) is long — never clip O/H/L/C on the main series.
+ * Study rows must stay compact so gear / eye / × stay clickable.
+ */
+[data-name="legend"] {
+  max-width: min(980px, calc(100% - 72px)) !important;
+  overflow: visible !important;
+}
+
+[data-name="legend"] [class*="legendMainSourceWrapper"],
+[data-name="legend"] [data-name="legend-series-item"] {
+  max-width: none !important;
+  overflow: visible !important;
+  flex-wrap: nowrap !important;
+}
+
+[data-name="legend"] [class*="legendMainSourceWrapper"] [class*="valueItem"],
+[data-name="legend"] [class*="legendMainSourceWrapper"] [class*="valueTitle"],
+[data-name="legend"] [class*="legendMainSourceWrapper"] [class*="valuesAdditionalWrapper"],
+[data-name="legend"] [data-name="legend-series-item"] [class*="listContainer"] {
+  overflow: visible !important;
+  text-overflow: clip !important;
+  max-width: none !important;
+}
+
+/* Study legend rows — truncate long titles; keep buttons in view */
+[data-name="legend"] [data-name="legend-source-item"],
+[data-name="legend"] [class*="sourcesWrapper"] > div {
+  max-width: min(360px, 48vw) !important;
+  overflow: hidden !important;
+}
+
+[data-name="legend"] [data-name="legend-source-item"] [class*="titlesWrapper"],
+[data-name="legend"] [data-name="legend-source-item"] [class*="title"] {
+  max-width: 200px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+[data-name="legend"] [data-name="legend-source-item"] [class*="buttons"],
+[data-name="legend"] [data-name="legend-source-item"] [class*="button"],
+[data-name="legend"] [data-name="legend-source-item"] [class*="controls"] {
+  flex-shrink: 0 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+}
+
+/* Hide native TV Symbol Search when Forge picker is active */
+body.forge-symbol-picker-open [data-name="symbol-search-items-dialog"],
+body.forge-symbol-picker-open [data-dialog-name="Symbol Search"] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+@media (max-width: 900px) {
+  .tv-header {
+    min-height: 38px !important;
+    max-height: 42px !important;
+  }
+
+  #header-toolbar-symbol-search,
+  button#header-toolbar-symbol-search {
+    max-width: min(140px, 36vw) !important;
+    height: 28px !important;
+    padding: 0 10px 0 8px !important;
+  }
+
+  .layout__area--left .tv-group {
+    min-width: 40px;
+  }
+
+  .chart-controls-bar {
+    bottom: 4px !important;
+  }
+}

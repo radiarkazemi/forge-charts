@@ -1,7 +1,9 @@
 /** Shared mobile layout metrics — keep rail / overlays / scrims in sync. */
 export const RAIL_WIDTH = 52;
 export const RAIL_WIDTH_COMPACT = 44;
-/** Chart tools row (symbol / interval / draw / indicators / more). */
+/** Faraz-style top row (profile · symbol pill · scrollable TFs). */
+export const MOBILE_TOP_BAR_HEIGHT = 44;
+/** Chart tools row (draw / indicators / more). */
 export const MOBILE_CHART_BAR_HEIGHT = 44;
 /** App tab row (watchlist / chart / trade / alerts / menu). */
 export const MOBILE_APP_NAV_HEIGHT = 52;

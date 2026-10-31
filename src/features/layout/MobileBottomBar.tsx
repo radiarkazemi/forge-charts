@@ -6,23 +6,8 @@ import SvgIcon from "@mui/material/SvgIcon";
 import type { SvgIconProps } from "@mui/material/SvgIcon";
 import { useState } from "react";
 import { useServices } from "@/app/use-services";
-import type { Interval } from "@/domain";
 import { useStore } from "@/shared/hooks/useStore";
 import { MOBILE_APP_NAV_HEIGHT, MOBILE_CHART_BAR_HEIGHT } from "./mobile-chrome";
-
-const QUICK_IV: ReadonlyArray<{ readonly value: Interval; readonly label: string }> = [
-  { value: "1S", label: "1s" },
-  { value: "5S", label: "5s" },
-  { value: "1", label: "1m" },
-  { value: "5", label: "5m" },
-  { value: "15", label: "15m" },
-  { value: "30", label: "30m" },
-  { value: "60", label: "1H" },
-  { value: "240", label: "4H" },
-  { value: "1D", label: "D" },
-  { value: "1W", label: "W" },
-  { value: "1M", label: "M" },
-];
 
 const BAR_BG = "#131722";
 const BAR_BORDER = "#2a2e39";
@@ -33,7 +18,6 @@ const MUTED = "#787b86";
 interface MobileBottomBarProps {
   readonly onCreateAlert: () => void;
   readonly onOpenWatchlist: () => void;
-  readonly onOpenTrade: () => void;
   readonly onOpenAlerts: () => void;
 }
 
@@ -59,7 +43,6 @@ const IndicatorsIcon = strokeIcon("M5.5 18.5v-4M10.5 18.5V9.5M15.5 18.5v-7M20.5 
 const MoreIcon = strokeIcon("M8 14h.01M14 14h.01M20 14h.01");
 const WatchlistIcon = strokeIcon("M9 5h10a1.5 1.5 0 0 1 1.5 1.5V22l-6.5-3.25L7.5 22V6.5A1.5 1.5 0 0 1 9 5z");
 const ChartIcon = strokeIcon("M6 18.5V12l4-3 4 5 4-7v11.5");
-const TradeIcon = strokeIcon("M8 11.5h12M16.5 8 20 11.5 16.5 15M20 16.5H8M11.5 20 8 16.5 11.5 13");
 const AlertsIcon = strokeIcon("M14 6.5a6 6 0 0 1 6 6v3.5l1.5 2H6.5l1.5-2V12.5a6 6 0 0 1 6-6zM12 22h4");
 const MenuIcon = strokeIcon("M7 9h14M7 14h14M7 19h14");
 
@@ -74,29 +57,22 @@ function formatPrice(price: number | undefined, precision = 2): string {
 /**
  * TradingView mobile chrome:
  * 1) Chart tools bar — Symbol · Interval · Draw · Indicators · More
- * 2) App tab bar — Watchlist · Chart · Trade · Alerts · Menu
+ * 2) App tab bar — Watchlist · Chart · Alerts · Menu
  */
 export function MobileBottomBar({
   onCreateAlert,
   onOpenWatchlist,
-  onOpenTrade,
   onOpenAlerts,
 }: MobileBottomBarProps) {
   const { chart, settings, quotes, alerts } = useServices();
   const symbol = useStore(chart.state, (s) => s.symbol);
-  const interval = useStore(chart.state, (s) => s.interval);
   const sidePanel = useStore(settings.settings, (s) => s.sidePanel);
   const quote = useStore(quotes.quotes, (book) => book[symbol]);
   const alertCount = useStore(alerts.alerts, (list) => list.filter((a) => a.status === "active").length);
-  const [ivOpen, setIvOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [drawOpen, setDrawOpen] = useState(false);
 
-  const bare = symbol.includes(":") ? symbol.slice(symbol.lastIndexOf(":") + 1) : symbol;
-  const ivLabel =
-    QUICK_IV.find((x) => x.value === interval)?.label ??
-    (interval === "1D" ? "D" : interval === "1W" ? "W" : interval === "1M" ? "M" : `${interval}`);
   const priceLabel = formatPrice(quote?.price);
   const change = quote?.changePercent;
   const changeColor =
@@ -146,13 +122,6 @@ export function MobileBottomBar({
       active: !sidePanel && !menuOpen,
     },
     {
-      key: "trade",
-      label: "Trade",
-      Icon: TradeIcon,
-      onClick: onOpenTrade,
-      active: false,
-    },
-    {
       key: "alerts",
       label: "Alerts",
       Icon: AlertsIcon,
@@ -181,35 +150,18 @@ export function MobileBottomBar({
           zIndex: 30,
         }}
       >
-        {/* Chart control bar — matches TV mobile quick actions under the plot. */}
+        {/* Chart tools — symbol/TF live in MobileTopBar (Faraz scroll chrome). */}
         <Box
           sx={{
             display: "flex",
             alignItems: "center",
+            justifyContent: "space-around",
             height: MOBILE_CHART_BAR_HEIGHT,
             px: 1,
             gap: 0.25,
             borderBottom: `1px solid ${BAR_BORDER}`,
           }}
         >
-          <ButtonBase
-            onClick={() => chart.openSymbolSearch()}
-            sx={{
-              color: "#fff",
-              fontWeight: 700,
-              fontSize: 14,
-              px: 0.75,
-              py: 0.5,
-              borderRadius: "6px",
-              maxWidth: priceLabel ? "34%" : "42%",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              "&:active": { bgcolor: "rgba(209,212,220,0.08)" },
-            }}
-          >
-            {bare.length > 10 ? `${bare.slice(0, 9)}…` : bare}
-          </ButtonBase>
           {priceLabel ? (
             <Box
               component="span"
@@ -218,8 +170,9 @@ export function MobileBottomBar({
                 fontWeight: 700,
                 fontSize: 12,
                 fontVariantNumeric: "tabular-nums",
-                px: 0.25,
-                maxWidth: "28%",
+                px: 1,
+                mr: "auto",
+                maxWidth: "40%",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
@@ -227,22 +180,9 @@ export function MobileBottomBar({
             >
               {priceLabel}
             </Box>
-          ) : null}
-          <ButtonBase
-            onClick={() => setIvOpen(true)}
-            sx={{
-              color: IDLE,
-              fontWeight: 700,
-              fontSize: 13,
-              px: 0.75,
-              py: 0.5,
-              borderRadius: "6px",
-              "&:active": { bgcolor: "rgba(209,212,220,0.08)" },
-            }}
-          >
-            {ivLabel}
-          </ButtonBase>
-          <Box sx={{ flex: 1 }} />
+          ) : (
+            <Box sx={{ flex: 1 }} />
+          )}
           {chartActions.map((item) => (
             <ButtonBase
               key={item.key}
@@ -250,7 +190,7 @@ export function MobileBottomBar({
               aria-label={item.label}
               title={item.label}
               sx={{
-                width: 40,
+                width: 44,
                 height: 36,
                 borderRadius: "8px",
                 color: "active" in item && item.active ? ACTIVE : IDLE,
@@ -325,53 +265,6 @@ export function MobileBottomBar({
           ))}
         </Box>
       </Box>
-
-      <Drawer
-        anchor="bottom"
-        open={ivOpen}
-        onClose={() => setIvOpen(false)}
-        slotProps={{
-          paper: {
-            sx: {
-              bgcolor: "#1e222d",
-              borderTopLeftRadius: 12,
-              borderTopRightRadius: 12,
-              borderTop: `1px solid ${BAR_BORDER}`,
-              pb: "calc(8px + env(safe-area-inset-bottom, 0px))",
-            },
-          },
-        }}
-      >
-        <Box sx={{ width: 36, height: 4, borderRadius: 2, bgcolor: "#434651", mx: "auto", mt: 1, mb: 1.5 }} />
-        <Box sx={{ px: 2, pb: 1, color: "#fff", fontWeight: 700, fontSize: 15 }}>Interval</Box>
-        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, px: 1.5, pb: 1 }}>
-          {QUICK_IV.map((iv) => {
-            const on = interval === iv.value;
-            return (
-              <ButtonBase
-                key={iv.value}
-                onClick={() => {
-                  chart.setInterval(iv.value);
-                  setIvOpen(false);
-                }}
-                sx={{
-                  minWidth: 56,
-                  height: 40,
-                  px: 1.5,
-                  borderRadius: "6px",
-                  bgcolor: on ? "rgba(41,98,255,0.18)" : "#2a2e39",
-                  color: on ? ACTIVE : IDLE,
-                  fontWeight: 700,
-                  fontSize: 13,
-                  border: on ? `1px solid ${ACTIVE}` : "1px solid transparent",
-                }}
-              >
-                {iv.label}
-              </ButtonBase>
-            );
-          })}
-        </Box>
-      </Drawer>
 
       <Drawer
         anchor="bottom"

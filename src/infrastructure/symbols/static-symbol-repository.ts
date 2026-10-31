@@ -1,4 +1,13 @@
-import { normalizeTicker, symbolMatches, SESSION_24X7, SESSION_FX, SESSION_US_EQUITY, type SymbolInfo, type SymbolType } from "@/domain";
+import {
+  normalizeTicker,
+  symbolMatches,
+  SESSION_24X7,
+  SESSION_FX,
+  SESSION_IRAN_GOLD,
+  SESSION_US_EQUITY,
+  type SymbolInfo,
+  type SymbolType,
+} from "@/domain";
 import type { SymbolRepository } from "@/application";
 
 const NY = "America/New_York";
@@ -51,14 +60,14 @@ function cfdSeeds(): Seed[] {
  * (Iran gold, XAU, majors, indices) before sparse Yahoo demo equities.
  */
 const SEEDS: readonly Seed[] = [
-  // Iran domestic gold — Faraz
-  ["ABSHODE", "آبشده نقدی 1", "IRAN", "commodity", 0],
-  ["G18", "گرم طلا ۱۸ عیار", "IRAN", "commodity", 0],
-  ["G24", "طلای ۲۴ عیار", "IRAN", "commodity", 0],
+  // Iran domestic gold — Faraz (keep legend titles short so OHLC fits)
+  ["ABSHODE", "آبشده نقدی", "IRAN", "commodity", 0],
+  ["G18", "گرم طلا ۱۸", "IRAN", "commodity", 0],
+  ["G24", "طلای ۲۴", "IRAN", "commodity", 0],
   ["SEKKE", "سکه امامی", "IRAN", "commodity", 0],
   ["NIM", "نیم سکه", "IRAN", "commodity", 0],
   ["ROB", "ربع سکه", "IRAN", "commodity", 0],
-  ["ONS", "انس جهانی (بازار ایران)", "IRAN", "commodity", 2],
+  ["ONS", "انس جهانی", "IRAN", "commodity", 2],
   // Gold / FX / indices — FOREXCOM / FXPRO / FXCM (Germany live for XAU; TV broker books for indices/FX)
   ["XAUUSD", "Gold Spot / U.S. Dollar", "FOREXCOM", "forex", 2],
   ["XAUUSD", "Gold Spot / U.S. Dollar", "FXPRO", "forex", 2],
@@ -221,9 +230,9 @@ function sessionFor(type: SymbolType, exchange: string): { session: string; time
 
 function toSymbol([ticker, name, exchange, type, pricePrecision]: Seed): SymbolInfo {
   const base = { ticker, name, exchange, type, pricePrecision, ...sessionFor(type, exchange) };
-  // Iran gold quotes stream continuously from TGJU/Anil — keep session open for 1S ticks.
+  // Iran gold / Faraz: collapse overnight (22→09 Tehran) like Faraz no-gap charts.
   if (exchange.toUpperCase() === "IRAN" || exchange.toUpperCase() === "TGJU") {
-    return { ...base, session: SESSION_24X7, timezone: TEHRAN };
+    return { ...base, session: SESSION_IRAN_GOLD, timezone: TEHRAN };
   }
   return base;
 }

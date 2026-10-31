@@ -757,6 +757,13 @@ export class ChartController {
 
   /** Open symbol search dialog. */
   openSymbolSearch(): void {
+    // Prefer Forge Faraz-style picker (AppShell listens for this event).
+    try {
+      window.dispatchEvent(new CustomEvent("forge:open-symbol-search"));
+      return;
+    } catch {
+      /* fall through */
+    }
     try {
       this.activeChart()?.executeActionById("symbolSearch");
     } catch {

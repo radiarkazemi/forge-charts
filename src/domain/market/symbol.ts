@@ -45,6 +45,12 @@ export const SESSION_US_EQUITY = "0930-1600";
  * Weekends closed — matches TradingView countdown / market-status behavior.
  */
 export const SESSION_FX = "2200-2159:123456";
+/**
+ * Iran gold / Faraz cash session (exchange TZ Asia/Tehran).
+ * 09:00–22:00 every day — overnight is outside session so the chart
+ * collapses it (Faraz-style no-gap) instead of painting 11h holes.
+ */
+export const SESSION_IRAN_GOLD = "0900-2200:1234567";
 
 export function normalizeTicker(ticker: string): string {
   const raw = ticker.trim().toUpperCase();
@@ -99,6 +105,12 @@ export function isMarketSessionOpen(symbol: SymbolInfo, nowMs: number = Date.now
     if (day === 5 && hhmm > 2159) return false; // Friday after 21:59 close
     if (day === 0 && hhmm < 2200) return false; // Sunday before open
     return true;
+  }
+
+  // Iran gold / Faraz: 0900-2200 every day (Asia/Tehran)
+  if (session.startsWith("0900-2200")) {
+    const { hhmm } = zonedParts(nowMs, tz.includes("Tehran") ? "Asia/Tehran" : tz);
+    return hhmm >= 900 && hhmm < 2200;
   }
 
   // US equity regular: 0930-1600 Mon–Fri

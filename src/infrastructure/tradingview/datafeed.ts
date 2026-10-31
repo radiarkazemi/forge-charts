@@ -503,15 +503,21 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       native.some((iv) => parseInterval(iv).unit === "seconds") || hasIntraday;
     const sessionOpen = isMarketSessionOpen(symbol);
 
+    const iran = symbol.exchange.toUpperCase() === "IRAN" || symbol.exchange.toUpperCase() === "TGJU";
     return {
-      name: symbol.ticker,
+      // Iran: show Faraz Farsi titles in the legend (آبشده نقدی, گرم طلا ۱۸, …).
+      name: iran ? symbol.name : symbol.ticker,
       ticker: `${symbol.exchange}:${symbol.ticker}`,
-      description: symbol.name,
+      description: iran ? symbol.ticker : symbol.name,
+      ...(iran
+        ? {
+            listed_exchange: "Faraz",
+          }
+        : { listed_exchange: symbol.exchange }),
       type: symbol.type,
       session: symbol.session,
       timezone: symbol.timezone as Timezone,
       exchange: symbol.exchange,
-      listed_exchange: symbol.exchange,
       format: "price",
       minmov: 1,
       pricescale: 10 ** symbol.pricePrecision,
@@ -524,7 +530,8 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       has_weekly_and_monthly: true,
       weekly_multipliers: ["1"],
       monthly_multipliers: ["1"],
-      // Do not invent empty candles when the feed is quiet / market closed.
+      // Never invent empty candles — flats looked worse than sparse Faraz history.
+      // Overnight Iran gaps collapse via SESSION_IRAN_GOLD instead.
       has_empty_bars: false,
       supported_resolutions: SUPPORTED_RESOLUTIONS,
       volume_precision: symbol.type === "crypto" ? 3 : 0,
