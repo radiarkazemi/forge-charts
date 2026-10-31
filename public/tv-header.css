@@ -4,21 +4,25 @@
   border-bottom: 1px solid rgba(120, 123, 134, 0.22) !important;
 }
 
-/* Symbol search — compact pill (do not steal header width) */
+/* Symbol search — Faraz pill: one left search icon + truncated ticker */
 #header-toolbar-symbol-search,
 button#header-toolbar-symbol-search {
   display: inline-flex !important;
   align-items: center !important;
   gap: 6px !important;
-  min-width: 0 !important;
-  max-width: 168px !important;
+  min-width: 72px !important;
+  width: auto !important;
+  max-width: min(220px, 28vw) !important;
   height: 30px !important;
   margin: 0 4px 0 2px !important;
-  padding: 0 10px 0 12px !important;
+  padding: 0 12px 0 10px !important;
   border-radius: 999px !important;
   border: 0 !important;
   background: rgba(120, 123, 134, 0.12) !important;
   box-shadow: none !important;
+  cursor: pointer !important;
+  pointer-events: auto !important;
+  flex: 0 1 auto !important;
 }
 
 #header-toolbar-symbol-search:hover {
@@ -31,21 +35,24 @@ button#header-toolbar-symbol-search {
   white-space: nowrap !important;
   font-size: 13px !important;
   font-weight: 600 !important;
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
 }
 
-#header-toolbar-symbol-search::after {
-  content: "";
-  flex: 0 0 14px;
-  width: 14px;
-  height: 14px;
-  opacity: 0.65;
-  background: currentColor;
-  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'><circle cx='11' cy='11' r='7'/><path d='M20 20l-3.5-3.5'/></svg>") center / contain no-repeat;
-  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'><circle cx='11' cy='11' r='7'/><path d='M20 20l-3.5-3.5'/></svg>") center / contain no-repeat;
-}
-
-#header-toolbar-symbol-search > svg {
+/* Keep TradingView's native left search icon; no second pseudo-icon */
+#header-toolbar-symbol-search::after,
+#header-toolbar-symbol-search::before {
+  content: none !important;
   display: none !important;
+}
+
+#header-toolbar-symbol-search > svg,
+#header-toolbar-symbol-search svg {
+  display: block !important;
+  flex: 0 0 auto !important;
+  width: 14px !important;
+  height: 14px !important;
+  opacity: 0.72 !important;
 }
 
 /* Profile person chip next to search */
@@ -110,16 +117,12 @@ button#header-toolbar-symbol-search {
   max-width: none !important;
 }
 
-/* Symbol Search dialog — light rounding only (avoid fighting CL layout) */
-[data-name="symbol-search-items-dialog"],
-[data-dialog-name="Symbol Search"] {
-  border-radius: 12px !important;
-  box-shadow: 0 10px 32px rgba(15, 20, 30, 0.16) !important;
-}
-
-[data-name="symbol-search-items-dialog"] input,
-[data-dialog-name="Symbol Search"] input {
-  border-radius: 8px !important;
+/* Hide native TV Symbol Search when Forge picker is active */
+body.forge-symbol-picker-open [data-name="symbol-search-items-dialog"],
+body.forge-symbol-picker-open [data-dialog-name="Symbol Search"] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 
 @media (max-width: 900px) {
@@ -130,9 +133,9 @@ button#header-toolbar-symbol-search {
 
   #header-toolbar-symbol-search,
   button#header-toolbar-symbol-search {
-    max-width: 120px !important;
+    max-width: min(140px, 36vw) !important;
     height: 28px !important;
-    padding: 0 8px !important;
+    padding: 0 10px 0 8px !important;
   }
 
   .layout__area--left .tv-group {

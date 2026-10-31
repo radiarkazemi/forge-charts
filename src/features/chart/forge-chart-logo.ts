@@ -1,14 +1,14 @@
 /**
- * Inject Forge brand mark into the Charting Library iframe (bottom-left of the
- * chart pane — same slot as TradingView / Faraz widget logo).
+ * Inject Forge brand lockup into the Charting Library iframe (bottom-left of
+ * the chart pane) — same mark + FORGE wordmark as `public/brand/forge-mark-dark.svg`.
  */
 
 import type { IChartingLibraryWidget } from "@/infrastructure/tradingview";
 
 const HOST_ATTR = "data-forge-chart-logo";
 
-/** Landing-page mark — blue→cyan gradient (same as `public/brand/forge-mark.svg`). */
-const MARK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="18" height="18" aria-hidden="true" fill="none"><defs><linearGradient id="forgeChartGrad" x1="8" y1="58" x2="54" y2="6" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#1638ff"/><stop offset="45%" stop-color="#2f7bff"/><stop offset="100%" stop-color="#5ce1ff"/></linearGradient></defs><g transform="skewX(-12) translate(5 0)" fill="url(#forgeChartGrad)"><path d="M12 10h14l-8 44H4z"/><path d="M26 10h30l-5 14H21z"/><path d="M23 32h24l-5 14H18z"/></g></svg>`;
+/** Codebase mark (light fill) — matches AuthGate / brand sheet lockup. */
+const MARK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="18" height="18" aria-hidden="true" fill="none"><g transform="skewX(-12) translate(5 0)" fill="currentColor"><path d="M12 10h14l-8 44H4z"/><path d="M26 10h30l-5 14H21z"/><path d="M23 32h24l-5 14H18z"/></g></svg>`;
 
 function ensureStyle(doc: Document): void {
   if (doc.getElementById("forge-chart-logo-style")) return;
@@ -22,47 +22,43 @@ a[${HOST_ATTR}] {
   z-index: 8;
   display: inline-flex;
   align-items: center;
-  height: 26px;
-  max-width: 26px;
-  padding: 0 4px;
-  gap: 0;
+  height: 28px;
+  padding: 0 8px 0 4px;
+  gap: 7px;
   border-radius: 6px;
   text-decoration: none;
-  color: inherit;
-  opacity: 0.72;
-  overflow: hidden;
+  color: #f5f7fb;
+  opacity: 0.88;
+  overflow: visible;
   pointer-events: auto;
-  transition: max-width 0.28s cubic-bezier(0.2, 0.8, 0.2, 1),
-    padding 0.28s ease, gap 0.28s ease, opacity 0.15s ease,
-    background-color 0.2s ease, box-shadow 0.2s ease;
+  transition: opacity 0.15s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+html.theme-light a[${HOST_ATTR}],
+.theme-light a[${HOST_ATTR}] {
+  color: #0b0e14;
 }
 a[${HOST_ATTR}]:hover {
-  max-width: 108px;
-  gap: 6px;
-  padding: 0 9px 0 4px;
   opacity: 1;
+  background: rgba(15, 20, 30, 0.55);
+  box-shadow: 0 2px 10px rgba(15, 20, 30, 0.18);
+}
+html.theme-light a[${HOST_ATTR}]:hover,
+.theme-light a[${HOST_ATTR}]:hover {
   background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 2px 10px rgba(15, 20, 30, 0.12);
 }
 a[${HOST_ATTR}] .forge-logo-text {
-  opacity: 0;
-  transform: translateX(-4px);
   white-space: nowrap;
   font: 700 12px/1 "Trebuchet MS", "Segoe UI", sans-serif;
-  letter-spacing: 0.02em;
-  transition: opacity 0.18s ease 0.04s, transform 0.28s ease;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: inherit;
 }
-a[${HOST_ATTR}]:hover .forge-logo-text {
-  opacity: 1;
-  transform: translateX(0);
-}
-a[${HOST_ATTR}] svg { display: block; flex-shrink: 0; }
+a[${HOST_ATTR}] svg { display: block; flex-shrink: 0; color: inherit; }
 `;
   doc.head.appendChild(style);
 }
 
 function findPaneHost(doc: Document): HTMLElement | null {
-  // Prefer the chart canvas stack (inside the pane), never the page chrome.
   const candidates = [
     doc.querySelector<HTMLElement>(".chart-container"),
     doc.querySelector<HTMLElement>(".chart-gui-wrapper"),
@@ -108,9 +104,13 @@ export function mountForgeChartLogo(widget: IChartingLibraryWidget): () => void 
         link.href = "https://forgechart.ir";
         link.target = "_blank";
         link.rel = "noopener noreferrer";
-        link.title = "Forge";
-        link.setAttribute("aria-label", "Forge");
-        link.innerHTML = `${MARK_SVG}<span class="forge-logo-text">Forge</span>`;
+        link.title = "FORGE";
+        link.setAttribute("aria-label", "FORGE");
+        link.innerHTML = `${MARK_SVG}<span class="forge-logo-text">FORGE</span>`;
+      } else {
+        link.innerHTML = `${MARK_SVG}<span class="forge-logo-text">FORGE</span>`;
+        link.title = "FORGE";
+        link.setAttribute("aria-label", "FORGE");
       }
       if (link.parentElement !== host) host.appendChild(link);
 

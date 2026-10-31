@@ -6,6 +6,7 @@ import { useServices } from "@/app/use-services";
 import { AlertToaster } from "@/features/alerts/AlertToaster";
 import { CreateAlertDialog } from "@/features/alerts/CreateAlertDialog";
 import { ChartWorkspace } from "@/features/chart/ChartWorkspace";
+import { SymbolSearchDialog } from "@/features/chart/SymbolSearchDialog";
 import { ProfileDialog } from "@/features/profile/ProfileDialog";
 import { ProfileMenu } from "@/features/profile/ProfileMenu";
 import { activeProfile } from "@/application";
@@ -35,17 +36,24 @@ export function AppShell({ onSignOut }: AppShellProps) {
   const { settings, chart, alerts } = useServices();
   const sidePanel = useStore(settings.settings, (s) => s.sidePanel);
   const appTheme = useStore(settings.settings, (s) => s.theme);
+  const language = useStore(settings.settings, (s) => s.language);
   const settingsSnap = useStore(settings.settings, (s) => s);
   const profile = activeProfile(settingsSnap);
   const symbol = useStore(chart.state, (s) => s.symbol);
   const alertCount = useStore(alerts.alerts, (list) => list.filter((a) => a.status === "active").length);
   const [alertDialogOpen, setAlertDialogOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [symbolSearchOpen, setSymbolSearchOpen] = useState(false);
   const [profileMenuPos, setProfileMenuPos] = useState<ProfileAnchorRect | null>(null);
 
   useEffect(() => {
     document.title = `${symbol} — Forge Charts`;
   }, [symbol]);
+
+  useEffect(() => {
+    document.documentElement.lang = language === "fa" ? "fa" : "en";
+    document.documentElement.dir = language === "fa" ? "rtl" : "ltr";
+  }, [language]);
 
   useEffect(() => {
     if (!isMobile) return;
@@ -77,11 +85,16 @@ export function AppShell({ onSignOut }: AppShellProps) {
         });
         return;
       }
-      // Mobile menu fallback — open near top-left (profile lives left on Faraz chrome).
       setProfileMenuPos({ top: 8, left: 12, bottom: 40, right: 44 });
     };
     window.addEventListener("forge:open-profile-menu", onOpen);
     return () => window.removeEventListener("forge:open-profile-menu", onOpen);
+  }, []);
+
+  useEffect(() => {
+    const onOpen = () => setSymbolSearchOpen(true);
+    window.addEventListener("forge:open-symbol-search", onOpen);
+    return () => window.removeEventListener("forge:open-symbol-search", onOpen);
   }, []);
 
   const openAlertDialog = () => setAlertDialogOpen(true);
@@ -169,7 +182,6 @@ export function AppShell({ onSignOut }: AppShellProps) {
           </Box>
         ) : null}
 
-        {/* Desktop only — mobile uses the bottom app tab bar instead of a right rail. */}
         {!isMobile ? (
           <SideRail
             active={sidePanel}
@@ -181,6 +193,7 @@ export function AppShell({ onSignOut }: AppShellProps) {
       </Box>
       <CreateAlertDialog open={alertDialogOpen} onClose={() => setAlertDialogOpen(false)} />
       <ProfileDialog open={profileOpen} onClose={() => setProfileOpen(false)} />
+      <SymbolSearchDialog open={symbolSearchOpen} onClose={() => setSymbolSearchOpen(false)} />
       <ProfileMenu
         anchorPosition={
           profileMenuPos
@@ -191,7 +204,9 @@ export function AppShell({ onSignOut }: AppShellProps) {
         onClose={() => setProfileMenuPos(null)}
         profile={profile}
         darkTheme={appTheme === "dark"}
+        language={language}
         onToggleTheme={() => settings.toggleTheme()}
+        onCycleLanguage={() => settings.cycleLanguage()}
         onOpenProfile={() => {
           setProfileMenuPos(null);
           setProfileOpen(true);

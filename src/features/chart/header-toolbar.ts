@@ -350,12 +350,27 @@ export function mountHeaderToolbar(
   profileBtn.addEventListener("pointerdown", openProfileMenu);
 
   // Place profile immediately before Symbol Search (Faraz: avatar → search pill).
+  // Intercept Symbol Search so Forge Faraz-style picker opens instead of the TV dialog.
+  let symInterceptBound: HTMLElement | null = null;
+  const openForgeSymbolSearch = (e: Event) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation?.();
+    window.dispatchEvent(new CustomEvent("forge:open-symbol-search"));
+  };
   const placeProfileNearSearch = () => {
     try {
       const doc = (widget as unknown as { _iFrame?: HTMLIFrameElement })._iFrame?.contentDocument;
       if (!doc) return;
       const sym = doc.getElementById("header-toolbar-symbol-search");
       sym?.classList.add("forge-symbol-search-pill");
+      if (sym && sym !== symInterceptBound) {
+        symInterceptBound?.removeEventListener("click", openForgeSymbolSearch, true);
+        symInterceptBound?.removeEventListener("pointerdown", openForgeSymbolSearch, true);
+        sym.addEventListener("click", openForgeSymbolSearch, true);
+        sym.addEventListener("pointerdown", openForgeSymbolSearch, true);
+        symInterceptBound = sym;
+      }
       if (!sym || !profileBtn.isConnected) return;
       const parent = sym.parentElement;
       if (parent && profileBtn.parentElement) {
