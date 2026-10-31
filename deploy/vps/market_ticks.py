@@ -2011,6 +2011,19 @@ def _fill_iran_from_coarser_faraz(
     return filled
 
 
+def _iran_tehran_hhmm(ts: int) -> int:
+    """Wall-clock HHMM in Asia/Tehran (fixed UTC+03:30, no DST)."""
+    shifted = int(ts) + IRAN_TZ_OFFSET_SEC
+    day_sec = shifted % 86_400
+    return (day_sec // 3600) * 100 + ((day_sec % 3600) // 60)
+
+
+def _iran_in_cash_session(ts: int) -> bool:
+    """Faraz cash session 09:00–22:00 Tehran (end exclusive)."""
+    hhmm = _iran_tehran_hhmm(ts)
+    return 900 <= hhmm < 2200
+
+
 def _fill_iran_session_gaps(
     buckets: dict[int, dict[str, float]],
     step: int,
@@ -2021,7 +2034,8 @@ def _fill_iran_session_gaps(
     """Insert carry-forward bars so intraday Iran charts stay continuous like Faraz.
 
     Fills holes smaller than `max_gap_steps` up to (but not past) the forming bucket.
-    Overnight / multi-hour breaks are left alone.
+    Only fills Tehran cash-session buckets (09–22); overnight stays empty so the
+    chart can collapse it (no-gap) via symbol session hours.
     """
     if step <= 0 or len(buckets) < 1:
         return 0
@@ -2030,30 +2044,28 @@ def _fill_iran_session_gaps(
         return 0
     filled = 0
     max_gap = max(1, int(max_gap_steps)) * step
+
+    def _carry(prev_t: int, until_t: int, px: float) -> int:
+        n = 0
+        t = prev_t + step
+        while t < until_t:
+            if t not in buckets and _iran_in_cash_session(t):
+                buckets[t] = {"t": t, "o": px, "h": px, "l": px, "c": px, "v": 0}
+                n += 1
+            t += step
+        return n
+
     for i in range(1, len(ordered)):
         prev_t = ordered[i - 1]
         next_t = ordered[i]
         gap = next_t - prev_t
         if gap <= step or gap > max_gap:
             continue
-        prev = buckets[prev_t]
-        px = float(prev["c"])
-        t = prev_t + step
-        while t < next_t:
-            if t not in buckets:
-                buckets[t] = {"t": t, "o": px, "h": px, "l": px, "c": px, "v": 0}
-                filled += 1
-            t += step
+        filled += _carry(prev_t, next_t, float(buckets[prev_t]["c"]))
     # Extend to the forming wall bucket when the tip is only a few steps behind.
     tip = max(ordered)
     if 0 < wall_t - tip <= max_gap and tip < wall_t:
-        px = float(buckets[tip]["c"])
-        t = tip + step
-        while t <= wall_t:
-            if t not in buckets:
-                buckets[t] = {"t": t, "o": px, "h": px, "l": px, "c": px, "v": 0}
-                filled += 1
-            t += step
+        filled += _carry(tip, wall_t + 1, float(buckets[tip]["c"]))
     return filled
 
 
@@ -2888,11 +2900,10 @@ def _load_iran_history_mongo(
                 sources.append(f"agg-{agg}")
 
         # Historical holes (e.g. G18 Apr 2026 has 5m but no 1m): expand coarser Faraz.
-        # Auth-off: synthetic path candles from 5m→1m look wrong vs real Faraz —
-        # only expand when native/tick history is still scarce.
+        # Always try when scarce; when auth is healthy also backfill denser paths.
         if step >= 60 and step < 86_400:
             auth_ok = _FARAZ_CUSTOMER_AUTH_OK is True
-            scarce = len(buckets) < min(limit, 120)
+            scarce = len(buckets) < min(limit, 200)
             if auth_ok or scarce:
                 derived = _fill_iran_from_coarser_faraz(
                     client,
@@ -2906,13 +2917,20 @@ def _load_iran_history_mongo(
                 if derived:
                     sources.append(f"derived-{derived}")
 
-        # Faraz-like continuity: fill short intraday holes (missed poll minutes).
-        # Auth-off: almost no gapfill — flat carry-forwards looked like broken
-        # G18/ABSHODE candles. Prefer real tick / Faraz bars with natural gaps.
-        if step <= 1_800:
+        # Faraz-like no-gap: fill in-session holes (missed polls / thin Mongo).
+        # Overnight (22→09 Tehran) is skipped inside the helper — symbol session
+        # hours collapse that range on the chart. Auth-off still fills denser
+        # now that overnight carry-forwards no longer paint as broken flats.
+        if step <= 3_600:
             gap_wall = wall_t if before is None else min(wall_t, before - step)
-            auth_ok = _FARAZ_CUSTOMER_AUTH_OK is True
-            max_steps = (3 if step <= 60 else 2) if not auth_ok else (90 if step <= 60 else 45)
+            if step <= 60:
+                max_steps = 120  # ≤2h of missed 1m polls within cash session
+            elif step <= 300:
+                max_steps = 48  # ≤4h of 5m
+            elif step <= 900:
+                max_steps = 24  # ≤6h of 15m
+            else:
+                max_steps = 13  # full cash-session day of 1h bars
             filled = _fill_iran_session_gaps(
                 buckets,
                 step,

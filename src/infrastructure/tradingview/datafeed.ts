@@ -530,8 +530,9 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       has_weekly_and_monthly: true,
       weekly_multipliers: ["1"],
       monthly_multipliers: ["1"],
-      // Do not invent empty candles when the feed is quiet / market closed.
-      has_empty_bars: false,
+      // Iran/Faraz: fill short in-session holes so charts stay continuous (no-gap).
+      // Other markets: leave real gaps when the feed is quiet / closed.
+      has_empty_bars: iran,
       supported_resolutions: SUPPORTED_RESOLUTIONS,
       volume_precision: symbol.type === "crypto" ? 3 : 0,
       visible_plots_set: "ohlcv",

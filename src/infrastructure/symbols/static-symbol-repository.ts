@@ -1,4 +1,13 @@
-import { normalizeTicker, symbolMatches, SESSION_24X7, SESSION_FX, SESSION_US_EQUITY, type SymbolInfo, type SymbolType } from "@/domain";
+import {
+  normalizeTicker,
+  symbolMatches,
+  SESSION_24X7,
+  SESSION_FX,
+  SESSION_IRAN_GOLD,
+  SESSION_US_EQUITY,
+  type SymbolInfo,
+  type SymbolType,
+} from "@/domain";
 import type { SymbolRepository } from "@/application";
 
 const NY = "America/New_York";
@@ -221,9 +230,9 @@ function sessionFor(type: SymbolType, exchange: string): { session: string; time
 
 function toSymbol([ticker, name, exchange, type, pricePrecision]: Seed): SymbolInfo {
   const base = { ticker, name, exchange, type, pricePrecision, ...sessionFor(type, exchange) };
-  // Iran gold quotes stream continuously from TGJU/Anil — keep session open for 1S ticks.
+  // Iran gold / Faraz: collapse overnight (22→09 Tehran) like Faraz no-gap charts.
   if (exchange.toUpperCase() === "IRAN" || exchange.toUpperCase() === "TGJU") {
-    return { ...base, session: SESSION_24X7, timezone: TEHRAN };
+    return { ...base, session: SESSION_IRAN_GOLD, timezone: TEHRAN };
   }
   return base;
 }

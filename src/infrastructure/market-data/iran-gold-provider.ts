@@ -329,11 +329,11 @@ export class IranGoldProvider implements MarketDataProvider {
         if (pending.length > 50) pending.shift();
         return;
       }
-      // Sparse Faraz polls: short bridge only (do not invent long flat series).
+      // Sparse Faraz polls: bridge short in-session holes (Faraz-style no-gap).
       const next = applyTick(current, price, ts, step);
       if (current && next.time > current.time + step) {
         const bridgePx = current.close;
-        const maxBridge = step * (step <= 60 ? 8 : 4);
+        const maxBridge = step * (step <= 60 ? 30 : step <= 300 ? 12 : 6);
         if (next.time - current.time <= maxBridge) {
           for (let t = current.time + step; t < next.time; t += step) {
             emit({
