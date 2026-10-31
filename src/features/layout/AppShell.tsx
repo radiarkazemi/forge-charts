@@ -51,8 +51,8 @@ export function AppShell({ onSignOut }: AppShellProps) {
   }, [symbol]);
 
   useEffect(() => {
+    // Keep chart chrome LTR (TradingView); menus/dialogs set their own `dir`.
     document.documentElement.lang = language === "fa" ? "fa" : "en";
-    document.documentElement.dir = language === "fa" ? "rtl" : "ltr";
   }, [language]);
 
   useEffect(() => {

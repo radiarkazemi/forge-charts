@@ -355,7 +355,7 @@ export function mountHeaderToolbar(
   const openForgeSymbolSearch = (e: Event) => {
     e.preventDefault();
     e.stopPropagation();
-    e.stopImmediatePropagation?.();
+    if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
     window.dispatchEvent(new CustomEvent("forge:open-symbol-search"));
   };
   const placeProfileNearSearch = () => {
