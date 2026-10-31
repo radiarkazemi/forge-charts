@@ -2748,13 +2748,17 @@ def _load_iran_history_mongo(
                 sources.append(f"derived-{derived}")
 
         # Faraz-like continuity: fill short intraday holes (missed poll minutes).
+        # When Faraz customer auth is dead, skip aggressive gapfill — long flat
+        # carry-forwards made G18 look broken on every TF.
         if step <= 1_800:
             gap_wall = wall_t if before is None else min(wall_t, before - step)
+            auth_ok = _FARAZ_CUSTOMER_AUTH_OK is True
+            max_steps = (12 if step <= 60 else 8) if not auth_ok else (90 if step <= 60 else 45)
             filled = _fill_iran_session_gaps(
                 buckets,
                 step,
                 wall_t=gap_wall,
-                max_gap_steps=90 if step <= 60 else 45,
+                max_gap_steps=max_steps,
             )
             if filled:
                 sources.append(f"gapfill:{filled}")
@@ -2926,6 +2930,20 @@ async def iran_gold_history(request: web.Request) -> web.Response:
     ordered = sorted(buckets.values(), key=lambda b: b["t"])
     if before is not None:
         ordered = [b for b in ordered if b["t"] < before]
+    # Drop internal flat carry-forwards (o=h=l=c) when Faraz auth is down — they
+    # dominate G18 charts and hide real tick OHLC. Keep the live tip.
+    if _FARAZ_CUSTOMER_AUTH_OK is not True and step < 86_400 and len(ordered) > 8:
+        cleaned: list[dict[str, float]] = []
+        last_i = len(ordered) - 1
+        for i, b in enumerate(ordered):
+            o, h, l, c = float(b["o"]), float(b["h"]), float(b["l"]), float(b["c"])
+            is_flat = abs(h - l) < 1e-9 and abs(o - c) < 1e-9 and abs(o - h) < 1e-9
+            if is_flat and i < last_i - 1 and float(b.get("v") or 0) <= 0:
+                continue
+            cleaned.append(b)
+        if len(cleaned) >= max(20, len(ordered) // 5):
+            ordered = cleaned
+            sources.append("drop-flat-gapfill")
     ordered = ordered[-limit:]
     bars = [[int(b["t"]), b["o"], b["h"], b["l"], b["c"], b["v"]] for b in ordered]
     return web.json_response(
@@ -2937,6 +2955,7 @@ async def iran_gold_history(request: web.Request) -> web.Response:
             "count": len(bars),
             "bars": bars,
             "source": "+".join(dict.fromkeys(sources)) or "empty",
+            "faraz_auth": _FARAZ_CUSTOMER_AUTH_OK is True,
         }
     )
 

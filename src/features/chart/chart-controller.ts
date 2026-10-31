@@ -72,6 +72,7 @@ export class ChartController {
   private syncHooks: ChartSyncHooks = {};
   private orcaEntityIds: EntityId[] = [];
   private readonly drawingHandlers = new Set<(entityId: EntityId, eventType: string) => void>();
+  private oneShotDrawingHandler: ((entityId: EntityId, eventType: string) => void) | null = null;
   private drawingBridge: ((entityId: EntityId, eventType: string) => void) | null = null;
   private readonly mouseDownHandlers = new Set<(params: MouseEventParams) => void>();
   private mouseDownBridge: ((params: MouseEventParams) => void) | null = null;
@@ -149,6 +150,16 @@ export class ChartController {
     this.bindStudyBridge(widget);
     // Match TradingView default: one-shot drawings (return to Cross after each shape).
     this.ensureStayInDrawingModeOff();
+    // Belt-and-suspenders: any finished shape on this pane returns to Cross even
+    // if layout-sync missed the create event (multipane races).
+    if (!this.oneShotDrawingHandler) {
+      this.oneShotDrawingHandler = (_id, eventType) => {
+        if (eventType !== "create") return;
+        void this.exitDrawingTool();
+        window.setTimeout(() => void this.exitDrawingTool(), 80);
+      };
+      this.drawingHandlers.add(this.oneShotDrawingHandler);
+    }
   }
 
   private bindDrawingBridge(widget: IChartingLibraryWidget): void {
