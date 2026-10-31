@@ -18,6 +18,7 @@ import {
 } from "./dealing-range";
 import { mountPositionToolIconPatcher } from "./position-tool-icons";
 import { mountHeaderToolbar, type HeaderToolbarApi } from "./header-toolbar";
+import { mountForgeChartLogo } from "./forge-chart-logo";
 import {
   mountSymbolSearchExchangeReset,
   purgeStickySymbolSearchFilters,
@@ -173,6 +174,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
     let unmountDealingRange: (() => void) | null = null;
     let unmountPositionIcons: (() => void) | null = null;
     let unmountSymbolSearchReset: (() => void) | null = null;
+    let unmountForgeLogo: (() => void) | null = null;
     const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches;
     const autosaveKey = isPrimary ? AUTOSAVE_KEY : `${AUTOSAVE_KEY}.pane.${paneIndex}`;
 
@@ -227,6 +229,9 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         window.clearTimeout(readyTimer);
         controller.attach(widget);
         onWidgetReady(widget);
+        // Bottom-left Forge mark inside the chart pane (TV / Faraz logo slot).
+        unmountForgeLogo?.();
+        unmountForgeLogo = mountForgeChartLogo(widget);
         // Volume is disabled by featureset; also strip any leftover Volume from
         // layouts that migrated from older autosave keys once.
         try {
@@ -384,6 +389,8 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
       unmountDealingRange?.();
       unmountPositionIcons?.();
       unmountSymbolSearchReset?.();
+      unmountForgeLogo?.();
+      unmountForgeLogo = null;
       try {
         (widget as unknown as { __forgePersistLeave?: () => void } | null)?.__forgePersistLeave?.();
       } catch {

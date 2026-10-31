@@ -503,15 +503,21 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       native.some((iv) => parseInterval(iv).unit === "seconds") || hasIntraday;
     const sessionOpen = isMarketSessionOpen(symbol);
 
+    const iran = symbol.exchange.toUpperCase() === "IRAN" || symbol.exchange.toUpperCase() === "TGJU";
     return {
       name: symbol.ticker,
       ticker: `${symbol.exchange}:${symbol.ticker}`,
       description: symbol.name,
+      // Search / details row — keep Faraz provenance visible without bloating the legend title.
+      ...(iran
+        ? {
+            listed_exchange: "Faraz",
+          }
+        : { listed_exchange: symbol.exchange }),
       type: symbol.type,
       session: symbol.session,
       timezone: symbol.timezone as Timezone,
       exchange: symbol.exchange,
-      listed_exchange: symbol.exchange,
       format: "price",
       minmov: 1,
       pricescale: 10 ** symbol.pricePrecision,

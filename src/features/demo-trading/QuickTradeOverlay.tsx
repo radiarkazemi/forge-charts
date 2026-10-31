@@ -68,9 +68,12 @@ export function QuickTradeOverlay({
         setAnchor({ top: 70, left: 56 });
         return;
       }
+      // Iran gold OHLC strings are long — sit Sell/Buy to the right of O/H/L/C.
+      const iranGold = /^(ABSHODE|G18|G24|SEKKE|NIM|ROB|MESGHAL)/i.test(symbol);
+      const leftPad = iranGold ? 260 : 48;
       setAnchor({
         top: Math.max(0, slot.top - hostRect.top),
-        left: Math.max(48, slot.left - hostRect.left),
+        left: Math.max(leftPad, slot.left - hostRect.left),
       });
     };
 
