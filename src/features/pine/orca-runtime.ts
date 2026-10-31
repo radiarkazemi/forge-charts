@@ -165,6 +165,36 @@ interface CircleEvent {
   bar: number;
 }
 
+/**
+ * One Orca-confirmed Dealing Range (same-color C1/C2 setup pair).
+ * Bullish → OTE measured from high (discount). Bearish → from low (premium).
+ */
+export interface ConfirmedDealingRange {
+  readonly bullish: boolean;
+  readonly name: string;
+  readonly top: number;
+  readonly bot: number;
+  readonly mid: number;
+  /** 0.618 OTE level (discount for bullish, premium for bearish). */
+  readonly ote618: number;
+  /** 0.786 OTE level. */
+  readonly ote786: number;
+  /** Range start (earlier extreme) unix sec. */
+  readonly t0: number;
+  /** Confirmation time (later extreme / C2) unix sec. */
+  readonly t1: number;
+  /** Bar index where the range was confirmed. */
+  readonly confirmBar: number;
+}
+
+export interface OrcaAnalysis {
+  readonly cmds: DrawCmd[];
+  /** Chronological confirmed dealing ranges (oldest → newest). */
+  readonly ranges: readonly ConfirmedDealingRange[];
+  /** Last structure direction after full replay: 1 up, -1 down, 0 unknown. */
+  readonly structureDir: 1 | -1 | 0;
+}
+
 export interface DrawCmd {
   kind: "line" | "rect" | "dot" | "label" | "vline" | "position";
   t1: number;
@@ -234,12 +264,14 @@ function checkPattern(
 }
 
 /**
- * Replay Orca bar-by-bar and emit draw commands (last dealing range only).
+ * Replay Orca bar-by-bar: BOS/MSS structure + confirmed Dealing Ranges.
+ * Returns draw cmds and structured ranges for confluence engines (FTA).
  */
-export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): DrawCmd[] {
-  const out: DrawCmd[] = [];
-  if (bars.length < inputs.left + inputs.right + 5) return out;
+export function computeOrcaAnalysis(bars: readonly OrcaBar[], inputs: OrcaInputs): OrcaAnalysis {
+  const empty: OrcaAnalysis = { cmds: [], ranges: [], structureDir: 0 };
+  if (bars.length < inputs.left + inputs.right + 5) return empty;
 
+  const out: DrawCmd[] = [];
   let lastSH: number | null = null;
   let lastSL: number | null = null;
   let lastSHBar: number | null = null;
@@ -261,7 +293,9 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
 
   // Dealing-range batches — one per completed setup (Orca overwrite within a setup).
   const drBatches: DrawCmd[][] = [];
+  const rangeBatches: ConfirmedDealingRange[] = [];
   let setupDr: DrawCmd[] | null = null;
+  let setupRange: ConfirmedDealingRange | null = null;
 
   const pushCircle = (dir: number, price: number, bar: number) => {
     cr.push({ dir, price, bar });
@@ -283,12 +317,13 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
     const rng = topP - botP;
     const y618 = bullish ? topP - rng * 0.618 : botP + rng * 0.618;
     const y786 = bullish ? topP - rng * 0.786 : botP + rng * 0.786;
-    const t1 = bars[x1]!.time;
+    const t0 = bars[x1]!.time;
+    const tConfirm = bars[Math.max(topBar, botBar)]!.time;
     const t2 = bars[x2]!.time;
     const cmds: DrawCmd[] = [
       {
         kind: "rect",
-        t1,
+        t1: t0,
         p1: topP,
         t2,
         p2: botP,
@@ -297,7 +332,7 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
       },
       {
         kind: "line",
-        t1,
+        t1: t0,
         p1: mid,
         t2,
         p2: mid,
@@ -311,7 +346,7 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
       cmds.push(
         {
           kind: "line",
-          t1,
+          t1: t0,
           p1: y618,
           t2,
           p2: y618,
@@ -322,7 +357,7 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
         },
         {
           kind: "line",
-          t1,
+          t1: t0,
           p1: y786,
           t2,
           p2: y786,
@@ -335,6 +370,18 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
     }
     // Later call within the same setup replaces earlier (classic Orca).
     setupDr = cmds;
+    setupRange = {
+      bullish,
+      name,
+      top: topP,
+      bot: botP,
+      mid,
+      ote618: y618,
+      ote786: y786,
+      t0,
+      t1: tConfirm,
+      confirmBar: Math.max(topBar, botBar),
+    };
   };
 
   const drawSetup = (
@@ -371,6 +418,7 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
     const c2Price = botBar <= topBar ? topP : botP;
 
     setupDr = null;
+    setupRange = null;
     if (
       inputs.showDealingRange &&
       prevCircSide !== 0 &&
@@ -393,7 +441,10 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
       const loBar2 = c1Price < c2Price ? c1Bar : c2Bar;
       if (hi2 > lo2) paintDr(hi2, lo2, hiBar2, loBar2, circColor, name, labelUp);
     }
-    if (setupDr) drBatches.push(setupDr);
+    if (setupDr && setupRange) {
+      drBatches.push(setupDr);
+      rangeBatches.push(setupRange);
+    }
 
     prevCircSide = side;
     prevCircPrice = c2Price;
@@ -537,15 +588,19 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
     }
   }
 
-  const filtered = drBatches.filter((batch) => {
-    const t = batch[0]?.t1;
-    if (t == null) return false;
-    if (inputs.fromTimeSec != null && t < inputs.fromTimeSec) return false;
-    if (inputs.toTimeSec != null && t > inputs.toTimeSec) return false;
-    return true;
-  });
+  const filteredIdx: number[] = [];
+  for (let i = 0; i < drBatches.length; i += 1) {
+    const t = rangeBatches[i]?.t1 ?? drBatches[i]![0]?.t1;
+    if (t == null) continue;
+    if (inputs.fromTimeSec != null && t < inputs.fromTimeSec) continue;
+    if (inputs.toTimeSec != null && t > inputs.toTimeSec) continue;
+    filteredIdx.push(i);
+  }
+  // Full chronological ranges for confluence (FTA); draw cmds still capped by maxN.
+  const allRanges = filteredIdx.map((i) => rangeBatches[i]!);
   const maxN = Math.max(1, Math.floor(inputs.maxDealingRanges));
-  const kept = filtered.slice(-maxN);
+  const keptIdx = filteredIdx.slice(-maxN);
+  const kept = keptIdx.map((i) => drBatches[i]!);
   // Stretch the newest range to the last loaded bar so it stays visible on the live edge.
   if (kept.length > 0 && bars.length > 0) {
     const lastT = bars[bars.length - 1]!.time;
@@ -556,7 +611,42 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
       }
     }
   }
-  return [...out, ...kept.flat()];
+  const dir: 1 | -1 | 0 = structureDir === 1 ? 1 : structureDir === -1 ? -1 : 0;
+  return {
+    cmds: [...out, ...kept.flat()],
+    ranges: allRanges,
+    structureDir: dir,
+  };
+}
+
+/** Replay Orca and return draw commands only (backward-compatible). */
+export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): DrawCmd[] {
+  return computeOrcaAnalysis(bars, inputs).cmds;
+}
+
+/** Last confirmed DR at-or-before bar index (null if none yet). */
+export function lastConfirmedDealingRangeAt(
+  ranges: readonly ConfirmedDealingRange[],
+  barIndex: number,
+): ConfirmedDealingRange | null {
+  let best: ConfirmedDealingRange | null = null;
+  for (const r of ranges) {
+    if (r.confirmBar <= barIndex) best = r;
+  }
+  return best;
+}
+
+/** True when bar trades into the OTE band (0.618–0.786) of a confirmed DR. */
+export function touchesDrOte(bar: OrcaBar, dr: ConfirmedDealingRange): boolean {
+  const lo = Math.min(dr.ote618, dr.ote786);
+  const hi = Math.max(dr.ote618, dr.ote786);
+  return bar.low <= hi && bar.high >= lo;
+}
+
+/** Discount (bullish) / Premium (bearish) half of the last DR. */
+export function inDrEntryHalf(bar: OrcaBar, dr: ConfirmedDealingRange): boolean {
+  if (dr.bullish) return bar.low <= dr.mid;
+  return bar.high >= dr.mid;
 }
 
 const linestyleMap = { solid: 0, dotted: 1, dashed: 2 } as const;

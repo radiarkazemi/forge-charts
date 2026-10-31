@@ -1,18 +1,29 @@
 /**
- * Forge Trading Assistant — Phase 1.5 (Texas-inspired)
+ * Forge Trading Assistant — Phase 1.5 (Texas-inspired) + Orca Dealing Range
  *
- * Day-trading confluence with optional **Manual Buy / Manual Sell** bias
- * (like Texas Signal Assistant), multi-TP (TP1/TP2), ATR stops, and a
- * moderate daily signal budget for 3m / 5m / 15m charts.
+ * Day-trading confluence with optional **Manual Buy / Manual Sell** bias,
+ * multi-TP (TP1/TP2), ATR stops, and a moderate daily signal budget for
+ * 3m / 5m / 15m charts.
  *
- * Flow:
- *   1. Structure BOS / MSS (or bias-aligned impulse)
- *   2. POI: Order Block and/or FVG
- *   3. Rejection into POI → Entry / SL / TP1 / TP2
+ * Flow (sensitive — DR + trend gate):
+ *   1. Structure trend (BOS / MSS) — up or down
+ *   2. Last confirmed Orca Dealing Range on this timeframe
+ *   3. Position must align with trend (opposite-trend = NOT confirmed)
+ *   4. Entry only from DR discount (long) / premium (short), ideally OTE
+ *   5. POI: Order Block and/or FVG + rejection → Entry / SL / TP1 / TP2
  */
 
 import type { EntityId, IChartWidgetApi } from "@/infrastructure/tradingview";
-import { paintOrcaOnChart, type DrawCmd, type OrcaBar } from "@/features/pine/orca-runtime";
+import {
+  computeOrcaAnalysis,
+  inDrEntryHalf,
+  lastConfirmedDealingRangeAt,
+  paintOrcaOnChart,
+  touchesDrOte,
+  type ConfirmedDealingRange,
+  type DrawCmd,
+  type OrcaBar,
+} from "@/features/pine/orca-runtime";
 
 export type FtaBar = OrcaBar;
 
@@ -35,6 +46,18 @@ export interface FtaInputs {
   readonly useOrderBlock: boolean;
   readonly useFvg: boolean;
   readonly requireRejection: boolean;
+  /**
+   * Require last confirmed Orca Dealing Range on this TF (same-color C1/C2).
+   * Super-sensitive filter — no DR → no signal.
+   */
+  readonly requireDealingRange: boolean;
+  /** Never confirm a position opposite the active structure trend. */
+  readonly requireTrendAlign: boolean;
+  /**
+   * Require price to touch DR OTE (0.618–0.786) — classic sensitive Orca entry.
+   * When false, discount/premium half of the DR is enough.
+   */
+  readonly requireDrOte: boolean;
   /** Hard cap of signals kept on chart. */
   readonly maxSignals: number;
   /** Soft daily budget (UTC day) — keeps frequency Texas-like. */
@@ -42,6 +65,8 @@ export interface FtaInputs {
   /** Min bars between two signals (cooldown). */
   readonly cooldownBars: number;
   readonly showZones: boolean;
+  /** Paint the last confirmed Dealing Range (EQ + OTE). */
+  readonly showDealingRange: boolean;
   /**
    * When true: paint native TV Long/Short Position boxes (Target + Stop + R:R).
    * When false: only BUY/SELL signal pills on the signal candles.
@@ -73,10 +98,14 @@ export const FTA_DEFAULTS: FtaInputs = {
   useOrderBlock: true,
   useFvg: true,
   requireRejection: true,
+  requireDealingRange: true,
+  requireTrendAlign: true,
+  requireDrOte: true,
   maxSignals: 8,
   maxSignalsPerDay: 5,
   cooldownBars: 8,
   showZones: false,
+  showDealingRange: true,
   showTradeBox: true,
   showStructure: false,
   showHistory: true,
@@ -136,6 +165,12 @@ export interface FtaResult {
     readonly price: number;
   }[];
   readonly biasLabel: string;
+  /** Active structure trend on this timeframe: 1 up, -1 down, 0 unknown. */
+  readonly trendDir: 1 | -1 | 0;
+  /** Last confirmed Orca Dealing Range on this timeframe (if any). */
+  readonly lastDealingRange: ConfirmedDealingRange | null;
+  /** Chronological confirmed DRs used for confluence. */
+  readonly dealingRanges: readonly ConfirmedDealingRange[];
 }
 
 interface Swing {
@@ -243,7 +278,8 @@ function bearRejection(bar: FtaBar, z: Zone, atr: number): boolean {
 }
 
 /**
- * Texas-inspired day-trading engine with optional Manual Buy/Sell bias.
+ * Texas-inspired day-trading engine with optional Manual Buy/Sell bias
+ * and Orca Dealing Range + trend confirmation (sensitive).
  */
 export function computeTradingAssistant(
   bars: readonly FtaBar[],
@@ -252,10 +288,49 @@ export function computeTradingAssistant(
   const cfg: FtaInputs = { ...FTA_DEFAULTS, ...inputs };
   const biasLbl = biasLabelOf(cfg.biasMode);
   const locked = biasDir(cfg.biasMode);
-  const empty: FtaResult = { signals: [], structureLines: [], biasLabel: biasLbl };
+  const empty: FtaResult = {
+    signals: [],
+    structureLines: [],
+    biasLabel: biasLbl,
+    trendDir: 0,
+    lastDealingRange: null,
+    dealingRanges: [],
+  };
   const left = Math.max(1, Math.floor(cfg.swingLeft));
   const right = Math.max(1, Math.floor(cfg.swingRight));
   if (bars.length < left + right + 20) return empty;
+
+  // Orca DR on this chart's timeframe — last confirmed same-color C1/C2 range.
+  const orca = computeOrcaAnalysis(bars, {
+    left: Math.max(1, left - 1),
+    right: Math.max(1, right - 1),
+    breakOnWick: false,
+    bosColor: "#FF9800",
+    mssColor: "#00BCD4",
+    bosWidth: 1,
+    showDealingRange: true,
+    showDrFibs: true,
+    midlineColor: "#F44336",
+    midlineWidth: 2,
+    drAhead: 8,
+    drFib618Color: "#A5D6A7",
+    drFib786Color: "#4DD0E1",
+    bullishSetupCircleColor: "#76FF03",
+    bearishSetupCircleColor: "#F44336",
+    onlySetupCircles: true,
+    showOrangeCircles: false,
+    circleColor: "#FF9800",
+    detectBullishPattern: true,
+    detectBearishPattern: true,
+    detectBearishCont: true,
+    detectBullishCont: true,
+    detectBullishRev_HL: true,
+    maxDealingRanges: 24,
+    fromTimeSec: null,
+    toTimeSec: null,
+    rangesOnly: true,
+  });
+  const dealingRanges = orca.ranges;
 
   const swings: Swing[] = [];
   const zones: Zone[] = [];
@@ -421,7 +496,26 @@ export function computeTradingAssistant(
       const cooled = i - lastSignalBarIdx >= Math.max(1, cfg.cooldownBars);
       const underDaily = usedToday < Math.max(1, cfg.maxSignalsPerDay);
 
-      if (cooled && underDaily) {
+      // Trend gate: opposite-of-trend positions are never confirmed.
+      const trendOk =
+        !cfg.requireTrendAlign ||
+        structureDir === 0 ||
+        structureDir === wantDir;
+
+      // Last confirmed Dealing Range on this timeframe (as of this bar).
+      const dr = lastConfirmedDealingRangeAt(dealingRanges, i);
+      const drDirOk =
+        !cfg.requireDealingRange ||
+        (dr != null &&
+          ((wantDir === 1 && dr.bullish) || (wantDir === -1 && !dr.bullish)));
+      const drHalfOk =
+        !cfg.requireDealingRange || (dr != null && inDrEntryHalf(bar, dr));
+      const drOteOk =
+        !cfg.requireDealingRange ||
+        !cfg.requireDrOte ||
+        (dr != null && touchesDrOte(bar, dr));
+
+      if (cooled && underDaily && trendOk && drDirOk && drHalfOk && drOteOk) {
         const candidates = zones.filter((z) => !z.used && z.dir === wantDir);
         candidates.sort((a, b) => {
           if (cfg.preferMss && a.structure !== b.structure) {
@@ -432,6 +526,15 @@ export function computeTradingAssistant(
         });
 
         for (const z of candidates.slice(0, 3)) {
+          // POI must sit in the correct DR half when DR is required (sensitive).
+          if (cfg.requireDealingRange && dr) {
+            const zoneInHalf =
+              wantDir === 1
+                ? z.lo <= dr.mid // discount / lower half for longs
+                : z.hi >= dr.mid; // premium / upper half for shorts
+            if (!zoneInHalf) continue;
+          }
+
           const ok = cfg.requireRejection
             ? z.dir === 1
               ? bullRejection(bar, z, atr)
@@ -442,7 +545,20 @@ export function computeTradingAssistant(
           z.used = true;
           const entry = bar.close;
           const pad = atr * Math.max(0, cfg.atrSlPad);
-          const stop = z.dir === 1 ? z.lo - pad : z.hi + pad;
+          // Prefer DR extreme as structural stop when DR confirmed.
+          const drStop =
+            dr && cfg.requireDealingRange
+              ? wantDir === 1
+                ? dr.bot - pad
+                : dr.top + pad
+              : null;
+          const zoneStop = z.dir === 1 ? z.lo - pad : z.hi + pad;
+          const stop =
+            drStop != null
+              ? wantDir === 1
+                ? Math.min(zoneStop, drStop)
+                : Math.max(zoneStop, drStop)
+              : zoneStop;
           const risk = Math.abs(entry - stop);
           if (risk < atr * 0.12) continue;
 
@@ -452,6 +568,8 @@ export function computeTradingAssistant(
           const tp2 = z.dir === 1 ? entry + risk * r2 : entry - risk * r2;
 
           const reasonParts = [`${z.structure}`, z.kind];
+          if (dr) reasonParts.push(dr.bullish ? "DR+" : "DR−");
+          if (cfg.requireDrOte) reasonParts.push("OTE");
           if (cfg.requireRejection) reasonParts.push("Reject");
           if (locked !== 0) reasonParts.push(locked === 1 ? "ManBuy" : "ManSell");
 
@@ -542,10 +660,17 @@ export function computeTradingAssistant(
   }
 
   const maxN = Math.max(1, Math.min(24, Math.floor(cfg.maxSignals)));
+  const trendOut: 1 | -1 | 0 =
+    structureDir === 1 ? 1 : structureDir === -1 ? -1 : 0;
+  const lastDr =
+    dealingRanges.length > 0 ? dealingRanges[dealingRanges.length - 1]! : null;
   return {
     signals: signals.slice(-maxN),
     structureLines: structureLines.slice(-Math.max(4, maxN)),
     biasLabel: biasLbl,
+    trendDir: trendOut,
+    lastDealingRange: lastDr,
+    dealingRanges,
   };
 }
 
@@ -561,8 +686,9 @@ function signalPillText(s: FtaSignal): string {
 
 /**
  * Draw FTA signals.
- * - `showTradeBox` on → native TV Long/Short Position (Target + Stop + R:R).
- * - `showTradeBox` off → only BUY/SELL pills on the signal candles.
+ * - Last confirmed Dealing Range (optional)
+ * - `showTradeBox` on → native TV Long/Short Position (Target + Stop + R:R)
+ * - `showTradeBox` off → only BUY/SELL pills on the signal candles
  */
 export function tradingAssistantDrawCmds(
   result: FtaResult,
@@ -595,6 +721,58 @@ export function tradingAssistantDrawCmds(
   const stopFill = normalizeHex(cfg.shortBoxColor, FTA_DEFAULTS.shortBoxColor);
   const boxAlpha = Math.max(0.05, Math.min(0.45, Number(cfg.boxOpacity) / 100));
   const zoneAlpha = Math.max(0.04, boxAlpha * 0.7);
+
+  // Last confirmed Dealing Range on this timeframe (EQ + OTE).
+  if (cfg.showDealingRange && result.lastDealingRange) {
+    const dr = result.lastDealingRange;
+    const drColor = dr.bullish ? "#76FF03" : "#F44336";
+    const t2 = Math.max(endT, dr.t1);
+    cmds.push({
+      kind: "rect",
+      t1: dr.t0,
+      p1: dr.top,
+      t2,
+      p2: dr.bot,
+      color: drColor,
+      fill: drColor,
+      fillAlpha: 0.08,
+      borderWidth: 1,
+      style: "solid",
+    });
+    cmds.push({
+      kind: "line",
+      t1: dr.t0,
+      p1: dr.mid,
+      t2,
+      p2: dr.mid,
+      color: "#F44336",
+      width: 2,
+      style: "dashed",
+      text: `${dr.bullish ? "DR↑" : "DR↓"} EQ`,
+    });
+    cmds.push({
+      kind: "line",
+      t1: dr.t0,
+      p1: dr.ote618,
+      t2,
+      p2: dr.ote618,
+      color: "#A5D6A7",
+      width: 1,
+      style: "dotted",
+      text: "0.618",
+    });
+    cmds.push({
+      kind: "line",
+      t1: dr.t0,
+      p1: dr.ote786,
+      t2,
+      p2: dr.ote786,
+      color: "#4DD0E1",
+      width: 1,
+      style: "dotted",
+      text: "0.786",
+    });
+  }
 
   for (const s of result.signals) {
     if (!cfg.showHistory && !s.active) continue;

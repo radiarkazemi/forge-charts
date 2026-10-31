@@ -106,6 +106,12 @@ export function useForgeTradingAssistantStudy(enabled = true): void {
           useOrderBlock: bool("useOrderBlock", FTA_STUDY_DEFAULTS.useOrderBlock),
           useFvg: bool("useFvg", FTA_STUDY_DEFAULTS.useFvg),
           requireRejection: bool("requireRejection", FTA_STUDY_DEFAULTS.requireRejection),
+          requireDealingRange: bool(
+            "requireDealingRange",
+            FTA_STUDY_DEFAULTS.requireDealingRange,
+          ),
+          requireTrendAlign: bool("requireTrendAlign", FTA_STUDY_DEFAULTS.requireTrendAlign),
+          requireDrOte: bool("requireDrOte", FTA_STUDY_DEFAULTS.requireDrOte),
           maxSignals: Math.min(
             24,
             Math.max(1, Math.floor(num("maxSignals", FTA_STUDY_DEFAULTS.maxSignals))),
@@ -119,6 +125,7 @@ export function useForgeTradingAssistantStudy(enabled = true): void {
             Math.max(1, Math.floor(num("cooldownBars", FTA_STUDY_DEFAULTS.cooldownBars))),
           ),
           showZones: bool("showZones", FTA_STUDY_DEFAULTS.showZones),
+          showDealingRange: bool("showDealingRange", FTA_STUDY_DEFAULTS.showDealingRange),
           showTradeBox: bool("showTradeBox", FTA_STUDY_DEFAULTS.showTradeBox),
           showStructure: bool("showStructure", FTA_STUDY_DEFAULTS.showStructure),
           showHistory: bool("showHistory", FTA_STUDY_DEFAULTS.showHistory),
@@ -203,8 +210,11 @@ export function useForgeTradingAssistantStudy(enabled = true): void {
           }
         }
         const live = result.signals.filter((s) => s.active).length;
+        const dr = result.lastDealingRange;
+        const trend =
+          result.trendDir === 1 ? "up" : result.trendDir === -1 ? "down" : "flat";
         console.info(
-          `[forge-ta] ${result.biasLabel} · painted ${ids.length} · signals=${result.signals.length} live=${live} bars=${bars.length}`,
+          `[forge-ta] ${result.biasLabel} · trend=${trend} · dr=${dr ? (dr.bullish ? "bull" : "bear") : "none"} · painted ${ids.length} · signals=${result.signals.length} live=${live} bars=${bars.length}`,
         );
       } catch (err) {
         console.warn("[forge-ta] paint failed", err);
