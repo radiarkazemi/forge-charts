@@ -15,6 +15,7 @@ import { useDealingRangesStudy } from "./useDealingRangesStudy";
 import { useSessionsStudy } from "./useSessionsStudy";
 import { useHtfCandlesStudy } from "./useHtfCandlesStudy";
 import { useStructureIntelligenceStudy } from "./useStructureIntelligenceStudy";
+import { useReplayMentorStudy } from "./useReplayMentorStudy";
 import { SessionsDashboard } from "@/features/sessions/SessionsDashboard";
 import { HtfCandleRemainLegend } from "@/features/sessions/HtfCandleRemainLegend";
 import { useTradingViewWidget } from "./useTradingViewWidget";
@@ -260,6 +261,7 @@ export function TradingViewChart({
   useStructureIntelligenceStudy(true);
   useSessionsStudy(true);
   useHtfCandlesStudy(true);
+  useReplayMentorStudy(true);
 
   return (
     <Box
