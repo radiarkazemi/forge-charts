@@ -322,7 +322,29 @@ export function mountHeaderToolbar(
   const openProfileMenu = (e: Event) => {
     e.preventDefault();
     e.stopPropagation();
-    window.dispatchEvent(new CustomEvent("forge:open-profile-menu"));
+    // Map iframe button rect → parent viewport so the React menu opens under the icon.
+    let top = 40;
+    let left = 12;
+    let bottom = 72;
+    let right = 44;
+    try {
+      const iframe = (widget as unknown as { _iFrame?: HTMLIFrameElement })._iFrame;
+      const btn = profileBtn.getBoundingClientRect();
+      const frame = iframe?.getBoundingClientRect();
+      const ox = frame?.left ?? 0;
+      const oy = frame?.top ?? 0;
+      top = oy + btn.top;
+      left = ox + btn.left;
+      bottom = oy + btn.bottom;
+      right = ox + btn.right;
+    } catch {
+      /* fall through with defaults */
+    }
+    window.dispatchEvent(
+      new CustomEvent("forge:open-profile-menu", {
+        detail: { top, left, bottom, right, width: right - left, height: bottom - top },
+      }),
+    );
   };
   profileBtn.addEventListener("click", openProfileMenu);
   profileBtn.addEventListener("pointerdown", openProfileMenu);

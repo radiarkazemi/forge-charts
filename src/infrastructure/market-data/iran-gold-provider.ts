@@ -124,25 +124,12 @@ function parsePackedBar(row: unknown): Bar | null {
   return { time, open, high, low, close, volume: Number.isFinite(volume) ? volume : 0 };
 }
 
-/** Cap wild Faraz tick shadows so G18/G24 don't show multi-toman spikes. */
-function clampBarWicks(bar: Bar, maxRange: number): Bar {
-  const bodyHi = Math.max(bar.open, bar.close);
-  const bodyLo = Math.min(bar.open, bar.close);
-  const span = Math.max(maxRange, Math.abs(bar.close - bar.open), 1e-6);
-  const mid = (bodyHi + bodyLo) / 2;
-  const half = span / 2;
-  let high = Math.min(bar.high, Math.max(bodyHi, mid + half));
-  let low = Math.max(bar.low, Math.min(bodyLo, mid - half));
-  if (high < bodyHi) high = bodyHi;
-  if (low > bodyLo) low = bodyLo;
-  return { ...bar, high, low };
-}
-
 /**
- * Faraz-like continuity: clamp outlier wicks, fill short holes with clean
- * dojis (no phantom shadows), drop nonsense zero/negative prints.
+ * Only crush absurd outlier wicks (bad Faraz ticks). Do NOT invent gapfill
+ * bars on the client — that flattened آبشده / G18 and looked “messed up”.
+ * Server already gapfills; we only drop non-positive prints + extreme spikes.
  */
-function sanitizeIranBars(bars: readonly Bar[], step: number): Bar[] {
+function sanitizeIranBars(bars: readonly Bar[]): Bar[] {
   if (bars.length === 0) return [];
   const closes = bars.map((b) => b.close).filter((c) => c > 0);
   const moves: number[] = [];
@@ -152,33 +139,24 @@ function sanitizeIranBars(bars: readonly Bar[], step: number): Bar[] {
   moves.sort((a, b) => a - b);
   const med = moves.length ? moves[Math.floor(moves.length / 2)]! : 0;
   const lastPx = closes[closes.length - 1] ?? 0;
-  // Tighter than server (×8) — client final pass for readable shadows.
-  const maxRange = Math.max(med * 3.5, lastPx * 1.5e-4, 1);
+  // Only clip spikes far beyond normal Faraz motion (leave real wicks alone).
+  const maxRange = Math.max(med * 12, lastPx * 4e-4, 1);
 
-  const clamped = bars
+  return bars
     .filter((b) => b.close > 0 && b.open > 0)
-    .map((b) => clampBarWicks(b, maxRange));
-
-  if (step <= 0 || clamped.length < 2) return clamped;
-
-  // Fill holes under ~45 steps with flat carry (O=H=L=C) — no invented wicks.
-  const maxGap = step * (step <= 60 ? 45 : 24);
-  const out: Bar[] = [];
-  for (let i = 0; i < clamped.length; i += 1) {
-    const cur = clamped[i]!;
-    if (out.length > 0) {
-      const prev = out[out.length - 1]!;
-      const gap = cur.time - prev.time;
-      if (gap > step && gap <= maxGap) {
-        const px = prev.close;
-        for (let t = prev.time + step; t < cur.time; t += step) {
-          out.push({ time: t, open: px, high: px, low: px, close: px, volume: 0 });
-        }
-      }
-    }
-    out.push(cur);
-  }
-  return out;
+    .map((b) => {
+      const bodyHi = Math.max(b.open, b.close);
+      const bodyLo = Math.min(b.open, b.close);
+      const rng = b.high - b.low;
+      if (rng <= maxRange) return b;
+      const mid = (bodyHi + bodyLo) / 2;
+      const half = maxRange / 2;
+      return {
+        ...b,
+        high: Math.max(bodyHi, Math.min(b.high, mid + half)),
+        low: Math.min(bodyLo, Math.max(b.low, mid - half)),
+      };
+    });
 }
 
 interface HistoryResponse {
@@ -326,7 +304,7 @@ export class IranGoldProvider implements MarketDataProvider {
       }
     }
     const merged = [...byTime.values()].sort((a, b) => a.time - b.time);
-    const clean = sanitizeIranBars(merged, step);
+    const clean = sanitizeIranBars(merged);
     return clean.slice(-Math.max(range.countBack, 1));
   }
 
@@ -363,11 +341,11 @@ export class IranGoldProvider implements MarketDataProvider {
         if (pending.length > 50) pending.shift();
         return;
       }
-      // Sparse Faraz polls: bridge with clean dojis only (no phantom shadows).
+      // Sparse Faraz polls: short bridge only (do not invent long flat series).
       const next = applyTick(current, price, ts, step);
       if (current && next.time > current.time + step) {
         const bridgePx = current.close;
-        const maxBridge = step * (step <= 60 ? 45 : 24);
+        const maxBridge = step * (step <= 60 ? 8 : 4);
         if (next.time - current.time <= maxBridge) {
           for (let t = current.time + step; t < next.time; t += step) {
             emit({
@@ -381,16 +359,8 @@ export class IranGoldProvider implements MarketDataProvider {
           }
         }
       }
-      // Cap live wick growth from a single bad Faraz tick.
-      const body = Math.abs(next.close - next.open);
-      const cap = Math.max(body * 4, Math.abs(next.close) * 2e-4, 1);
-      const bodyHi = Math.max(next.open, next.close);
-      const bodyLo = Math.min(next.open, next.close);
-      emit({
-        ...next,
-        high: Math.min(next.high, bodyHi + cap),
-        low: Math.max(next.low, bodyLo - cap),
-      });
+      // Leave live wicks alone — history sanitize already crushes absurd spikes.
+      emit(next);
     };
 
     // Seed forming bar from deep history (Faraz D/W/M or Mongo), like cp_fetcher.

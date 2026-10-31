@@ -33,7 +33,6 @@ const MUTED = "#787b86";
 interface MobileBottomBarProps {
   readonly onCreateAlert: () => void;
   readonly onOpenWatchlist: () => void;
-  readonly onOpenTrade: () => void;
   readonly onOpenAlerts: () => void;
 }
 
@@ -59,7 +58,6 @@ const IndicatorsIcon = strokeIcon("M5.5 18.5v-4M10.5 18.5V9.5M15.5 18.5v-7M20.5 
 const MoreIcon = strokeIcon("M8 14h.01M14 14h.01M20 14h.01");
 const WatchlistIcon = strokeIcon("M9 5h10a1.5 1.5 0 0 1 1.5 1.5V22l-6.5-3.25L7.5 22V6.5A1.5 1.5 0 0 1 9 5z");
 const ChartIcon = strokeIcon("M6 18.5V12l4-3 4 5 4-7v11.5");
-const TradeIcon = strokeIcon("M8 11.5h12M16.5 8 20 11.5 16.5 15M20 16.5H8M11.5 20 8 16.5 11.5 13");
 const AlertsIcon = strokeIcon("M14 6.5a6 6 0 0 1 6 6v3.5l1.5 2H6.5l1.5-2V12.5a6 6 0 0 1 6-6zM12 22h4");
 const MenuIcon = strokeIcon("M7 9h14M7 14h14M7 19h14");
 
@@ -74,12 +72,11 @@ function formatPrice(price: number | undefined, precision = 2): string {
 /**
  * TradingView mobile chrome:
  * 1) Chart tools bar — Symbol · Interval · Draw · Indicators · More
- * 2) App tab bar — Watchlist · Chart · Trade · Alerts · Menu
+ * 2) App tab bar — Watchlist · Chart · Alerts · Menu
  */
 export function MobileBottomBar({
   onCreateAlert,
   onOpenWatchlist,
-  onOpenTrade,
   onOpenAlerts,
 }: MobileBottomBarProps) {
   const { chart, settings, quotes, alerts } = useServices();
@@ -144,13 +141,6 @@ export function MobileBottomBar({
         if (sidePanel) settings.setSidePanel(null);
       },
       active: !sidePanel && !menuOpen,
-    },
-    {
-      key: "trade",
-      label: "Trade",
-      Icon: TradeIcon,
-      onClick: onOpenTrade,
-      active: false,
     },
     {
       key: "alerts",

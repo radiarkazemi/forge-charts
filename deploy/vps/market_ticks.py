@@ -2485,7 +2485,7 @@ def _load_iran_history_mongo(
         if forming is not None and len(prices) >= 2:
             moves = sorted(abs(prices[i] - prices[i - 1]) for i in range(1, len(prices)))
             med = moves[len(moves) // 2] if moves else 0.0
-            max_range = max(med * 8.0, abs(prices[-1]) * 2e-4, 1.0)
+            max_range = max(med * 12.0, abs(prices[-1]) * 4e-4, 1.0)
             buckets[wall_t] = _clamp_iran_tick_wicks(forming, max_range)
 
     try:
@@ -2615,12 +2615,12 @@ def _load_iran_history_mongo(
                 closes.append(price)
             if not built:
                 return
-            # Median adjacent move → wick cap (stops single bad ticks from huge shadows).
-            # ×3.5 keeps Faraz G18 readable; ×8 still left tall "shadow" spikes.
+            # Median adjacent move → wick cap (only crush absurd spikes; leave real Faraz wicks).
+            # ×3.5 flattened آبشده/G18; ×12 matches client sanitizeIranBars.
             moves = [abs(closes[i] - closes[i - 1]) for i in range(1, len(closes))]
             moves.sort()
             med_move = moves[len(moves) // 2] if moves else 0.0
-            max_range = max(med_move * 3.5, abs(closes[-1]) * 1.5e-4, 1.0)
+            max_range = max(med_move * 12.0, abs(closes[-1]) * 4e-4, 1.0)
             for t0, bar in built.items():
                 clamped = _clamp_iran_tick_wicks(bar, max_range)
                 existing = buckets.get(t0)

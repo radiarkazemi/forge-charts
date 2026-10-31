@@ -22,7 +22,10 @@ import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import type { UserProfile } from "@/application";
 
 interface ProfileMenuProps {
-  readonly anchorEl: HTMLElement | null;
+  /** Viewport point under the header profile icon (preferred). */
+  readonly anchorPosition?: { top: number; left: number } | null;
+  /** Legacy DOM anchor — used when position is unavailable. */
+  readonly anchorEl?: HTMLElement | null;
   readonly open: boolean;
   readonly onClose: () => void;
   readonly profile: UserProfile;
@@ -35,7 +38,8 @@ interface ProfileMenuProps {
 
 /** TradingView-style account menu (Dark theme toggle, Help, etc.). */
 export function ProfileMenu({
-  anchorEl,
+  anchorPosition = null,
+  anchorEl = null,
   open,
   onClose,
   profile,
@@ -45,13 +49,16 @@ export function ProfileMenu({
   onSignOut,
   alertCount = 0,
 }: ProfileMenuProps) {
+  const usePos = Boolean(anchorPosition);
   return (
     <Menu
-      anchorEl={anchorEl}
+      anchorReference={usePos ? "anchorPosition" : "anchorEl"}
+      anchorPosition={usePos ? (anchorPosition ?? undefined) : undefined}
+      anchorEl={usePos ? null : anchorEl}
       open={open}
       onClose={onClose}
-      anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
-      transformOrigin={{ vertical: "top", horizontal: "right" }}
+      anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+      transformOrigin={{ vertical: "top", horizontal: "left" }}
       slotProps={{
         paper: {
           sx: {

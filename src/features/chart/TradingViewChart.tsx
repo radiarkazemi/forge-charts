@@ -19,12 +19,7 @@ import { useReplayMentorStudy } from "./useReplayMentorStudy";
 import { SessionsDashboard } from "@/features/sessions/SessionsDashboard";
 import { HtfCandleRemainLegend } from "@/features/sessions/HtfCandleRemainLegend";
 import { useTradingViewWidget } from "./useTradingViewWidget";
-import {
-  QuickTradeOverlay,
-  TradeLinesOverlay,
-  CandleCountdownOverlay,
-  useDemoChartLines,
-} from "@/features/demo-trading";
+import { CandleCountdownOverlay } from "@/features/demo-trading";
 import { RADIAR_LAYOUT_NAME } from "@/infrastructure/tradingview";
 
 interface TradingViewChartProps {
@@ -50,7 +45,7 @@ export function TradingViewChart({
   hideHeader = false,
   transparentShell = false,
 }: TradingViewChartProps) {
-  const { chart, barReplay, datafeed, saveLoadAdapter, storage, settings, alerts, quotes, config, demoTrading, demoSpace } =
+  const { chart, barReplay, datafeed, saveLoadAdapter, storage, settings, alerts, quotes, config } =
     useServices();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const headerApiRef = useRef<HeaderToolbarApi | null>(null);
@@ -249,13 +244,11 @@ export function TradingViewChart({
     onWidgetReady: (widget) => {
       if (isPrimary) {
         barReplay.attach(widget, datafeed);
-        demoSpace.attach(widget, datafeed, demoTrading);
       }
     },
   });
 
   useChartAlertLines(isPrimary ? controller : null, alerts);
-  useDemoChartLines(isPrimary);
   // Must run on every pane — header Indicators can migrate the study off pane 0.
   useDealingRangesStudy(true);
   useStructureIntelligenceStudy(true);
@@ -281,8 +274,6 @@ export function TradingViewChart({
     >
       <Box ref={containerRef} sx={{ position: "absolute", inset: 0 }} />
 
-      {isPrimary ? <QuickTradeOverlay containerRef={containerRef} /> : null}
-      {isPrimary ? <TradeLinesOverlay containerRef={containerRef} /> : null}
       {isPrimary && !replayActive ? <CandleCountdownOverlay /> : null}
       {isPrimary ? <HtfCandleRemainLegend /> : null}
       <SessionsDashboard />

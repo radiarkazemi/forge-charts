@@ -6,7 +6,6 @@ import { useServices } from "@/app/use-services";
 import { AlertToaster } from "@/features/alerts/AlertToaster";
 import { CreateAlertDialog } from "@/features/alerts/CreateAlertDialog";
 import { ChartWorkspace } from "@/features/chart/ChartWorkspace";
-import { DemoTradingDock, OrderTicketPanel } from "@/features/demo-trading";
 import { ProfileDialog } from "@/features/profile/ProfileDialog";
 import { ProfileMenu } from "@/features/profile/ProfileMenu";
 import { activeProfile } from "@/application";
@@ -19,6 +18,13 @@ interface AppShellProps {
   readonly onSignOut: () => void;
 }
 
+interface ProfileAnchorRect {
+  readonly top: number;
+  readonly left: number;
+  readonly bottom: number;
+  readonly right: number;
+}
+
 /**
  * Chart shell matching TradingView Supercharts.
  * Mobile: TV-app shell — no desktop header, full-bleed chart, bottom tool + app bars.
@@ -26,31 +32,16 @@ interface AppShellProps {
 export function AppShell({ onSignOut }: AppShellProps) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
-  const { settings, chart, alerts, demoTrading } = useServices();
+  const { settings, chart, alerts } = useServices();
   const sidePanel = useStore(settings.settings, (s) => s.sidePanel);
   const appTheme = useStore(settings.settings, (s) => s.theme);
   const settingsSnap = useStore(settings.settings, (s) => s);
-  const ticketOpen = useStore(demoTrading.state, (s) => s.ticketOpen);
   const profile = activeProfile(settingsSnap);
   const symbol = useStore(chart.state, (s) => s.symbol);
   const alertCount = useStore(alerts.alerts, (list) => list.filter((a) => a.status === "active").length);
   const [alertDialogOpen, setAlertDialogOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [profileMenuAnchor, setProfileMenuAnchor] = useState<HTMLElement | null>(null);
-  const profileAnchorRef = useState(() => {
-    if (typeof document === "undefined") return null;
-    const el = document.createElement("div");
-    el.style.cssText =
-      "position:fixed;top:6px;right:48px;width:1px;height:28px;pointer-events:none;z-index:40;";
-    document.body.appendChild(el);
-    return el;
-  })[0];
-
-  useEffect(() => {
-    return () => {
-      profileAnchorRef?.remove();
-    };
-  }, [profileAnchorRef]);
+  const [profileMenuPos, setProfileMenuPos] = useState<ProfileAnchorRect | null>(null);
 
   useEffect(() => {
     document.title = `${symbol} — Forge Charts`;
@@ -65,27 +56,37 @@ export function AppShell({ onSignOut }: AppShellProps) {
     if (settings.settings.get().sidePanel) {
       settings.setSidePanel(null);
     }
-    if (demoTrading.state.get().dockOpen) {
-      demoTrading.setDockOpen(false);
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: mobile breakpoint only
   }, [isMobile]);
 
   useEffect(() => {
-    const onOpen = () => setProfileMenuAnchor(profileAnchorRef);
+    const onOpen = (event: Event) => {
+      const detail = (event as CustomEvent<Partial<ProfileAnchorRect>>).detail;
+      if (
+        detail &&
+        typeof detail.top === "number" &&
+        typeof detail.left === "number" &&
+        typeof detail.bottom === "number" &&
+        typeof detail.right === "number"
+      ) {
+        setProfileMenuPos({
+          top: detail.top,
+          left: detail.left,
+          bottom: detail.bottom,
+          right: detail.right,
+        });
+        return;
+      }
+      // Mobile menu fallback — open near top-left (profile lives left on Faraz chrome).
+      setProfileMenuPos({ top: 8, left: 12, bottom: 40, right: 44 });
+    };
     window.addEventListener("forge:open-profile-menu", onOpen);
     return () => window.removeEventListener("forge:open-profile-menu", onOpen);
-  }, [profileAnchorRef]);
-
-  useEffect(() => {
-    if (profileAnchorRef) {
-      // Mobile has no right rail — pin the invisible profile anchor to the corner.
-      profileAnchorRef.style.right = isMobile ? "12px" : "56px";
-    }
-  }, [isMobile, profileAnchorRef]);
+  }, []);
 
   const openAlertDialog = () => setAlertDialogOpen(true);
-  const openProfileMenu = () => setProfileMenuAnchor(profileAnchorRef);
+  const openProfileMenu = () =>
+    setProfileMenuPos({ top: 8, left: 12, bottom: 40, right: 44 });
 
   const overlayPanel = isMobile && sidePanel ? sidePanel : null;
   const desktopSideDock = !isMobile && sidePanel && sidePanel !== "pine" ? sidePanel : null;
@@ -115,7 +116,6 @@ export function AppShell({ onSignOut }: AppShellProps) {
                 onRunPine={(code) => chart.runPineDraft(code)}
               />
             ) : null}
-            {ticketOpen ? <OrderTicketPanel mobile={isMobile} /> : null}
             {overlayPanel ? (
               <>
                 <Box
@@ -139,16 +139,11 @@ export function AppShell({ onSignOut }: AppShellProps) {
               </>
             ) : null}
           </Box>
-          <DemoTradingDock mobile={isMobile} />
           {isMobile ? (
             <MobileBottomBar
               onCreateAlert={openAlertDialog}
               onOpenWatchlist={() => settings.toggleSidePanel("watchlist")}
               onOpenAlerts={() => settings.toggleSidePanel("alerts")}
-              onOpenTrade={() => {
-                demoTrading.setTicketOpen(true);
-                demoTrading.setDockOpen(true);
-              }}
             />
           ) : null}
         </Box>
@@ -187,14 +182,18 @@ export function AppShell({ onSignOut }: AppShellProps) {
       <CreateAlertDialog open={alertDialogOpen} onClose={() => setAlertDialogOpen(false)} />
       <ProfileDialog open={profileOpen} onClose={() => setProfileOpen(false)} />
       <ProfileMenu
-        anchorEl={profileMenuAnchor}
-        open={Boolean(profileMenuAnchor)}
-        onClose={() => setProfileMenuAnchor(null)}
+        anchorPosition={
+          profileMenuPos
+            ? { top: profileMenuPos.bottom, left: profileMenuPos.left }
+            : null
+        }
+        open={Boolean(profileMenuPos)}
+        onClose={() => setProfileMenuPos(null)}
         profile={profile}
         darkTheme={appTheme === "dark"}
         onToggleTheme={() => settings.toggleTheme()}
         onOpenProfile={() => {
-          setProfileMenuAnchor(null);
+          setProfileMenuPos(null);
           setProfileOpen(true);
         }}
         onSignOut={onSignOut}
