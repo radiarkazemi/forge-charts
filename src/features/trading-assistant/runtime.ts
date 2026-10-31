@@ -361,7 +361,6 @@ export function computeTradingAssistant(
       // One signal per zone.
       z.used = true;
 
-      const mid = (z.lo + z.hi) / 2;
       const entry = bar.close;
       const pad = atr * 0.08;
       const stop = z.dir === 1 ? z.lo - pad : z.hi + pad;
