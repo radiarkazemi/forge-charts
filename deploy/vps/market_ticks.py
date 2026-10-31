@@ -2043,7 +2043,17 @@ def _fill_iran_session_gaps(
     if not ordered:
         return 0
     filled = 0
-    max_gap = max(1, int(max_gap_steps)) * step
+    max_session_steps = max(1, int(max_gap_steps))
+
+    def _session_missing(prev_t: int, until_t: int) -> int:
+        """Count cash-session buckets strictly between prev and until."""
+        n = 0
+        t = prev_t + step
+        while t < until_t:
+            if _iran_in_cash_session(t):
+                n += 1
+            t += step
+        return n
 
     def _carry(prev_t: int, until_t: int, px: float) -> int:
         n = 0
@@ -2058,13 +2068,16 @@ def _fill_iran_session_gaps(
     for i in range(1, len(ordered)):
         prev_t = ordered[i - 1]
         next_t = ordered[i]
-        gap = next_t - prev_t
-        if gap <= step or gap > max_gap:
+        if next_t - prev_t <= step:
+            continue
+        # Measure the hole in session steps so overnight (22→09) does not
+        # block filling the cash-session shoulders on either side.
+        if _session_missing(prev_t, next_t) > max_session_steps:
             continue
         filled += _carry(prev_t, next_t, float(buckets[prev_t]["c"]))
-    # Extend to the forming wall bucket when the tip is only a few steps behind.
+    # Extend to the forming wall bucket when the tip is only a few session steps behind.
     tip = max(ordered)
-    if 0 < wall_t - tip <= max_gap and tip < wall_t:
+    if tip < wall_t and _session_missing(tip, wall_t + 1) <= max_session_steps:
         filled += _carry(tip, wall_t + 1, float(buckets[tip]["c"]))
     return filled
 
