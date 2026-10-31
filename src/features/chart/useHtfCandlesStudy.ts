@@ -173,7 +173,8 @@ export function useHtfCandlesStudy(enabled = true): void {
           showVi: bool("showVi", HTF_CANDLES_DEFAULTS.showVi),
           showTrace: bool("showTrace", HTF_CANDLES_DEFAULTS.showTrace),
           showLabels: bool("showLabels", HTF_CANDLES_DEFAULTS.showLabels),
-          showTimer: bool("showTimer", HTF_CANDLES_DEFAULTS.showTimer),
+          // Force off — HTF remain labels duplicated the blue price-scale countdown.
+          showTimer: false,
           showHtfName: bool("showHtfName", HTF_CANDLES_DEFAULTS.showHtfName),
           showGroupBackdrop: bool("showGroupBackdrop", HTF_CANDLES_DEFAULTS.showGroupBackdrop),
           dailyOpenMode,
