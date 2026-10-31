@@ -15,6 +15,7 @@ import { createDealingRangesIndicator } from "@/features/chart/dealing-ranges-in
 import { createSessionsIndicator } from "@/features/chart/sessions-indicator";
 import { createHtfCandlesIndicator } from "@/features/chart/htf-candles-indicator";
 import { createStructureIntelligenceIndicator } from "@/features/chart/structure-intelligence-indicator";
+import { createReplayMentorIndicator } from "@/features/chart/replay-mentor-indicator";
 
 export interface WidgetOptionsInput {
   readonly container: HTMLElement;
@@ -292,6 +293,14 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
       intervals: FAVORITE_INTERVALS,
       chartTypes: ["Candles", "Heiken Ashi", "Line", "Area", "Bars"],
       drawingTools: FAVORITE_DRAWING_TOOLS,
+      // Titles must match study `description` / UI name exactly.
+      indicators: [
+        "Forge Replay Mentor",
+        "Forge Structure Intelligence",
+        "Dealing Ranges",
+        "ICT HTF Candles",
+        "Forge Sessions",
+      ],
     },
     time_frames: TIME_FRAMES,
     loading_screen: { backgroundColor: tokens.background, foregroundColor: tokens.accent },
@@ -315,6 +324,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
         createStructureIntelligenceIndicator(PineJS as never) as CustomIndicator,
         createSessionsIndicator(PineJS as never) as CustomIndicator,
         createHtfCandlesIndicator(PineJS as never) as CustomIndicator,
+        createReplayMentorIndicator(PineJS as never) as CustomIndicator,
       ]),
   };
 }
