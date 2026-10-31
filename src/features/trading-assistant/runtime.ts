@@ -111,9 +111,9 @@ export const FTA_DEFAULTS: FtaInputs = {
   showHistory: true,
   bullColor: "#43A047",
   bearColor: "#E53935",
-  // Match TradingView Long/Short Position defaults.
-  longBoxColor: "#089981",
-  shortBoxColor: "#F23645",
+  // Classic TV Long/Short Position greens/reds.
+  longBoxColor: "#00A000",
+  shortBoxColor: "#FF0000",
   boxOpacity: 20,
 };
 
@@ -149,10 +149,14 @@ export interface FtaSignal {
   readonly outcome: FtaOutcome;
   /** Highest TP reached before SL (for labels). */
   readonly tpHit: 0 | 1 | 2;
-  /** When the signal resolved (TP/SL); entry time while live. */
+  /** Always the entry/signal candle time (markers stay on that candle). */
   readonly labelTime: number;
-  /** Price the pill is anchored to (entry / TP / SL). */
+  /** Anchor price for the signal marker (below low for BUY, above high for SELL). */
   readonly labelPrice: number;
+  /** Signal candle high — for arrow placement. */
+  readonly candleHigh: number;
+  /** Signal candle low — for arrow placement. */
+  readonly candleLow: number;
 }
 
 export interface FtaResult {
@@ -300,10 +304,10 @@ export function computeTradingAssistant(
   const right = Math.max(1, Math.floor(cfg.swingRight));
   if (bars.length < left + right + 20) return empty;
 
-  // Orca DR on this chart's timeframe — last confirmed same-color C1/C2 range.
+  // Orca DR on this chart's timeframe — sensitive pivots (1,1) like classic Orca.
   const orca = computeOrcaAnalysis(bars, {
-    left: Math.max(1, left - 1),
-    right: Math.max(1, right - 1),
+    left: 1,
+    right: 1,
     breakOnWick: false,
     bosColor: "#FF9800",
     mssColor: "#00BCD4",
@@ -525,34 +529,20 @@ export function computeTradingAssistant(
           return b.t1 - a.t1;
         });
 
-        for (const z of candidates.slice(0, 3)) {
-          // POI must sit in the correct DR half when DR is required (sensitive).
-          if (cfg.requireDealingRange && dr) {
-            const zoneInHalf =
-              wantDir === 1
-                ? z.lo <= dr.mid // discount / lower half for longs
-                : z.hi >= dr.mid; // premium / upper half for shorts
-            if (!zoneInHalf) continue;
-          }
-
-          const ok = cfg.requireRejection
-            ? z.dir === 1
-              ? bullRejection(bar, z, atr)
-              : bearRejection(bar, z, atr)
-            : touchesZone(bar, z) && (z.dir === 1 ? isBull(bar) : !isBull(bar));
-          if (!ok) continue;
-
-          z.used = true;
+        const tryEmit = (
+          zlo: number,
+          zhi: number,
+          bornTime: number,
+          structure: "MSS" | "BOS",
+          structurePrice: number,
+          poiKind: string,
+          markUsed?: Zone,
+        ): boolean => {
           const entry = bar.close;
           const pad = atr * Math.max(0, cfg.atrSlPad);
-          // Prefer DR extreme as structural stop when DR confirmed.
+          const zoneStop = wantDir === 1 ? zlo - pad : zhi + pad;
           const drStop =
-            dr && cfg.requireDealingRange
-              ? wantDir === 1
-                ? dr.bot - pad
-                : dr.top + pad
-              : null;
-          const zoneStop = z.dir === 1 ? z.lo - pad : z.hi + pad;
+            dr != null ? (wantDir === 1 ? dr.bot - pad : dr.top + pad) : null;
           const stop =
             drStop != null
               ? wantDir === 1
@@ -560,49 +550,109 @@ export function computeTradingAssistant(
                 : Math.max(zoneStop, drStop)
               : zoneStop;
           const risk = Math.abs(entry - stop);
-          if (risk < atr * 0.12) continue;
+          if (risk < atr * 0.12) return false;
 
           const r1 = Math.max(0.5, cfg.tp1R);
           const r2 = Math.max(r1, cfg.tp2R);
-          const tp1 = z.dir === 1 ? entry + risk * r1 : entry - risk * r1;
-          const tp2 = z.dir === 1 ? entry + risk * r2 : entry - risk * r2;
+          const tp1 = wantDir === 1 ? entry + risk * r1 : entry - risk * r1;
+          const tp2 = wantDir === 1 ? entry + risk * r2 : entry - risk * r2;
+          // Keep marker glued to the signal candle (not TP/SL later).
+          const labelPrice =
+            wantDir === 1 ? bar.low - atr * 0.15 : bar.high + atr * 0.15;
 
-          const reasonParts = [`${z.structure}`, z.kind];
+          const reasonParts = [structure, poiKind];
           if (dr) reasonParts.push(dr.bullish ? "DR+" : "DR−");
-          if (cfg.requireDrOte) reasonParts.push("OTE");
+          if (cfg.requireDrOte && dr && touchesDrOte(bar, dr)) reasonParts.push("OTE");
           if (cfg.requireRejection) reasonParts.push("Reject");
           if (locked !== 0) reasonParts.push(locked === 1 ? "ManBuy" : "ManSell");
 
+          if (markUsed) markUsed.used = true;
           signals.push({
-            dir: z.dir,
-            kind: z.structure,
+            dir: wantDir,
+            kind: structure,
             reason: reasonParts.join("+"),
             biasLabel: biasLbl,
             time: bar.time,
-            bornTime: z.t0,
+            bornTime,
             entry,
             stop,
             tp1,
             tp2,
             risk,
             rr: r2,
-            zlo: z.lo,
-            zhi: z.hi,
-            structurePrice: z.structurePrice,
+            zlo,
+            zhi,
+            structurePrice,
             active: true,
             outcome: "open",
             tpHit: 0,
             labelTime: bar.time,
-            labelPrice: entry,
+            labelPrice,
+            candleHigh: bar.high,
+            candleLow: bar.low,
           });
           lastSignalBarIdx = i;
           dayCounts.set(day, usedToday + 1);
-          break;
+          return true;
+        };
+
+        let emitted = false;
+        for (const z of candidates.slice(0, 3)) {
+          if (cfg.requireDealingRange && dr) {
+            const zoneInHalf =
+              wantDir === 1 ? z.lo <= dr.mid : z.hi >= dr.mid;
+            if (!zoneInHalf) continue;
+          }
+          const ok = cfg.requireRejection
+            ? z.dir === 1
+              ? bullRejection(bar, z, atr)
+              : bearRejection(bar, z, atr)
+            : touchesZone(bar, z) && (z.dir === 1 ? isBull(bar) : !isBull(bar));
+          if (!ok) continue;
+          emitted = tryEmit(z.lo, z.hi, z.t0, z.structure, z.structurePrice, z.kind, z);
+          if (emitted) break;
+        }
+
+        // Smarter: if no OB/FVG but last DR is confirmed + OTE/half + rejection,
+        // use the Dealing Range itself as the POI (classic sensitive DR entry).
+        if (!emitted && cfg.requireDealingRange && dr && wantDir !== 0) {
+          let zlo: number;
+          let zhi: number;
+          if (cfg.requireDrOte) {
+            zlo = Math.min(dr.ote618, dr.ote786);
+            zhi = Math.max(dr.ote618, dr.ote786);
+          } else if (wantDir === 1) {
+            zlo = dr.bot;
+            zhi = dr.mid;
+          } else {
+            zlo = dr.mid;
+            zhi = dr.top;
+          }
+          const drZone: Zone = {
+            dir: wantDir,
+            kind: "OB",
+            t0: dr.t0,
+            t1: dr.t1,
+            lo: zlo,
+            hi: zhi,
+            structure: "MSS",
+            structurePrice: dr.mid,
+            used: false,
+          };
+          const rejectOk = cfg.requireRejection
+            ? wantDir === 1
+              ? bullRejection(bar, drZone, atr)
+              : bearRejection(bar, drZone, atr)
+            : touchesZone(bar, drZone) && (wantDir === 1 ? isBull(bar) : !isBull(bar));
+          if (rejectOk) {
+            tryEmit(zlo, zhi, dr.t0, "MSS", dr.mid, "DR");
+          }
         }
       }
     }
 
     // Resolve open signals — track TP1 then TP2 (Texas-style multi-target).
+    // Keep labelTime/labelPrice on the entry candle so markers stay clear.
     for (const s of signals) {
       if (!s.active) continue;
       if (s.time >= bar.time) continue;
@@ -610,44 +660,27 @@ export function computeTradingAssistant(
         if (bar.low <= s.stop) {
           s.active = false;
           s.outcome = "sl";
-          s.labelTime = bar.time;
-          s.labelPrice = s.stop;
         } else {
-          if (s.tpHit < 1 && bar.high >= s.tp1) {
-            s.tpHit = 1;
-            s.labelTime = bar.time;
-            s.labelPrice = s.tp1;
-          }
+          if (s.tpHit < 1 && bar.high >= s.tp1) s.tpHit = 1;
           if (bar.high >= s.tp2) {
             s.tpHit = 2;
             s.active = false;
             s.outcome = "tp2";
-            s.labelTime = bar.time;
-            s.labelPrice = s.tp2;
           }
         }
       } else if (bar.high >= s.stop) {
         s.active = false;
         s.outcome = "sl";
-        s.labelTime = bar.time;
-        s.labelPrice = s.stop;
       } else {
-        if (s.tpHit < 1 && bar.low <= s.tp1) {
-          s.tpHit = 1;
-          s.labelTime = bar.time;
-          s.labelPrice = s.tp1;
-        }
+        if (s.tpHit < 1 && bar.low <= s.tp1) s.tpHit = 1;
         if (bar.low <= s.tp2) {
           s.tpHit = 2;
           s.active = false;
           s.outcome = "tp2";
-          s.labelTime = bar.time;
-          s.labelPrice = s.tp2;
         }
       }
       if (!s.active && s.outcome === "open" && s.tpHit === 1) {
         s.outcome = "tp1";
-        s.labelPrice = s.tp1;
       }
     }
   }
@@ -684,23 +717,11 @@ function signalPillText(s: FtaSignal): string {
   return `${tag} - LIVE`;
 }
 
-function fmtDist(n: number): string {
-  const a = Math.abs(n);
-  if (a >= 100) return a.toFixed(2);
-  if (a >= 1) return a.toFixed(3);
-  return a.toFixed(5);
-}
-
-function fmtPct(entry: number, other: number): string {
-  if (!Number.isFinite(entry) || entry === 0) return "0.00";
-  return ((Math.abs(other - entry) / Math.abs(entry)) * 100).toFixed(2);
-}
-
 /**
  * Draw FTA signals.
- * - Last confirmed Dealing Range (optional)
- * - `showTradeBox` on → TV-style green Target + red Stop boxes + Target/Stop/R:R labels
- * - Signal BUY/SELL pills always drawn on the signal candle (even when boxes off)
+ * - Last confirmed Dealing Range: discount (green) + premium (red) + EQ/OTE
+ * - Native TV Long/Short Position (green Target + red Stop) when boxes on
+ * - Arrow + pill glued to the signal candle (always)
  */
 export function tradingAssistantDrawCmds(
   result: FtaResult,
@@ -729,29 +750,37 @@ export function tradingAssistantDrawCmds(
 
   const bullPill = normalizeHex(cfg.bullColor, FTA_DEFAULTS.bullColor);
   const bearPill = normalizeHex(cfg.bearColor, FTA_DEFAULTS.bearColor);
-  // TV Long/Short Position defaults: green Target, red Stop (both directions).
   const targetFill = normalizeHex(cfg.longBoxColor, FTA_DEFAULTS.longBoxColor);
   const stopFill = normalizeHex(cfg.shortBoxColor, FTA_DEFAULTS.shortBoxColor);
-  const boxAlpha = Math.max(0.08, Math.min(0.35, Number(cfg.boxOpacity) / 100));
+  const boxAlpha = Math.max(0.12, Math.min(0.35, Number(cfg.boxOpacity) / 100));
   const zoneAlpha = Math.max(0.04, boxAlpha * 0.7);
-  // Solid label chips like the TV position tool.
-  const targetLabelBg = "#089981";
-  const stopLabelBg = "#F23645";
 
-  // Last confirmed Dealing Range on this timeframe (EQ + OTE).
+  // Dealing Range backdrop first; signals last so paint-cap keeps markers.
   if (cfg.showDealingRange && result.lastDealingRange) {
     const dr = result.lastDealingRange;
-    const drColor = dr.bullish ? "#76FF03" : "#F44336";
     const t2 = Math.max(endT, dr.t1);
+    // Premium (upper) = red · Discount (lower) = green — TV/ICT style.
     cmds.push({
       kind: "rect",
       t1: dr.t0,
       p1: dr.top,
       t2,
+      p2: dr.mid,
+      color: "#FF0000",
+      fill: "#FF0000",
+      fillAlpha: 0.14,
+      borderWidth: 1,
+      style: "solid",
+    });
+    cmds.push({
+      kind: "rect",
+      t1: dr.t0,
+      p1: dr.mid,
+      t2,
       p2: dr.bot,
-      color: drColor,
-      fill: drColor,
-      fillAlpha: 0.08,
+      color: "#00A000",
+      fill: "#00A000",
+      fillAlpha: 0.14,
       borderWidth: 1,
       style: "solid",
     });
@@ -788,20 +817,35 @@ export function tradingAssistantDrawCmds(
       style: "dotted",
       text: "0.786",
     });
+    cmds.push({
+      kind: "label",
+      t1: dr.t1,
+      p1: (dr.top + dr.mid) / 2,
+      color: "#FF0000",
+      fill: "#FF0000",
+      text: "Premium",
+    });
+    cmds.push({
+      kind: "label",
+      t1: dr.t1,
+      p1: (dr.bot + dr.mid) / 2,
+      color: "#00A000",
+      fill: "#00A000",
+      text: "Discount",
+    });
   }
 
   for (const s of result.signals) {
     if (!cfg.showHistory && !s.active) continue;
     const bull = s.dir === 1;
     const pill = bull ? bullPill : bearPill;
-    const extend = Math.max(endT, s.labelTime || s.time, s.time);
 
     if (cfg.showZones) {
       cmds.push({
         kind: "rect",
         t1: s.bornTime,
         p1: s.zhi,
-        t2: extend,
+        t2: Math.max(endT, s.time),
         p2: s.zlo,
         color: pill,
         fill: pill,
@@ -812,85 +856,37 @@ export function tradingAssistantDrawCmds(
     }
 
     if (cfg.showTradeBox) {
-      // TradingView Long/Short Position look:
-      // green Target zone + red Stop zone + Target / Stop / R:R pills.
-      const rewardLo = Math.min(s.entry, s.tp2);
-      const rewardHi = Math.max(s.entry, s.tp2);
-      const riskLo = Math.min(s.entry, s.stop);
-      const riskHi = Math.max(s.entry, s.stop);
-
+      // Native Charting Library Long/Short Position (green Target + red Stop).
       cmds.push({
-        kind: "rect",
+        kind: "position",
         t1: s.time,
-        p1: rewardHi,
-        t2: extend,
-        p2: rewardLo,
-        color: targetFill,
+        p1: s.entry,
+        dir: s.dir,
+        profitPrice: s.tp2,
+        stopPrice: s.stop,
+        color: pill,
         fill: targetFill,
+        stopFill,
         fillAlpha: boxAlpha,
-        borderWidth: 1,
-        style: "solid",
-      });
-      cmds.push({
-        kind: "rect",
-        t1: s.time,
-        p1: riskHi,
-        t2: extend,
-        p2: riskLo,
-        color: stopFill,
-        fill: stopFill,
-        fillAlpha: boxAlpha,
-        borderWidth: 1,
-        style: "solid",
-      });
-      // Entry divider
-      cmds.push({
-        kind: "line",
-        t1: s.time,
-        p1: s.entry,
-        t2: extend,
-        p2: s.entry,
-        color: "#808080",
-        width: 1,
-        style: "solid",
-      });
-
-      const targetDist = Math.abs(s.tp2 - s.entry);
-      const stopDist = Math.abs(s.stop - s.entry);
-      const rr = stopDist > 0 ? targetDist / stopDist : s.rr;
-      const midT = s.time + Math.max(1, Math.floor((extend - s.time) / 2));
-
-      cmds.push({
-        kind: "label",
-        t1: midT,
-        p1: s.tp2,
-        color: targetLabelBg,
-        fill: targetLabelBg,
-        text: `Target: ${fmtDist(targetDist)} (${fmtPct(s.entry, s.tp2)}%)`,
-      });
-      cmds.push({
-        kind: "label",
-        t1: midT,
-        p1: s.stop,
-        color: stopLabelBg,
-        fill: stopLabelBg,
-        text: `Stop: ${fmtDist(stopDist)} (${fmtPct(s.entry, s.stop)}%)`,
-      });
-      cmds.push({
-        kind: "label",
-        t1: midT,
-        p1: s.entry,
-        color: targetLabelBg,
-        fill: targetLabelBg,
-        text: `Risk/Reward Ratio: ${rr.toFixed(1)}`,
       });
     }
 
-    // Always keep the signal pill on the right candle (boxes are optional).
+    // Arrow + pill glued to the signal candle so the bar is obvious.
+    const arrowPrice = bull
+      ? (s.candleLow || s.entry) * 0.9997
+      : (s.candleHigh || s.entry) * 1.0003;
+    cmds.push({
+      kind: "arrow",
+      t1: s.time,
+      p1: arrowPrice,
+      dir: s.dir,
+      color: pill,
+      text: bull ? "BUY" : "SELL",
+    });
     cmds.push({
       kind: "label",
-      t1: s.labelTime || s.time,
-      p1: s.labelPrice || s.entry,
+      t1: s.time,
+      p1: s.labelPrice || arrowPrice,
       color: pill,
       fill: pill,
       text: signalPillText(s),

@@ -196,7 +196,7 @@ export interface OrcaAnalysis {
 }
 
 export interface DrawCmd {
-  kind: "line" | "rect" | "dot" | "label" | "vline" | "position";
+  kind: "line" | "rect" | "dot" | "label" | "vline" | "position" | "arrow";
   t1: number;
   p1: number;
   t2?: number;
@@ -210,7 +210,7 @@ export interface DrawCmd {
   fillAlpha?: number;
   /** Border linewidth for rects (default 2). */
   borderWidth?: number;
-  /** `position` only: 1 = long_position, -1 = short_position. */
+  /** `position` / `arrow`: 1 = long / arrow_up, -1 = short / arrow_down. */
   dir?: 1 | -1;
   /** `position` only: take-profit price (converted to ticks at paint). */
   profitPrice?: number;
@@ -762,8 +762,8 @@ export async function paintOrcaOnChart(
   options?: { readonly ownerStudyId?: EntityId },
 ): Promise<EntityId[]> {
   const ids: EntityId[] = [];
-  // Cap drawing volume for CL performance (rangesOnly ≈ 4 cmds each).
-  const limited = cmds.length > 80 ? cmds.slice(cmds.length - 80) : cmds;
+  // Cap drawing volume for CL performance; keep newest (signals live at the end).
+  const limited = cmds.length > 120 ? cmds.slice(cmds.length - 120) : cmds;
   const ownerStudyId = options?.ownerStudyId;
   const minTick = resolveMinTick(chart);
 
@@ -784,20 +784,24 @@ export async function paintOrcaOnChart(
         Number.isFinite(cmd.profitPrice) &&
         Number.isFinite(cmd.stopPrice)
       ) {
-        // Native TV Long/Short Position (RiskReward) — Target / Stop / R:R labels.
+        // Native TV Long/Short Position — green Target + red Stop (do NOT set `text`).
         const shape = cmd.dir === 1 ? "long_position" : "short_position";
         const profitLevel = priceToTicks(cmd.profitPrice! - cmd.p1, minTick);
         const stopLevel = priceToTicks(cmd.stopPrice! - cmd.p1, minTick);
-        const alpha = Math.max(0.05, Math.min(0.55, cmd.fillAlpha ?? 0.2));
-        // CL transparency: 0 = opaque … 100 = invisible (TV default ≈ 80).
+        const alpha = Math.max(0.12, Math.min(0.4, cmd.fillAlpha ?? 0.2));
         const transparency = Math.round((1 - alpha) * 100);
-        const profitHex = clColor(cmd.fill ?? "#089981", "#089981");
-        const stopHex = clColor(cmd.stopFill ?? "#F23645", "#F23645");
+        const profitHex = clColor(cmd.fill ?? "#00A000", "#00A000");
+        const stopHex = clColor(cmd.stopFill ?? "#FF0000", "#FF0000");
         const id = await chart.createShape(
           { time: cmd.t1 as never, price: cmd.p1 },
           {
-            ...common,
+            disableSelection: true,
+            disableSave: true,
+            disableUndo: true,
+            showInObjectsTree: false,
+            ...(ownerStudyId ? { ownerStudyId } : {}),
             shape: shape as never,
+            // Never pass `text` — CL throws / breaks Long·Short Position.
             overrides: {
               profitLevel,
               stopLevel,
@@ -810,28 +814,30 @@ export async function paintOrcaOnChart(
               showPriceLabels: true,
               alwaysShowStats: true,
               linewidth: 1,
-              linecolor: "#808080",
+              linecolor: "#585858",
               borderColor: "#667b8b",
               drawBorder: false,
               fontsize: 12,
               textcolor: "#ffffff",
+              riskDisplayMode: "percents",
             } as never,
           },
         );
-        if (id) {
-          // Stretch box to signal end (or last bar) so it reads like a drawn position.
-          if (cmd.t2 != null && cmd.t2 > cmd.t1) {
-            try {
-              chart.getShapeById(id).setPoints([
-                { time: cmd.t1 as never, price: cmd.p1 },
-                { time: cmd.t2 as never, price: cmd.p1 },
-              ]);
-            } catch {
-              /* keep default width */
-            }
-          }
-          ids.push(id);
-        }
+        if (id) ids.push(id);
+      } else if (cmd.kind === "arrow" && (cmd.dir === 1 || cmd.dir === -1)) {
+        const id = await chart.createShape(
+          { time: cmd.t1 as never, price: cmd.p1 },
+          {
+            ...common,
+            shape: (cmd.dir === 1 ? "arrow_up" : "arrow_down") as never,
+            text: (cmd.text ?? "").trim() || (cmd.dir === 1 ? "BUY" : "SELL"),
+            overrides: {
+              color: stroke,
+              fontsize: 14,
+            },
+          },
+        );
+        if (id) ids.push(id);
       } else if (cmd.kind === "line" && cmd.t2 != null && cmd.p2 != null) {
         const label = (cmd.text ?? "").trim();
         const id = await chart.createMultipointShape(
@@ -857,13 +863,9 @@ export async function paintOrcaOnChart(
         );
         if (id) ids.push(id);
       } else if (cmd.kind === "rect" && cmd.t2 != null && cmd.p2 != null) {
-        // Prefer rgba with spaces — CL docs use this form for rectangle fills.
+        // CL rectangles: solid hex + transparency (rgba fills are unreliable).
         const fillHex = clColor(cmd.fill ?? cmd.color, stroke);
-        const r = Number.parseInt(fillHex.slice(1, 3), 16);
-        const g = Number.parseInt(fillHex.slice(3, 5), 16);
-        const b = Number.parseInt(fillHex.slice(5, 7), 16);
         const alpha = Math.max(0.04, Math.min(0.85, cmd.fillAlpha ?? 0.2));
-        // CL `transparency` is 0=opaque … 100=invisible.
         const transparency = Math.round((1 - alpha) * 100);
         const border = Math.max(0, Math.min(4, cmd.borderWidth ?? 1));
         const id = await chart.createMultipointShape(
@@ -875,9 +877,11 @@ export async function paintOrcaOnChart(
             ...common,
             shape: "rectangle",
             overrides: {
-              color: stroke,
-              backgroundColor: `rgba(${r}, ${g}, ${b}, ${alpha})`,
+              color: fillHex,
+              linecolor: fillHex,
+              backgroundColor: fillHex,
               fillBackground: true,
+              filled: true,
               linewidth: border,
               transparency,
               linestyle: linestyleMap[cmd.style ?? "solid"],
