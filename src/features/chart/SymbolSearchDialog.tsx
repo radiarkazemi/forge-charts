@@ -200,14 +200,16 @@ export function SymbolSearchDialog({ open, onClose }: SymbolSearchDialogProps) {
       fullWidth
       maxWidth="sm"
       dir={rtl ? "rtl" : "ltr"}
-      PaperProps={{
-        sx: {
-          bgcolor: bg,
-          color: fg,
-          borderRadius: "16px",
-          border: `1px solid ${border}`,
-          overflow: "hidden",
-          maxHeight: "min(820px, 88vh)",
+      slotProps={{
+        paper: {
+          sx: {
+            bgcolor: bg,
+            color: fg,
+            borderRadius: "16px",
+            border: `1px solid ${border}`,
+            overflow: "hidden",
+            maxHeight: "min(820px, 88vh)",
+          },
         },
       }}
     >
@@ -241,12 +243,14 @@ export function SymbolSearchDialog({ open, onClose }: SymbolSearchDialogProps) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={PLACEHOLDER[language]}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon sx={{ color: muted, fontSize: 18 }} />
-              </InputAdornment>
-            ),
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon sx={{ color: muted, fontSize: 18 }} />
+                </InputAdornment>
+              ),
+            },
           }}
           sx={{
             "& .MuiOutlinedInput-root": {
