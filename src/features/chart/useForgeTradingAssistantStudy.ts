@@ -93,10 +93,16 @@ export function useForgeTradingAssistantStudy(enabled = true): void {
           const v = map.get(id);
           return typeof v === "boolean" ? v : fallback;
         };
+        const biasRaw = Math.floor(num("biasMode", FTA_STUDY_DEFAULTS.biasMode));
+        const biasMode = (biasRaw === 1 ? 1 : biasRaw === 2 ? 2 : 0) as 0 | 1 | 2;
         return {
+          biasMode,
           swingLeft: Math.max(1, Math.floor(num("swingLeft", FTA_STUDY_DEFAULTS.swingLeft))),
           swingRight: Math.max(1, Math.floor(num("swingRight", FTA_STUDY_DEFAULTS.swingRight))),
-          targetR: Math.max(1, num("targetR", FTA_STUDY_DEFAULTS.targetR)),
+          tp1R: Math.max(0.5, num("tp1R", FTA_STUDY_DEFAULTS.tp1R)),
+          tp2R: Math.max(1, num("tp2R", FTA_STUDY_DEFAULTS.tp2R)),
+          atrLength: Math.max(5, Math.floor(num("atrLength", FTA_STUDY_DEFAULTS.atrLength))),
+          atrSlPad: Math.max(0, num("atrSlPad", FTA_STUDY_DEFAULTS.atrSlPad)),
           preferMss: bool("preferMss", FTA_STUDY_DEFAULTS.preferMss),
           useOrderBlock: bool("useOrderBlock", FTA_STUDY_DEFAULTS.useOrderBlock),
           useFvg: bool("useFvg", FTA_STUDY_DEFAULTS.useFvg),
@@ -105,13 +111,24 @@ export function useForgeTradingAssistantStudy(enabled = true): void {
             24,
             Math.max(1, Math.floor(num("maxSignals", FTA_STUDY_DEFAULTS.maxSignals))),
           ),
+          maxSignalsPerDay: Math.min(
+            20,
+            Math.max(1, Math.floor(num("maxSignalsPerDay", FTA_STUDY_DEFAULTS.maxSignalsPerDay))),
+          ),
+          cooldownBars: Math.min(
+            60,
+            Math.max(1, Math.floor(num("cooldownBars", FTA_STUDY_DEFAULTS.cooldownBars))),
+          ),
           showZones: bool("showZones", FTA_STUDY_DEFAULTS.showZones),
+          showTradeBox: bool("showTradeBox", FTA_STUDY_DEFAULTS.showTradeBox),
           showStructure: bool("showStructure", FTA_STUDY_DEFAULTS.showStructure),
           showHistory: bool("showHistory", FTA_STUDY_DEFAULTS.showHistory),
           bullColor: FTA_DEFAULTS.bullColor,
           bearColor: FTA_DEFAULTS.bearColor,
           tpColor: FTA_DEFAULTS.tpColor,
           slColor: FTA_DEFAULTS.slColor,
+          riskFill: FTA_DEFAULTS.riskFill,
+          rewardFill: FTA_DEFAULTS.rewardFill,
         };
       } catch {
         return {};
@@ -186,7 +203,7 @@ export function useForgeTradingAssistantStudy(enabled = true): void {
         }
         const live = result.signals.filter((s) => s.active).length;
         console.info(
-          `[forge-ta] painted ${ids.length} shapes · signals=${result.signals.length} live=${live} bars=${bars.length}`,
+          `[forge-ta] ${result.biasLabel} · painted ${ids.length} · signals=${result.signals.length} live=${live} bars=${bars.length}`,
         );
       } catch (err) {
         console.warn("[forge-ta] paint failed", err);

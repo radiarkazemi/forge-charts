@@ -1,7 +1,7 @@
 /**
  * Charting Library custom study: “Forge Trading Assistant”.
  * Plots are inert — Buy/Sell + Entry/SL/TP painted by
- * `useForgeTradingAssistantStudy` from the Phase 1 confluence runtime.
+ * `useForgeTradingAssistantStudy` (Texas-inspired Manual Buy/Sell bias).
  */
 
 import type { CustomIndicator } from "@/infrastructure/tradingview";
@@ -11,15 +11,22 @@ export const FTA_STUDY_NAME = "Forge Trading Assistant";
 export const FTA_STUDY_ID = "ForgeTradingAssistant@tv-basicstudies-1";
 
 export const FTA_STUDY_DEFAULTS = {
+  biasMode: FTA_DEFAULTS.biasMode,
   swingLeft: FTA_DEFAULTS.swingLeft,
   swingRight: FTA_DEFAULTS.swingRight,
-  targetR: FTA_DEFAULTS.targetR,
+  tp1R: FTA_DEFAULTS.tp1R,
+  tp2R: FTA_DEFAULTS.tp2R,
+  atrLength: FTA_DEFAULTS.atrLength,
+  atrSlPad: FTA_DEFAULTS.atrSlPad,
   preferMss: FTA_DEFAULTS.preferMss,
   useOrderBlock: FTA_DEFAULTS.useOrderBlock,
   useFvg: FTA_DEFAULTS.useFvg,
   requireRejection: FTA_DEFAULTS.requireRejection,
   maxSignals: FTA_DEFAULTS.maxSignals,
+  maxSignalsPerDay: FTA_DEFAULTS.maxSignalsPerDay,
+  cooldownBars: FTA_DEFAULTS.cooldownBars,
   showZones: FTA_DEFAULTS.showZones,
+  showTradeBox: FTA_DEFAULTS.showTradeBox,
   showStructure: FTA_DEFAULTS.showStructure,
   showHistory: FTA_DEFAULTS.showHistory,
 } as const;
@@ -35,7 +42,7 @@ export function createForgeTradingAssistantIndicator(PineJS: {
       id: FTA_STUDY_ID as never,
       name: FTA_STUDY_NAME,
       description: FTA_STUDY_NAME,
-      shortDescription: "Forge TA · Buy/Sell TP/SL",
+      shortDescription: "Forge TA · Manual Buy/Sell · TP1/TP2",
       isCustomIndicator: true,
       is_price_study: true,
       linkedToSeries: true,
@@ -60,6 +67,14 @@ export function createForgeTradingAssistantIndicator(PineJS: {
       },
       inputs: [
         {
+          id: "biasMode",
+          name: "Direction (0=Auto, 1=Manual Buy, 2=Manual Sell)",
+          defval: FTA_STUDY_DEFAULTS.biasMode,
+          type: "integer",
+          min: 0,
+          max: 2,
+        },
+        {
           id: "swingLeft",
           name: "Swing left bars",
           defval: FTA_STUDY_DEFAULTS.swingLeft,
@@ -76,12 +91,36 @@ export function createForgeTradingAssistantIndicator(PineJS: {
           max: 8,
         },
         {
-          id: "targetR",
-          name: "TP / SL ratio (R)",
-          defval: FTA_STUDY_DEFAULTS.targetR,
+          id: "tp1R",
+          name: "TP1 (R multiple)",
+          defval: FTA_STUDY_DEFAULTS.tp1R,
+          type: "float",
+          min: 0.5,
+          max: 4,
+        },
+        {
+          id: "tp2R",
+          name: "TP2 (R multiple)",
+          defval: FTA_STUDY_DEFAULTS.tp2R,
           type: "float",
           min: 1,
           max: 6,
+        },
+        {
+          id: "atrLength",
+          name: "ATR length",
+          defval: FTA_STUDY_DEFAULTS.atrLength,
+          type: "integer",
+          min: 5,
+          max: 50,
+        },
+        {
+          id: "atrSlPad",
+          name: "SL pad × ATR",
+          defval: FTA_STUDY_DEFAULTS.atrSlPad,
+          type: "float",
+          min: 0,
+          max: 2,
         },
         {
           id: "preferMss",
@@ -108,12 +147,34 @@ export function createForgeTradingAssistantIndicator(PineJS: {
           type: "bool",
         },
         {
+          id: "maxSignalsPerDay",
+          name: "Max signals / day (UTC)",
+          defval: FTA_STUDY_DEFAULTS.maxSignalsPerDay,
+          type: "integer",
+          min: 1,
+          max: 20,
+        },
+        {
+          id: "cooldownBars",
+          name: "Cooldown bars between signals",
+          defval: FTA_STUDY_DEFAULTS.cooldownBars,
+          type: "integer",
+          min: 1,
+          max: 60,
+        },
+        {
           id: "maxSignals",
           name: "Max signals drawn",
           defval: FTA_STUDY_DEFAULTS.maxSignals,
           type: "integer",
           min: 1,
           max: 24,
+        },
+        {
+          id: "showTradeBox",
+          name: "Show risk/reward trade box",
+          defval: FTA_STUDY_DEFAULTS.showTradeBox,
+          type: "bool",
         },
         {
           id: "showZones",

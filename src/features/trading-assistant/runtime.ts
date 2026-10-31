@@ -1,12 +1,14 @@
 /**
- * Forge Trading Assistant — Phase 1
+ * Forge Trading Assistant — Phase 1.5 (Texas-inspired)
  *
- * Confluence engine for Buy/Sell with Entry · SL · TP (R:R):
- *   1. Structure: BOS / MSS (market structure shift)
- *   2. POI: Order Block and/or Fair Value Gap left by the impulse
- *   3. Trigger: rejection candle back into the POI with the structure bias
+ * Day-trading confluence with optional **Manual Buy / Manual Sell** bias
+ * (like Texas Signal Assistant), multi-TP (TP1/TP2), ATR stops, and a
+ * moderate daily signal budget for 3m / 5m / 15m charts.
  *
- * Paint via DrawCmd → paintOrcaOnChart (same path as SI / Mentor).
+ * Flow:
+ *   1. Structure BOS / MSS (or bias-aligned impulse)
+ *   2. POI: Order Block and/or FVG
+ *   3. Rejection into POI → Entry / SL / TP1 / TP2
  */
 
 import type { EntityId, IChartWidgetApi } from "@/infrastructure/tradingview";
@@ -14,63 +16,92 @@ import { paintOrcaOnChart, type DrawCmd, type OrcaBar } from "@/features/pine/or
 
 export type FtaBar = OrcaBar;
 
+/** 0 = Auto · 1 = Manual Buy · 2 = Manual Sell (Texas-style direction lock). */
+export type FtaBiasMode = 0 | 1 | 2;
+
 export interface FtaInputs {
   readonly swingLeft: number;
   readonly swingRight: number;
-  /** Target reward multiple of risk (e.g. 2 = 1:2). */
-  readonly targetR: number;
-  /** Prefer MSS (reversal) over continuation BOS when both qualify. */
+  /** 0 Auto, 1 Manual Buy, 2 Manual Sell. */
+  readonly biasMode: FtaBiasMode;
+  /** First take-profit in R multiples (default 1). */
+  readonly tp1R: number;
+  /** Second take-profit in R multiples (default 2) — main target. */
+  readonly tp2R: number;
+  readonly atrLength: number;
+  /** Extra SL padding as fraction of ATR (e.g. 0.25). */
+  readonly atrSlPad: number;
   readonly preferMss: boolean;
   readonly useOrderBlock: boolean;
   readonly useFvg: boolean;
   readonly requireRejection: boolean;
-  /** Max simultaneous live + recent signals drawn. */
+  /** Hard cap of signals kept on chart. */
   readonly maxSignals: number;
+  /** Soft daily budget (UTC day) — keeps frequency Texas-like. */
+  readonly maxSignalsPerDay: number;
+  /** Min bars between two signals (cooldown). */
+  readonly cooldownBars: number;
   readonly showZones: boolean;
+  readonly showTradeBox: boolean;
   readonly showStructure: boolean;
   readonly showHistory: boolean;
   readonly bullColor: string;
   readonly bearColor: string;
   readonly tpColor: string;
   readonly slColor: string;
+  readonly riskFill: string;
+  readonly rewardFill: string;
 }
 
 export const FTA_DEFAULTS: FtaInputs = {
   swingLeft: 2,
   swingRight: 2,
-  targetR: 2,
+  biasMode: 0,
+  tp1R: 1,
+  tp2R: 2,
+  atrLength: 14,
+  atrSlPad: 0.25,
   preferMss: true,
   useOrderBlock: true,
   useFvg: true,
   requireRejection: true,
-  maxSignals: 6,
+  maxSignals: 8,
+  maxSignalsPerDay: 5,
+  cooldownBars: 8,
   showZones: true,
+  showTradeBox: true,
   showStructure: true,
   showHistory: true,
   bullColor: "#00C853",
   bearColor: "#FF1744",
   tpColor: "#26A69A",
   slColor: "#EF5350",
+  riskFill: "#546E7A",
+  rewardFill: "#00897B",
 };
+
+export type FtaOutcome = "open" | "tp1" | "tp2" | "sl";
 
 export interface FtaSignal {
   readonly dir: 1 | -1;
   readonly kind: "MSS" | "BOS";
   readonly reason: string;
+  readonly biasLabel: string;
   readonly time: number;
   readonly bornTime: number;
   readonly entry: number;
   readonly stop: number;
-  readonly target: number;
+  readonly tp1: number;
+  readonly tp2: number;
   readonly risk: number;
-  readonly reward: number;
   readonly rr: number;
   readonly zlo: number;
   readonly zhi: number;
   readonly structurePrice: number;
-  /** Still open (not hit SL/TP on later bars). */
   readonly active: boolean;
-  readonly outcome: "open" | "tp" | "sl";
+  readonly outcome: FtaOutcome;
+  /** Highest TP reached before SL (for labels). */
+  readonly tpHit: 0 | 1 | 2;
 }
 
 export interface FtaResult {
@@ -82,6 +113,7 @@ export interface FtaResult {
     readonly t2: number;
     readonly price: number;
   }[];
+  readonly biasLabel: string;
 }
 
 interface Swing {
@@ -102,6 +134,26 @@ interface Zone {
   structure: "MSS" | "BOS";
   structurePrice: number;
   used: boolean;
+}
+
+type MutableSignal = {
+  -readonly [K in keyof FtaSignal]: FtaSignal[K];
+};
+
+function biasLabelOf(mode: FtaBiasMode): string {
+  if (mode === 1) return "Manual Buy";
+  if (mode === 2) return "Manual Sell";
+  return "Auto";
+}
+
+function biasDir(mode: FtaBiasMode): 1 | -1 | 0 {
+  if (mode === 1) return 1;
+  if (mode === 2) return -1;
+  return 0;
+}
+
+function utcDayKey(ts: number): number {
+  return Math.floor(ts / 86_400);
 }
 
 function pivotHigh(bars: readonly FtaBar[], i: number, left: number, right: number): number | null {
@@ -126,7 +178,7 @@ function pivotLow(bars: readonly FtaBar[], i: number, left: number, right: numbe
   return l;
 }
 
-function atrApprox(bars: readonly FtaBar[], i: number, len = 14): number {
+function atrApprox(bars: readonly FtaBar[], i: number, len: number): number {
   let sum = 0;
   let n = 0;
   const from = Math.max(1, i - len + 1);
@@ -155,10 +207,9 @@ function touchesZone(bar: FtaBar, z: Zone): boolean {
 function bullRejection(bar: FtaBar, z: Zone, atr: number): boolean {
   if (!isBull(bar)) return false;
   if (!touchesZone(bar, z)) return false;
-  // Close in upper half of zone or above mid; wick into zone.
   const mid = (z.lo + z.hi) / 2;
   const lowerWick = Math.min(bar.open, bar.close) - bar.low;
-  return bar.close >= mid && (lowerWick >= atr * 0.15 || bar.close > z.hi * 0.999);
+  return bar.close >= mid && (lowerWick >= atr * 0.12 || bar.close > z.hi * 0.999);
 }
 
 function bearRejection(bar: FtaBar, z: Zone, atr: number): boolean {
@@ -166,18 +217,20 @@ function bearRejection(bar: FtaBar, z: Zone, atr: number): boolean {
   if (!touchesZone(bar, z)) return false;
   const mid = (z.lo + z.hi) / 2;
   const upperWick = bar.high - Math.max(bar.open, bar.close);
-  return bar.close <= mid && (upperWick >= atr * 0.15 || bar.close < z.lo * 1.001);
+  return bar.close <= mid && (upperWick >= atr * 0.12 || bar.close < z.lo * 1.001);
 }
 
 /**
- * Phase 1 signal engine — BOS/MSS → OB/FVG → rejection → Entry/SL/TP.
+ * Texas-inspired day-trading engine with optional Manual Buy/Sell bias.
  */
 export function computeTradingAssistant(
   bars: readonly FtaBar[],
   inputs: Partial<FtaInputs> = {},
 ): FtaResult {
   const cfg: FtaInputs = { ...FTA_DEFAULTS, ...inputs };
-  const empty: FtaResult = { signals: [], structureLines: [] };
+  const biasLbl = biasLabelOf(cfg.biasMode);
+  const locked = biasDir(cfg.biasMode);
+  const empty: FtaResult = { signals: [], structureLines: [], biasLabel: biasLbl };
   const left = Math.max(1, Math.floor(cfg.swingLeft));
   const right = Math.max(1, Math.floor(cfg.swingRight));
   if (bars.length < left + right + 20) return empty;
@@ -185,9 +238,6 @@ export function computeTradingAssistant(
   const swings: Swing[] = [];
   const zones: Zone[] = [];
   const structureLines: FtaResult["structureLines"][number][] = [];
-  type MutableSignal = {
-    -readonly [K in keyof FtaSignal]: FtaSignal[K];
-  };
   const signals: MutableSignal[] = [];
 
   let lastSH: Swing | null = null;
@@ -195,10 +245,14 @@ export function computeTradingAssistant(
   let structureDir = 0;
   let lastOppositeBearIdx: number | null = null;
   let lastOppositeBullIdx: number | null = null;
+  let lastSignalBarIdx = -10_000;
+  const dayCounts = new Map<number, number>();
+
+  const atrLen = Math.max(5, Math.floor(cfg.atrLength));
 
   for (let i = left + right; i < bars.length; i += 1) {
     const bar = bars[i]!;
-    const atr = atrApprox(bars, i);
+    const atr = atrApprox(bars, i, atrLen);
 
     if (!isBull(bar)) lastOppositeBearIdx = i;
     else lastOppositeBullIdx = i;
@@ -266,7 +320,7 @@ export function computeTradingAssistant(
         const b0 = bars[i - 2]!;
         const b1 = bars[i - 1]!;
         const minGap = atr * 0.1;
-        if (bar.low - b0.high > minGap && bodyOf(b1) > atr * 0.3) {
+        if (bar.low - b0.high > minGap && bodyOf(b1) > atr * 0.28) {
           zones.push({
             dir: 1,
             kind: "FVG",
@@ -313,7 +367,7 @@ export function computeTradingAssistant(
         const b0 = bars[i - 2]!;
         const b1 = bars[i - 1]!;
         const minGap = atr * 0.1;
-        if (b0.low - bar.high > minGap && bodyOf(b1) > atr * 0.3) {
+        if (b0.low - bar.high > minGap && bodyOf(b1) > atr * 0.28) {
           zones.push({
             dir: -1,
             kind: "FVG",
@@ -329,72 +383,84 @@ export function computeTradingAssistant(
       }
     }
 
-    // Invalidate zones that price closed through (mitigated).
     for (const z of zones) {
       if (z.used) continue;
       if (z.dir === 1 && bar.close < z.lo) z.used = true;
       if (z.dir === -1 && bar.close > z.hi) z.used = true;
     }
 
-    // Trigger: rejection into unused zone aligned with structure bias.
-    // Prefer unused zones created after the latest structure event.
-    const candidates = zones.filter((z) => !z.used && z.dir === structureDir);
-    if (candidates.length === 0) continue;
+    // Effective trade direction: manual lock overrides auto structure bias.
+    const wantDir: 1 | -1 | 0 = locked !== 0 ? locked : (structureDir as 1 | -1 | 0);
+    if (wantDir === 0) {
+      // still resolve open signals below
+    } else {
+      const day = utcDayKey(bar.time);
+      const usedToday = dayCounts.get(day) ?? 0;
+      const cooled = i - lastSignalBarIdx >= Math.max(1, cfg.cooldownBars);
+      const underDaily = usedToday < Math.max(1, cfg.maxSignalsPerDay);
 
-    // Prefer MSS zones when preferMss; else newest zone.
-    candidates.sort((a, b) => {
-      if (cfg.preferMss && a.structure !== b.structure) {
-        if (a.structure === "MSS") return -1;
-        if (b.structure === "MSS") return 1;
+      if (cooled && underDaily) {
+        const candidates = zones.filter((z) => !z.used && z.dir === wantDir);
+        candidates.sort((a, b) => {
+          if (cfg.preferMss && a.structure !== b.structure) {
+            if (a.structure === "MSS") return -1;
+            if (b.structure === "MSS") return 1;
+          }
+          return b.t1 - a.t1;
+        });
+
+        for (const z of candidates.slice(0, 3)) {
+          const ok = cfg.requireRejection
+            ? z.dir === 1
+              ? bullRejection(bar, z, atr)
+              : bearRejection(bar, z, atr)
+            : touchesZone(bar, z) && (z.dir === 1 ? isBull(bar) : !isBull(bar));
+          if (!ok) continue;
+
+          z.used = true;
+          const entry = bar.close;
+          const pad = atr * Math.max(0, cfg.atrSlPad);
+          const stop = z.dir === 1 ? z.lo - pad : z.hi + pad;
+          const risk = Math.abs(entry - stop);
+          if (risk < atr * 0.12) continue;
+
+          const r1 = Math.max(0.5, cfg.tp1R);
+          const r2 = Math.max(r1, cfg.tp2R);
+          const tp1 = z.dir === 1 ? entry + risk * r1 : entry - risk * r1;
+          const tp2 = z.dir === 1 ? entry + risk * r2 : entry - risk * r2;
+
+          const reasonParts = [`${z.structure}`, z.kind];
+          if (cfg.requireRejection) reasonParts.push("Reject");
+          if (locked !== 0) reasonParts.push(locked === 1 ? "ManBuy" : "ManSell");
+
+          signals.push({
+            dir: z.dir,
+            kind: z.structure,
+            reason: reasonParts.join("+"),
+            biasLabel: biasLbl,
+            time: bar.time,
+            bornTime: z.t0,
+            entry,
+            stop,
+            tp1,
+            tp2,
+            risk,
+            rr: r2,
+            zlo: z.lo,
+            zhi: z.hi,
+            structurePrice: z.structurePrice,
+            active: true,
+            outcome: "open",
+            tpHit: 0,
+          });
+          lastSignalBarIdx = i;
+          dayCounts.set(day, usedToday + 1);
+          break;
+        }
       }
-      return b.t1 - a.t1;
-    });
-
-    for (const z of candidates.slice(0, 3)) {
-      const ok = cfg.requireRejection
-        ? z.dir === 1
-          ? bullRejection(bar, z, atr)
-          : bearRejection(bar, z, atr)
-        : touchesZone(bar, z) && (z.dir === 1 ? isBull(bar) : !isBull(bar));
-      if (!ok) continue;
-
-      // One signal per zone.
-      z.used = true;
-
-      const entry = bar.close;
-      const pad = atr * 0.08;
-      const stop = z.dir === 1 ? z.lo - pad : z.hi + pad;
-      const risk = Math.abs(entry - stop);
-      if (risk < atr * 0.15) continue; // noise
-      const rr = Math.max(1, cfg.targetR);
-      const reward = risk * rr;
-      const target = z.dir === 1 ? entry + reward : entry - reward;
-
-      const reasonParts = [`${z.structure}`, z.kind];
-      if (cfg.requireRejection) reasonParts.push("Reject");
-
-      signals.push({
-        dir: z.dir,
-        kind: z.structure,
-        reason: reasonParts.join("+"),
-        time: bar.time,
-        bornTime: z.t0,
-        entry,
-        stop,
-        target,
-        risk,
-        reward,
-        rr,
-        zlo: z.lo,
-        zhi: z.hi,
-        structurePrice: z.structurePrice,
-        active: true,
-        outcome: "open",
-      });
-      break; // one new signal per bar
     }
 
-    // Resolve open signals against later bars.
+    // Resolve open signals — track TP1 then TP2 (Texas-style multi-target).
     for (const s of signals) {
       if (!s.active) continue;
       if (s.time >= bar.time) continue;
@@ -402,19 +468,41 @@ export function computeTradingAssistant(
         if (bar.low <= s.stop) {
           s.active = false;
           s.outcome = "sl";
-        } else if (bar.high >= s.target) {
-          s.active = false;
-          s.outcome = "tp";
+        } else {
+          if (s.tpHit < 1 && bar.high >= s.tp1) s.tpHit = 1;
+          if (bar.high >= s.tp2) {
+            s.tpHit = 2;
+            s.active = false;
+            s.outcome = "tp2";
+          } else if (s.tpHit === 1 && !s.active) {
+            /* keep */
+          } else if (s.tpHit === 1 && bar.low <= s.entry) {
+            // optional: leave open until TP2 or SL
+          }
         }
       } else {
         if (bar.high >= s.stop) {
           s.active = false;
           s.outcome = "sl";
-        } else if (bar.low <= s.target) {
-          s.active = false;
-          s.outcome = "tp";
+        } else {
+          if (s.tpHit < 1 && bar.low <= s.tp1) s.tpHit = 1;
+          if (bar.low <= s.tp2) {
+            s.tpHit = 2;
+            s.active = false;
+            s.outcome = "tp2";
+          }
         }
       }
+      // If TP1 hit but still open, surface as tp1 outcome once closed by time window end —
+      // leave active until TP2/SL for live management.
+      if (!s.active && s.outcome === "open" && s.tpHit === 1) s.outcome = "tp1";
+    }
+  }
+
+  // Finalize: any still-open with TP1 hit keep outcome open; closed with only TP1 → tp1
+  for (const s of signals) {
+    if (!s.active && s.outcome === "open" && s.tpHit >= 1) {
+      s.outcome = s.tpHit >= 2 ? "tp2" : "tp1";
     }
   }
 
@@ -422,10 +510,18 @@ export function computeTradingAssistant(
   return {
     signals: signals.slice(-maxN),
     structureLines: structureLines.slice(-Math.max(4, maxN)),
+    biasLabel: biasLbl,
   };
 }
 
-/** Build chart drawings for Phase 1 signals. */
+function outcomeLabel(s: FtaSignal): string {
+  if (s.outcome === "tp2" || s.tpHit >= 2) return "TP2 hit";
+  if (s.outcome === "tp1" || s.tpHit >= 1) return s.active ? "TP1 hit" : "TP1 hit";
+  if (s.outcome === "sl") return "SL hit";
+  return "LIVE";
+}
+
+/** Texas-like drawings: trade box (risk/reward) + Entry/SL/TP1/TP2 + labels. */
 export function tradingAssistantDrawCmds(
   result: FtaResult,
   inputs: Partial<FtaInputs> = {},
@@ -447,7 +543,7 @@ export function tradingAssistantDrawCmds(
         color: c,
         width: ev.kind === "MSS" ? 2 : 1,
         style: ev.kind === "MSS" ? "solid" : "dashed",
-        text: `${ev.kind} ${ev.dir === 1 ? "▲" : "▼"}`,
+        text: `${ev.kind}`,
       });
     }
   }
@@ -457,9 +553,9 @@ export function tradingAssistantDrawCmds(
     const bull = s.dir === 1;
     const c = bull ? cfg.bullColor : cfg.bearColor;
     const tag = bull ? "BUY" : "SELL";
-    const t2 = s.active && endT > s.time ? endT : s.time;
-    const extend = Math.max(t2, s.time);
+    const extend = Math.max(endT, s.time);
 
+    // POI zone (OB/FVG)
     if (cfg.showZones) {
       cmds.push({
         kind: "rect",
@@ -472,6 +568,28 @@ export function tradingAssistantDrawCmds(
       });
     }
 
+    // Texas-style trade box: risk (entry↔SL) + reward (entry↔TP2)
+    if (cfg.showTradeBox) {
+      cmds.push({
+        kind: "rect",
+        t1: s.time,
+        p1: Math.max(s.entry, s.stop),
+        t2: extend,
+        p2: Math.min(s.entry, s.stop),
+        color: cfg.riskFill,
+        fill: cfg.riskFill,
+      });
+      cmds.push({
+        kind: "rect",
+        t1: s.time,
+        p1: Math.max(s.entry, s.tp2),
+        t2: extend,
+        p2: Math.min(s.entry, s.tp2),
+        color: cfg.rewardFill,
+        fill: cfg.rewardFill,
+      });
+    }
+
     cmds.push({
       kind: "line",
       t1: s.time,
@@ -480,7 +598,7 @@ export function tradingAssistantDrawCmds(
       p2: s.entry,
       color: c,
       width: 2,
-      style: "solid",
+      style: "dotted",
       text: "Entry",
     });
     cmds.push({
@@ -497,24 +615,68 @@ export function tradingAssistantDrawCmds(
     cmds.push({
       kind: "line",
       t1: s.time,
-      p1: s.target,
+      p1: s.tp1,
       t2: extend,
-      p2: s.target,
+      p2: s.tp1,
+      color: cfg.tpColor,
+      width: 1,
+      style: "dotted",
+      text: `TP1 1:${cfg.tp1R}`,
+    });
+    cmds.push({
+      kind: "line",
+      t1: s.time,
+      p1: s.tp2,
+      t2: extend,
+      p2: s.tp2,
       color: cfg.tpColor,
       width: 2,
-      style: "dotted",
-      text: `TP 1:${s.rr}`,
+      style: "solid",
+      text: `TP2 1:${cfg.tp2R}`,
     });
 
-    const status =
-      s.outcome === "open" ? "LIVE" : s.outcome === "tp" ? "TP✓" : "SL✗";
+    const status = outcomeLabel(s);
     cmds.push({
       kind: "dot",
       t1: s.time,
       p1: s.entry,
       color: c,
-      text: `${tag} · 1:${s.rr} · ${s.reason} · ${status}`,
+      text: `${tag} · ${status} · ${s.reason}`,
     });
+
+    // Extra Texas-style hit marker when TP2 completed
+    if (s.tpHit >= 2 || s.outcome === "tp2") {
+      cmds.push({
+        kind: "dot",
+        t1: s.time,
+        p1: s.tp2,
+        color: cfg.tpColor,
+        text: `${tag} - TP2 hit`,
+      });
+    } else if (s.tpHit >= 1) {
+      cmds.push({
+        kind: "dot",
+        t1: s.time,
+        p1: s.tp1,
+        color: cfg.tpColor,
+        text: "TP1 hit",
+      });
+    }
+  }
+
+  // Bias watermark-style label on last bar
+  if (endT > 0) {
+    const last = result.signals[result.signals.length - 1];
+    const px = last?.entry ?? 0;
+    if (px > 0) {
+      cmds.push({
+        kind: "dot",
+        t1: endT,
+        p1: px,
+        color: "#2962FF",
+        text: `Forge TA · ${result.biasLabel}`,
+      });
+    }
   }
 
   return cmds;
