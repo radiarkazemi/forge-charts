@@ -1854,30 +1854,29 @@ def _fill_iran_from_finer_faraz(
         .sort("t", 1)
         .limit(kid_limit)
     )
-    # Always supplement 1m children from anil ohlc_1m — faraz_ohlc can be sparse
-    # across multi-day outages while ohlc_1m stayed dense (Faraz no-gap source).
-    if child_step == 60:
-        extra = list(
+    # Fallback only: when Faraz children are empty, use anil ohlc_1m.
+    # Always-merging tick folds invented flat 1h bars that smashed Faraz OHLC.
+    if not kids and child_step == 60:
+        kids = list(
             client["anil_gold"]["ohlc_1m"]
             .find(
                 {"channel": channel, "c": {"$gt": 0}, "t": {"$gte": win_lo, "$lt": win_hi}},
-                {"t": 1, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1},
+                {"t": 1, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1, "src": 1},
             )
             .sort("t", 1)
             .limit(kid_limit)
         )
-        if extra:
-            kids = list(kids) + extra
     if not kids:
         return 0
 
     by_parent: dict[int, list[dict[str, float]]] = {}
     for doc in kids:
         try:
-            src = str(doc.get("src") or "")
-            # Prefer real Faraz / ohlc rows; tick folds OK when that's all we have.
             ct = _align_iran_bar_time(int(doc["t"]), child_step)
             pt = _align_iran_bar_time(ct, step)
+            # Skip outside cash session — overnight flats painted as broken candles.
+            if not _iran_in_cash_session(pt):
+                continue
             if pt not in buckets:  # only fill holes
                 by_parent.setdefault(pt, []).append(
                     {
@@ -1889,7 +1888,6 @@ def _fill_iran_from_finer_faraz(
                         "v": float(doc.get("v") or 0),
                     }
                 )
-                del src  # lint calm
         except (KeyError, TypeError, ValueError):
             continue
 
@@ -1905,6 +1903,9 @@ def _fill_iran_from_finer_faraz(
         h = max(float(b["h"]) for b in series)
         l = min(float(b["l"]) for b in series)
         v = sum(float(b.get("v") or 0) for b in series)
+        # Reject single-print / flat tick folds — they look like broken OHLC.
+        if len(series) < 2 and abs(h - l) < 1e-9:
+            continue
         buckets[pt] = {
             "t": pt,
             "o": _iran_toman_round(o),
@@ -2915,6 +2916,50 @@ def _load_iran_history_mongo(
             if agg:
                 sources.append(f"agg-{agg}")
 
+        # Hour+: backfill missing cash-session buckets from stored ohlc_1h when the
+        # bar has a real range (skip flat tick folds).
+        if step >= 3600 and step < 86_400 and step % 3600 == 0:
+            end_t = before if before is not None else wall_t + step
+            start_t = end_t - max(limit, 200) * step
+            parents = list(
+                client["anil_gold"]["ohlc_1h"]
+                .find(
+                    {
+                        "channel": channel,
+                        "c": {"$gt": 0},
+                        "t": {"$gte": start_t, "$lt": end_t},
+                    },
+                    {"t": 1, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1},
+                )
+                .sort("t", 1)
+                .limit(min(limit * 2, 4_000))
+            )
+            added = 0
+            for doc in parents:
+                try:
+                    t0 = _align_iran_bar_time(int(doc["t"]), step)
+                    if t0 in buckets or t0 > wall_t or not _iran_in_cash_session(t0):
+                        continue
+                    o = float(doc["o"])
+                    h = float(doc["h"])
+                    l = float(doc["l"])
+                    c = float(doc["c"])
+                    if abs(h - l) < 1e-9 and abs(o - c) < 1e-9:
+                        continue
+                    buckets[t0] = {
+                        "t": t0,
+                        "o": _iran_toman_round(o),
+                        "h": _iran_toman_round(h),
+                        "l": _iran_toman_round(l),
+                        "c": _iran_toman_round(c),
+                        "v": float(doc.get("v") or 0),
+                    }
+                    added += 1
+                except (KeyError, TypeError, ValueError):
+                    continue
+            if added:
+                sources.append(f"ohlc_1h:{added}")
+
         # Historical holes (e.g. G18 Apr 2026 has 5m but no 1m): expand coarser Faraz.
         # Always try when scarce; when auth is healthy also backfill denser paths.
         if step >= 60 and step < 86_400:
@@ -2933,20 +2978,18 @@ def _load_iran_history_mongo(
                 if derived:
                     sources.append(f"derived-{derived}")
 
-        # Faraz-like no-gap: fill in-session holes (missed polls / thin Mongo).
-        # Overnight (22→09 Tehran) is skipped inside the helper — symbol session
-        # hours collapse that range on the chart. Auth-off still fills denser
-        # now that overnight carry-forwards no longer paint as broken flats.
-        if step <= 3_600:
+        # Short in-session holes only (missed polls). Never invent flat 1h days —
+        # those looked worse than sparse Faraz history. Overnight collapses via
+        # SESSION_IRAN_GOLD on the client.
+        if step <= 1_800:
             gap_wall = wall_t if before is None else min(wall_t, before - step)
+            auth_ok = _FARAZ_CUSTOMER_AUTH_OK is True
             if step <= 60:
-                max_steps = 120  # ≤2h of missed 1m polls within cash session
+                max_steps = 12 if auth_ok else 4
             elif step <= 300:
-                max_steps = 48  # ≤4h of 5m
-            elif step <= 900:
-                max_steps = 24  # ≤6h of 15m
+                max_steps = 8 if auth_ok else 3
             else:
-                max_steps = 13  # full cash-session day of 1h bars
+                max_steps = 4 if auth_ok else 2
             filled = _fill_iran_session_gaps(
                 buckets,
                 step,
@@ -3123,9 +3166,25 @@ async def iran_gold_history(request: web.Request) -> web.Response:
     ordered = sorted(buckets.values(), key=lambda b: b["t"])
     if before is not None:
         ordered = [b for b in ordered if b["t"] < before]
-    # Keep the series continuous — dropping flats created gaps that made
-    # TradingView stop left-paging (15S “no previous history”). Prefer denser
-    # real bars via reduced gapfill above instead.
+    # Minute+: drop synthetic flat carry-forwards (o=h=l=c, v=0) — they looked
+    # like broken G18/ABSHODE candles. Keep sub-minute flats so left-paging works.
+    if step >= 60 and ordered:
+        tip_t = ordered[-1]["t"]
+        cleaned: list[dict[str, float]] = []
+        for b in ordered:
+            try:
+                o = float(b["o"])
+                h = float(b["h"])
+                l = float(b["l"])
+                c = float(b["c"])
+                v = float(b.get("v") or 0)
+            except (KeyError, TypeError, ValueError):
+                continue
+            is_flat = abs(h - l) < 1e-9 and abs(o - c) < 1e-9
+            if is_flat and v <= 0 and int(b["t"]) != tip_t:
+                continue
+            cleaned.append(b)
+        ordered = cleaned
     ordered = ordered[-limit:]
     bars = [
         [

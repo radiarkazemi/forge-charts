@@ -12,6 +12,7 @@ import { ProfileMenu } from "@/features/profile/ProfileMenu";
 import { activeProfile } from "@/application";
 import { useStore } from "@/shared/hooks/useStore";
 import { MobileBottomBar } from "./MobileBottomBar";
+import { MobileTopBar } from "./MobileTopBar";
 import { SidePanel } from "./SidePanel";
 import { SideRail } from "./SideRail";
 
@@ -28,7 +29,7 @@ interface ProfileAnchorRect {
 
 /**
  * Chart shell matching TradingView Supercharts.
- * Mobile: TV-app shell — no desktop header, full-bleed chart, bottom tool + app bars.
+ * Mobile: Faraz top chrome (scrollable symbol + TFs) + bottom tool/app bars.
  */
 export function AppShell({ onSignOut }: AppShellProps) {
   const theme = useTheme();
@@ -118,6 +119,7 @@ export function AppShell({ onSignOut }: AppShellProps) {
     >
       <Box component="main" sx={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
         <Box sx={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
+          {isMobile ? <MobileTopBar /> : null}
           <Box sx={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0, position: "relative" }}>
             <ChartWorkspace onCreateAlert={openAlertDialog} onOpenProfile={openProfileMenu} />
             {desktopSideDock ? (
