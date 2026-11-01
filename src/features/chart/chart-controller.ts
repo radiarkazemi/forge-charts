@@ -692,7 +692,7 @@ export class ChartController {
           : /forge\s*sessions|sessions\s*\[luxalgo\]/i.test(displayName)
             ? "ForgeSessions@tv-basicstudies-1"
             : /forge\s*trading\s*assistant|forge\s*ta\b/i.test(displayName)
-              ? "ForgeTradingAssistant@tv-basicstudies-1"
+              ? "ForgeTradingAssistant@tv-basicstudies-2"
               : /forge\s*replay\s*mentor|replay\s*mentor/i.test(displayName)
                 ? "ForgeReplayMentor@tv-basicstudies-1"
                 : /ict\s*htf\s*candles/i.test(displayName)
@@ -726,7 +726,7 @@ export class ChartController {
             : /forge\s*sessions|sessions\s*\[luxalgo\]/i.test(name)
               ? "ForgeSessions@tv-basicstudies-1"
               : /forge\s*trading\s*assistant|forge\s*ta\b/i.test(name)
-                ? "ForgeTradingAssistant@tv-basicstudies-1"
+                ? "ForgeTradingAssistant@tv-basicstudies-2"
                 : /forge\s*replay\s*mentor|replay\s*mentor/i.test(name)
                   ? "ForgeReplayMentor@tv-basicstudies-1"
                   : /ict\s*htf\s*candles/i.test(name)

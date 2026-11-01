@@ -8,7 +8,8 @@ import type { CustomIndicator } from "@/infrastructure/tradingview";
 import { FTA_DEFAULTS } from "@/features/trading-assistant/runtime";
 
 export const FTA_STUDY_NAME = "Forge Trading Assistant";
-export const FTA_STUDY_ID = "ForgeTradingAssistant@tv-basicstudies-1";
+/** Bumped to -2 so saved studies pick up relaxed DR-entry defaults (OTE off). */
+export const FTA_STUDY_ID = "ForgeTradingAssistant@tv-basicstudies-2";
 
 export const FTA_STUDY_DEFAULTS = {
   biasMode: FTA_DEFAULTS.biasMode,

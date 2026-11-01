@@ -21,6 +21,8 @@ import { studyIsVisible } from "./study-paint-gate";
 const MAX_BARS = 1_200;
 const STUDY_DEBOUNCE_MS = 700;
 const PRESENCE_POLL_MS = 8_000;
+/** Refresh BUY/SELL as new bars form (fingerprint skips no-op paints). */
+const LIVE_REFRESH_MS = 12_000;
 
 function fingerprint(
   cmds: readonly { kind: string; t1: number; p1: number; t2?: number; p2?: number; text?: string }[],
@@ -208,7 +210,14 @@ export function useForgeTradingAssistantStudy(enabled = true): void {
         };
         const cmds = tradingAssistantDrawCmds(lean, opts, bars[bars.length - 1]!.time);
         const fp = fingerprint(cmds);
-        if (!force && fp === lastFpRef.current && lastKeyRef.current === key) return;
+        // Skip identical paints even on forced live refresh (avoids createShape storms).
+        if (
+          fp === lastFpRef.current &&
+          lastKeyRef.current === key &&
+          entityIdsRef.current.length > 0
+        ) {
+          return;
+        }
         if (cancelled || myGen !== genRef.current) return;
         const ids =
           cmds.length === 0
@@ -293,6 +302,7 @@ export function useForgeTradingAssistantStudy(enabled = true): void {
       kickoff();
     }
     const kickoffTimer = window.setTimeout(kickoff, 1_400);
+    const kickoffTimer2 = window.setTimeout(kickoff, 2_800);
     const poll = window.setInterval(() => {
       if (cancelled || busyRef.current) return;
       const ids = findStudyIds();
@@ -308,9 +318,25 @@ export function useForgeTradingAssistantStudy(enabled = true): void {
       if (lastKeyRef.current === "") void repaint(false);
     }, PRESENCE_POLL_MS);
 
+    const livePoll = window.setInterval(() => {
+      if (cancelled || busyRef.current) return;
+      if (findStudyIds().length === 0) return;
+      void repaint(true);
+    }, LIVE_REFRESH_MS);
+
+    const onDataLoaded = () => {
+      if (findStudyIds().length === 0) return;
+      scheduleRepaint();
+    };
+
     try {
       widget.subscribe("study_event", onStudyEvent as never);
       widget.subscribe("study_properties_changed", onStudyProperties as never);
+    } catch {
+      /* ignore */
+    }
+    try {
+      widget.activeChart()?.onDataLoaded()?.subscribe(null, onDataLoaded);
     } catch {
       /* ignore */
     }
@@ -320,10 +346,17 @@ export function useForgeTradingAssistantStudy(enabled = true): void {
       genRef.current += 1;
       window.clearTimeout(studyTimer);
       window.clearTimeout(kickoffTimer);
+      window.clearTimeout(kickoffTimer2);
       window.clearInterval(poll);
+      window.clearInterval(livePoll);
       try {
         widget.unsubscribe("study_event", onStudyEvent as never);
         widget.unsubscribe("study_properties_changed", onStudyProperties as never);
+      } catch {
+        /* ignore */
+      }
+      try {
+        widget.activeChart()?.onDataLoaded()?.unsubscribe(null, onDataLoaded);
       } catch {
         /* ignore */
       }

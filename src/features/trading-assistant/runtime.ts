@@ -100,10 +100,11 @@ export const FTA_DEFAULTS: FtaInputs = {
   requireRejection: true,
   requireDealingRange: true,
   requireTrendAlign: true,
-  requireDrOte: true,
+  /** Default off — discount/premium half is enough; OTE is optional filter. */
+  requireDrOte: false,
   maxSignals: 8,
-  maxSignalsPerDay: 5,
-  cooldownBars: 8,
+  maxSignalsPerDay: 6,
+  cooldownBars: 4,
   showZones: false,
   showDealingRange: true,
   showTradeBox: true,
@@ -279,6 +280,31 @@ function bearRejection(bar: FtaBar, z: Zone, atr: number): boolean {
   const mid = (z.lo + z.hi) / 2;
   const upperWick = bar.high - Math.max(bar.open, bar.close);
   return bar.close <= mid && (upperWick >= atr * 0.12 || bar.close < z.lo * 1.001);
+}
+
+/** Soft DR reaction: wick into entry half / OTE, close with trade direction. */
+function drReaction(
+  bar: FtaBar,
+  dr: ConfirmedDealingRange,
+  dir: 1 | -1,
+  requireOte: boolean,
+): boolean {
+  const oteLo = Math.min(dr.ote618, dr.ote786);
+  const oteHi = Math.max(dr.ote618, dr.ote786);
+  if (dir === 1) {
+    if (!dr.bullish) return false;
+    const touched = requireOte
+      ? bar.low <= oteHi && bar.high >= oteLo
+      : bar.low <= dr.mid || (bar.close <= dr.mid && bar.close >= dr.bot);
+    // Bullish rejection from discount — close holds above the DR floor.
+    return touched && isBull(bar) && bar.close >= dr.bot;
+  }
+  if (dr.bullish) return false;
+  const touched = requireOte
+    ? bar.low <= oteHi && bar.high >= oteLo
+    : bar.high >= dr.mid || (bar.close >= dr.mid && bar.close <= dr.top);
+  // Bearish rejection from premium — close holds below the DR ceiling.
+  return touched && !isBull(bar) && bar.close <= dr.top;
 }
 
 /**
@@ -493,45 +519,39 @@ export function computeTradingAssistant(
       if (z.dir === -1 && bar.close > z.hi) z.used = true;
     }
 
-    // Effective trade direction: manual lock overrides auto structure bias.
-    const wantDir: 1 | -1 | 0 = locked !== 0 ? locked : (structureDir as 1 | -1 | 0);
-    if (wantDir === 0) {
-      // still resolve open signals below
-    } else {
+    // Last confirmed Dealing Range on this TF as of this bar.
+    const dr = lastConfirmedDealingRangeAt(dealingRanges, i);
+    const drBias: 1 | -1 | 0 = dr ? (dr.bullish ? 1 : -1) : 0;
+    // Auto bias: when DR is required, DR direction is the trade bias (Orca POI).
+    // Otherwise prefer live structure, then DR.
+    const wantDir: 1 | -1 | 0 =
+      locked !== 0
+        ? locked
+        : cfg.requireDealingRange && drBias !== 0
+          ? drBias
+          : structureDir !== 0
+            ? (structureDir as 1 | -1)
+            : drBias;
+
+    if (wantDir !== 0) {
       const day = utcDayKey(bar.time);
       const usedToday = dayCounts.get(day) ?? 0;
       const cooled = i - lastSignalBarIdx >= Math.max(1, cfg.cooldownBars);
       const underDaily = usedToday < Math.max(1, cfg.maxSignalsPerDay);
 
-      // Trend gate: opposite-of-trend positions are never confirmed.
+      // Opposite-of-trend never confirms OB/FVG when structure is known.
+      // DR-primary entries use the DR itself as bias (gated separately below).
       const trendOk =
         !cfg.requireTrendAlign ||
         structureDir === 0 ||
         structureDir === wantDir;
 
-      // Last confirmed Dealing Range on this timeframe (as of this bar).
-      const dr = lastConfirmedDealingRangeAt(dealingRanges, i);
+      // DR must exist + match direction when required.
       const drDirOk =
         !cfg.requireDealingRange ||
-        (dr != null &&
-          ((wantDir === 1 && dr.bullish) || (wantDir === -1 && !dr.bullish)));
-      const drHalfOk =
-        !cfg.requireDealingRange || (dr != null && inDrEntryHalf(bar, dr));
-      const drOteOk =
-        !cfg.requireDealingRange ||
-        !cfg.requireDrOte ||
-        (dr != null && touchesDrOte(bar, dr));
+        (dr != null && wantDir === drBias);
 
-      if (cooled && underDaily && trendOk && drDirOk && drHalfOk && drOteOk) {
-        const candidates = zones.filter((z) => !z.used && z.dir === wantDir);
-        candidates.sort((a, b) => {
-          if (cfg.preferMss && a.structure !== b.structure) {
-            if (a.structure === "MSS") return -1;
-            if (b.structure === "MSS") return 1;
-          }
-          return b.t1 - a.t1;
-        });
-
+      if (cooled && underDaily && drDirOk) {
         const tryEmit = (
           zlo: number,
           zhi: number,
@@ -553,19 +573,18 @@ export function computeTradingAssistant(
                 : Math.max(zoneStop, drStop)
               : zoneStop;
           const risk = Math.abs(entry - stop);
-          if (risk < atr * 0.12) return false;
+          if (!(risk > 0) || risk < atr * 0.08) return false;
 
           const r1 = Math.max(0.5, cfg.tp1R);
           const r2 = Math.max(r1, cfg.tp2R);
           const tp1 = wantDir === 1 ? entry + risk * r1 : entry - risk * r1;
           const tp2 = wantDir === 1 ? entry + risk * r2 : entry - risk * r2;
-          // Keep marker glued to the signal candle (not TP/SL later).
           const labelPrice =
             wantDir === 1 ? bar.low - atr * 0.15 : bar.high + atr * 0.15;
 
           const reasonParts = [structure, poiKind];
           if (dr) reasonParts.push(dr.bullish ? "DR+" : "DR−");
-          if (cfg.requireDrOte && dr && touchesDrOte(bar, dr)) reasonParts.push("OTE");
+          if (dr && touchesDrOte(bar, dr)) reasonParts.push("OTE");
           if (cfg.requireRejection) reasonParts.push("Reject");
           if (locked !== 0) reasonParts.push(locked === 1 ? "ManBuy" : "ManSell");
 
@@ -600,55 +619,64 @@ export function computeTradingAssistant(
         };
 
         let emitted = false;
-        for (const z of candidates.slice(0, 3)) {
-          if (cfg.requireDealingRange && dr) {
-            const zoneInHalf =
-              wantDir === 1 ? z.lo <= dr.mid : z.hi >= dr.mid;
-            if (!zoneInHalf) continue;
-          }
-          const ok = cfg.requireRejection
-            ? z.dir === 1
-              ? bullRejection(bar, z, atr)
-              : bearRejection(bar, z, atr)
-            : touchesZone(bar, z) && (z.dir === 1 ? isBull(bar) : !isBull(bar));
-          if (!ok) continue;
-          emitted = tryEmit(z.lo, z.hi, z.t0, z.structure, z.structurePrice, z.kind, z);
-          if (emitted) break;
+
+        // Primary: Dealing Range is the POI (wick into half/OTE + directional close).
+        // DR already encodes Orca direction — do not also veto with swing trend.
+        if (dr && drReaction(bar, dr, wantDir, cfg.requireDrOte)) {
+          const zlo = cfg.requireDrOte
+            ? Math.min(dr.ote618, dr.ote786)
+            : wantDir === 1
+              ? dr.bot
+              : dr.mid;
+          const zhi = cfg.requireDrOte
+            ? Math.max(dr.ote618, dr.ote786)
+            : wantDir === 1
+              ? dr.mid
+              : dr.top;
+          emitted = tryEmit(zlo, zhi, dr.t0, "MSS", dr.mid, "DR");
         }
 
-        // Smarter: if no OB/FVG but last DR is confirmed + OTE/half + rejection,
-        // use the Dealing Range itself as the POI (classic sensitive DR entry).
-        if (!emitted && cfg.requireDealingRange && dr) {
-          let zlo: number;
-          let zhi: number;
-          if (cfg.requireDrOte) {
-            zlo = Math.min(dr.ote618, dr.ote786);
-            zhi = Math.max(dr.ote618, dr.ote786);
-          } else if (wantDir === 1) {
-            zlo = dr.bot;
-            zhi = dr.mid;
-          } else {
-            zlo = dr.mid;
-            zhi = dr.top;
+        // Secondary: OB/FVG inside the correct DR half — still respect trend gate.
+        if (!emitted && trendOk) {
+          const candidates = zones.filter((z) => !z.used && z.dir === wantDir);
+          candidates.sort((a, b) => {
+            if (cfg.preferMss && a.structure !== b.structure) {
+              if (a.structure === "MSS") return -1;
+              if (b.structure === "MSS") return 1;
+            }
+            return b.t1 - a.t1;
+          });
+          for (const z of candidates.slice(0, 4)) {
+            if (cfg.requireDealingRange && dr) {
+              const zoneInHalf =
+                wantDir === 1 ? z.lo <= dr.mid : z.hi >= dr.mid;
+              if (!zoneInHalf) continue;
+              if (cfg.requireDrOte && !touchesDrOte(bar, dr) && !inDrEntryHalf(bar, dr)) {
+                continue;
+              }
+            }
+            const ok = cfg.requireRejection
+              ? z.dir === 1
+                ? bullRejection(bar, z, atr)
+                : bearRejection(bar, z, atr)
+              : touchesZone(bar, z) && (z.dir === 1 ? isBull(bar) : !isBull(bar));
+            if (!ok) continue;
+            emitted = tryEmit(z.lo, z.hi, z.t0, z.structure, z.structurePrice, z.kind, z);
+            if (emitted) break;
           }
-          const drZone: Zone = {
-            dir: wantDir,
-            kind: "OB",
-            t0: dr.t0,
-            t1: dr.t1,
-            lo: zlo,
-            hi: zhi,
-            structure: "MSS",
-            structurePrice: dr.mid,
-            used: false,
-          };
-          const rejectOk = cfg.requireRejection
-            ? wantDir === 1
-              ? bullRejection(bar, drZone, atr)
-              : bearRejection(bar, drZone, atr)
-            : touchesZone(bar, drZone) && (wantDir === 1 ? isBull(bar) : !isBull(bar));
-          if (rejectOk) {
-            tryEmit(zlo, zhi, dr.t0, "MSS", dr.mid, "DR");
+        }
+
+        // Fallback without DR requirement: OB/FVG alone (legacy path).
+        if (!emitted && !cfg.requireDealingRange && trendOk) {
+          const candidates = zones.filter((z) => !z.used && z.dir === wantDir);
+          for (const z of candidates.slice(0, 3)) {
+            const ok = cfg.requireRejection
+              ? z.dir === 1
+                ? bullRejection(bar, z, atr)
+                : bearRejection(bar, z, atr)
+              : touchesZone(bar, z) && (z.dir === 1 ? isBull(bar) : !isBull(bar));
+            if (!ok) continue;
+            if (tryEmit(z.lo, z.hi, z.t0, z.structure, z.structurePrice, z.kind, z)) break;
           }
         }
       }
