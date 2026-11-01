@@ -17,12 +17,20 @@ interface BarReplayToolbarProps {
   readonly forceVisible?: boolean;
 }
 
-const SPEEDS: readonly { value: BarReplaySpeed; label: string; candleLabel: string }[] = [
-  { value: 0.5, label: "0.5x", candleLabel: "0.5/s" },
-  { value: 1, label: "1x", candleLabel: "1/s" },
-  { value: 2, label: "2x", candleLabel: "2/s" },
-  { value: 5, label: "5x", candleLabel: "5/s" },
-  { value: 10, label: "10x", candleLabel: "10/s" },
+const FORM_SPEED_OPTIONS: readonly { value: BarReplaySpeed; label: string }[] = [
+  { value: 0.5, label: "0.5x" },
+  { value: 1, label: "1x" },
+  { value: 2, label: "2x" },
+  { value: 5, label: "5x" },
+  { value: 10, label: "10x" },
+];
+
+/** Candle-by-candle (tick) play — ×5 / ×10 / ×20 / ×30 candles per second. */
+const CANDLE_SPEED_OPTIONS: readonly { value: BarReplaySpeed; label: string }[] = [
+  { value: 5, label: "×5" },
+  { value: 10, label: "×10" },
+  { value: 20, label: "×20" },
+  { value: 30, label: "×30" },
 ];
 
 const MENU_PAPER = {
@@ -59,8 +67,11 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
   const candleByCandle = snap.candleByCandle;
   const canStep = snap.cursorIndex >= 0 && snap.cursorIndex < snap.bufferLength - 1;
   const resolutionLabel = controller.resolutionLabel();
-  const speedMeta = SPEEDS.find((s) => s.value === snap.speed) ?? SPEEDS[1]!;
-  const speedLabel = candleByCandle ? speedMeta.candleLabel : speedMeta.label;
+  const speedOptions = candleByCandle ? CANDLE_SPEED_OPTIONS : FORM_SPEED_OPTIONS;
+  const speedMeta =
+    speedOptions.find((s) => s.value === snap.speed) ??
+    (candleByCandle ? CANDLE_SPEED_OPTIONS[0]! : FORM_SPEED_OPTIONS[1]!);
+  const speedLabel = speedMeta.label;
 
   const openSpeed = (e: MouseEvent<HTMLElement>) => setSpeedAnchor(e.currentTarget);
   const openSelect = (e: MouseEvent<HTMLElement>) => setSelectAnchor(e.currentTarget);
@@ -295,7 +306,7 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
           }}
           title={
             candleByCandle
-              ? "Candles per second (1× = 1 candle/sec)"
+              ? "Candle-by-candle speed (×5 / ×10 / ×20 / ×30 candles per sec)"
               : "Replay speed (scales TF forming duration)"
           }
           aria-label="Replay speed"
@@ -312,7 +323,7 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
           transformOrigin={{ vertical: "top", horizontal: "center" }}
           slotProps={{ paper: { sx: { ...MENU_PAPER, minWidth: 96 } } }}
         >
-          {SPEEDS.map((s) => (
+          {speedOptions.map((s) => (
             <MenuItem
               key={s.value}
               selected={s.value === snap.speed}
@@ -323,7 +334,7 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
               sx={{ "&.Mui-selected": { bgcolor: "rgba(41,98,255,0.18)" } }}
             >
               <Typography component="span" sx={{ fontWeight: 600, fontSize: 13 }}>
-                {candleByCandle ? s.candleLabel : s.label}
+                {s.label}
               </Typography>
             </MenuItem>
           ))}

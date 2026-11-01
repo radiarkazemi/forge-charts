@@ -15,6 +15,7 @@ import { useServices } from "@/app/use-services";
 import type { UiLanguage } from "@/application";
 import type { SymbolInfo } from "@/domain";
 import { useStore } from "@/shared/hooks/useStore";
+import { brokerLogoForExchange } from "./broker-logos";
 
 interface SymbolSearchDialogProps {
   readonly open: boolean;
@@ -312,6 +313,7 @@ export function SymbolSearchDialog({ open, onClose }: SymbolSearchDialogProps) {
       <List dense disablePadding sx={{ overflowY: "auto", flex: 1, pb: 1 }}>
         {filtered.map((s) => {
           const av = avatarFor(s);
+          const broker = brokerLogoForExchange(s.exchange);
           // Iran: always show Faraz Farsi title (آبشده نقدی, گرم طلا ۱۸, …).
           const title =
             s.exchange.toUpperCase() === "IRAN" || /[\u0600-\u06FF]/.test(s.name) ? s.name : s.ticker;
@@ -370,6 +372,44 @@ export function SymbolSearchDialog({ open, onClose }: SymbolSearchDialogProps) {
                   </Box>
                 </Box>
               </Box>
+              {broker ? (
+                <Box
+                  component="img"
+                  src={broker.src}
+                  alt={broker.label}
+                  title={broker.label}
+                  sx={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: "6px",
+                    objectFit: "contain",
+                    flexShrink: 0,
+                    bgcolor: dark ? "rgba(255,255,255,0.06)" : "rgba(19,23,34,0.04)",
+                    border: `1px solid ${border}`,
+                    p: "3px",
+                  }}
+                />
+              ) : (
+                <Box
+                  sx={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: "6px",
+                    flexShrink: 0,
+                    display: "grid",
+                    placeItems: "center",
+                    bgcolor: dark ? "rgba(255,255,255,0.06)" : "rgba(19,23,34,0.04)",
+                    border: `1px solid ${border}`,
+                    color: muted,
+                    fontSize: 9,
+                    fontWeight: 700,
+                    letterSpacing: 0.2,
+                  }}
+                  title={s.exchange}
+                >
+                  {s.exchange.slice(0, 3).toUpperCase()}
+                </Box>
+              )}
               <OpenInNewIcon sx={{ fontSize: 16, color: muted, opacity: 0.7 }} />
             </ListItemButton>
           );

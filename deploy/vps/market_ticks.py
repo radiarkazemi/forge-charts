@@ -56,6 +56,27 @@ FARAZ_HISTORY_PROXY = os.environ.get(
 FARAZ_COOKIE = os.environ.get("FARAZ_COOKIE", "").strip()
 FARAZ_USER_ID = os.environ.get("FARAZ_USER_ID", "").strip()
 FARAZ_TOKEN = os.environ.get("FARAZ_TOKEN", "").strip()
+
+
+def _faraz_token_expiry_sec() -> int | None:
+    """JWT `exp` from FARAZ_TOKEN, or None if unreadable."""
+    tok = FARAZ_TOKEN
+    if not tok or tok.count(".") < 2:
+        return None
+    try:
+        import base64
+        import json as _json
+
+        payload = tok.split(".")[1]
+        pad = "=" * (-len(payload) % 4)
+        data = _json.loads(base64.urlsafe_b64decode(payload + pad))
+        exp = int(data.get("exp") or 0)
+        return exp if exp > 0 else None
+    except Exception:
+        return None
+
+
+_FARAZ_TOKEN_EXP = _faraz_token_expiry_sec()
 FARAZ_ADJUST_TYPE = int(os.environ.get("FARAZ_ADJUST_TYPE", "2"))
 # Faraz client caps: <1m → 1000, else 10000.
 FARAZ_COUNTBACK_MAX = int(os.environ.get("FARAZ_COUNTBACK_MAX", "10000"))
@@ -1854,10 +1875,11 @@ def _fill_iran_from_finer_faraz(
         .sort("t", 1)
         .limit(kid_limit)
     )
-    # Fallback only: when Faraz children are empty, use anil ohlc_1m.
-    # Always-merging tick folds invented flat 1h bars that smashed Faraz OHLC.
-    if not kids and child_step == 60:
-        kids = list(
+    # Always merge anil ohlc_1m for 1m children — Faraz 1m is often sparse on
+    # G18/ABSHODE, which left 1H charts looking like isolated "fractal" spikes.
+    # Prefer Faraz rows when both exist (ingested first); ohlc_1m fills holes.
+    if child_step == 60:
+        ohlc_1m = list(
             client["anil_gold"]["ohlc_1m"]
             .find(
                 {"channel": channel, "c": {"$gt": 0}, "t": {"$gte": win_lo, "$lt": win_hi}},
@@ -1866,6 +1888,8 @@ def _fill_iran_from_finer_faraz(
             .sort("t", 1)
             .limit(kid_limit)
         )
+        if ohlc_1m:
+            kids = list(kids) + ohlc_1m
     if not kids:
         return 0
 
@@ -2026,6 +2050,9 @@ def _iran_in_cash_session(ts: int) -> bool:
     """Faraz cash session 09:00–22:00 Tehran (end exclusive)."""
     hhmm = _iran_tehran_hhmm(ts)
     return 900 <= hhmm < 2200
+
+
+# (daily→1H O→H→L→C expand removed — looked worse than sparse real history)
 
 
 def _fill_iran_session_gaps(
@@ -2308,6 +2335,15 @@ def materialize_iran_1m_from_5m(*, channels: list[str] | None = None) -> int:
 
 async def bootstrap_faraz_history(session: aiohttp.ClientSession) -> None:
     """Fetch max-countback history once per symbol/resolution and persist to Mongo."""
+    if _FARAZ_TOKEN_EXP is not None and _FARAZ_TOKEN_EXP < time.time():
+        LOG.warning(
+            "FARAZ_TOKEN expired at %s UTC — customer 1H history will 401 until "
+            "FARAZ_COOKIE is refreshed via deploy/vps/set_faraz_session.sh "
+            "(using public 1D→1H expand as fallback)",
+            time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(_FARAZ_TOKEN_EXP)),
+        )
+    elif not (FARAZ_COOKIE or FARAZ_TOKEN):
+        LOG.warning("FARAZ_COOKIE/FARAZ_TOKEN unset — deep intraday Faraz history unavailable")
     if not IRAN_HISTORY_BOOTSTRAP:
         return
     LOG.info(
@@ -2978,18 +3014,23 @@ def _load_iran_history_mongo(
                 if derived:
                     sources.append(f"derived-{derived}")
 
-        # Short in-session holes only (missed polls). Never invent flat 1h days —
-        # those looked worse than sparse Faraz history. Overnight collapses via
-        # SESSION_IRAN_GOLD on the client.
-        if step <= 1_800:
+        # NOTE: do NOT synthesize 1H from daily OHLC — O→H→L→C path bars look worse
+        # than sparse history. Prefer real Faraz customer 1H (FARAZ_COOKIE) + 1m densify.
+
+        # Short in-session holes (missed polls). Include 1H–4H so G18 hour charts
+        # are not fractal spikes; overnight still collapses via SESSION_IRAN_GOLD.
+        if step <= 14_400:
             gap_wall = wall_t if before is None else min(wall_t, before - step)
             auth_ok = _FARAZ_CUSTOMER_AUTH_OK is True
             if step <= 60:
                 max_steps = 12 if auth_ok else 4
             elif step <= 300:
                 max_steps = 8 if auth_ok else 3
+            elif step <= 1_800:
+                max_steps = 6 if auth_ok else 3
             else:
-                max_steps = 4 if auth_ok else 2
+                # 1H/2H/4H: fill up to ~8 missing cash-session hours from carry.
+                max_steps = 8 if auth_ok else 4
             filled = _fill_iran_session_gaps(
                 buckets,
                 step,
@@ -3160,15 +3201,21 @@ async def iran_gold_history(request: web.Request) -> web.Response:
                 )
             )
 
+    # No daily→1H synthesis here — fake path bars look worse than sparse real history.
+
     if not buckets and mongo_client() is None:
         return web.json_response({"detail": "pymongo unavailable"}, status=503)
 
     ordered = sorted(buckets.values(), key=lambda b: b["t"])
     if before is not None:
         ordered = [b for b in ordered if b["t"] < before]
-    # Minute+: drop synthetic flat carry-forwards (o=h=l=c, v=0) — they looked
+    # Hour+ intraday: only cash-session buckets (drop 07:00/08:00 pre-open flats).
+    if 3600 <= step < 86_400:
+        ordered = [b for b in ordered if _iran_in_cash_session(int(b["t"]))]
+    # Minute–30m: drop synthetic flat carry-forwards (o=h=l=c, v=0) — they looked
     # like broken G18/ABSHODE candles. Keep sub-minute flats so left-paging works.
-    if step >= 60 and ordered:
+    # Hour+: keep short session gapfills (v=0) so 1H stays continuous after agg.
+    if 60 <= step <= 1_800 and ordered:
         tip_t = ordered[-1]["t"]
         cleaned: list[dict[str, float]] = []
         for b in ordered:

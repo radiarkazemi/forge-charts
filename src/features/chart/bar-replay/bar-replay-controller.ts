@@ -8,7 +8,14 @@ import {
 import type { TradingViewDatafeed } from "@/infrastructure/tradingview/datafeed";
 import type { EntityId, IChartingLibraryWidget } from "@/infrastructure/tradingview";
 
-export type BarReplaySpeed = 0.5 | 1 | 2 | 5 | 10;
+/** Form-mode speeds (TF duration ÷ speed) plus candle-by-candle rates (×5–×30). */
+export type BarReplaySpeed = 0.5 | 1 | 2 | 5 | 10 | 20 | 30;
+
+/** Speeds shown when candle-by-candle (tick) play is on. */
+export const CANDLE_BY_CANDLE_SPEEDS: readonly BarReplaySpeed[] = [5, 10, 20, 30];
+
+/** Speeds shown for realtime-form play. */
+export const FORM_PLAY_SPEEDS: readonly BarReplaySpeed[] = [0.5, 1, 2, 5, 10];
 
 export type BarReplayPhase = "idle" | "selecting" | "ready" | "playing";
 
@@ -76,9 +83,9 @@ function tickIntervalMs(stepMs: number, speed: BarReplaySpeed): number {
   return 1_000;
 }
 
-/** Wall ms between closed candles in candle-by-candle play (1× = 1 candle/sec). */
+/** Wall ms between closed candles in candle-by-candle play (×N ≈ N candles/sec). */
 function candleStepIntervalMs(speed: BarReplaySpeed): number {
-  return Math.max(50, Math.round(1_000 / Math.max(0.25, speed)));
+  return Math.max(30, Math.round(1_000 / Math.max(0.25, speed)));
 }
 
 /** Prefer a denser TF for true intra-bar path when available. */
@@ -275,10 +282,20 @@ export class BarReplayController {
     const next = Boolean(enabled);
     if (next === this.state.get().candleByCandle) return;
 
+    const snapSpeed = (candleMode: boolean, speed: BarReplaySpeed): BarReplaySpeed => {
+      if (candleMode) {
+        return (CANDLE_BY_CANDLE_SPEEDS as readonly number[]).includes(speed)
+          ? speed
+          : 5;
+      }
+      return (FORM_PLAY_SPEEDS as readonly number[]).includes(speed) ? speed : 1;
+    };
+
     if (playing && next && this.formingTarget) {
       // Switching into step mode mid-form — finish the current bar first.
       void this.commitFormingBar().then(() => {
-        this.patch({ candleByCandle: true, formProgress: 0 });
+        const speed = snapSpeed(true, this.state.get().speed);
+        this.patch({ candleByCandle: true, formProgress: 0, speed });
         if (this.state.get().phase === "playing" || this.playTimer !== 0) {
           this.stopPlayTimer();
           this.startPlayTimer();
@@ -290,13 +307,19 @@ export class BarReplayController {
     if (playing && next) {
       this.formingTarget = null;
       this.formingSubs = [];
-      this.patch({ candleByCandle: true, formProgress: 0 });
+      const speed = snapSpeed(true, this.state.get().speed);
+      this.patch({ candleByCandle: true, formProgress: 0, speed });
       this.stopPlayTimer();
       this.startPlayTimer();
       return;
     }
 
-    this.patch({ candleByCandle: next, formProgress: next ? 0 : this.state.get().formProgress });
+    const speed = snapSpeed(next, this.state.get().speed);
+    this.patch({
+      candleByCandle: next,
+      formProgress: next ? 0 : this.state.get().formProgress,
+      speed,
+    });
     if (playing) {
       if (!next && !this.formingTarget) {
         this.beginFormingNext();
