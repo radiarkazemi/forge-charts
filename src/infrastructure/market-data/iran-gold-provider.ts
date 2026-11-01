@@ -224,6 +224,96 @@ function fillIranSessionGaps(bars: readonly Bar[], step: number, maxGapSteps = 8
   return out;
 }
 
+function iranTehranDayStart(tsSec: number): number {
+  const shifted = Math.floor(tsSec) + IRAN_TZ_OFFSET_SEC;
+  const day0 = shifted - (((shifted % 86_400) + 86_400) % 86_400);
+  return day0 - IRAN_TZ_OFFSET_SEC;
+}
+
+function ohlcPathPoints(o: number, h: number, l: number, c: number, n: number): number[] {
+  const count = Math.max(2, Math.floor(n));
+  const anchors = [o, h, l, c];
+  const seg = [Math.floor(count / 3), Math.floor(count / 3), 0];
+  seg[2] = count - seg[0]! - seg[1]!;
+  if (seg[2]! < 1) {
+    seg[2] = 1;
+    if (seg[0]! > 1) seg[0]! -= 1;
+  }
+  const pts: number[] = [];
+  for (let i = 0; i < 3; i += 1) {
+    const a = anchors[i]!;
+    const b = anchors[i + 1]!;
+    const length = seg[i]!;
+    for (let k = 0; k < length; k += 1) {
+      const frac = i < 2 ? k / Math.max(1, length) : length > 1 ? k / (length - 1) : 1;
+      pts.push(a + (b - a) * frac);
+    }
+  }
+  pts[0] = o;
+  pts[pts.length - 1] = c;
+  return pts.slice(0, count);
+}
+
+/** Expand Faraz daily OHLC into cash-session hour bars (fills multi-day holes). */
+function densifyHourBarsFromDaily(
+  parents: readonly Bar[],
+  dailies: readonly Bar[],
+  step: number,
+): Bar[] {
+  if (step < 3600 || step >= 86_400 || dailies.length === 0) return [...parents];
+  const byTime = new Map<number, Bar>();
+  for (const b of parents) {
+    if (iranInCashSession(b.time)) byTime.set(b.time, b);
+  }
+  const missingDays = new Set<number>();
+  const times = [...byTime.keys()].sort((a, b) => a - b);
+  for (let i = 1; i < times.length; i += 1) {
+    const prev = times[i - 1]!;
+    const cur = times[i]!;
+    if (cur - prev <= step * 1.5) continue;
+    for (let t = prev + step; t < cur; t += step) {
+      if (iranInCashSession(t)) missingDays.add(iranTehranDayStart(t));
+    }
+  }
+  // Also cover leading/trailing scarcity inside the parent span.
+  if (times.length >= 2) {
+    for (let t = times[0]!; t <= times[times.length - 1]!; t += step) {
+      if (!byTime.has(t) && iranInCashSession(t)) missingDays.add(iranTehranDayStart(t));
+    }
+  }
+  if (missingDays.size === 0) return [...byTime.values()].sort((a, b) => a.time - b.time);
+
+  for (const day of dailies) {
+    const dayStart = iranTehranDayStart(day.time + 12 * 3600);
+    if (!missingDays.has(dayStart)) continue;
+    const session: number[] = [];
+    for (let t = alignTime(dayStart + 9 * 3600, step); t < dayStart + 22 * 3600; t += step) {
+      if (iranInCashSession(t)) session.push(t);
+    }
+    if (session.length === 0) continue;
+    const path = ohlcPathPoints(day.open, day.high, day.low, day.close, session.length + 1);
+    for (let i = 0; i < session.length; i += 1) {
+      const t0 = session[i]!;
+      if (byTime.has(t0)) continue;
+      const px0 = path[i]!;
+      const px1 = path[i + 1]!;
+      let hi = Math.max(px0, px1);
+      let lo = Math.min(px0, px1);
+      hi = Math.min(Math.max(hi, day.open, day.close), day.high);
+      lo = Math.max(Math.min(lo, day.open, day.close), day.low);
+      byTime.set(t0, {
+        time: t0,
+        open: toman(px0),
+        high: toman(hi),
+        low: toman(lo),
+        close: toman(px1),
+        volume: (day.volume || 0) / session.length,
+      });
+    }
+  }
+  return [...byTime.values()].sort((a, b) => a.time - b.time);
+}
+
 function applyTick(current: Bar | null, price: number, tsSec: number, step: number): Bar {
   const wallBucket = alignTime(Math.floor(Date.now() / 1000), step);
   let t = alignTime(tsSec, step);
@@ -429,6 +519,30 @@ export class IranGoldProvider implements MarketDataProvider {
         }
       } catch {
         /* keep sparse parents */
+      }
+      // Multi-day holes (Faraz 1H auth dead): expand public/Mongo daily into session hours.
+      if (countSessionHoles(merged, step) > 0) {
+        try {
+          const dJson = await fetchJson<HistoryResponse>(
+            buildUrl(HISTORY_BASE, {
+              symbol: route.ticker,
+              interval: "1D",
+              limit: Math.min(400, Math.max(120, Math.ceil(limit / 6))),
+              before: range.to > 0 ? range.to : undefined,
+            }),
+            { timeoutMs: REQUEST_TIMEOUT_MS },
+          );
+          const dailies = (dJson.bars ?? [])
+            .map(parsePackedBar)
+            .filter((b): b is Bar => b !== null)
+            .filter((b) => b.time < before)
+            .sort((a, b) => a.time - b.time);
+          if (dailies.length > 0) {
+            merged = densifyHourBarsFromDaily(merged, dailies, step);
+          }
+        } catch {
+          /* keep prior densify */
+        }
       }
       // Remaining short cash-session holes → carry-forward (not multi-day outages).
       merged = fillIranSessionGaps(merged, step, 8);

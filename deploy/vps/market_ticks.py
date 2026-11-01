@@ -56,6 +56,27 @@ FARAZ_HISTORY_PROXY = os.environ.get(
 FARAZ_COOKIE = os.environ.get("FARAZ_COOKIE", "").strip()
 FARAZ_USER_ID = os.environ.get("FARAZ_USER_ID", "").strip()
 FARAZ_TOKEN = os.environ.get("FARAZ_TOKEN", "").strip()
+
+
+def _faraz_token_expiry_sec() -> int | None:
+    """JWT `exp` from FARAZ_TOKEN, or None if unreadable."""
+    tok = FARAZ_TOKEN
+    if not tok or tok.count(".") < 2:
+        return None
+    try:
+        import base64
+        import json as _json
+
+        payload = tok.split(".")[1]
+        pad = "=" * (-len(payload) % 4)
+        data = _json.loads(base64.urlsafe_b64decode(payload + pad))
+        exp = int(data.get("exp") or 0)
+        return exp if exp > 0 else None
+    except Exception:
+        return None
+
+
+_FARAZ_TOKEN_EXP = _faraz_token_expiry_sec()
 FARAZ_ADJUST_TYPE = int(os.environ.get("FARAZ_ADJUST_TYPE", "2"))
 # Faraz client caps: <1m → 1000, else 10000.
 FARAZ_COUNTBACK_MAX = int(os.environ.get("FARAZ_COUNTBACK_MAX", "10000"))
@@ -2031,6 +2052,224 @@ def _iran_in_cash_session(ts: int) -> bool:
     return 900 <= hhmm < 2200
 
 
+def _iran_tehran_day_start(ts: int) -> int:
+    """Tehran calendar day start (00:00) as unix sec for the day containing ts."""
+    shifted = int(ts) + IRAN_TZ_OFFSET_SEC
+    day0 = shifted - (shifted % 86_400)
+    return day0 - IRAN_TZ_OFFSET_SEC
+
+
+def _iran_session_hour_buckets(day_start: int, step: int) -> list[int]:
+    """Cash-session bucket starts for one Tehran day (09:00–22:00 exclusive)."""
+    if step <= 0 or step >= 86_400:
+        return []
+    out: list[int] = []
+    t = _align_iran_bar_time(day_start + 9 * 3600, step)
+    end = day_start + 22 * 3600
+    # Walk forward; align may snap before 09:00 — skip those.
+    while t < end:
+        if _iran_in_cash_session(t):
+            out.append(t)
+        t += step
+    return out
+
+
+def _ohlc_path_points(o: float, h: float, l: float, c: float, n: int) -> list[float]:
+    """Classic O→H→L→C path sampled into n points (n≥2)."""
+    n = max(2, int(n))
+    # Anchor path through the four prints.
+    anchors = [float(o), float(h), float(l), float(c)]
+    # Uniform samples along the 3 segments.
+    seg_lens = [n // 3, n // 3, n - 2 * (n // 3)]
+    if seg_lens[-1] < 1:
+        seg_lens[-1] = 1
+        if seg_lens[0] > 1:
+            seg_lens[0] -= 1
+    pts: list[float] = []
+    for i, length in enumerate(seg_lens):
+        a, b = anchors[i], anchors[i + 1]
+        for k in range(length):
+            if i < 2:
+                frac = k / max(1, length)
+            else:
+                frac = k / max(1, length - 1) if length > 1 else 1.0
+            pts.append(a + (b - a) * frac)
+    # Ensure exact end.
+    pts[-1] = float(c)
+    pts[0] = float(o)
+    return pts[:n]
+
+
+def _expand_daily_to_session_hours(day: dict[str, float], step: int) -> list[dict[str, float]]:
+    """Synthesize cash-session hour bars from one Faraz daily OHLC (visual continuity)."""
+    if step < 3600 or step >= 86_400:
+        return []
+    try:
+        t_day = _align_iran_bar_time(int(day["t"]), 86_400)
+        # Daily stamps are often Tehran 03:30 (=00:00 UTC); normalize to day start.
+        day_start = _iran_tehran_day_start(t_day + 12 * 3600)
+        o = float(day["o"])
+        h = float(day["h"])
+        l = float(day["l"])
+        c = float(day["c"])
+        v = float(day.get("v") or 0)
+    except (KeyError, TypeError, ValueError):
+        return []
+    if not (o > 0 and h > 0 and l > 0 and c > 0):
+        return []
+    buckets = _iran_session_hour_buckets(day_start, step)
+    if not buckets:
+        return []
+    path = _ohlc_path_points(o, h, l, c, len(buckets) + 1)
+    out: list[dict[str, float]] = []
+    for i, t0 in enumerate(buckets):
+        px0 = path[i]
+        px1 = path[i + 1]
+        hi = max(px0, px1)
+        lo = min(px0, px1)
+        # Keep daily envelope available on the extreme hours.
+        if i == 0:
+            hi = max(hi, o, h)
+            lo = min(lo, o)
+        if i == len(buckets) - 1:
+            hi = max(hi, c)
+            lo = min(lo, c, l)
+        # Clamp into daily H/L.
+        hi = min(max(hi, o, c), h)
+        lo = max(min(lo, o, c), l)
+        out.append(
+            {
+                "t": t0,
+                "o": _iran_toman_round(px0),
+                "h": _iran_toman_round(hi),
+                "l": _iran_toman_round(lo),
+                "c": _iran_toman_round(px1),
+                "v": v / max(1, len(buckets)),
+            }
+        )
+    return out
+
+
+def _fill_iran_hours_from_daily(
+    client: Any,
+    channel: str,
+    buckets: dict[int, dict[str, float]],
+    step: int,
+    *,
+    limit: int,
+    before: int | None,
+    wall_t: int,
+    daily_bars: list[dict[str, float]] | None = None,
+) -> int:
+    """Fill multi-day 1H holes from Faraz daily OHLC (public chart-history / Mongo 1D).
+
+    Used when customer intraday auth is dead and faraz_ohlc resolution=60 is sparse —
+    otherwise G18 1H shows fractal spikes across empty weeks.
+    """
+    if client is None or step < 3600 or step >= 86_400:
+        return 0
+    end_t = before if before is not None else wall_t + step
+    start_t = end_t - max(limit, 200) * step
+    if buckets:
+        ordered = sorted(t for t in buckets if t < end_t)
+        if ordered:
+            start_t = min(start_t, ordered[0] - 3 * 86_400)
+
+    dailies: list[dict[str, float]] = list(daily_bars or [])
+    if not dailies:
+        try:
+            docs = list(
+                client["anil_gold"]["faraz_ohlc"]
+                .find(
+                    {
+                        "channel": channel,
+                        "resolution": "1D",
+                        "c": {"$gt": 0},
+                        "t": {"$gte": start_t - 86_400, "$lt": end_t + 86_400},
+                    },
+                    {"t": 1, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1},
+                )
+                .sort("t", 1)
+                .limit(min(max(limit // 4, 120), 400))
+            )
+            for doc in docs:
+                dailies.append(
+                    {
+                        "t": float(doc["t"]),
+                        "o": float(doc["o"]),
+                        "h": float(doc["h"]),
+                        "l": float(doc["l"]),
+                        "c": float(doc["c"]),
+                        "v": float(doc.get("v") or 0),
+                    }
+                )
+            if not dailies:
+                docs = list(
+                    client["anil_gold"]["ohlc_1d"]
+                    .find(
+                        {
+                            "channel": channel,
+                            "c": {"$gt": 0},
+                            "t": {"$gte": start_t - 86_400, "$lt": end_t + 86_400},
+                        },
+                        {"t": 1, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1},
+                    )
+                    .sort("t", 1)
+                    .limit(400)
+                )
+                for doc in docs:
+                    dailies.append(
+                        {
+                            "t": float(doc["t"]),
+                            "o": float(doc["o"]),
+                            "h": float(doc["h"]),
+                            "l": float(doc["l"]),
+                            "c": float(doc["c"]),
+                            "v": float(doc.get("v") or 0),
+                        }
+                    )
+        except Exception as exc:
+            LOG.debug("daily load for hour fill %s: %s", channel, exc)
+            return 0
+    if not dailies:
+        return 0
+
+    # Index synthesized hours by day-start so we only expand days that have holes.
+    missing_days: set[int] = set()
+    t = _align_iran_bar_time(start_t, step)
+    while t < end_t and t <= wall_t:
+        if t not in buckets and _iran_in_cash_session(t):
+            missing_days.add(_iran_tehran_day_start(t))
+        t += step
+    if not missing_days:
+        return 0
+
+    filled = 0
+    for day in dailies:
+        try:
+            day_start = _iran_tehran_day_start(int(day["t"]) + 12 * 3600)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if day_start not in missing_days:
+            continue
+        for bar in _expand_daily_to_session_hours(day, step):
+            t0 = int(bar["t"])
+            if t0 in buckets or t0 > wall_t or t0 >= end_t:
+                continue
+            if not _iran_in_cash_session(t0):
+                continue
+            buckets[t0] = {
+                "t": t0,
+                "o": bar["o"],
+                "h": bar["h"],
+                "l": bar["l"],
+                "c": bar["c"],
+                "v": bar.get("v", 0),
+            }
+            filled += 1
+    return filled
+
+
 def _fill_iran_session_gaps(
     buckets: dict[int, dict[str, float]],
     step: int,
@@ -2311,6 +2550,15 @@ def materialize_iran_1m_from_5m(*, channels: list[str] | None = None) -> int:
 
 async def bootstrap_faraz_history(session: aiohttp.ClientSession) -> None:
     """Fetch max-countback history once per symbol/resolution and persist to Mongo."""
+    if _FARAZ_TOKEN_EXP is not None and _FARAZ_TOKEN_EXP < time.time():
+        LOG.warning(
+            "FARAZ_TOKEN expired at %s UTC — customer 1H history will 401 until "
+            "FARAZ_COOKIE is refreshed via deploy/vps/set_faraz_session.sh "
+            "(using public 1D→1H expand as fallback)",
+            time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(_FARAZ_TOKEN_EXP)),
+        )
+    elif not (FARAZ_COOKIE or FARAZ_TOKEN):
+        LOG.warning("FARAZ_COOKIE/FARAZ_TOKEN unset — deep intraday Faraz history unavailable")
     if not IRAN_HISTORY_BOOTSTRAP:
         return
     LOG.info(
@@ -2981,6 +3229,22 @@ def _load_iran_history_mongo(
                 if derived:
                     sources.append(f"derived-{derived}")
 
+        # Multi-day 1H holes (Faraz customer auth expired → empty resolution=60):
+        # expand public/Mongo daily OHLC into cash-session hours so charts are not
+        # fractal spikes across empty weeks (e.g. G18 Oct 2026).
+        if step >= 3600 and step < 86_400:
+            daily_n = _fill_iran_hours_from_daily(
+                client,
+                channel,
+                buckets,
+                step,
+                limit=limit,
+                before=before,
+                wall_t=wall_t if before is None else (before - step),
+            )
+            if daily_n:
+                sources.append(f"daily1h:{daily_n}")
+
         # Short in-session holes (missed polls). Include 1H–4H so G18 hour charts
         # are not fractal spikes; overnight still collapses via SESSION_IRAN_GOLD.
         if step <= 14_400:
@@ -3164,6 +3428,58 @@ async def iran_gold_history(request: web.Request) -> web.Response:
                     src="faraz-live",
                 )
             )
+
+    # Hour TF still sparse (customer 1H auth dead): expand public daily into session hours.
+    if 3600 <= step < 86_400:
+        ordered_pre = sorted(buckets)
+        big_hole = False
+        if len(ordered_pre) >= 2:
+            for i in range(1, len(ordered_pre)):
+                if ordered_pre[i] - ordered_pre[i - 1] > max(step * 12, 12 * 3600):
+                    big_hole = True
+                    break
+        elif len(ordered_pre) < min(limit, 40):
+            big_hole = True
+        if big_hole:
+            daily = await fetch_faraz_chart_history(session, channel, "1D")
+            if daily:
+                before_keys = set(buckets)
+                wall_i = int(time.time())
+                added = _fill_iran_hours_from_daily(
+                    mongo_client(),
+                    channel,
+                    buckets,
+                    step,
+                    limit=limit,
+                    before=before,
+                    wall_t=wall_i if before is None else min(wall_i, before - step),
+                    daily_bars=daily,
+                )
+                if added:
+                    sources.append(f"daily1h-live:{added}")
+                    new_bars = [
+                        {
+                            "t": float(buckets[t]["t"]),
+                            "o": float(buckets[t]["o"]),
+                            "h": float(buckets[t]["h"]),
+                            "l": float(buckets[t]["l"]),
+                            "c": float(buckets[t]["c"]),
+                            "v": float(buckets[t].get("v") or 0),
+                        }
+                        for t in sorted(buckets)
+                        if t not in before_keys
+                    ]
+                    if new_bars:
+                        # Persist expanded hours so scrollback stays dense.
+                        asyncio.create_task(
+                            asyncio.to_thread(
+                                persist_faraz_bars,
+                                channel,
+                                "60" if step == 3600 else (faraz_res or "60"),
+                                new_bars,
+                                src="daily-expand",
+                            )
+                        )
 
     if not buckets and mongo_client() is None:
         return web.json_response({"detail": "pymongo unavailable"}, status=503)
