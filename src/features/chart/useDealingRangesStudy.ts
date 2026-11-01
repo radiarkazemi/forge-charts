@@ -19,11 +19,12 @@ import {
   type DrawCmd,
 } from "@/features/pine/orca-runtime";
 import { DEALING_RANGES_DEFAULTS } from "./dealing-ranges-indicator";
+import { studyIsVisible } from "./study-paint-gate";
 
 /** Cap bars fed into Orca so 1m/seconds charts stay responsive. */
-const MAX_BARS = 5_000;
+const MAX_BARS = 2_500;
 /** Debounce study add/remove/input changes before expensive export+paint. */
-const STUDY_DEBOUNCE_MS = 400;
+const STUDY_DEBOUNCE_MS = 550;
 /** Cheap presence check only (no export) while a study is active. */
 const PRESENCE_POLL_MS = 6_000;
 
@@ -150,6 +151,14 @@ export function useDealingRangesStudy(enabled = true): void {
       }
 
       const studyId = studyIds[0]!;
+      const studyApi = widget.activeChart()?.getStudyById(studyId);
+      if (!studyIsVisible(studyApi)) {
+        genRef.current += 1;
+        clearDrawings();
+        lastKeyRef.current = `hidden:${symbol}:${interval}`;
+        lastFpRef.current = "";
+        return;
+      }
       const opts = readOptions(studyId) ?? defaultOpts();
       const key = JSON.stringify({ symbol, interval, opts, studies: studyIds });
       if (!force && key === lastKeyRef.current && entityIdsRef.current.length > 0) {

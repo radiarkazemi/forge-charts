@@ -15,9 +15,11 @@ import {
   type FtaInputs,
 } from "@/features/trading-assistant/runtime";
 import { FTA_STUDY_DEFAULTS } from "./forge-trading-assistant-indicator";
+import { studyIsVisible } from "./study-paint-gate";
 
-const MAX_BARS = 4_000;
-const STUDY_DEBOUNCE_MS = 450;
+/** Keep light — Orca DR + paint shapes on 4k bars freezes the chart. */
+const MAX_BARS = 1_800;
+const STUDY_DEBOUNCE_MS = 650;
 const PRESENCE_POLL_MS = 6_000;
 
 function fingerprint(
@@ -169,6 +171,14 @@ export function useForgeTradingAssistantStudy(enabled = true): void {
         return;
       }
       const studyId = studyIds[0]!;
+      const studyApi = widget.activeChart()?.getStudyById(studyId);
+      if (!studyIsVisible(studyApi)) {
+        genRef.current += 1;
+        clearDrawings();
+        lastKeyRef.current = `hidden:${symbol}:${interval}`;
+        lastFpRef.current = "";
+        return;
+      }
       const opts = readOptions(studyId);
       const key = JSON.stringify({ symbol, interval, opts, studies: studyIds });
       if (!force && key === lastKeyRef.current && entityIdsRef.current.length > 0) return;
@@ -191,7 +201,12 @@ export function useForgeTradingAssistantStudy(enabled = true): void {
           return;
         }
         const result = computeTradingAssistant(bars, opts);
-        const cmds = tradingAssistantDrawCmds(result, opts, bars[bars.length - 1]!.time);
+        // Cap painted history so createShape storms don't freeze the chart.
+        const lean = {
+          ...result,
+          signals: result.signals.slice(-6),
+        };
+        const cmds = tradingAssistantDrawCmds(lean, opts, bars[bars.length - 1]!.time);
         const fp = fingerprint(cmds);
         if (!force && fp === lastFpRef.current && lastKeyRef.current === key) return;
         if (cancelled || myGen !== genRef.current) return;
@@ -229,13 +244,14 @@ export function useForgeTradingAssistantStudy(enabled = true): void {
         );
       } catch (err) {
         console.warn("[forge-ta] paint failed", err);
+        lastKeyRef.current = "";
       } finally {
         busyRef.current = false;
         if (!cancelled && pendingRef.current) {
           pendingRef.current = false;
           window.setTimeout(() => {
             void repaint(false);
-          }, 0);
+          }, 120);
         }
       }
     };

@@ -23,6 +23,7 @@ import {
   SESSIONS_STUDY_DEFAULTS,
   SESSIONS_MAX_COUNT,
 } from "./sessions-indicator";
+import { chartAllowedByMaxMinutes, studyIsVisible } from "./study-paint-gate";
 
 const MAX_BARS = 6_000;
 const STUDY_DEBOUNCE_MS = 400;
@@ -104,6 +105,7 @@ function defaultOpts(): SessionsOptions {
   return {
     sessions: mergeSessionDefs(readSessionSlotsFromMap(map), 8, ""),
     historyLimit: 0,
+    maxMinutes: SESSIONS_STUDY_DEFAULTS.maxMinutes,
     timezoneOffset: SESSIONS_STUDY_DEFAULTS.timezoneOffset,
     useExchangeTimezone: SESSIONS_STUDY_DEFAULTS.useExchangeTimezone,
     exchangeTimezone: SESSIONS_STUDY_DEFAULTS.exchangeTimezone,
@@ -196,7 +198,14 @@ export function useSessionsStudy(enabled = true): void {
         };
         const bool = (id: string, fallback: boolean) => {
           const v = map.get(id);
-          return typeof v === "boolean" ? v : fallback;
+          if (typeof v === "boolean") return v;
+          if (typeof v === "number") return v !== 0;
+          if (typeof v === "string") {
+            const s = v.trim().toLowerCase();
+            if (s === "true" || s === "1") return true;
+            if (s === "false" || s === "0") return false;
+          }
+          return fallback;
         };
 
         // Inputs “+ Add session” / “− Remove” checkboxes (CL has no real + button).
@@ -258,6 +267,10 @@ export function useSessionsStudy(enabled = true): void {
         return {
           sessions,
           historyLimit: 0,
+          maxMinutes: Math.max(
+            0,
+            Math.min(240, Math.floor(num("maxMinutes", SESSIONS_STUDY_DEFAULTS.maxMinutes))),
+          ),
           timezoneOffset: Math.max(
             -12,
             Math.min(14, Math.floor(num("timezoneOffset", SESSIONS_STUDY_DEFAULTS.timezoneOffset))),
@@ -301,7 +314,20 @@ export function useSessionsStudy(enabled = true): void {
       }
 
       const studyId = studyIds[0]!;
+      const studyApi = widget.activeChart()?.getStudyById(studyId);
       const opts = readOptions(studyId) ?? defaultOpts();
+      const maxMinutes =
+        typeof (opts as { maxMinutes?: number }).maxMinutes === "number"
+          ? (opts as { maxMinutes?: number }).maxMinutes!
+          : SESSIONS_STUDY_DEFAULTS.maxMinutes;
+      // Honor Visibility eye + “≤ N minute” gate (drawings ignore CL Visibility alone).
+      if (!studyIsVisible(studyApi) || !chartAllowedByMaxMinutes(String(interval), maxMinutes)) {
+        genRef.current += 1;
+        clearDrawings();
+        lastKeyRef.current = `hidden:${symbol}:${interval}:${maxMinutes}`;
+        lastFpRef.current = "";
+        return;
+      }
       const optsKey = JSON.stringify({ symbol, interval, opts, studies: studyIds });
 
       const myGen = ++genRef.current;

@@ -87,6 +87,8 @@ for (let i = 0; i < SESSIONS_MAX_COUNT; i += 1) {
 export const SESSIONS_STUDY_DEFAULTS = {
   ...slotInputDefaults,
   extraSessions: "",
+  /** 0 = all TFs; 5 = only paint on ≤5m (and seconds). */
+  maxMinutes: 5,
   timezoneOffset: SESSIONS_DEFAULTS.timezoneOffset,
   useExchangeTimezone: SESSIONS_DEFAULTS.useExchangeTimezone,
   exchangeTimezone: SESSIONS_DEFAULTS.exchangeTimezone,
@@ -238,6 +240,14 @@ export function createSessionsIndicator(PineJS: {
           name: "Midnight line · Enable (00:00 open → tip − 5×1m)",
           defval: SESSIONS_STUDY_DEFAULTS.showMidnightLine,
           type: "bool",
+        },
+        {
+          id: "maxMinutes",
+          name: "Visibility · Only on ≤ N minute charts (0 = all TFs)",
+          defval: SESSIONS_STUDY_DEFAULTS.maxMinutes,
+          type: "integer",
+          min: 0,
+          max: 240,
         },
         {
           id: "timezoneOffset",

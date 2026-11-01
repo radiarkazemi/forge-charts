@@ -304,36 +304,39 @@ export function computeTradingAssistant(
   const right = Math.max(1, Math.floor(cfg.swingRight));
   if (bars.length < left + right + 20) return empty;
 
-  // Orca DR on this chart's timeframe — sensitive pivots (1,1) like classic Orca.
-  const orca = computeOrcaAnalysis(bars, {
-    left: 1,
-    right: 1,
-    breakOnWick: false,
-    bosColor: "#FF9800",
-    mssColor: "#00BCD4",
-    bosWidth: 1,
-    showDealingRange: true,
-    showDrFibs: true,
-    midlineColor: "#F44336",
-    midlineWidth: 2,
-    drAhead: 8,
-    drFib618Color: "#A5D6A7",
-    drFib786Color: "#4DD0E1",
-    bullishSetupCircleColor: "#76FF03",
-    bearishSetupCircleColor: "#F44336",
-    onlySetupCircles: true,
-    showOrangeCircles: false,
-    circleColor: "#FF9800",
-    detectBullishPattern: true,
-    detectBearishPattern: true,
-    detectBearishCont: true,
-    detectBullishCont: true,
-    detectBullishRev_HL: true,
-    maxDealingRanges: 24,
-    fromTimeSec: null,
-    toTimeSec: null,
-    rangesOnly: true,
-  });
+  // Orca DR (sensitive 1,1 pivots). Skip when DR is fully disabled — big win for load time.
+  const needDr = cfg.requireDealingRange || cfg.showDealingRange;
+  const orca = needDr
+    ? computeOrcaAnalysis(bars, {
+        left: 1,
+        right: 1,
+        breakOnWick: false,
+        bosColor: "#FF9800",
+        mssColor: "#00BCD4",
+        bosWidth: 1,
+        showDealingRange: true,
+        showDrFibs: true,
+        midlineColor: "#F44336",
+        midlineWidth: 2,
+        drAhead: 8,
+        drFib618Color: "#A5D6A7",
+        drFib786Color: "#4DD0E1",
+        bullishSetupCircleColor: "#76FF03",
+        bearishSetupCircleColor: "#F44336",
+        onlySetupCircles: true,
+        showOrangeCircles: false,
+        circleColor: "#FF9800",
+        detectBullishPattern: true,
+        detectBearishPattern: true,
+        detectBearishCont: true,
+        detectBullishCont: true,
+        detectBullishRev_HL: true,
+        maxDealingRanges: 12,
+        fromTimeSec: null,
+        toTimeSec: null,
+        rangesOnly: true,
+      })
+    : { cmds: [], ranges: [], structureDir: 0 as const };
   const dealingRanges = orca.ranges;
 
   const swings: Swing[] = [];
