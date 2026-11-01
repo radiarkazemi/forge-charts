@@ -1854,10 +1854,11 @@ def _fill_iran_from_finer_faraz(
         .sort("t", 1)
         .limit(kid_limit)
     )
-    # Fallback only: when Faraz children are empty, use anil ohlc_1m.
-    # Always-merging tick folds invented flat 1h bars that smashed Faraz OHLC.
-    if not kids and child_step == 60:
-        kids = list(
+    # Always merge anil ohlc_1m for 1m children — Faraz 1m is often sparse on
+    # G18/ABSHODE, which left 1H charts looking like isolated "fractal" spikes.
+    # Prefer Faraz rows when both exist (ingested first); ohlc_1m fills holes.
+    if child_step == 60:
+        ohlc_1m = list(
             client["anil_gold"]["ohlc_1m"]
             .find(
                 {"channel": channel, "c": {"$gt": 0}, "t": {"$gte": win_lo, "$lt": win_hi}},
@@ -1866,6 +1867,8 @@ def _fill_iran_from_finer_faraz(
             .sort("t", 1)
             .limit(kid_limit)
         )
+        if ohlc_1m:
+            kids = list(kids) + ohlc_1m
     if not kids:
         return 0
 
@@ -2978,18 +2981,20 @@ def _load_iran_history_mongo(
                 if derived:
                     sources.append(f"derived-{derived}")
 
-        # Short in-session holes only (missed polls). Never invent flat 1h days —
-        # those looked worse than sparse Faraz history. Overnight collapses via
-        # SESSION_IRAN_GOLD on the client.
-        if step <= 1_800:
+        # Short in-session holes (missed polls). Include 1H–4H so G18 hour charts
+        # are not fractal spikes; overnight still collapses via SESSION_IRAN_GOLD.
+        if step <= 14_400:
             gap_wall = wall_t if before is None else min(wall_t, before - step)
             auth_ok = _FARAZ_CUSTOMER_AUTH_OK is True
             if step <= 60:
                 max_steps = 12 if auth_ok else 4
             elif step <= 300:
                 max_steps = 8 if auth_ok else 3
+            elif step <= 1_800:
+                max_steps = 6 if auth_ok else 3
             else:
-                max_steps = 4 if auth_ok else 2
+                # 1H/2H/4H: fill up to ~8 missing cash-session hours from carry.
+                max_steps = 8 if auth_ok else 4
             filled = _fill_iran_session_gaps(
                 buckets,
                 step,
@@ -3166,9 +3171,13 @@ async def iran_gold_history(request: web.Request) -> web.Response:
     ordered = sorted(buckets.values(), key=lambda b: b["t"])
     if before is not None:
         ordered = [b for b in ordered if b["t"] < before]
-    # Minute+: drop synthetic flat carry-forwards (o=h=l=c, v=0) — they looked
+    # Hour+ intraday: only cash-session buckets (drop 07:00/08:00 pre-open flats).
+    if 3600 <= step < 86_400:
+        ordered = [b for b in ordered if _iran_in_cash_session(int(b["t"]))]
+    # Minute–30m: drop synthetic flat carry-forwards (o=h=l=c, v=0) — they looked
     # like broken G18/ABSHODE candles. Keep sub-minute flats so left-paging works.
-    if step >= 60 and ordered:
+    # Hour+: keep short session gapfills (v=0) so 1H stays continuous after agg.
+    if 60 <= step <= 1_800 and ordered:
         tip_t = ordered[-1]["t"]
         cleaned: list[dict[str, float]] = []
         for b in ordered:

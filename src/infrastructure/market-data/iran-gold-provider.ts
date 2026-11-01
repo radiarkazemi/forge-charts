@@ -92,6 +92,138 @@ function alignTime(tsSec: number, step: number): number {
   return ts - (ts % s);
 }
 
+/** Faraz cash session 09:00–22:00 Tehran (end exclusive). */
+function iranInCashSession(tsSec: number): boolean {
+  const shifted = Math.floor(tsSec) + IRAN_TZ_OFFSET_SEC;
+  const daySec = ((shifted % 86_400) + 86_400) % 86_400;
+  const hhmm = Math.floor(daySec / 3600) * 100 + Math.floor((daySec % 3600) / 60);
+  return hhmm >= 900 && hhmm < 2200;
+}
+
+function mergeBarPreferRange(prev: Bar | undefined, next: Bar): Bar {
+  if (!prev) return next;
+  const prevRange = prev.high - prev.low;
+  const nextRange = next.high - next.low;
+  if (nextRange > prevRange || (nextRange === prevRange && (next.volume || 0) >= (prev.volume || 0))) {
+    return {
+      time: next.time,
+      open: prev.open,
+      high: Math.max(prev.high, next.high),
+      low: Math.min(prev.low, next.low),
+      close: next.close,
+      volume: (prev.volume || 0) + (next.volume || 0),
+    };
+  }
+  return {
+    time: prev.time,
+    open: prev.open,
+    high: Math.max(prev.high, next.high),
+    low: Math.min(prev.low, next.low),
+    close: prev.close,
+    volume: (prev.volume || 0) + (next.volume || 0),
+  };
+}
+
+/** Count in-session parent holes larger than 1.5× step (fractal 1H charts). */
+function countSessionHoles(bars: readonly Bar[], step: number): number {
+  if (bars.length < 2 || step < 3600) return 0;
+  let holes = 0;
+  for (let i = 1; i < bars.length; i += 1) {
+    const prev = bars[i - 1]!.time;
+    const cur = bars[i]!.time;
+    if (cur - prev <= step * 1.5) continue;
+    let missing = 0;
+    for (let t = prev + step; t < cur; t += step) {
+      if (iranInCashSession(t)) missing += 1;
+    }
+    if (missing > 0) holes += 1;
+  }
+  return holes;
+}
+
+/** Aggregate 1m bars into hour+ buckets and fill missing cash-session parents. */
+function densifyHourBarsFromMinutes(
+  parents: readonly Bar[],
+  minutes: readonly Bar[],
+  step: number,
+): Bar[] {
+  if (step < 3600 || step >= 86_400 || minutes.length === 0) return [...parents];
+  const byTime = new Map<number, Bar>();
+  for (const b of parents) {
+    if (!iranInCashSession(b.time) && step >= 3600) continue;
+    byTime.set(b.time, b);
+  }
+  const fromM1 = new Map<number, Bar>();
+  for (const m of minutes) {
+    if (!iranInCashSession(m.time)) continue;
+    const t0 = alignTime(m.time, step);
+    if (!iranInCashSession(t0)) continue;
+    const next: Bar = {
+      time: t0,
+      open: m.open,
+      high: m.high,
+      low: m.low,
+      close: m.close,
+      volume: m.volume || 0,
+    };
+    const prev = fromM1.get(t0);
+    if (!prev) {
+      fromM1.set(t0, next);
+      continue;
+    }
+    fromM1.set(t0, {
+      time: t0,
+      open: prev.open,
+      high: Math.max(prev.high, next.high),
+      low: Math.min(prev.low, next.low),
+      close: next.close,
+      volume: (prev.volume || 0) + (next.volume || 0),
+    });
+  }
+  for (const [t, bar] of fromM1) {
+    const existing = byTime.get(t);
+    if (!existing) {
+      byTime.set(t, bar);
+      continue;
+    }
+    // Prefer the bar with more range / volume when both exist.
+    byTime.set(t, mergeBarPreferRange(existing, bar));
+  }
+  return [...byTime.values()].sort((a, b) => a.time - b.time);
+}
+
+/**
+ * Carry-forward short in-session holes (≤ maxGapSteps) so 1H is continuous
+ * like Faraz. Overnight (22→09) stays empty for SESSION_IRAN_GOLD collapse.
+ */
+function fillIranSessionGaps(bars: readonly Bar[], step: number, maxGapSteps = 8): Bar[] {
+  if (bars.length < 2 || step < 3600 || step >= 86_400) return [...bars];
+  const out: Bar[] = [];
+  for (let i = 0; i < bars.length; i += 1) {
+    const cur = bars[i]!;
+    if (out.length === 0) {
+      out.push(cur);
+      continue;
+    }
+    const prev = out[out.length - 1]!;
+    if (cur.time - prev.time > step) {
+      let missing = 0;
+      for (let t = prev.time + step; t < cur.time; t += step) {
+        if (iranInCashSession(t)) missing += 1;
+      }
+      if (missing > 0 && missing <= maxGapSteps) {
+        const px = prev.close;
+        for (let t = prev.time + step; t < cur.time; t += step) {
+          if (!iranInCashSession(t)) continue;
+          out.push({ time: t, open: px, high: px, low: px, close: px, volume: 0 });
+        }
+      }
+    }
+    out.push(cur);
+  }
+  return out;
+}
+
 function applyTick(current: Bar | null, price: number, tsSec: number, step: number): Bar {
   const wallBucket = alignTime(Math.floor(Date.now() / 1000), step);
   let t = alignTime(tsSec, step);
@@ -263,35 +395,45 @@ export class IranGoldProvider implements MarketDataProvider {
     const byTime = new Map<number, Bar>();
     for (const b of bars) {
       const t = alignTime(b.time, step);
+      // Drop pre/post cash-session hour stamps (07:00/08:00 flats looked fractal).
+      if (step >= 3600 && step < 86_400 && !iranInCashSession(t)) continue;
       const next = { ...b, time: t };
-      const prev = byTime.get(t);
-      if (!prev) {
-        byTime.set(t, next);
-        continue;
-      }
-      const prevRange = prev.high - prev.low;
-      const nextRange = next.high - next.low;
-      if (nextRange > prevRange || (nextRange === prevRange && (next.volume || 0) >= (prev.volume || 0))) {
-        byTime.set(t, {
-          time: t,
-          open: prev.open,
-          high: Math.max(prev.high, next.high),
-          low: Math.min(prev.low, next.low),
-          close: next.close,
-          volume: (prev.volume || 0) + (next.volume || 0),
-        });
-      } else {
-        byTime.set(t, {
-          time: t,
-          open: prev.open,
-          high: Math.max(prev.high, next.high),
-          low: Math.min(prev.low, next.low),
-          close: prev.close,
-          volume: (prev.volume || 0) + (next.volume || 0),
-        });
-      }
+      byTime.set(t, mergeBarPreferRange(byTime.get(t), next));
     }
-    const merged = [...byTime.values()].sort((a, b) => a.time - b.time);
+    let merged = [...byTime.values()].sort((a, b) => a.time - b.time);
+
+    // G18/ABSHODE 1H (and 2H/4H) often arrive sparse from Faraz — rebuild missing
+    // cash-session hours from dense 1m history so the chart is continuous.
+    if (step >= 3600 && step < 86_400 && countSessionHoles(merged, step) > 0) {
+      try {
+        const m1Limit = Math.min(
+          20_000,
+          Math.max(limit * Math.ceil(step / 60) + 500, 3_000),
+        );
+        const m1Json = await fetchJson<HistoryResponse>(
+          buildUrl(HISTORY_BASE, {
+            symbol: route.ticker,
+            interval: "1",
+            limit: m1Limit,
+            before: range.to > 0 ? range.to : undefined,
+          }),
+          { timeoutMs: REQUEST_TIMEOUT_MS },
+        );
+        const minutes = (m1Json.bars ?? [])
+          .map(parsePackedBar)
+          .filter((b): b is Bar => b !== null)
+          .filter((b) => b.time < before)
+          .sort((a, b) => a.time - b.time);
+        if (minutes.length > 0) {
+          merged = densifyHourBarsFromMinutes(merged, minutes, step);
+        }
+      } catch {
+        /* keep sparse parents */
+      }
+      // Remaining short cash-session holes → carry-forward (not multi-day outages).
+      merged = fillIranSessionGaps(merged, step, 8);
+    }
+
     const clean = sanitizeIranBars(merged);
     return clean.slice(-Math.max(range.countBack, 1));
   }
