@@ -163,8 +163,8 @@ export function useReplayMentorStudy(enabled = true): void {
       if (!studyIsVisible(studyApi)) {
         genRef.current += 1;
         clearDrawings();
-        lastKeyRef.current = `hidden:${symbol}:${interval}`;
-        lastFpRef.current = "";
+        lastFpRef.current = `hidden:${symbol}:${interval}`;
+        lastClosedCursorRef.current = -1;
         return;
       }
       const opts = readOptions(studyId);

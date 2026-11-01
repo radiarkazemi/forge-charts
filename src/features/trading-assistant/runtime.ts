@@ -618,7 +618,7 @@ export function computeTradingAssistant(
 
         // Smarter: if no OB/FVG but last DR is confirmed + OTE/half + rejection,
         // use the Dealing Range itself as the POI (classic sensitive DR entry).
-        if (!emitted && cfg.requireDealingRange && dr && wantDir !== 0) {
+        if (!emitted && cfg.requireDealingRange && dr) {
           let zlo: number;
           let zhi: number;
           if (cfg.requireDrOte) {
