@@ -4,18 +4,24 @@ export type BrokerLogoId = "faraz" | "forexcom" | "fxpro" | "fxcm" | "binance" |
 
 export interface BrokerLogo {
   readonly id: BrokerLogoId;
-  /** Served from /brand/brokers/… (copied into dist on build). */
+  /** Under Vite `base` (/charts/ in prod) → …/brand/brokers/… */
   readonly src: string;
   readonly label: string;
 }
 
+function brokerAsset(file: string): string {
+  const base = import.meta.env.BASE_URL || "/";
+  const root = base.endsWith("/") ? base : `${base}/`;
+  return `${root}brand/brokers/${file}`;
+}
+
 const BY_EXCHANGE: Record<string, BrokerLogo> = {
-  IRAN: { id: "faraz", src: "/brand/brokers/faraz.svg", label: "Faraz" },
-  FARAZ: { id: "faraz", src: "/brand/brokers/faraz.svg", label: "Faraz" },
-  FOREXCOM: { id: "forexcom", src: "/brand/brokers/forexcom.png", label: "FOREXCOM" },
-  FXPRO: { id: "fxpro", src: "/brand/brokers/fxpro.svg", label: "FXPRO" },
-  FXCM: { id: "fxcm", src: "/brand/brokers/fxcm.svg", label: "FXCM" },
-  BINANCE: { id: "binance", src: "/brand/brokers/binance.svg", label: "Binance" },
+  IRAN: { id: "faraz", src: brokerAsset("faraz.svg"), label: "Faraz" },
+  FARAZ: { id: "faraz", src: brokerAsset("faraz.svg"), label: "Faraz" },
+  FOREXCOM: { id: "forexcom", src: brokerAsset("forexcom.png"), label: "FOREXCOM" },
+  FXPRO: { id: "fxpro", src: brokerAsset("fxpro.svg"), label: "FXPRO" },
+  FXCM: { id: "fxcm", src: brokerAsset("fxcm.svg"), label: "FXCM" },
+  BINANCE: { id: "binance", src: brokerAsset("binance.svg"), label: "Binance" },
 };
 
 export function brokerLogoForExchange(exchange: string): BrokerLogo | null {
