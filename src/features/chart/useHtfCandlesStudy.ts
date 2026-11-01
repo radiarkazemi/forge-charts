@@ -19,9 +19,10 @@ import {
   HTF_CANDLES_STUDY_NAME,
   readHtfSlotsFromMap,
 } from "./htf-candles-indicator";
+import { studyIsVisible } from "./study-paint-gate";
 
-const MAX_BARS = 8_000;
-const STUDY_DEBOUNCE_MS = 400;
+const MAX_BARS = 4_000;
+const STUDY_DEBOUNCE_MS = 500;
 /** Live tip refresh — keep light; timers alone must not force a full redraw. */
 const LIVE_REFRESH_MS = 5_000;
 const PRESENCE_POLL_MS = 6_000;
@@ -208,6 +209,14 @@ export function useHtfCandlesStudy(enabled = true): void {
         return;
       }
       const studyId = studyIds[0]!;
+      const studyApi = widget.activeChart()?.getStudyById(studyId);
+      if (!studyIsVisible(studyApi)) {
+        genRef.current += 1;
+        clearDrawings();
+        lastKeyRef.current = `hidden:${symbol}:${interval}`;
+        lastFpRef.current = "";
+        return;
+      }
       const opts = readOptions(studyId) ?? { ...HTF_CANDLES_DEFAULTS };
       const optsKey = JSON.stringify({ symbol, interval, opts, studies: studyIds });
       const myGen = ++genRef.current;

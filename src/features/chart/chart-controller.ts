@@ -691,11 +691,13 @@ export class ChartController {
           ? "ForgeStructureIntelligence@tv-basicstudies-1"
           : /forge\s*sessions|sessions\s*\[luxalgo\]/i.test(displayName)
             ? "ForgeSessions@tv-basicstudies-1"
-            : /forge\s*replay\s*mentor|replay\s*mentor/i.test(displayName)
-              ? "ForgeReplayMentor@tv-basicstudies-1"
-              : /ict\s*htf\s*candles/i.test(displayName)
-                ? "IctHtfCandles@tv-basicstudies-1"
-                : displayName;
+            : /forge\s*trading\s*assistant|forge\s*ta\b/i.test(displayName)
+              ? "ForgeTradingAssistant@tv-basicstudies-2"
+              : /forge\s*replay\s*mentor|replay\s*mentor/i.test(displayName)
+                ? "ForgeReplayMentor@tv-basicstudies-1"
+                : /ict\s*htf\s*candles/i.test(displayName)
+                  ? "IctHtfCandles@tv-basicstudies-1"
+                  : displayName;
       const study = chart.getStudyById(entityId);
       const inputs: Record<string, unknown> = {};
       for (const item of study.getInputValues()) {
@@ -723,11 +725,13 @@ export class ChartController {
             ? "ForgeStructureIntelligence@tv-basicstudies-1"
             : /forge\s*sessions|sessions\s*\[luxalgo\]/i.test(name)
               ? "ForgeSessions@tv-basicstudies-1"
-              : /forge\s*replay\s*mentor|replay\s*mentor/i.test(name)
-                ? "ForgeReplayMentor@tv-basicstudies-1"
-                : /ict\s*htf\s*candles/i.test(name)
-                  ? "IctHtfCandles@tv-basicstudies-1"
-                  : null;
+              : /forge\s*trading\s*assistant|forge\s*ta\b/i.test(name)
+                ? "ForgeTradingAssistant@tv-basicstudies-2"
+                : /forge\s*replay\s*mentor|replay\s*mentor/i.test(name)
+                  ? "ForgeReplayMentor@tv-basicstudies-1"
+                  : /ict\s*htf\s*candles/i.test(name)
+                    ? "IctHtfCandles@tv-basicstudies-1"
+                    : null;
     void chart
       .createStudy(name, false, false, inputs as never)
       .catch(() => {

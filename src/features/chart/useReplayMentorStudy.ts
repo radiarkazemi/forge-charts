@@ -18,9 +18,10 @@ import {
   MENTOR_DEFAULTS,
 } from "@/features/replay-mentor/runtime";
 import { REPLAY_MENTOR_DEFAULTS } from "./replay-mentor-indicator";
+import { studyIsVisible } from "./study-paint-gate";
 
-const MAX_BARS = 4_000;
-const STUDY_DEBOUNCE_MS = 320;
+const MAX_BARS = 2_000;
+const STUDY_DEBOUNCE_MS = 450;
 const PRESENCE_POLL_MS = 6_000;
 
 function fingerprint(
@@ -158,6 +159,14 @@ export function useReplayMentorStudy(enabled = true): void {
       }
 
       const studyId = studyIds[0]!;
+      const studyApi = widget.activeChart()?.getStudyById(studyId);
+      if (!studyIsVisible(studyApi)) {
+        genRef.current += 1;
+        clearDrawings();
+        lastFpRef.current = `hidden:${symbol}:${interval}`;
+        lastClosedCursorRef.current = -1;
+        return;
+      }
       const opts = readOptions(studyId);
       const myGen = ++genRef.current;
       busyRef.current = true;

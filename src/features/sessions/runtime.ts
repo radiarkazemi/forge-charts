@@ -39,6 +39,12 @@ export interface SessionsOptions {
   readonly sessions: readonly SessionDef[];
   /** 0 = draw every completed session in the loaded bars (no artificial cap). */
   readonly historyLimit: number;
+  /**
+   * Only paint when chart TF ≤ this many minutes (0 = any TF).
+   * Needed because CL Visibility cannot express “≤5m” precisely, and our
+   * createShape overlays ignore the Visibility tab unless we gate them.
+   */
+  readonly maxMinutes?: number;
   readonly timezoneOffset: number;
   readonly useExchangeTimezone: boolean;
   readonly exchangeTimezone: string;

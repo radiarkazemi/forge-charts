@@ -23,13 +23,18 @@ import {
   SESSIONS_STUDY_DEFAULTS,
   SESSIONS_MAX_COUNT,
 } from "./sessions-indicator";
+import {
+  chartAllowedByMaxMinutes,
+  liveChartResolution,
+  studyIsVisible,
+} from "./study-paint-gate";
 
-const MAX_BARS = 6_000;
-const STUDY_DEBOUNCE_MS = 400;
+const MAX_BARS = 4_000;
+const STUDY_DEBOUNCE_MS = 450;
 /** Presence / cleanup when study removed. */
 const PRESENCE_POLL_MS = 6_000;
 /** Soft refresh so forming session boxes track live bars — keep light for chart FPS. */
-const LIVE_REFRESH_MS = 4_000;
+const LIVE_REFRESH_MS = 5_000;
 
 function fingerprintCmds(
   cmds: readonly { kind: string; t1: number; p1: number; color?: string; fill?: string }[],
@@ -104,6 +109,7 @@ function defaultOpts(): SessionsOptions {
   return {
     sessions: mergeSessionDefs(readSessionSlotsFromMap(map), 8, ""),
     historyLimit: 0,
+    maxMinutes: SESSIONS_STUDY_DEFAULTS.maxMinutes,
     timezoneOffset: SESSIONS_STUDY_DEFAULTS.timezoneOffset,
     useExchangeTimezone: SESSIONS_STUDY_DEFAULTS.useExchangeTimezone,
     exchangeTimezone: SESSIONS_STUDY_DEFAULTS.exchangeTimezone,
@@ -196,7 +202,14 @@ export function useSessionsStudy(enabled = true): void {
         };
         const bool = (id: string, fallback: boolean) => {
           const v = map.get(id);
-          return typeof v === "boolean" ? v : fallback;
+          if (typeof v === "boolean") return v;
+          if (typeof v === "number") return v !== 0;
+          if (typeof v === "string") {
+            const s = v.trim().toLowerCase();
+            if (s === "true" || s === "1") return true;
+            if (s === "false" || s === "0") return false;
+          }
+          return fallback;
         };
 
         // Inputs “+ Add session” / “− Remove” checkboxes (CL has no real + button).
@@ -258,6 +271,10 @@ export function useSessionsStudy(enabled = true): void {
         return {
           sessions,
           historyLimit: 0,
+          maxMinutes: Math.max(
+            0,
+            Math.min(240, Math.floor(num("maxMinutes", SESSIONS_STUDY_DEFAULTS.maxMinutes))),
+          ),
           timezoneOffset: Math.max(
             -12,
             Math.min(14, Math.floor(num("timezoneOffset", SESSIONS_STUDY_DEFAULTS.timezoneOffset))),
@@ -301,8 +318,38 @@ export function useSessionsStudy(enabled = true): void {
       }
 
       const studyId = studyIds[0]!;
+      const studyApi = widget.activeChart()?.getStudyById(studyId);
       const opts = readOptions(studyId) ?? defaultOpts();
-      const optsKey = JSON.stringify({ symbol, interval, opts, studies: studyIds });
+      const maxMinutes = Math.max(
+        0,
+        Math.min(
+          240,
+          Math.floor(
+            Number(
+              (opts as { maxMinutes?: number }).maxMinutes ??
+                SESSIONS_STUDY_DEFAULTS.maxMinutes,
+            ) || SESSIONS_STUDY_DEFAULTS.maxMinutes,
+          ),
+        ),
+      );
+      // Always read LIVE resolution — React store can lag behind TF switches.
+      const res = liveChartResolution(widget) || String(interval || "");
+      const allowedTf = chartAllowedByMaxMinutes(res, maxMinutes);
+      const visible = studyIsVisible(studyApi);
+      // Honor Visibility eye + “≤ N minute” gate (drawings ignore CL Visibility alone).
+      if (!visible || !allowedTf) {
+        if (entityIdsRef.current.length > 0 || lastKeyRef.current) {
+          genRef.current += 1;
+          clearDrawings();
+        }
+        lastKeyRef.current = `hidden:${symbol}:${res}:max${maxMinutes}`;
+        lastFpRef.current = "";
+        console.info(
+          `[forge-sessions] gated off · res=${res} maxMinutes=${maxMinutes} visible=${visible} allowedTf=${allowedTf}`,
+        );
+        return;
+      }
+      const optsKey = JSON.stringify({ symbol, res, maxMinutes, opts, studies: studyIds });
 
       const myGen = ++genRef.current;
       busyRef.current = true;
@@ -381,7 +428,7 @@ export function useSessionsStudy(enabled = true): void {
           pendingRef.current = false;
           window.setTimeout(() => {
             void repaint(false);
-          }, 0);
+          }, 150);
         }
       }
     };
@@ -443,11 +490,46 @@ export function useSessionsStudy(enabled = true): void {
     }, PRESENCE_POLL_MS);
 
     // Live tip refresh — forming LQ/Open/NY boxes track new highs/lows.
+    // Also re-check TF gate so a store lag cannot leave boxes on 15m/1H.
     const livePoll = window.setInterval(() => {
       if (cancelled || busyRef.current) return;
       if (findStudyIds().length === 0) return;
-      void repaint(false);
+      void repaint(true);
     }, LIVE_REFRESH_MS);
+
+    // Resolution changes sometimes fire before React store updates — clear ASAP.
+    const onIntervalChanged = (_res: string) => {
+      // Synchronously clear if the new TF is above maxMinutes.
+      try {
+        const studyIdsNow = findStudyIds();
+        if (studyIdsNow.length === 0) return;
+        const optsNow = readOptions(studyIdsNow[0]!) ?? defaultOpts();
+        const maxMin = Math.max(
+          0,
+          Math.floor(
+            Number(
+              (optsNow as { maxMinutes?: number }).maxMinutes ??
+                SESSIONS_STUDY_DEFAULTS.maxMinutes,
+            ) || SESSIONS_STUDY_DEFAULTS.maxMinutes,
+          ),
+        );
+        const resNow = liveChartResolution(widget) || String(_res || "");
+        if (!chartAllowedByMaxMinutes(resNow, maxMin)) {
+          genRef.current += 1;
+          clearDrawings();
+          lastKeyRef.current = `hidden:${symbol}:${resNow}:max${maxMin}`;
+          lastFpRef.current = "";
+        }
+      } catch {
+        /* ignore */
+      }
+      scheduleRepaint();
+    };
+    try {
+      widget.activeChart()?.onIntervalChanged()?.subscribe(null, onIntervalChanged);
+    } catch {
+      /* ignore */
+    }
 
     const onDataLoaded = () => {
       if (findStudyIds().length === 0) return;
@@ -482,6 +564,11 @@ export function useSessionsStudy(enabled = true): void {
       }
       try {
         widget.activeChart()?.onDataLoaded()?.unsubscribe(null, onDataLoaded);
+      } catch {
+        /* ignore */
+      }
+      try {
+        widget.activeChart()?.onIntervalChanged()?.unsubscribe(null, onIntervalChanged);
       } catch {
         /* ignore */
       }

@@ -165,8 +165,38 @@ interface CircleEvent {
   bar: number;
 }
 
+/**
+ * One Orca-confirmed Dealing Range (same-color C1/C2 setup pair).
+ * Bullish → OTE measured from high (discount). Bearish → from low (premium).
+ */
+export interface ConfirmedDealingRange {
+  readonly bullish: boolean;
+  readonly name: string;
+  readonly top: number;
+  readonly bot: number;
+  readonly mid: number;
+  /** 0.618 OTE level (discount for bullish, premium for bearish). */
+  readonly ote618: number;
+  /** 0.786 OTE level. */
+  readonly ote786: number;
+  /** Range start (earlier extreme) unix sec. */
+  readonly t0: number;
+  /** Confirmation time (later extreme / C2) unix sec. */
+  readonly t1: number;
+  /** Bar index where the range was confirmed. */
+  readonly confirmBar: number;
+}
+
+export interface OrcaAnalysis {
+  readonly cmds: DrawCmd[];
+  /** Chronological confirmed dealing ranges (oldest → newest). */
+  readonly ranges: readonly ConfirmedDealingRange[];
+  /** Last structure direction after full replay: 1 up, -1 down, 0 unknown. */
+  readonly structureDir: 1 | -1 | 0;
+}
+
 export interface DrawCmd {
-  kind: "line" | "rect" | "dot" | "label" | "vline";
+  kind: "line" | "rect" | "dot" | "label" | "vline" | "position" | "arrow";
   t1: number;
   p1: number;
   t2?: number;
@@ -176,6 +206,18 @@ export interface DrawCmd {
   style?: "solid" | "dashed" | "dotted";
   text?: string;
   fill?: string;
+  /** Rectangle / position fill alpha 0–1 (default 0.2). Lower = lighter overlays. */
+  fillAlpha?: number;
+  /** Border linewidth for rects (default 2). */
+  borderWidth?: number;
+  /** `position` / `arrow`: 1 = long / arrow_up, -1 = short / arrow_down. */
+  dir?: 1 | -1;
+  /** `position` only: take-profit price (converted to ticks at paint). */
+  profitPrice?: number;
+  /** `position` only: stop-loss price (converted to ticks at paint). */
+  stopPrice?: number;
+  /** `position` only: stop-zone fill (#hex). `fill` is the target/profit fill. */
+  stopFill?: string;
 }
 
 function pivotHigh(bars: readonly OrcaBar[], i: number, left: number, right: number): number | null {
@@ -222,12 +264,14 @@ function checkPattern(
 }
 
 /**
- * Replay Orca bar-by-bar and emit draw commands (last dealing range only).
+ * Replay Orca bar-by-bar: BOS/MSS structure + confirmed Dealing Ranges.
+ * Returns draw cmds and structured ranges for confluence engines (FTA).
  */
-export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): DrawCmd[] {
-  const out: DrawCmd[] = [];
-  if (bars.length < inputs.left + inputs.right + 5) return out;
+export function computeOrcaAnalysis(bars: readonly OrcaBar[], inputs: OrcaInputs): OrcaAnalysis {
+  const empty: OrcaAnalysis = { cmds: [], ranges: [], structureDir: 0 };
+  if (bars.length < inputs.left + inputs.right + 5) return empty;
 
+  const out: DrawCmd[] = [];
   let lastSH: number | null = null;
   let lastSL: number | null = null;
   let lastSHBar: number | null = null;
@@ -249,7 +293,9 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
 
   // Dealing-range batches — one per completed setup (Orca overwrite within a setup).
   const drBatches: DrawCmd[][] = [];
+  const rangeBatches: ConfirmedDealingRange[] = [];
   let setupDr: DrawCmd[] | null = null;
+  let setupRange: ConfirmedDealingRange | null = null;
 
   const pushCircle = (dir: number, price: number, bar: number) => {
     cr.push({ dir, price, bar });
@@ -271,12 +317,13 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
     const rng = topP - botP;
     const y618 = bullish ? topP - rng * 0.618 : botP + rng * 0.618;
     const y786 = bullish ? topP - rng * 0.786 : botP + rng * 0.786;
-    const t1 = bars[x1]!.time;
+    const t0 = bars[x1]!.time;
+    const tConfirm = bars[Math.max(topBar, botBar)]!.time;
     const t2 = bars[x2]!.time;
     const cmds: DrawCmd[] = [
       {
         kind: "rect",
-        t1,
+        t1: t0,
         p1: topP,
         t2,
         p2: botP,
@@ -285,7 +332,7 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
       },
       {
         kind: "line",
-        t1,
+        t1: t0,
         p1: mid,
         t2,
         p2: mid,
@@ -299,7 +346,7 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
       cmds.push(
         {
           kind: "line",
-          t1,
+          t1: t0,
           p1: y618,
           t2,
           p2: y618,
@@ -310,7 +357,7 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
         },
         {
           kind: "line",
-          t1,
+          t1: t0,
           p1: y786,
           t2,
           p2: y786,
@@ -323,6 +370,18 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
     }
     // Later call within the same setup replaces earlier (classic Orca).
     setupDr = cmds;
+    setupRange = {
+      bullish,
+      name,
+      top: topP,
+      bot: botP,
+      mid,
+      ote618: y618,
+      ote786: y786,
+      t0,
+      t1: tConfirm,
+      confirmBar: Math.max(topBar, botBar),
+    };
   };
 
   const drawSetup = (
@@ -359,6 +418,7 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
     const c2Price = botBar <= topBar ? topP : botP;
 
     setupDr = null;
+    setupRange = null;
     if (
       inputs.showDealingRange &&
       prevCircSide !== 0 &&
@@ -381,7 +441,10 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
       const loBar2 = c1Price < c2Price ? c1Bar : c2Bar;
       if (hi2 > lo2) paintDr(hi2, lo2, hiBar2, loBar2, circColor, name, labelUp);
     }
-    if (setupDr) drBatches.push(setupDr);
+    if (setupDr && setupRange) {
+      drBatches.push(setupDr);
+      rangeBatches.push(setupRange);
+    }
 
     prevCircSide = side;
     prevCircPrice = c2Price;
@@ -525,15 +588,19 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
     }
   }
 
-  const filtered = drBatches.filter((batch) => {
-    const t = batch[0]?.t1;
-    if (t == null) return false;
-    if (inputs.fromTimeSec != null && t < inputs.fromTimeSec) return false;
-    if (inputs.toTimeSec != null && t > inputs.toTimeSec) return false;
-    return true;
-  });
+  const filteredIdx: number[] = [];
+  for (let i = 0; i < drBatches.length; i += 1) {
+    const t = rangeBatches[i]?.t1 ?? drBatches[i]![0]?.t1;
+    if (t == null) continue;
+    if (inputs.fromTimeSec != null && t < inputs.fromTimeSec) continue;
+    if (inputs.toTimeSec != null && t > inputs.toTimeSec) continue;
+    filteredIdx.push(i);
+  }
+  // Full chronological ranges for confluence (FTA); draw cmds still capped by maxN.
+  const allRanges = filteredIdx.map((i) => rangeBatches[i]!);
   const maxN = Math.max(1, Math.floor(inputs.maxDealingRanges));
-  const kept = filtered.slice(-maxN);
+  const keptIdx = filteredIdx.slice(-maxN);
+  const kept = keptIdx.map((i) => drBatches[i]!);
   // Stretch the newest range to the last loaded bar so it stays visible on the live edge.
   if (kept.length > 0 && bars.length > 0) {
     const lastT = bars[bars.length - 1]!.time;
@@ -544,7 +611,42 @@ export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): 
       }
     }
   }
-  return [...out, ...kept.flat()];
+  const dir: 1 | -1 | 0 = structureDir === 1 ? 1 : structureDir === -1 ? -1 : 0;
+  return {
+    cmds: [...out, ...kept.flat()],
+    ranges: allRanges,
+    structureDir: dir,
+  };
+}
+
+/** Replay Orca and return draw commands only (backward-compatible). */
+export function computeOrcaDraws(bars: readonly OrcaBar[], inputs: OrcaInputs): DrawCmd[] {
+  return computeOrcaAnalysis(bars, inputs).cmds;
+}
+
+/** Last confirmed DR at-or-before bar index (null if none yet). */
+export function lastConfirmedDealingRangeAt(
+  ranges: readonly ConfirmedDealingRange[],
+  barIndex: number,
+): ConfirmedDealingRange | null {
+  let best: ConfirmedDealingRange | null = null;
+  for (const r of ranges) {
+    if (r.confirmBar <= barIndex) best = r;
+  }
+  return best;
+}
+
+/** True when bar trades into the OTE band (0.618–0.786) of a confirmed DR. */
+export function touchesDrOte(bar: OrcaBar, dr: ConfirmedDealingRange): boolean {
+  const lo = Math.min(dr.ote618, dr.ote786);
+  const hi = Math.max(dr.ote618, dr.ote786);
+  return bar.low <= hi && bar.high >= lo;
+}
+
+/** Discount (bullish) / Premium (bearish) half of the last DR. */
+export function inDrEntryHalf(bar: OrcaBar, dr: ConfirmedDealingRange): boolean {
+  if (dr.bullish) return bar.low <= dr.mid;
+  return bar.high >= dr.mid;
 }
 
 const linestyleMap = { solid: 0, dotted: 1, dashed: 2 } as const;
@@ -629,6 +731,30 @@ function clColor(color: string, fallback = "#787B86"): string {
   return fallback;
 }
 
+/** Symbol min tick (price units). Used to convert TP/SL distances → CL ticks. */
+function resolveMinTick(chart: IChartWidgetApi): number {
+  try {
+    const ext = chart.symbolExt() as {
+      pricescale?: number;
+      minmov?: number;
+    } | null;
+    const scale = Number(ext?.pricescale);
+    const minmov = Number(ext?.minmov);
+    if (Number.isFinite(scale) && scale > 0) {
+      const move = Number.isFinite(minmov) && minmov > 0 ? minmov : 1;
+      return move / scale;
+    }
+  } catch {
+    /* fall through */
+  }
+  return 0.01;
+}
+
+function priceToTicks(priceDiff: number, minTick: number): number {
+  const tick = minTick > 0 ? minTick : 0.01;
+  return Math.max(1, Math.round(Math.abs(priceDiff) / tick));
+}
+
 /** Draw computed commands onto a Charting Library chart; returns entity ids. */
 export async function paintOrcaOnChart(
   chart: IChartWidgetApi,
@@ -636,9 +762,10 @@ export async function paintOrcaOnChart(
   options?: { readonly ownerStudyId?: EntityId },
 ): Promise<EntityId[]> {
   const ids: EntityId[] = [];
-  // Cap drawing volume for CL performance (rangesOnly ≈ 4 cmds each).
-  const limited = cmds.length > 80 ? cmds.slice(cmds.length - 80) : cmds;
+  // Cap drawing volume for CL performance; keep newest (signals live at the end).
+  const limited = cmds.length > 60 ? cmds.slice(cmds.length - 60) : cmds;
   const ownerStudyId = options?.ownerStudyId;
+  const minTick = resolveMinTick(chart);
 
   for (let i = 0; i < limited.length; i += 1) {
     const cmd = limited[i]!;
@@ -651,7 +778,67 @@ export async function paintOrcaOnChart(
       ...(ownerStudyId ? { ownerStudyId } : {}),
     } as const;
     try {
-      if (cmd.kind === "line" && cmd.t2 != null && cmd.p2 != null) {
+      if (
+        cmd.kind === "position" &&
+        (cmd.dir === 1 || cmd.dir === -1) &&
+        Number.isFinite(cmd.profitPrice) &&
+        Number.isFinite(cmd.stopPrice)
+      ) {
+        // Native TV Long/Short Position — green Target + red Stop (do NOT set `text`).
+        const shape = cmd.dir === 1 ? "long_position" : "short_position";
+        const profitLevel = priceToTicks(cmd.profitPrice! - cmd.p1, minTick);
+        const stopLevel = priceToTicks(cmd.stopPrice! - cmd.p1, minTick);
+        const alpha = Math.max(0.12, Math.min(0.4, cmd.fillAlpha ?? 0.2));
+        const transparency = Math.round((1 - alpha) * 100);
+        const profitHex = clColor(cmd.fill ?? "#00A000", "#00A000");
+        const stopHex = clColor(cmd.stopFill ?? "#FF0000", "#FF0000");
+        const id = await chart.createShape(
+          { time: cmd.t1 as never, price: cmd.p1 },
+          {
+            disableSelection: true,
+            disableSave: true,
+            disableUndo: true,
+            showInObjectsTree: false,
+            ...(ownerStudyId ? { ownerStudyId } : {}),
+            shape: shape as never,
+            // Never pass `text` — CL throws / breaks Long·Short Position.
+            overrides: {
+              profitLevel,
+              stopLevel,
+              profitBackground: profitHex,
+              stopBackground: stopHex,
+              profitBackgroundTransparency: transparency,
+              stopBackgroundTransparency: transparency,
+              fillBackground: true,
+              fillLabelBackground: true,
+              showPriceLabels: true,
+              alwaysShowStats: true,
+              linewidth: 1,
+              linecolor: "#585858",
+              borderColor: "#667b8b",
+              drawBorder: false,
+              fontsize: 12,
+              textcolor: "#ffffff",
+              riskDisplayMode: "percents",
+            } as never,
+          },
+        );
+        if (id) ids.push(id);
+      } else if (cmd.kind === "arrow" && (cmd.dir === 1 || cmd.dir === -1)) {
+        const id = await chart.createShape(
+          { time: cmd.t1 as never, price: cmd.p1 },
+          {
+            ...common,
+            shape: (cmd.dir === 1 ? "arrow_up" : "arrow_down") as never,
+            text: (cmd.text ?? "").trim() || (cmd.dir === 1 ? "BUY" : "SELL"),
+            overrides: {
+              color: stroke,
+              fontsize: 14,
+            },
+          },
+        );
+        if (id) ids.push(id);
+      } else if (cmd.kind === "line" && cmd.t2 != null && cmd.p2 != null) {
         const label = (cmd.text ?? "").trim();
         const id = await chart.createMultipointShape(
           [
@@ -676,11 +863,11 @@ export async function paintOrcaOnChart(
         );
         if (id) ids.push(id);
       } else if (cmd.kind === "rect" && cmd.t2 != null && cmd.p2 != null) {
-        // Prefer rgba with spaces — CL docs use this form for rectangle fills.
+        // CL rectangles: solid hex + transparency (rgba fills are unreliable).
         const fillHex = clColor(cmd.fill ?? cmd.color, stroke);
-        const r = Number.parseInt(fillHex.slice(1, 3), 16);
-        const g = Number.parseInt(fillHex.slice(3, 5), 16);
-        const b = Number.parseInt(fillHex.slice(5, 7), 16);
+        const alpha = Math.max(0.04, Math.min(0.85, cmd.fillAlpha ?? 0.2));
+        const transparency = Math.round((1 - alpha) * 100);
+        const border = Math.max(0, Math.min(4, cmd.borderWidth ?? 1));
         const id = await chart.createMultipointShape(
           [
             { time: cmd.t1 as never, price: cmd.p1 },
@@ -690,11 +877,14 @@ export async function paintOrcaOnChart(
             ...common,
             shape: "rectangle",
             overrides: {
-              color: stroke,
-              backgroundColor: `rgba(${r}, ${g}, ${b}, 0.2)`,
+              color: fillHex,
+              linecolor: fillHex,
+              backgroundColor: fillHex,
               fillBackground: true,
-              linewidth: 2,
-              transparency: 50,
+              filled: true,
+              linewidth: border,
+              transparency,
+              linestyle: linestyleMap[cmd.style ?? "solid"],
             },
           },
         );
@@ -715,12 +905,37 @@ export async function paintOrcaOnChart(
           },
         );
         if (id) ids.push(id);
+      } else if (cmd.kind === "label" && (cmd.text ?? "").trim()) {
+        // Pill-style signal tags (Texas-like): filled badge + contrasting text.
+        const label = ` ${cmd.text!.trim()} `;
+        const bg = clColor(cmd.fill ?? cmd.color, stroke);
+        const id = await chart.createShape(
+          { time: cmd.t1 as never, price: cmd.p1 },
+          {
+            ...common,
+            shape: "text",
+            text: label,
+            overrides: {
+              color: "#FFFFFF",
+              fontsize: 12,
+              bold: true,
+              fillBackground: true,
+              backgroundColor: bg,
+              drawBorder: false,
+              borderColor: bg,
+              borderWidth: 0,
+              horzLabelsAlign: "center",
+              vertLabelsAlign: "middle",
+            },
+          },
+        );
+        if (id) ids.push(id);
       }
     } catch {
       /* skip bad draw */
     }
     // Yield so CL can paint candles / handle clicks between shapes.
-    if (i > 0 && i % 4 === 0) {
+    if (i > 0 && i % 3 === 0) {
       await new Promise<void>((r) => {
         window.setTimeout(r, 0);
       });

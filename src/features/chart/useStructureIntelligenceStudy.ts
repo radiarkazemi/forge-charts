@@ -16,9 +16,10 @@ import {
   SI_DEFAULTS,
 } from "@/features/structure-intelligence/runtime";
 import { SI_STUDY_DEFAULTS } from "./structure-intelligence-indicator";
+import { studyIsVisible } from "./study-paint-gate";
 
-const MAX_BARS = 5_000;
-const STUDY_DEBOUNCE_MS = 450;
+const MAX_BARS = 2_500;
+const STUDY_DEBOUNCE_MS = 550;
 const PRESENCE_POLL_MS = 6_000;
 
 function fingerprint(cmds: readonly { kind: string; t1: number; p1: number }[]): string {
@@ -150,6 +151,14 @@ export function useStructureIntelligenceStudy(enabled = true): void {
         return;
       }
       const studyId = studyIds[0]!;
+      const studyApi = widget.activeChart()?.getStudyById(studyId);
+      if (!studyIsVisible(studyApi)) {
+        genRef.current += 1;
+        clearDrawings();
+        lastKeyRef.current = `hidden:${symbol}:${interval}`;
+        lastFpRef.current = "";
+        return;
+      }
       const opts = readOptions(studyId);
       const key = JSON.stringify({ symbol, interval, opts, studies: studyIds });
       if (!force && key === lastKeyRef.current && entityIdsRef.current.length > 0) return;
