@@ -763,7 +763,7 @@ export async function paintOrcaOnChart(
 ): Promise<EntityId[]> {
   const ids: EntityId[] = [];
   // Cap drawing volume for CL performance; keep newest (signals live at the end).
-  const limited = cmds.length > 120 ? cmds.slice(cmds.length - 120) : cmds;
+  const limited = cmds.length > 60 ? cmds.slice(cmds.length - 60) : cmds;
   const ownerStudyId = options?.ownerStudyId;
   const minTick = resolveMinTick(chart);
 
@@ -935,7 +935,7 @@ export async function paintOrcaOnChart(
       /* skip bad draw */
     }
     // Yield so CL can paint candles / handle clicks between shapes.
-    if (i > 0 && i % 4 === 0) {
+    if (i > 0 && i % 3 === 0) {
       await new Promise<void>((r) => {
         window.setTimeout(r, 0);
       });

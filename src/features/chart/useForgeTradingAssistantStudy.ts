@@ -17,10 +17,10 @@ import {
 import { FTA_STUDY_DEFAULTS } from "./forge-trading-assistant-indicator";
 import { studyIsVisible } from "./study-paint-gate";
 
-/** Keep light — Orca DR + paint shapes on 4k bars freezes the chart. */
-const MAX_BARS = 1_800;
-const STUDY_DEBOUNCE_MS = 650;
-const PRESENCE_POLL_MS = 6_000;
+/** Keep light — Orca DR + paint shapes on large histories freezes the chart. */
+const MAX_BARS = 1_200;
+const STUDY_DEBOUNCE_MS = 700;
+const PRESENCE_POLL_MS = 8_000;
 
 function fingerprint(
   cmds: readonly { kind: string; t1: number; p1: number; t2?: number; p2?: number; text?: string }[],
