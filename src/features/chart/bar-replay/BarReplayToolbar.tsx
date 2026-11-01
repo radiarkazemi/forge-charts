@@ -1,5 +1,8 @@
 import Box from "@mui/material/Box";
 import ButtonBase from "@mui/material/ButtonBase";
+import Checkbox from "@mui/material/Checkbox";
+import ListItemIcon from "@mui/material/ListItemIcon";
+import ListItemText from "@mui/material/ListItemText";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
 import Typography from "@mui/material/Typography";
@@ -14,12 +17,12 @@ interface BarReplayToolbarProps {
   readonly forceVisible?: boolean;
 }
 
-const SPEEDS: readonly { value: BarReplaySpeed; label: string }[] = [
-  { value: 0.5, label: "0.5x" },
-  { value: 1, label: "1x" },
-  { value: 2, label: "2x" },
-  { value: 5, label: "5x" },
-  { value: 10, label: "10x" },
+const SPEEDS: readonly { value: BarReplaySpeed; label: string; candleLabel: string }[] = [
+  { value: 0.5, label: "0.5x", candleLabel: "0.5/s" },
+  { value: 1, label: "1x", candleLabel: "1/s" },
+  { value: 2, label: "2x", candleLabel: "2/s" },
+  { value: 5, label: "5x", candleLabel: "5/s" },
+  { value: 10, label: "10x", candleLabel: "10/s" },
 ];
 
 const MENU_PAPER = {
@@ -53,9 +56,11 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
   if (!snap.active && !forceVisible) return null;
 
   const playing = snap.phase === "playing";
+  const candleByCandle = snap.candleByCandle;
   const canStep = snap.cursorIndex >= 0 && snap.cursorIndex < snap.bufferLength - 1;
   const resolutionLabel = controller.resolutionLabel();
   const speedMeta = SPEEDS.find((s) => s.value === snap.speed) ?? SPEEDS[1]!;
+  const speedLabel = candleByCandle ? speedMeta.candleLabel : speedMeta.label;
 
   const openSpeed = (e: MouseEvent<HTMLElement>) => setSpeedAnchor(e.currentTarget);
   const openSelect = (e: MouseEvent<HTMLElement>) => setSelectAnchor(e.currentTarget);
@@ -146,7 +151,7 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
           onClose={() => setSelectAnchor(null)}
           anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
           transformOrigin={{ vertical: "top", horizontal: "left" }}
-          slotProps={{ paper: { sx: { ...MENU_PAPER, minWidth: 168 } } }}
+          slotProps={{ paper: { sx: { ...MENU_PAPER, minWidth: 220 } } }}
         >
           <MenuItem
             onClick={() => {
@@ -172,6 +177,35 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
             }}
           >
             Jump to realtime
+          </MenuItem>
+          <MenuItem
+            onClick={() => {
+              controller.setCandleByCandle(!candleByCandle);
+            }}
+            title="Play advances one closed candle at a time (speed = candles/sec)"
+          >
+            <ListItemIcon sx={{ minWidth: 34 }}>
+              <Checkbox
+                edge="start"
+                checked={candleByCandle}
+                tabIndex={-1}
+                disableRipple
+                size="small"
+                sx={{
+                  p: 0,
+                  color: "#787b86",
+                  "&.Mui-checked": { color: "#2962ff" },
+                }}
+              />
+            </ListItemIcon>
+            <ListItemText
+              primary="Candle by candle"
+              secondary={candleByCandle ? "Play = 1 bar / tick" : "Play = form over TF time"}
+              slotProps={{
+                primary: { sx: { fontSize: 13, fontWeight: 500 } },
+                secondary: { sx: { fontSize: 11, color: "#787b86" } },
+              }}
+            />
           </MenuItem>
         </Menu>
 
@@ -202,6 +236,52 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
           <StepIcon />
         </ButtonBase>
 
+        {/* Candle-by-candle toggle (tick box on the strip) */}
+        <ButtonBase
+          sx={{
+            ...iconBtn,
+            width: "auto",
+            minWidth: 28,
+            px: 0.5,
+            gap: 0.25,
+            color: candleByCandle ? "#5b8cff" : "#b2b5be",
+            bgcolor: candleByCandle ? "rgba(41,98,255,0.14)" : "transparent",
+          }}
+          title={
+            candleByCandle
+              ? "Candle by candle ON — Play jumps one closed bar at a time"
+              : "Candle by candle OFF — Play forms each bar over TF duration"
+          }
+          aria-label="Candle by candle play"
+          aria-pressed={candleByCandle}
+          onClick={() => controller.setCandleByCandle(!candleByCandle)}
+        >
+          <Checkbox
+            checked={candleByCandle}
+            tabIndex={-1}
+            disableRipple
+            size="small"
+            sx={{
+              p: 0,
+              color: "inherit",
+              "&.Mui-checked": { color: "#5b8cff" },
+              "& .MuiSvgIcon-root": { fontSize: 16 },
+            }}
+          />
+          <Box
+            component="span"
+            sx={{
+              display: { xs: "none", sm: "inline" },
+              fontSize: 12,
+              fontWeight: 600,
+              lineHeight: 1,
+              pr: 0.25,
+            }}
+          >
+            1 bar
+          </Box>
+        </ButtonBase>
+
         {/* Speed */}
         <ButtonBase
           sx={{
@@ -213,12 +293,16 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
             fontWeight: 500,
             color: "#d1d4dc",
           }}
-          title="Replay speed"
+          title={
+            candleByCandle
+              ? "Candles per second (1× = 1 candle/sec)"
+              : "Replay speed (scales TF forming duration)"
+          }
           aria-label="Replay speed"
           aria-haspopup="menu"
           onClick={openSpeed}
         >
-          {speedMeta.label}
+          {speedLabel}
         </ButtonBase>
         <Menu
           anchorEl={speedAnchor}
@@ -226,7 +310,7 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
           onClose={() => setSpeedAnchor(null)}
           anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
           transformOrigin={{ vertical: "top", horizontal: "center" }}
-          slotProps={{ paper: { sx: { ...MENU_PAPER, minWidth: 80 } } }}
+          slotProps={{ paper: { sx: { ...MENU_PAPER, minWidth: 96 } } }}
         >
           {SPEEDS.map((s) => (
             <MenuItem
@@ -239,7 +323,7 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
               sx={{ "&.Mui-selected": { bgcolor: "rgba(41,98,255,0.18)" } }}
             >
               <Typography component="span" sx={{ fontWeight: 600, fontSize: 13 }}>
-                {s.label}
+                {candleByCandle ? s.candleLabel : s.label}
               </Typography>
             </MenuItem>
           ))}

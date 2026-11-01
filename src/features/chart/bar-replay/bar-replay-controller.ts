@@ -16,12 +16,17 @@ export interface BarReplayState {
   readonly active: boolean;
   readonly phase: BarReplayPhase;
   readonly speed: BarReplaySpeed;
+  /**
+   * When true, Play advances one fully-closed candle at a time
+   * (1× ≈ 1 candle/sec). When false, each candle forms over real TF duration / speed.
+   */
+  readonly candleByCandle: boolean;
   readonly resolution: string;
   readonly cursorIndex: number;
   readonly startIndex: number;
   readonly bufferLength: number;
   readonly selecting: boolean;
-  /** 0–1 progress through the forming candle. */
+  /** 0–1 progress through the forming candle (realtime-form mode only). */
   readonly formProgress: number;
 }
 
@@ -29,6 +34,7 @@ const INITIAL: BarReplayState = {
   active: false,
   phase: "idle",
   speed: 1,
+  candleByCandle: false,
   resolution: "15",
   cursorIndex: -1,
   startIndex: -1,
@@ -70,6 +76,11 @@ function tickIntervalMs(stepMs: number, speed: BarReplaySpeed): number {
   return 1_000;
 }
 
+/** Wall ms between closed candles in candle-by-candle play (1× = 1 candle/sec). */
+function candleStepIntervalMs(speed: BarReplaySpeed): number {
+  return Math.max(50, Math.round(1_000 / Math.max(0.25, speed)));
+}
+
 /** Prefer a denser TF for true intra-bar path when available. */
 function microResolutionFor(res: string): string | null {
   const sec = resolutionToSec(res);
@@ -84,9 +95,11 @@ function microResolutionFor(res: string): string | null {
 
 /**
  * TradingView-style Bar Replay: select a bar, truncate future history,
- * then form each next candle over real timeframe duration (scaled by speed).
- * Uses true lower-TF data for the path when available; otherwise simulates
- * a natural O→H→L→C path from the closed bar’s OHLC.
+ * then either:
+ * - form each next candle over real TF duration (scaled by speed), or
+ * - advance one fully-closed candle at a time (candle-by-candle, ~1/sec at 1×).
+ * Forming mode uses lower-TF data for the path when available; otherwise
+ * simulates a natural O→H→L→C path from the closed bar’s OHLC.
  */
 export class BarReplayController {
   readonly state: Store<BarReplayState> = createStore(INITIAL);
@@ -103,6 +116,8 @@ export class BarReplayController {
   private formProgressAtStart = 0;
   private formingTarget: Bar | null = null;
   private formingSubs: Bar[] = [];
+  /** Prevent overlapping candle-by-candle advances while an async step is in flight. */
+  private candleStepBusy = false;
 
   attach(widget: IChartingLibraryWidget, datafeed: TradingViewDatafeed): void {
     this.widget = widget;
@@ -156,10 +171,12 @@ export class BarReplayController {
     datafeed.beginReplay({ ticker: ticker || undefined, resolution });
     this.buffer = [];
     this.microBuffer = [];
+    const prev = this.state.get();
     this.state.set({
       active: true,
       phase: "selecting",
-      speed: this.state.get().speed,
+      speed: prev.speed,
+      candleByCandle: prev.candleByCandle,
       resolution,
       cursorIndex: -1,
       startIndex: -1,
@@ -227,8 +244,9 @@ export class BarReplayController {
 
   setSpeed(speed: BarReplaySpeed): void {
     const playing = this.state.get().phase === "playing" || this.playTimer !== 0;
-    // Preserve mid-candle progress across speed changes.
-    if (playing && this.formingTarget) {
+    const candleMode = this.state.get().candleByCandle;
+    // Preserve mid-candle progress across speed changes (realtime-form mode only).
+    if (playing && this.formingTarget && !candleMode) {
       const stepMs = resolutionToStepMs(this.state.get().resolution);
       const prevSpeed = this.state.get().speed;
       const elapsed = Date.now() - this.formStartedAtMs;
@@ -243,6 +261,46 @@ export class BarReplayController {
       this.patch({ speed });
     }
     if (playing) {
+      this.stopPlayTimer();
+      this.startPlayTimer();
+    }
+  }
+
+  /**
+   * Toggle candle-by-candle play: each Play tick jumps one closed bar
+   * (speed = candles per second at 1× baseline).
+   */
+  setCandleByCandle(enabled: boolean): void {
+    const playing = this.state.get().phase === "playing" || this.playTimer !== 0;
+    const next = Boolean(enabled);
+    if (next === this.state.get().candleByCandle) return;
+
+    if (playing && next && this.formingTarget) {
+      // Switching into step mode mid-form — finish the current bar first.
+      void this.commitFormingBar().then(() => {
+        this.patch({ candleByCandle: true, formProgress: 0 });
+        if (this.state.get().phase === "playing" || this.playTimer !== 0) {
+          this.stopPlayTimer();
+          this.startPlayTimer();
+        }
+      });
+      return;
+    }
+
+    if (playing && next) {
+      this.formingTarget = null;
+      this.formingSubs = [];
+      this.patch({ candleByCandle: true, formProgress: 0 });
+      this.stopPlayTimer();
+      this.startPlayTimer();
+      return;
+    }
+
+    this.patch({ candleByCandle: next, formProgress: next ? 0 : this.state.get().formProgress });
+    if (playing) {
+      if (!next && !this.formingTarget) {
+        this.beginFormingNext();
+      }
       this.stopPlayTimer();
       this.startPlayTimer();
     }
@@ -265,7 +323,9 @@ export class BarReplayController {
     await this.rebuildBufferAt(next, cursorTime);
     if (wasPlaying && this.state.get().cursorIndex >= 0) {
       this.patch({ phase: "playing" });
-      this.beginFormingNext();
+      if (!this.state.get().candleByCandle) {
+        this.beginFormingNext();
+      }
       this.startPlayTimer();
     }
   }
@@ -277,7 +337,12 @@ export class BarReplayController {
       return;
     }
     this.patch({ phase: "playing" });
-    if (!this.formingTarget) {
+    if (this.state.get().candleByCandle) {
+      // Step mode: no intra-bar forming — jump closed candles on the timer.
+      if (this.formingTarget) {
+        await this.commitFormingBar();
+      }
+    } else if (!this.formingTarget) {
       this.beginFormingNext();
     } else {
       // Resume mid-candle from saved progress.
@@ -288,7 +353,7 @@ export class BarReplayController {
   }
 
   pause(): void {
-    if (this.formingTarget && this.playTimer !== 0) {
+    if (this.formingTarget && this.playTimer !== 0 && !this.state.get().candleByCandle) {
       const stepMs = resolutionToStepMs(this.state.get().resolution);
       const speed = this.state.get().speed;
       const elapsed = Date.now() - this.formStartedAtMs;
@@ -348,7 +413,8 @@ export class BarReplayController {
     datafeed?.endReplay();
     this.buffer = [];
     this.microBuffer = [];
-    this.state.set({ ...INITIAL, speed: this.state.get().speed });
+    const { speed, candleByCandle } = this.state.get();
+    this.state.set({ ...INITIAL, speed, candleByCandle });
 
     if (widget) {
       try {
@@ -618,6 +684,13 @@ export class BarReplayController {
 
   private onFormTick(): void {
     if (this.state.get().phase !== "playing" && this.playTimer === 0) return;
+
+    // Candle-by-candle: jump one fully-closed bar per timer tick.
+    if (this.state.get().candleByCandle) {
+      void this.onCandleByCandleTick();
+      return;
+    }
+
     const target = this.formingTarget;
     if (!target) {
       this.beginFormingNext();
@@ -647,6 +720,26 @@ export class BarReplayController {
     }
 
     this.pushForming(progress);
+  }
+
+  /** Advance exactly one closed candle (no intra-bar forming). */
+  private async onCandleByCandleTick(): Promise<void> {
+    if (this.state.get().phase !== "playing" && this.playTimer === 0) return;
+    if (this.candleStepBusy) return;
+    this.candleStepBusy = true;
+    try {
+      if (this.formingTarget) {
+        await this.commitFormingBar();
+        return;
+      }
+      const advanced = await this.advanceClosedOne();
+      if (!advanced) return;
+      if (this.state.get().cursorIndex >= this.state.get().bufferLength - 1) {
+        this.pause();
+      }
+    } finally {
+      this.candleStepBusy = false;
+    }
   }
 
   private reloadSeries(): void {
@@ -700,11 +793,17 @@ export class BarReplayController {
 
   private startPlayTimer(): void {
     this.stopPlayTimer();
-    const stepMs = resolutionToStepMs(this.state.get().resolution);
-    const ms = tickIntervalMs(stepMs, this.state.get().speed);
+    const { speed, candleByCandle, resolution } = this.state.get();
+    const ms = candleByCandle
+      ? candleStepIntervalMs(speed)
+      : tickIntervalMs(resolutionToStepMs(resolution), speed);
     this.playTimer = window.setInterval(() => {
       this.onFormTick();
     }, ms);
+    // Candle-by-candle: step immediately so Play feels responsive (then interval).
+    if (candleByCandle) {
+      void this.onCandleByCandleTick();
+    }
   }
 
   private stopPlayTimer(): void {
