@@ -17,6 +17,7 @@ import { createHtfCandlesIndicator } from "@/features/chart/htf-candles-indicato
 import { createStructureIntelligenceIndicator } from "@/features/chart/structure-intelligence-indicator";
 import { createReplayMentorIndicator } from "@/features/chart/replay-mentor-indicator";
 import { createForgeTradingAssistantIndicator } from "@/features/chart/forge-trading-assistant-indicator";
+import { createForgeCertaintyIndicator } from "@/features/chart/forge-certainty-indicator";
 
 export interface WidgetOptionsInput {
   readonly container: HTMLElement;
@@ -296,6 +297,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
       drawingTools: FAVORITE_DRAWING_TOOLS,
       // Titles must match study `description` / UI name exactly.
       indicators: [
+        "Forge Certainty",
         "Forge Trading Assistant",
         "Forge Replay Mentor",
         "Forge Structure Intelligence",
@@ -328,6 +330,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
         createHtfCandlesIndicator(PineJS as never) as CustomIndicator,
         createReplayMentorIndicator(PineJS as never) as CustomIndicator,
         createForgeTradingAssistantIndicator(PineJS as never) as CustomIndicator,
+        createForgeCertaintyIndicator(PineJS as never) as CustomIndicator,
       ]),
   };
 }

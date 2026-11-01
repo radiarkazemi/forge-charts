@@ -17,6 +17,7 @@ import { useHtfCandlesStudy } from "./useHtfCandlesStudy";
 import { useStructureIntelligenceStudy } from "./useStructureIntelligenceStudy";
 import { useReplayMentorStudy } from "./useReplayMentorStudy";
 import { useForgeTradingAssistantStudy } from "./useForgeTradingAssistantStudy";
+import { useForgeCertaintyStudy } from "./useForgeCertaintyStudy";
 import { SessionsDashboard } from "@/features/sessions/SessionsDashboard";
 import { useTradingViewWidget } from "./useTradingViewWidget";
 import { RADIAR_LAYOUT_NAME } from "@/infrastructure/tradingview";
@@ -254,6 +255,7 @@ export function TradingViewChart({
   useHtfCandlesStudy(true);
   useReplayMentorStudy(true);
   useForgeTradingAssistantStudy(true);
+  useForgeCertaintyStudy(true);
 
   return (
     <Box
