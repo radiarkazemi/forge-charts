@@ -1,25 +1,17 @@
 /**
- * Forge Trading Assistant — Phase 1.5 (Texas-inspired) + Orca Dealing Range
+ * Forge Trading Assistant — clean Texas-style day trader (no DR/OB noise).
  *
- * Day-trading confluence with optional **Manual Buy / Manual Sell** bias,
- * multi-TP (TP1/TP2), ATR stops, and a moderate daily signal budget for
- * 3m / 5m / 15m charts.
- *
- * Flow (sensitive — DR + trend gate):
- *   1. Structure trend (BOS / MSS) — up or down
- *   2. Last confirmed Orca Dealing Range on this timeframe
- *   3. Position must align with trend (opposite-trend = NOT confirmed)
- *   4. Entry only from DR discount (long) / premium (short), ideally OTE
- *   5. POI: Order Block and/or FVG + rejection → Entry / SL / TP1 / TP2
+ * Manual Buy / Manual Sell / Auto bias with stop entries:
+ *   • SELL STOP — close breaks a confirmed swing low; SL = swing high + ATR pad
+ *   • BUY STOP  — close breaks a confirmed swing high; SL = swing low − ATR pad
+ *   • TP1 / TP2 = fixed R multiples from that risk (default 1R / 2R)
+ *   • One open trade at a time + cooldown + daily cap
  */
 
 import type { EntityId, IChartWidgetApi } from "@/infrastructure/tradingview";
 import {
   computeOrcaAnalysis,
-  inDrEntryHalf,
-  lastConfirmedDealingRangeAt,
   paintOrcaOnChart,
-  touchesDrOte,
   type ConfirmedDealingRange,
   type DrawCmd,
   type OrcaBar,
@@ -93,29 +85,29 @@ export const FTA_DEFAULTS: FtaInputs = {
   tp1R: 1,
   tp2R: 2,
   atrLength: 14,
-  atrSlPad: 0.25,
+  /** Texas title uses ATR pad ≈ 0.2 */
+  atrSlPad: 0.2,
   preferMss: true,
-  useOrderBlock: true,
-  useFvg: true,
-  requireRejection: true,
-  requireDealingRange: true,
+  useOrderBlock: false,
+  useFvg: false,
+  requireRejection: false,
+  /** Texas itself is not DR-gated — keep off to kill noise. */
+  requireDealingRange: false,
   requireTrendAlign: true,
-  /** Default off — discount/premium half is enough; OTE is optional filter. */
   requireDrOte: false,
   maxSignals: 8,
-  maxSignalsPerDay: 6,
-  cooldownBars: 4,
+  maxSignalsPerDay: 5,
+  cooldownBars: 5,
   showZones: false,
-  showDealingRange: true,
+  showDealingRange: false,
   showTradeBox: true,
   showStructure: false,
   showHistory: true,
   bullColor: "#43A047",
   bearColor: "#E53935",
-  // Classic TV Long/Short Position greens/reds.
-  longBoxColor: "#00A000",
-  shortBoxColor: "#FF0000",
-  boxOpacity: 20,
+  longBoxColor: "#787B86",
+  shortBoxColor: "#2962FF",
+  boxOpacity: 18,
 };
 
 function normalizeHex(raw: string, fallback: string): string {
@@ -186,18 +178,6 @@ interface Swing {
   broken: boolean;
 }
 
-interface Zone {
-  dir: 1 | -1;
-  kind: "OB" | "FVG";
-  t0: number;
-  t1: number;
-  lo: number;
-  hi: number;
-  structure: "MSS" | "BOS";
-  structurePrice: number;
-  used: boolean;
-}
-
 type MutableSignal = {
   -readonly [K in keyof FtaSignal]: FtaSignal[K];
 };
@@ -254,62 +234,9 @@ function atrApprox(bars: readonly FtaBar[], i: number, len: number): number {
   return n > 0 ? sum / n : Math.max(bars[i]!.high - bars[i]!.low, 1e-8);
 }
 
-function isBull(b: FtaBar): boolean {
-  return b.close >= b.open;
-}
-
-function bodyOf(b: FtaBar): number {
-  return Math.abs(b.close - b.open);
-}
-
-function touchesZone(bar: FtaBar, z: Zone): boolean {
-  return bar.low <= z.hi && bar.high >= z.lo;
-}
-
-function bullRejection(bar: FtaBar, z: Zone, atr: number): boolean {
-  if (!isBull(bar)) return false;
-  if (!touchesZone(bar, z)) return false;
-  const mid = (z.lo + z.hi) / 2;
-  const lowerWick = Math.min(bar.open, bar.close) - bar.low;
-  return bar.close >= mid && (lowerWick >= atr * 0.12 || bar.close > z.hi * 0.999);
-}
-
-function bearRejection(bar: FtaBar, z: Zone, atr: number): boolean {
-  if (isBull(bar)) return false;
-  if (!touchesZone(bar, z)) return false;
-  const mid = (z.lo + z.hi) / 2;
-  const upperWick = bar.high - Math.max(bar.open, bar.close);
-  return bar.close <= mid && (upperWick >= atr * 0.12 || bar.close < z.lo * 1.001);
-}
-
-/** Soft DR reaction: wick into entry half / OTE, close with trade direction. */
-function drReaction(
-  bar: FtaBar,
-  dr: ConfirmedDealingRange,
-  dir: 1 | -1,
-  requireOte: boolean,
-): boolean {
-  const oteLo = Math.min(dr.ote618, dr.ote786);
-  const oteHi = Math.max(dr.ote618, dr.ote786);
-  if (dir === 1) {
-    if (!dr.bullish) return false;
-    const touched = requireOte
-      ? bar.low <= oteHi && bar.high >= oteLo
-      : bar.low <= dr.mid || (bar.close <= dr.mid && bar.close >= dr.bot);
-    // Bullish rejection from discount — close holds above the DR floor.
-    return touched && isBull(bar) && bar.close >= dr.bot;
-  }
-  if (dr.bullish) return false;
-  const touched = requireOte
-    ? bar.low <= oteHi && bar.high >= oteLo
-    : bar.high >= dr.mid || (bar.close >= dr.mid && bar.close <= dr.top);
-  // Bearish rejection from premium — close holds below the DR ceiling.
-  return touched && !isBull(bar) && bar.close <= dr.top;
-}
-
 /**
- * Texas-inspired day-trading engine with optional Manual Buy/Sell bias
- * and Orca Dealing Range + trend confirmation (sensitive).
+ * Clean Texas engine: swing break → stop entry → ATR-padded SL → TP1/TP2 R.
+ * No DR soft reactions, no OB/FVG spam.
  */
 export function computeTradingAssistant(
   bars: readonly FtaBar[],
@@ -330,62 +257,59 @@ export function computeTradingAssistant(
   const right = Math.max(1, Math.floor(cfg.swingRight));
   if (bars.length < left + right + 20) return empty;
 
-  // Orca DR (sensitive 1,1 pivots). Skip when DR is fully disabled — big win for load time.
-  const needDr = cfg.requireDealingRange || cfg.showDealingRange;
-  const orca = needDr
-    ? computeOrcaAnalysis(bars, {
-        left: 1,
-        right: 1,
-        breakOnWick: false,
-        bosColor: "#FF9800",
-        mssColor: "#00BCD4",
-        bosWidth: 1,
-        showDealingRange: true,
-        showDrFibs: true,
-        midlineColor: "#F44336",
-        midlineWidth: 2,
-        drAhead: 8,
-        drFib618Color: "#A5D6A7",
-        drFib786Color: "#4DD0E1",
-        bullishSetupCircleColor: "#76FF03",
-        bearishSetupCircleColor: "#F44336",
-        onlySetupCircles: true,
-        showOrangeCircles: false,
-        circleColor: "#FF9800",
-        detectBullishPattern: true,
-        detectBearishPattern: true,
-        detectBearishCont: true,
-        detectBullishCont: true,
-        detectBullishRev_HL: true,
-        maxDealingRanges: 12,
-        fromTimeSec: null,
-        toTimeSec: null,
-        rangesOnly: true,
-      })
-    : { cmds: [], ranges: [], structureDir: 0 as const };
-  const dealingRanges = orca.ranges;
+  // Optional DR backdrop only (never gates entries in the clean Texas path).
+  const dealingRanges =
+    cfg.showDealingRange
+      ? computeOrcaAnalysis(bars, {
+          left: 1,
+          right: 1,
+          breakOnWick: false,
+          bosColor: "#FF9800",
+          mssColor: "#00BCD4",
+          bosWidth: 1,
+          showDealingRange: true,
+          showDrFibs: true,
+          midlineColor: "#F44336",
+          midlineWidth: 2,
+          drAhead: 8,
+          drFib618Color: "#A5D6A7",
+          drFib786Color: "#4DD0E1",
+          bullishSetupCircleColor: "#76FF03",
+          bearishSetupCircleColor: "#F44336",
+          onlySetupCircles: true,
+          showOrangeCircles: false,
+          circleColor: "#FF9800",
+          detectBullishPattern: true,
+          detectBearishPattern: true,
+          detectBearishCont: true,
+          detectBullishCont: true,
+          detectBullishRev_HL: true,
+          maxDealingRanges: 4,
+          fromTimeSec: null,
+          toTimeSec: null,
+          rangesOnly: true,
+        }).ranges
+      : [];
 
-  const swings: Swing[] = [];
-  const zones: Zone[] = [];
   const structureLines: FtaResult["structureLines"][number][] = [];
   const signals: MutableSignal[] = [];
 
   let lastSH: Swing | null = null;
   let lastSL: Swing | null = null;
+  /** Prior swing used as protective stop when the opposite swing breaks. */
+  let stopAnchorHigh: Swing | null = null;
+  let stopAnchorLow: Swing | null = null;
   let structureDir = 0;
-  let lastOppositeBearIdx: number | null = null;
-  let lastOppositeBullIdx: number | null = null;
   let lastSignalBarIdx = -10_000;
+  let lastExitBarIdx = -10_000;
   const dayCounts = new Map<number, number>();
-
   const atrLen = Math.max(5, Math.floor(cfg.atrLength));
+
+  const hasOpen = () => signals.some((s) => s.active);
 
   for (let i = left + right; i < bars.length; i += 1) {
     const bar = bars[i]!;
     const atr = atrApprox(bars, i, atrLen);
-
-    if (!isBull(bar)) lastOppositeBearIdx = i;
-    else lastOppositeBullIdx = i;
 
     const ph = pivotHigh(bars, i, left, right);
     if (ph != null) {
@@ -397,8 +321,8 @@ export function computeTradingAssistant(
         kind: "high",
         broken: false,
       };
-      swings.push(sw);
       lastSH = sw;
+      stopAnchorHigh = sw;
     }
 
     const pl = pivotLow(bars, i, left, right);
@@ -411,13 +335,16 @@ export function computeTradingAssistant(
         kind: "low",
         broken: false,
       };
-      swings.push(sw);
       lastSL = sw;
+      stopAnchorLow = sw;
     }
 
     const preStructure = structureDir;
     const bullBreak = lastSH != null && !lastSH.broken && bar.close > lastSH.price;
     const bearBreak = lastSL != null && !lastSL.broken && bar.close < lastSL.price;
+
+    let brokeHigh: Swing | null = null;
+    let brokeLow: Swing | null = null;
 
     if (bullBreak && lastSH) {
       const isMss = preStructure === -1;
@@ -429,41 +356,9 @@ export function computeTradingAssistant(
         t2: bar.time,
         price: lastSH.price,
       });
+      brokeHigh = lastSH;
       lastSH.broken = true;
       structureDir = 1;
-
-      if (cfg.useOrderBlock && lastOppositeBearIdx != null && lastOppositeBearIdx < i) {
-        const obBar = bars[lastOppositeBearIdx]!;
-        zones.push({
-          dir: 1,
-          kind: "OB",
-          t0: obBar.time,
-          t1: bar.time,
-          lo: obBar.low,
-          hi: Math.max(obBar.high, obBar.open, obBar.close),
-          structure: kind,
-          structurePrice: lastSH.price,
-          used: false,
-        });
-      }
-      if (cfg.useFvg && i >= 2) {
-        const b0 = bars[i - 2]!;
-        const b1 = bars[i - 1]!;
-        const minGap = atr * 0.1;
-        if (bar.low - b0.high > minGap && bodyOf(b1) > atr * 0.28) {
-          zones.push({
-            dir: 1,
-            kind: "FVG",
-            t0: b0.time,
-            t1: bar.time,
-            lo: b0.high,
-            hi: bar.low,
-            structure: kind,
-            structurePrice: lastSH.price,
-            used: false,
-          });
-        }
-      }
     }
 
     if (bearBreak && lastSL) {
@@ -476,214 +371,12 @@ export function computeTradingAssistant(
         t2: bar.time,
         price: lastSL.price,
       });
+      brokeLow = lastSL;
       lastSL.broken = true;
       structureDir = -1;
-
-      if (cfg.useOrderBlock && lastOppositeBullIdx != null && lastOppositeBullIdx < i) {
-        const obBar = bars[lastOppositeBullIdx]!;
-        zones.push({
-          dir: -1,
-          kind: "OB",
-          t0: obBar.time,
-          t1: bar.time,
-          lo: Math.min(obBar.low, obBar.open, obBar.close),
-          hi: obBar.high,
-          structure: kind,
-          structurePrice: lastSL.price,
-          used: false,
-        });
-      }
-      if (cfg.useFvg && i >= 2) {
-        const b0 = bars[i - 2]!;
-        const b1 = bars[i - 1]!;
-        const minGap = atr * 0.1;
-        if (b0.low - bar.high > minGap && bodyOf(b1) > atr * 0.28) {
-          zones.push({
-            dir: -1,
-            kind: "FVG",
-            t0: b0.time,
-            t1: bar.time,
-            lo: bar.high,
-            hi: b0.low,
-            structure: kind,
-            structurePrice: lastSL.price,
-            used: false,
-          });
-        }
-      }
     }
 
-    for (const z of zones) {
-      if (z.used) continue;
-      if (z.dir === 1 && bar.close < z.lo) z.used = true;
-      if (z.dir === -1 && bar.close > z.hi) z.used = true;
-    }
-
-    // Last confirmed Dealing Range on this TF as of this bar.
-    const dr = lastConfirmedDealingRangeAt(dealingRanges, i);
-    const drBias: 1 | -1 | 0 = dr ? (dr.bullish ? 1 : -1) : 0;
-    // Auto bias: when DR is required, DR direction is the trade bias (Orca POI).
-    // Otherwise prefer live structure, then DR.
-    const wantDir: 1 | -1 | 0 =
-      locked !== 0
-        ? locked
-        : cfg.requireDealingRange && drBias !== 0
-          ? drBias
-          : structureDir !== 0
-            ? (structureDir as 1 | -1)
-            : drBias;
-
-    if (wantDir !== 0) {
-      const day = utcDayKey(bar.time);
-      const usedToday = dayCounts.get(day) ?? 0;
-      const cooled = i - lastSignalBarIdx >= Math.max(1, cfg.cooldownBars);
-      const underDaily = usedToday < Math.max(1, cfg.maxSignalsPerDay);
-
-      // Opposite-of-trend never confirms OB/FVG when structure is known.
-      // DR-primary entries use the DR itself as bias (gated separately below).
-      const trendOk =
-        !cfg.requireTrendAlign ||
-        structureDir === 0 ||
-        structureDir === wantDir;
-
-      // DR must exist + match direction when required.
-      const drDirOk =
-        !cfg.requireDealingRange ||
-        (dr != null && wantDir === drBias);
-
-      if (cooled && underDaily && drDirOk) {
-        const tryEmit = (
-          zlo: number,
-          zhi: number,
-          bornTime: number,
-          structure: "MSS" | "BOS",
-          structurePrice: number,
-          poiKind: string,
-          markUsed?: Zone,
-        ): boolean => {
-          const entry = bar.close;
-          const pad = atr * Math.max(0, cfg.atrSlPad);
-          const zoneStop = wantDir === 1 ? zlo - pad : zhi + pad;
-          const drStop =
-            dr != null ? (wantDir === 1 ? dr.bot - pad : dr.top + pad) : null;
-          const stop =
-            drStop != null
-              ? wantDir === 1
-                ? Math.min(zoneStop, drStop)
-                : Math.max(zoneStop, drStop)
-              : zoneStop;
-          const risk = Math.abs(entry - stop);
-          if (!(risk > 0) || risk < atr * 0.08) return false;
-
-          const r1 = Math.max(0.5, cfg.tp1R);
-          const r2 = Math.max(r1, cfg.tp2R);
-          const tp1 = wantDir === 1 ? entry + risk * r1 : entry - risk * r1;
-          const tp2 = wantDir === 1 ? entry + risk * r2 : entry - risk * r2;
-          const labelPrice =
-            wantDir === 1 ? bar.low - atr * 0.15 : bar.high + atr * 0.15;
-
-          const reasonParts = [structure, poiKind];
-          if (dr) reasonParts.push(dr.bullish ? "DR+" : "DR−");
-          if (dr && touchesDrOte(bar, dr)) reasonParts.push("OTE");
-          if (cfg.requireRejection) reasonParts.push("Reject");
-          if (locked !== 0) reasonParts.push(locked === 1 ? "ManBuy" : "ManSell");
-
-          if (markUsed) markUsed.used = true;
-          signals.push({
-            dir: wantDir,
-            kind: structure,
-            reason: reasonParts.join("+"),
-            biasLabel: biasLbl,
-            time: bar.time,
-            bornTime,
-            entry,
-            stop,
-            tp1,
-            tp2,
-            risk,
-            rr: r2,
-            zlo,
-            zhi,
-            structurePrice,
-            active: true,
-            outcome: "open",
-            tpHit: 0,
-            labelTime: bar.time,
-            labelPrice,
-            candleHigh: bar.high,
-            candleLow: bar.low,
-          });
-          lastSignalBarIdx = i;
-          dayCounts.set(day, usedToday + 1);
-          return true;
-        };
-
-        let emitted = false;
-
-        // Primary: Dealing Range is the POI (wick into half/OTE + directional close).
-        // DR already encodes Orca direction — do not also veto with swing trend.
-        if (dr && drReaction(bar, dr, wantDir, cfg.requireDrOte)) {
-          const zlo = cfg.requireDrOte
-            ? Math.min(dr.ote618, dr.ote786)
-            : wantDir === 1
-              ? dr.bot
-              : dr.mid;
-          const zhi = cfg.requireDrOte
-            ? Math.max(dr.ote618, dr.ote786)
-            : wantDir === 1
-              ? dr.mid
-              : dr.top;
-          emitted = tryEmit(zlo, zhi, dr.t0, "MSS", dr.mid, "DR");
-        }
-
-        // Secondary: OB/FVG inside the correct DR half — still respect trend gate.
-        if (!emitted && trendOk) {
-          const candidates = zones.filter((z) => !z.used && z.dir === wantDir);
-          candidates.sort((a, b) => {
-            if (cfg.preferMss && a.structure !== b.structure) {
-              if (a.structure === "MSS") return -1;
-              if (b.structure === "MSS") return 1;
-            }
-            return b.t1 - a.t1;
-          });
-          for (const z of candidates.slice(0, 4)) {
-            if (cfg.requireDealingRange && dr) {
-              const zoneInHalf =
-                wantDir === 1 ? z.lo <= dr.mid : z.hi >= dr.mid;
-              if (!zoneInHalf) continue;
-              if (cfg.requireDrOte && !touchesDrOte(bar, dr) && !inDrEntryHalf(bar, dr)) {
-                continue;
-              }
-            }
-            const ok = cfg.requireRejection
-              ? z.dir === 1
-                ? bullRejection(bar, z, atr)
-                : bearRejection(bar, z, atr)
-              : touchesZone(bar, z) && (z.dir === 1 ? isBull(bar) : !isBull(bar));
-            if (!ok) continue;
-            emitted = tryEmit(z.lo, z.hi, z.t0, z.structure, z.structurePrice, z.kind, z);
-            if (emitted) break;
-          }
-        }
-
-        // Fallback without DR requirement: OB/FVG alone (legacy path).
-        if (!emitted && !cfg.requireDealingRange && trendOk) {
-          const candidates = zones.filter((z) => !z.used && z.dir === wantDir);
-          for (const z of candidates.slice(0, 3)) {
-            const ok = cfg.requireRejection
-              ? z.dir === 1
-                ? bullRejection(bar, z, atr)
-                : bearRejection(bar, z, atr)
-              : touchesZone(bar, z) && (z.dir === 1 ? isBull(bar) : !isBull(bar));
-            if (!ok) continue;
-            if (tryEmit(z.lo, z.hi, z.t0, z.structure, z.structurePrice, z.kind, z)) break;
-          }
-        }
-      }
-    }
-
-    // Resolve open signals — track TP1 then TP2 (Texas-style multi-target).
-    // Keep labelTime/labelPrice on the entry candle so markers stay clear.
+    // Resolve open trades before considering a new entry (one position).
     for (const s of signals) {
       if (!s.active) continue;
       if (s.time >= bar.time) continue;
@@ -691,32 +384,129 @@ export function computeTradingAssistant(
         if (bar.low <= s.stop) {
           s.active = false;
           s.outcome = "sl";
+          lastExitBarIdx = i;
         } else {
           if (s.tpHit < 1 && bar.high >= s.tp1) s.tpHit = 1;
           if (bar.high >= s.tp2) {
             s.tpHit = 2;
             s.active = false;
             s.outcome = "tp2";
+            lastExitBarIdx = i;
           }
         }
       } else if (bar.high >= s.stop) {
         s.active = false;
         s.outcome = "sl";
+        lastExitBarIdx = i;
       } else {
         if (s.tpHit < 1 && bar.low <= s.tp1) s.tpHit = 1;
         if (bar.low <= s.tp2) {
           s.tpHit = 2;
           s.active = false;
           s.outcome = "tp2";
+          lastExitBarIdx = i;
         }
       }
       if (!s.active && s.outcome === "open" && s.tpHit === 1) {
         s.outcome = "tp1";
       }
     }
+
+    if (hasOpen()) continue;
+
+    const day = utcDayKey(bar.time);
+    const usedToday = dayCounts.get(day) ?? 0;
+    const cooled =
+      i - lastSignalBarIdx >= Math.max(1, cfg.cooldownBars) &&
+      i - lastExitBarIdx >= Math.max(1, Math.floor(cfg.cooldownBars / 2));
+    const underDaily = usedToday < Math.max(1, cfg.maxSignalsPerDay);
+    if (!cooled || !underDaily) continue;
+
+    const pad = atr * Math.max(0, cfg.atrSlPad);
+    const r1 = Math.max(0.5, cfg.tp1R);
+    const r2 = Math.max(r1, cfg.tp2R);
+
+    const emitStop = (
+      dir: 1 | -1,
+      entry: number,
+      stopRaw: number,
+      structure: "MSS" | "BOS",
+      structurePrice: number,
+      bornTime: number,
+    ): boolean => {
+      const stop = dir === 1 ? stopRaw - pad : stopRaw + pad;
+      const risk = Math.abs(entry - stop);
+      // Reject microscopic or absurd risk vs ATR (noise filter).
+      if (!(risk > 0) || risk < atr * 0.15 || risk > atr * 8) return false;
+      const tp1 = dir === 1 ? entry + risk * r1 : entry - risk * r1;
+      const tp2 = dir === 1 ? entry + risk * r2 : entry - risk * r2;
+      const labelPrice = dir === 1 ? bar.low - atr * 0.12 : bar.high + atr * 0.12;
+      signals.push({
+        dir,
+        kind: structure,
+        reason: dir === 1 ? "BUY STOP" : "SELL STOP",
+        biasLabel: biasLbl,
+        time: bar.time,
+        bornTime,
+        entry,
+        stop,
+        tp1,
+        tp2,
+        risk,
+        rr: r2,
+        zlo: dir === 1 ? stop : Math.min(entry, tp2),
+        zhi: dir === 1 ? Math.max(entry, tp2) : stop,
+        structurePrice,
+        active: true,
+        outcome: "open",
+        tpHit: 0,
+        labelTime: bar.time,
+        labelPrice,
+        candleHigh: bar.high,
+        candleLow: bar.low,
+      });
+      lastSignalBarIdx = i;
+      dayCounts.set(day, usedToday + 1);
+      return true;
+    };
+
+    // SELL STOP — Manual Sell or Auto on bearish swing-low break.
+    const allowSell = locked === -1 || (locked === 0 && brokeLow != null);
+    if (allowSell && brokeLow) {
+      const anchor = stopAnchorHigh;
+      if (anchor && anchor.idx < brokeLow.idx) {
+        const isMss = preStructure === 1;
+        emitStop(
+          -1,
+          brokeLow.price,
+          anchor.price,
+          isMss ? "MSS" : "BOS",
+          brokeLow.price,
+          brokeLow.time,
+        );
+      }
+    }
+
+    // BUY STOP — Manual Buy or Auto on bullish swing-high break.
+    if (!hasOpen()) {
+      const allowBuy = locked === 1 || (locked === 0 && brokeHigh != null);
+      if (allowBuy && brokeHigh) {
+        const anchor = stopAnchorLow;
+        if (anchor && anchor.idx < brokeHigh.idx) {
+          const isMss = preStructure === -1;
+          emitStop(
+            1,
+            brokeHigh.price,
+            anchor.price,
+            isMss ? "MSS" : "BOS",
+            brokeHigh.price,
+            brokeHigh.time,
+          );
+        }
+      }
+    }
   }
 
-  // Finalize: any still-open with TP1 hit keep outcome open; closed with only TP1 → tp1
   for (const s of signals) {
     if (!s.active && s.outcome === "open" && s.tpHit >= 1) {
       s.outcome = s.tpHit >= 2 ? "tp2" : "tp1";
@@ -730,7 +520,7 @@ export function computeTradingAssistant(
     dealingRanges.length > 0 ? dealingRanges[dealingRanges.length - 1]! : null;
   return {
     signals: signals.slice(-maxN),
-    structureLines: structureLines.slice(-Math.max(4, maxN)),
+    structureLines: cfg.showStructure ? structureLines.slice(-Math.max(4, maxN)) : [],
     biasLabel: biasLbl,
     trendDir: trendOut,
     lastDealingRange: lastDr,
@@ -738,14 +528,14 @@ export function computeTradingAssistant(
   };
 }
 
-/** Texas pill text: "SELL - TP2 hit" / "BUY - SL hit" / "SELL - LIVE". */
+/** Texas pill text: "SELL STOP" / "SELL - TP2 hit" / "BUY - SL hit". */
 function signalPillText(s: FtaSignal): string {
   const tag = s.dir === 1 ? "BUY" : "SELL";
   if (s.outcome === "tp2" || s.tpHit >= 2) return `${tag} - TP2 hit`;
   if (s.outcome === "sl") return `${tag} - SL hit`;
   if (s.outcome === "tp1" || (s.tpHit >= 1 && !s.active)) return `${tag} - TP1 hit`;
   if (s.tpHit >= 1 && s.active) return `${tag} - TP1 hit`;
-  return `${tag} - LIVE`;
+  return `${tag} STOP`;
 }
 
 /**

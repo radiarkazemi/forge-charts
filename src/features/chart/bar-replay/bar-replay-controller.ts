@@ -83,7 +83,10 @@ function tickIntervalMs(stepMs: number, speed: BarReplaySpeed): number {
   return 1_000;
 }
 
-/** Wall ms between closed candles in candle-by-candle play (×N ≈ N candles/sec). */
+/**
+ * Wall ms between closed candles in candle-by-candle play.
+ * ×N shortens the delay for each single candle (1s / N) — never advances N bars per tick.
+ */
 function candleStepIntervalMs(speed: BarReplaySpeed): number {
   return Math.max(30, Math.round(1_000 / Math.max(0.25, speed)));
 }
@@ -274,8 +277,8 @@ export class BarReplayController {
   }
 
   /**
-   * Toggle candle-by-candle play: each Play tick jumps one closed bar
-   * (speed = candles per second at 1× baseline).
+   * Toggle candle-by-candle play: each Play tick advances exactly one closed bar.
+   * Speed ×N only shortens the wait between those single bars (not bars-per-tick).
    */
   setCandleByCandle(enabled: boolean): void {
     const playing = this.state.get().phase === "playing" || this.playTimer !== 0;
@@ -745,7 +748,10 @@ export class BarReplayController {
     this.pushForming(progress);
   }
 
-  /** Advance exactly one closed candle (no intra-bar forming). */
+  /**
+   * Advance exactly one closed candle per timer fire.
+   * Speed only changes `candleStepIntervalMs` — never loop `speed` bars here.
+   */
   private async onCandleByCandleTick(): Promise<void> {
     if (this.state.get().phase !== "playing" && this.playTimer === 0) return;
     if (this.candleStepBusy) return;
@@ -755,6 +761,7 @@ export class BarReplayController {
         await this.commitFormingBar();
         return;
       }
+      // One bar only — ×5/×10/×20/×30 are delay multipliers, not bars-per-tick.
       const advanced = await this.advanceClosedOne();
       if (!advanced) return;
       if (this.state.get().cursorIndex >= this.state.get().bufferLength - 1) {

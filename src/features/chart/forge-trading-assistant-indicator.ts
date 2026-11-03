@@ -1,15 +1,15 @@
 /**
  * Charting Library custom study: “Forge Trading Assistant”.
  * Plots are inert — Buy/Sell + Entry/SL/TP painted by
- * `useForgeTradingAssistantStudy` (Texas-inspired Manual Buy/Sell bias).
+ * `useForgeTradingAssistantStudy` (clean Texas Manual Buy/Sell stop-entry).
  */
 
 import type { CustomIndicator } from "@/infrastructure/tradingview";
 import { FTA_DEFAULTS } from "@/features/trading-assistant/runtime";
 
 export const FTA_STUDY_NAME = "Forge Trading Assistant";
-/** Bumped to -2 so saved studies pick up relaxed DR-entry defaults (OTE off). */
-export const FTA_STUDY_ID = "ForgeTradingAssistant@tv-basicstudies-2";
+/** Bumped to -3 so saved studies pick up clean Texas defaults (no DR/OB noise). */
+export const FTA_STUDY_ID = "ForgeTradingAssistant@tv-basicstudies-3";
 
 export const FTA_STUDY_DEFAULTS = {
   biasMode: FTA_DEFAULTS.biasMode,
@@ -52,7 +52,7 @@ export function createForgeTradingAssistantIndicator(PineJS: {
       id: FTA_STUDY_ID as never,
       name: FTA_STUDY_NAME,
       description: FTA_STUDY_NAME,
-      shortDescription: "Forge TA · DR + trend · Long/Short",
+      shortDescription: "Texas · Manual Buy/Sell · Stop entry",
       isCustomIndicator: true,
       is_price_study: true,
       linkedToSeries: true,
@@ -140,37 +140,37 @@ export function createForgeTradingAssistantIndicator(PineJS: {
         },
         {
           id: "useOrderBlock",
-          name: "Use Order Blocks",
+          name: "Legacy · Order Blocks (off = Texas clean)",
           defval: FTA_STUDY_DEFAULTS.useOrderBlock,
           type: "bool",
         },
         {
           id: "useFvg",
-          name: "Use Fair Value Gaps",
+          name: "Legacy · Fair Value Gaps (off = Texas clean)",
           defval: FTA_STUDY_DEFAULTS.useFvg,
           type: "bool",
         },
         {
           id: "requireRejection",
-          name: "Require rejection candle",
+          name: "Legacy · Require rejection candle",
           defval: FTA_STUDY_DEFAULTS.requireRejection,
           type: "bool",
         },
         {
           id: "requireDealingRange",
-          name: "Require last confirmed Dealing Range (this TF)",
+          name: "Legacy · Require Dealing Range gate",
           defval: FTA_STUDY_DEFAULTS.requireDealingRange,
           type: "bool",
         },
         {
           id: "requireTrendAlign",
-          name: "Block opposite-of-trend positions",
+          name: "Prefer structure-aligned breaks (Auto)",
           defval: FTA_STUDY_DEFAULTS.requireTrendAlign,
           type: "bool",
         },
         {
           id: "requireDrOte",
-          name: "Require DR OTE touch (0.618–0.786) — sensitive",
+          name: "Legacy · Require DR OTE touch",
           defval: FTA_STUDY_DEFAULTS.requireDrOte,
           type: "bool",
         },

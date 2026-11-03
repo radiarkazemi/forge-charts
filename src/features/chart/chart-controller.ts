@@ -16,6 +16,7 @@ import {
   parseOrcaInputs,
 } from "@/features/pine/orca-runtime";
 import { resolvePineStudy } from "@/features/pine/pine-runner";
+import { FTA_STUDY_ID } from "@/features/chart/forge-trading-assistant-indicator";
 
 export interface ChartState {
   readonly symbol: string;
@@ -692,7 +693,7 @@ export class ChartController {
           : /forge\s*sessions|sessions\s*\[luxalgo\]/i.test(displayName)
             ? "ForgeSessions@tv-basicstudies-1"
             : /forge\s*trading\s*assistant|forge\s*ta\b/i.test(displayName)
-              ? "ForgeTradingAssistant@tv-basicstudies-2"
+              ? FTA_STUDY_ID
               : /forge\s*certainty/i.test(displayName)
                 ? "ForgeCertainty@tv-basicstudies-1"
                 : /forge\s*replay\s*mentor|replay\s*mentor/i.test(displayName)
@@ -728,7 +729,7 @@ export class ChartController {
             : /forge\s*sessions|sessions\s*\[luxalgo\]/i.test(name)
               ? "ForgeSessions@tv-basicstudies-1"
               : /forge\s*trading\s*assistant|forge\s*ta\b/i.test(name)
-                ? "ForgeTradingAssistant@tv-basicstudies-2"
+                ? FTA_STUDY_ID
                 : /forge\s*certainty/i.test(name)
                   ? "ForgeCertainty@tv-basicstudies-1"
                   : /forge\s*replay\s*mentor|replay\s*mentor/i.test(name)
