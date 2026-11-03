@@ -25,12 +25,12 @@ const FORM_SPEED_OPTIONS: readonly { value: BarReplaySpeed; label: string }[] = 
   { value: 10, label: "10x" },
 ];
 
-/** Candle-by-candle (tick) play — ×5 / ×10 / ×20 / ×30 candles per second. */
+/** Candle-by-candle play — ×N = each candle arrives N× faster (still 1 bar / tick). */
 const CANDLE_SPEED_OPTIONS: readonly { value: BarReplaySpeed; label: string }[] = [
-  { value: 5, label: "×5" },
-  { value: 10, label: "×10" },
-  { value: 20, label: "×20" },
-  { value: 30, label: "×30" },
+  { value: 5, label: "5x" },
+  { value: 10, label: "10x" },
+  { value: 20, label: "20x" },
+  { value: 30, label: "30x" },
 ];
 
 const MENU_PAPER = {
@@ -193,7 +193,7 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
             onClick={() => {
               controller.setCandleByCandle(!candleByCandle);
             }}
-            title="Play advances one closed candle at a time (speed = candles/sec)"
+            title="Play advances one closed candle at a time; speed only shortens the wait"
           >
             <ListItemIcon sx={{ minWidth: 34 }}>
               <Checkbox
@@ -211,7 +211,11 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
             </ListItemIcon>
             <ListItemText
               primary="Candle by candle"
-              secondary={candleByCandle ? "Play = 1 bar / tick" : "Play = form over TF time"}
+              secondary={
+                candleByCandle
+                  ? "1 bar / tick · speed = per-candle delay"
+                  : "Play = form over TF time"
+              }
               slotProps={{
                 primary: { sx: { fontSize: 13, fontWeight: 500 } },
                 secondary: { sx: { fontSize: 11, color: "#787b86" } },
@@ -306,7 +310,7 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
           }}
           title={
             candleByCandle
-              ? "Candle-by-candle speed (×5 / ×10 / ×20 / ×30 candles per sec)"
+              ? "Per-candle playback speed (5x–30x shortens wait; still 1 bar per tick)"
               : "Replay speed (scales TF forming duration)"
           }
           aria-label="Replay speed"
