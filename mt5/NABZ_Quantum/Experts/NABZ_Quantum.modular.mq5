@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "Forge Charts / NABZ"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "2.30"
-#property description "NABZ Quantum v2.3 — drag panel, Save Pos, sessions, Auto RF R1-R3, fits above terminal"
+#property version   "2.40"
+#property description "NABZ Quantum v2.4 — continuous drag, fit clamp, ECO popup, no overflow"
 
 #include <NABZ_Quantum/NabzUI.mqh>
 

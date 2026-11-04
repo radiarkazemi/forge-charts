@@ -5,10 +5,10 @@
 //+------------------------------------------------------------------+
 #property copyright "Forge Charts / NABZ"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "2.30"
-#property description "NABZ Quantum v2.3 — drag panel, Save Pos, sessions, Auto RF R1-R3, fits above terminal"
+#property version   "2.40"
+#property description "NABZ Quantum v2.4 — continuous drag, fit clamp, ECO popup, no overflow"
 
-// Single-file build v2.3 — copy ONLY this .mq5 into MQL5/Experts/
+// Single-file build v2.4
 #include <Trade/Trade.mqh>
 
 
@@ -19,7 +19,7 @@
 
 #define NABZ_PREFIX     "NABZ2_"
 #define NABZ_SESS_PFX   "NABZSESS_"
-#define NABZ_VERSION    "2.3.0"  // drag panel, Save Pos, sessions, auto RF R1-R3
+#define NABZ_VERSION    "2.4.0"  // real drag, fit clamp, no overflow glitch
 #define NABZ_TITLE      "NABZ"
 
 //--- Base layout (scaled at runtime via NabzLayout)
@@ -1382,11 +1382,12 @@ void NabzUI_DrawHeader(NabzUIState &ui, const int x, int &y)
    NabzUI_Rect("hdr_accent", x, y, L.panelW - 2 * L.pad, 3, COL_GOLD, COL_GOLD, 2);
    y += 10;
 
+   // Invisible drag strip across header (hold left mouse & drag anywhere on title row)
+   NabzUI_Rect("hdr_drag", x, y - 4, L.panelW - 2 * L.pad - 36, 34, COL_BG1, COL_BG1, 0);
+   ObjectSetString(0, NABZ_PREFIX + "hdr_drag", OBJPROP_TOOLTIP, "Drag to move panel");
+
    NabzUI_Label("hdr_title", x, y, NABZ_TITLE, COL_GOLD_GLOW, L.fontTitle, "Segoe UI Semibold");
-   NabzUI_Label("hdr_ver", x + 64, y + 5, "v" + NABZ_VERSION, COL_MUTED, L.fontTiny);
-   // Drag handle — click & drag header to move panel on chart
-   NabzUI_Button("btn_move", x + 118, y - 2, 52, 28, "MOVE", COL_BG3, COL_GOLD);
-   ObjectSetString(0, NABZ_PREFIX + "btn_move", OBJPROP_TOOLTIP, "Drag panel: click MOVE then drag chart");
+   NabzUI_Label("hdr_ver", x + 58, y + 5, "v" + NABZ_VERSION, COL_MUTED, L.fontTiny);
 
    int right = x + L.panelW - 2 * L.pad;
    NabzUI_Button("btn_minmax", right - 30, y - 2, 30, 28, "—", COL_BG3, COL_TEXT);
@@ -1394,13 +1395,13 @@ void NabzUI_DrawHeader(NabzUIState &ui, const int x, int &y)
 
    if(ui.risk.showCandleTimer)
    {
-      NabzUI_Chip("hdr_timer", right - 108, y - 2, 72, 28, ui.candleLeft, COL_BG3, COL_GOLD_GLOW, 10);
-      NabzUI_Chip("hdr_sp", right - 186, y - 2, 72, 28,
+      NabzUI_Chip("hdr_timer", right - 108, y - 2, 70, 28, ui.candleLeft, COL_BG3, COL_GOLD_GLOW, 10);
+      NabzUI_Chip("hdr_sp", right - 182, y - 2, 68, 28,
                   StringFormat("SP %.1f", spread), COL_BG3, (spread > 50 ? COL_WARN : COL_INFO), 9);
    }
    else
    {
-      NabzUI_Chip("hdr_sp", right - 108, y - 2, 72, 28,
+      NabzUI_Chip("hdr_sp", right - 108, y - 2, 70, 28,
                   StringFormat("SP %.1f", spread), COL_BG3, (spread > 50 ? COL_WARN : COL_INFO), 9);
    }
    y += 34;
@@ -1659,17 +1660,36 @@ void NabzUI_DrawNav(NabzUIState &ui, const int x, int &y)
 }
 
 void NabzUI_DrawSavePosPopup(NabzUIState &ui); // forward
+void NabzUI_DrawEcoPopup(NabzUIState &ui);
 
 void NabzUI_DrawMainPanel(NabzUIState &ui)
 {
    NabzLayoutCompute(ui.layout, ui.bottomReserve);
    ui.candleLeft = NabzUI_CandleLeftText();
-   ui.compactMode = (ui.layout.maxH < 560);
+
+   int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+   int chartW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+   int maxBottom = chartH - ui.layout.bottomReserve;
+   if(maxBottom < ui.layout.panelY + 220)
+      maxBottom = ui.layout.panelY + 220;
+
+   // Keep panel inside chart horizontally
+   if(ui.layout.panelX < 4) ui.layout.panelX = 4;
+   if(ui.layout.panelX + ui.layout.panelW > chartW - 4)
+      ui.layout.panelX = MathMax(4, chartW - ui.layout.panelW - 4);
+   if(ui.layout.panelY < 4) ui.layout.panelY = 4;
+   if(ui.layout.panelY > maxBottom - 80)
+      ui.layout.panelY = MathMax(4, maxBottom - 80);
+
+   int availH = maxBottom - ui.layout.panelY;
+   ui.compactMode = (availH < 620);
 
    if(ui.minimized)
    {
+      ObjectsDeleteAll(0, NABZ_PREFIX + "news");
       NabzUI_DrawMiniBar(ui);
       if(ui.savePosOpen) NabzUI_DrawSavePosPopup(ui);
+      if(ui.view == NABZ_VIEW_ECO) NabzUI_DrawEcoPopup(ui);
       return;
    }
 
@@ -1679,6 +1699,12 @@ void NabzUI_DrawMainPanel(NabzUIState &ui)
    int x = x0 + L.pad;
    int y = y0 + L.pad;
 
+   // Reserve footer (nav + links) so it never falls outside the body
+   int footerH = 30 + L.gap + 28 + L.pad + 8;
+   int contentMaxY = y0 + availH - footerH;
+
+   // Draw shell first with full available height (exact fit above terminal)
+   ui.panelH = availH;
    NabzUI_Rect("panel_glow", x0 - 2, y0 - 2, L.panelW + 4, ui.panelH + 4,
                NabzMix(COL_GOLD, COL_BG0, 88), NabzMix(COL_GOLD, COL_BG0, 75), 0);
    NabzUI_Rect("panel_body", x0, y0, L.panelW, ui.panelH, COL_BG1, COL_BORDER, 1);
@@ -1687,34 +1713,71 @@ void NabzUI_DrawMainPanel(NabzUIState &ui)
    NabzUI_DrawHeader(ui, x, y);
    NabzUI_DrawRisk(ui, x, y);
    NabzUI_DrawExec(ui, x, y);
-   NabzUI_DrawPositions(ui, x, y);
 
-   // When short on vertical space, skip news to stay above terminal bars
-   bool drawNews = !ui.compactMode;
-   NabzUI_DrawProp(ui, x, y);
-   if(drawNews)
-      NabzUI_DrawNews(ui, x, y);
+   if(y + 90 < contentMaxY)
+      NabzUI_DrawPositions(ui, x, y);
    else
-      ObjectsDeleteAll(0, NABZ_PREFIX + "news");
+      ObjectsDeleteAll(0, NABZ_PREFIX + "pos");
+
+   if(y + 120 < contentMaxY)
+      NabzUI_DrawProp(ui, x, y);
+   else
+   {
+      ObjectsDeleteAll(0, NABZ_PREFIX + "prop");
+      ObjectsDeleteAll(0, NABZ_PREFIX + "dd_");
+      ObjectsDeleteAll(0, NABZ_PREFIX + "tgt");
+      ObjectsDeleteAll(0, NABZ_PREFIX + "frisk");
+   }
+
+   // News is NEVER inside the main column (was overflowing). Use ECO popup instead.
+   ObjectsDeleteAll(0, NABZ_PREFIX + "news");
+
+   // Pin nav to bottom of panel body
+   int navY = y0 + ui.panelH - footerH + L.pad;
+   if(navY < y + 8) navY = y + 8;
+   y = navY;
    NabzUI_DrawNav(ui, x, y);
-
-   ui.panelH = (y - y0) + L.pad;
-   // Clamp so panel bottom stays above MT5 terminal / toolbox
-   int maxBottom = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS) - L.bottomReserve;
-   if(y0 + ui.panelH > maxBottom)
-      ui.panelH = MathMax(L.miniH + 20, maxBottom - y0);
-
-   ObjectSetInteger(0, NABZ_PREFIX + "panel_body", OBJPROP_YSIZE, ui.panelH);
-   ObjectSetInteger(0, NABZ_PREFIX + "panel_glow", OBJPROP_YSIZE, ui.panelH + 4);
-   ObjectSetInteger(0, NABZ_PREFIX + "panel_rail", OBJPROP_YSIZE, ui.panelH);
 
    if(ui.savePosOpen)
       NabzUI_DrawSavePosPopup(ui);
    else
       ObjectsDeleteAll(0, NABZ_PREFIX + "svp_");
+
+   if(ui.view == NABZ_VIEW_ECO)
+      NabzUI_DrawEcoPopup(ui);
+   else
+      ObjectsDeleteAll(0, NABZ_PREFIX + "eco_");
 }
 
 //+------------------------------------------------------------------+
+void NabzUI_DrawEcoPopup(NabzUIState &ui)
+{
+   ObjectsDeleteAll(0, NABZ_PREFIX + "eco_");
+   NabzLayout L = ui.layout;
+   int x0 = L.panelX + L.panelW + 12;
+   int y0 = L.panelY + 40;
+   int w = 280;
+   int h = 160;
+   NabzUI_Rect("eco_glow", x0 - 2, y0 - 2, w + 4, h + 4, NabzMix(COL_INFO, COL_BG0, 88), COL_BORDER, 0);
+   NabzUI_Rect("eco_body", x0, y0, w, h, COL_BG1, COL_BORDER, 1);
+   NabzUI_Rect("eco_rail", x0, y0, 3, h, COL_INFO, COL_INFO, 2);
+   NabzUI_Label("eco_title", x0 + 12, y0 + 12, "ECONOMIC NEWS · TODAY", COL_INFO, 11, "Segoe UI Semibold");
+   NabzUI_Button("eco_x", x0 + w - 32, y0 + 10, 24, 24, "✕", COL_BG3, COL_MUTED);
+   NabzUI_Button("eco_prev", x0 + w - 64, y0 + 10, 24, 24, "‹", COL_BG3, COL_TEXT);
+   NabzUI_Button("eco_next", x0 + w - 96, y0 + 10, 24, 24, "›", COL_BG3, COL_TEXT);
+   // fix order: prev left of next
+   ObjectSetInteger(0, NABZ_PREFIX + "eco_prev", OBJPROP_XDISTANCE, x0 + w - 92);
+   ObjectSetInteger(0, NABZ_PREFIX + "eco_next", OBJPROP_XDISTANCE, x0 + w - 64);
+
+   for(int i = 0; i < 4; ++i)
+   {
+      int idx = ui.news.offset + i;
+      string line = (idx < ui.news.count) ? NabzNewsLine(ui.news, idx) : (i == 0 ? "No events" : "");
+      color c = (idx < ui.news.count && !ui.news.items[idx].released) ? COL_TEXT : COL_MUTED;
+      NabzUI_Label("eco_l" + IntegerToString(i), x0 + 12, y0 + 44 + i * 24, line, c, 9);
+   }
+}
+
 void NabzUI_DrawSavePosPopup(NabzUIState &ui)
 {
    ObjectsDeleteAll(0, NABZ_PREFIX + "svp_");
@@ -2221,13 +2284,19 @@ bool NabzUI_HandleClick(NabzUIState &ui, const string key)
       NabzUI_ToggleMinimize(ui);
       return true;
    }
-   if(key == "btn_move")
+   if(key == "eco_x")
    {
-      ui.panelDragging = !ui.panelDragging;
-      if(ui.panelDragging)
-         Comment("NABZ: MOVE mode — click chart to place panel top-left");
-      else
-         Comment("");
+      ui.view = NABZ_VIEW_NONE;
+      return true;
+   }
+   if(key == "eco_prev")
+   {
+      ui.news.offset = MathMax(0, ui.news.offset - 1);
+      return true;
+   }
+   if(key == "eco_next")
+   {
+      ui.news.offset = MathMin(MathMax(0, ui.news.count - 1), ui.news.offset + 1);
       return true;
    }
    if(key == "rr_minus")
@@ -2289,15 +2358,55 @@ bool NabzUI_HandleClick(NabzUIState &ui, const string key)
    return false;
 }
 
-// Chart click while MOVE mode — place panel
+// Continuous drag: hold left mouse on header area and move
+bool NabzUI_HandleMouseMove(NabzUIState &ui, const int mx, const int my, const uint state)
+{
+   bool left = ((state & 1) == 1);
+   NabzLayout L = ui.layout;
+   int x0 = L.panelX;
+   int y0 = L.panelY;
+   int hdrH = 56;
+   bool inHeader = (mx >= x0 && mx <= x0 + L.panelW - 34 &&
+                    my >= y0 && my <= y0 + hdrH);
+
+   static bool s_down = false;
+   if(left && !s_down)
+   {
+      if(inHeader && !ui.minimized)
+      {
+         ui.panelDragging = true;
+         ui.dragOffX = mx - x0;
+         ui.dragOffY = my - y0;
+      }
+   }
+   if(!left)
+   {
+      ui.panelDragging = false;
+   }
+   s_down = left;
+
+   if(ui.panelDragging && left)
+   {
+      int chartW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+      int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+      int maxBottom = chartH - ui.bottomReserve;
+      ui.layout.panelX = mx - ui.dragOffX;
+      ui.layout.panelY = my - ui.dragOffY;
+      if(ui.layout.panelX < 4) ui.layout.panelX = 4;
+      if(ui.layout.panelY < 4) ui.layout.panelY = 4;
+      if(ui.layout.panelX > chartW - L.panelW - 4)
+         ui.layout.panelX = chartW - L.panelW - 4;
+      if(ui.layout.panelY > maxBottom - 100)
+         ui.layout.panelY = maxBottom - 100;
+      return true;
+   }
+   return false;
+}
+
 bool NabzUI_HandleChartClick(NabzUIState &ui, const int px, const int py)
 {
-   if(!ui.panelDragging) return false;
-   ui.layout.panelX = MathMax(4, px - 20);
-   ui.layout.panelY = MathMax(4, py - 10);
-   ui.panelDragging = false;
-   Comment("");
-   return true;
+   // kept for compatibility — drag uses mouse move now
+   return false;
 }
 
 void NabzUI_ReadRREdit(NabzUIState &ui)
