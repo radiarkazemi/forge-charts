@@ -174,9 +174,6 @@ void NabzLayoutCompute(NabzLayout &L, const int bottomReserve = 140)
    L.fontTiny  = 8;
    L.miniH     = 48;
 }
-
-#endif
-//+------------------------------------------------------------------+
 //===== END NabzTheme.mqh =====
 
 //===== BEGIN NabzRisk.mqh =====
@@ -319,9 +316,6 @@ double NabzPositionOpenR(const ulong ticket)
    double move = (type == POSITION_TYPE_BUY) ? (px - open) : (open - px);
    return move / risk;
 }
-
-#endif
-//+------------------------------------------------------------------+
 //===== END NabzRisk.mqh =====
 
 //===== BEGIN NabzTrade.mqh =====
@@ -568,9 +562,6 @@ void NabzInitDrag(NabzDragPlan &d, const bool isBuy)
    d.sl = isBuy ? mid - atr : mid + atr;
    d.tp = isBuy ? mid + atr * 2.0 : mid - atr * 2.0;
 }
-
-#endif
-//+------------------------------------------------------------------+
 //===== END NabzTrade.mqh =====
 
 //===== BEGIN NabzProp.mqh =====
@@ -678,9 +669,6 @@ void NabzPropUpdate(const NabzPropConfig &c, NabzPropSnapshot &s)
    else
       s.floatingRisk = 0.0;
 }
-
-#endif
-//+------------------------------------------------------------------+
 //===== END NabzProp.mqh =====
 
 //===== BEGIN NabzNews.mqh =====
@@ -790,9 +778,6 @@ string NabzNewsLine(const NabzNewsState &n, const int index)
    string st = it.released ? "RELEASED" : "SOON";
    return StringFormat("%s  ·  %s  ·  %s  ·  %s", it.currency, it.name, t, st);
 }
-
-#endif
-//+------------------------------------------------------------------+
 //===== END NabzNews.mqh =====
 
 //===== BEGIN NabzSessions.mqh =====
@@ -956,9 +941,6 @@ void NabzSessionsRedraw(const NabzSessionHours &h)
       }
    }
 }
-
-#endif
-//+------------------------------------------------------------------+
 //===== END NabzSessions.mqh =====
 
 //===== BEGIN NabzJournal.mqh =====
@@ -1170,9 +1152,6 @@ string NabzPctFmt(const double v, const int digits = 2)
    string sign = (v >= 0 ? "+" : "");
    return sign + DoubleToString(v, digits) + "%";
 }
-
-#endif
-//+------------------------------------------------------------------+
 //===== END NabzJournal.mqh =====
 
 //===== BEGIN NabzUI.mqh =====
@@ -2448,9 +2427,6 @@ void NabzUI_ReadRREdit(NabzUIState &ui)
       NabzUI_ApplyRRToDrag(ui);
    }
 }
-
-#endif
-//+------------------------------------------------------------------+
 //===== END NabzUI.mqh =====
 
 //--- Inputs
