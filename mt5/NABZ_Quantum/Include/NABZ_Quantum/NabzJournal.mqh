@@ -113,11 +113,8 @@ void NabzJournalCompute(NabzJournalStats &j, const NabzSessionHours &sessions,
    int wins = 0;
    int curWin = 0, curLoss = 0, maxWin = 0, maxLoss = 0;
    double sessAsia = 0, sessLon = 0, sessNy = 0, sessOff = 0;
-   double runBal = AccountInfoDouble(ACCOUNT_BALANCE); // approximate rebuild reverse later
    // First pass: collect closed deals OUT
    double profits[];
-   datetime times[];
-   string   sess[];
    ArrayResize(profits, 0);
 
    int deals = HistoryDealsTotal();
@@ -166,9 +163,7 @@ void NabzJournalCompute(NabzJournalStats &j, const NabzSessionHours &sessions,
 
       int n = ArraySize(profits);
       ArrayResize(profits, n + 1);
-      ArrayResize(times, n + 1);
       profits[n] = profit;
-      times[n] = t;
    }
 
    for(int i = 0; i < j.dayCount; ++i)
