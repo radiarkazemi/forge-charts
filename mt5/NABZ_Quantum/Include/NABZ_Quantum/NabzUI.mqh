@@ -33,9 +33,17 @@ struct NabzUIState
    int              settingsTab;      // 0 RISK 1 Account 2 NEWS 3 MANAGE 4 ALERT 5 SESS
    string           candleLeft;
    // panel drag
-   bool             panelDragging;
+   bool             panelDragging;   // sticky MOVE mode (follows mouse)
+   bool             panelHoldDrag;   // hold-left on MOVE bar
    int              dragOffX;
    int              dragOffY;
+   int              lastMouseX;
+   int              lastMouseY;
+   int              moveBarX;
+   int              moveBarY;
+   int              moveBarW;
+   int              moveBarH;
+   uint             dragToggleMs;    // ignore chart-click drop right after toggle
    int              bottomReserve;
    // Save Pos popup
    bool             savePosOpen;
@@ -208,22 +216,15 @@ void NabzUI_DrawHeader(NabzUIState &ui, const int x, int &y)
    NabzLayout L = ui.layout;
    double spread = (SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID))
                    / SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   int inner = L.panelW - 2 * L.pad;
 
-   NabzUI_Rect("hdr_accent", x, y, L.panelW - 2 * L.pad, 3, COL_GOLD, COL_GOLD, 2);
+   NabzUI_Rect("hdr_accent", x, y, inner, 3, COL_GOLD, COL_GOLD, 2);
    y += 10;
 
    NabzUI_Label("hdr_title", x, y, NABZ_TITLE, COL_GOLD_GLOW, L.fontTitle, "Segoe UI Semibold");
    NabzUI_Label("hdr_ver", x + 58, y + 5, "v" + NABZ_VERSION, COL_MUTED, L.fontTiny);
 
-   // Sticky MOVE: click once, then move mouse — click MOVE again (or chart) to drop
-   NabzUI_Button("btn_move", x + 118, y - 2, 56, 28,
-                 ui.panelDragging ? "DROP" : "MOVE",
-                 ui.panelDragging ? COL_WARN : COL_BG3,
-                 ui.panelDragging ? COL_BG0 : COL_GOLD);
-   ObjectSetString(0, NABZ_PREFIX + "btn_move", OBJPROP_TOOLTIP,
-                  ui.panelDragging ? "Click to drop panel here" : "Click MOVE, then move mouse to place panel");
-
-   int right = x + L.panelW - 2 * L.pad;
+   int right = x + inner;
    NabzUI_Button("btn_minmax", right - 30, y - 2, 30, 28, "—", COL_BG3, COL_TEXT);
    ObjectSetString(0, NABZ_PREFIX + "btn_minmax", OBJPROP_TOOLTIP, "Minimize NABZ panel");
 
@@ -239,6 +240,21 @@ void NabzUI_DrawHeader(NabzUIState &ui, const int x, int &y)
                   StringFormat("SP %.1f", spread), COL_BG3, (spread > 50 ? COL_WARN : COL_INFO), 9);
    }
    y += 34;
+
+   // Full-width MOVE bar (never truncated / never under SP chips)
+   ui.moveBarX = x;
+   ui.moveBarY = y;
+   ui.moveBarW = inner;
+   ui.moveBarH = 32;
+   string moveTxt = ui.panelDragging ? "✔  DROP HERE  (click to lock)" : "⠿  MOVE PANEL  (click or hold-drag)";
+   NabzUI_Button("btn_move", ui.moveBarX, ui.moveBarY, ui.moveBarW, ui.moveBarH,
+                 moveTxt,
+                 ui.panelDragging ? COL_WARN : COL_BG3,
+                 ui.panelDragging ? COL_BG0 : COL_GOLD_GLOW);
+   ObjectSetInteger(0, NABZ_PREFIX + "btn_move", OBJPROP_FONTSIZE, 10);
+   ObjectSetString(0, NABZ_PREFIX + "btn_move", OBJPROP_TOOLTIP,
+                  "Click = sticky move · Hold left mouse = drag · Click again to lock");
+   y += ui.moveBarH + 10;
 }
 
 void NabzUI_ApplyRRToDrag(NabzUIState &ui)
@@ -548,12 +564,13 @@ void NabzUI_DrawMainPanel(NabzUIState &ui)
    NabzUI_DrawRisk(ui, x, y);
    NabzUI_DrawExec(ui, x, y);
 
-   if(y + 90 < contentMaxY)
+   if(y + 70 < contentMaxY)
       NabzUI_DrawPositions(ui, x, y);
    else
       ObjectsDeleteAll(0, NABZ_PREFIX + "pos");
 
-   if(y + 120 < contentMaxY)
+   // Sample replica: Live Analysis + Economic News sit above the nav
+   if(y + 100 < contentMaxY)
       NabzUI_DrawProp(ui, x, y);
    else
    {
@@ -563,8 +580,10 @@ void NabzUI_DrawMainPanel(NabzUIState &ui)
       ObjectsDeleteAll(0, NABZ_PREFIX + "frisk");
    }
 
-   // News is NEVER inside the main column (was overflowing). Use ECO popup instead.
-   ObjectsDeleteAll(0, NABZ_PREFIX + "news");
+   if(!ui.compactMode && y + 90 < contentMaxY)
+      NabzUI_DrawNews(ui, x, y);
+   else
+      ObjectsDeleteAll(0, NABZ_PREFIX + "news");
 
    // Pin nav to bottom of panel body
    int navY = y0 + ui.panelH - footerH + L.pad;
@@ -1113,12 +1132,42 @@ void NabzUI_ReadSessionEdits(NabzUIState &ui)
 void NabzUI_SetDragging(NabzUIState &ui, const bool on)
 {
    ui.panelDragging = on;
-   // Lock chart pan/zoom while placing the panel (stops chart-move glitch)
-   ChartSetInteger(0, CHART_MOUSE_SCROLL, on ? false : true);
+   ui.panelHoldDrag = false;
+   ui.dragToggleMs = GetTickCount();
+   // Lock chart pan while placing the panel
+   ChartSetInteger(0, CHART_MOUSE_SCROLL, (on || ui.panelHoldDrag) ? false : true);
    if(on)
-      Comment("NABZ MOVE: move mouse · click DROP or empty chart to lock");
+   {
+      ui.dragOffX = ui.lastMouseX - ui.layout.panelX;
+      ui.dragOffY = ui.lastMouseY - ui.layout.panelY;
+      if(ui.dragOffX < 8) ui.dragOffX = ui.layout.panelW / 3;
+      if(ui.dragOffY < 4) ui.dragOffY = 40;
+      Comment("NABZ: moving — mouse follows panel · click DROP HERE to lock");
+   }
    else
       Comment("");
+}
+
+bool NabzUI_PointInMoveBar(const NabzUIState &ui, const int mx, const int my)
+{
+   return (mx >= ui.moveBarX && mx <= ui.moveBarX + ui.moveBarW &&
+           my >= ui.moveBarY && my <= ui.moveBarY + ui.moveBarH);
+}
+
+void NabzUI_ApplyPanelXY(NabzUIState &ui, const int nx, const int ny)
+{
+   int chartW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+   int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+   int maxBottom = chartH - ui.bottomReserve;
+   int x = nx, y = ny;
+   if(x < 4) x = 4;
+   if(y < 4) y = 4;
+   if(x > chartW - ui.layout.panelW - 4)
+      x = MathMax(4, chartW - ui.layout.panelW - 4);
+   if(y > maxBottom - 100)
+      y = MathMax(4, maxBottom - 100);
+   ui.layout.panelX = x;
+   ui.layout.panelY = y;
 }
 
 // Returns true if the click was handled here
@@ -1131,6 +1180,7 @@ bool NabzUI_HandleClick(NabzUIState &ui, const string key)
    }
    if(key == "btn_move")
    {
+      // Toggle sticky move — do NOT rely on chart CLICK (it races OBJECT_CLICK)
       NabzUI_SetDragging(ui, !ui.panelDragging);
       return true;
    }
@@ -1208,63 +1258,53 @@ bool NabzUI_HandleClick(NabzUIState &ui, const string key)
    return false;
 }
 
-// Shift all screen-corner UI objects (skip price/time objects)
-void NabzUI_ShiftAll(const int dx, const int dy)
+// Sticky MOVE + hold-drag on MOVE bar. Returns true if panel XY changed (caller redraws).
+bool NabzUI_HandleMouseMove(NabzUIState &ui, const int mx, const int my, const uint state)
 {
-   if(dx == 0 && dy == 0)
-      return;
-   int total = ObjectsTotal(0, -1, -1);
-   for(int i = total - 1; i >= 0; --i)
-   {
-      string n = ObjectName(0, i, -1, -1);
-      if(StringFind(n, NABZ_PREFIX) != 0)
-         continue;
-      ENUM_OBJECT t = (ENUM_OBJECT)ObjectGetInteger(0, n, OBJPROP_TYPE);
-      if(t == OBJ_HLINE || t == OBJ_TREND || t == OBJ_RECTANGLE || t == OBJ_TEXT ||
-         t == OBJ_CHANNEL || t == OBJ_FIBO)
-         continue;
-      ObjectSetInteger(0, n, OBJPROP_XDISTANCE,
-                       (int)ObjectGetInteger(0, n, OBJPROP_XDISTANCE) + dx);
-      ObjectSetInteger(0, n, OBJPROP_YDISTANCE,
-                       (int)ObjectGetInteger(0, n, OBJPROP_YDISTANCE) + dy);
-   }
-}
-
-// Sticky MOVE: panel follows mouse; caller should NOT full-redraw (we shift in place)
-bool NabzUI_HandleMouseMove(NabzUIState &ui, const int mx, const int my, const uint /*state*/)
-{
-   if(!ui.panelDragging || ui.minimized)
+   ui.lastMouseX = mx;
+   ui.lastMouseY = my;
+   if(ui.minimized)
       return false;
 
-   NabzLayout L = ui.layout;
-   int chartW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
-   int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
-   int maxBottom = chartH - ui.bottomReserve;
+   bool left = ((state & 1) == 1);
 
-   int nx = mx - L.panelW / 3;
-   int ny = my - 24;
-   if(nx < 4) nx = 4;
-   if(ny < 4) ny = 4;
-   if(nx > chartW - L.panelW - 4)
-      nx = MathMax(4, chartW - L.panelW - 4);
-   if(ny > maxBottom - 100)
-      ny = MathMax(4, maxBottom - 100);
+   // Hold-drag: press on MOVE bar and drag (sample-style)
+   if(left && !ui.panelDragging)
+   {
+      if(!ui.panelHoldDrag && NabzUI_PointInMoveBar(ui, mx, my))
+      {
+         ui.panelHoldDrag = true;
+         ui.dragOffX = mx - ui.layout.panelX;
+         ui.dragOffY = my - ui.layout.panelY;
+         ChartSetInteger(0, CHART_MOUSE_SCROLL, false);
+      }
+   }
+   if(!left && ui.panelHoldDrag)
+   {
+      ui.panelHoldDrag = false;
+      if(!ui.panelDragging)
+         ChartSetInteger(0, CHART_MOUSE_SCROLL, true);
+   }
 
-   NabzUI_ShiftAll(nx - ui.layout.panelX, ny - ui.layout.panelY);
-   ui.layout.panelX = nx;
-   ui.layout.panelY = ny;
-   ChartRedraw(0);
+   if(!ui.panelDragging && !ui.panelHoldDrag)
+      return false;
+
+   int nx = mx - ui.dragOffX;
+   int ny = my - ui.dragOffY;
+   int ox = ui.layout.panelX;
+   int oy = ui.layout.panelY;
+   NabzUI_ApplyPanelXY(ui, nx, ny);
+   if(ui.layout.panelX == ox && ui.layout.panelY == oy)
+      return false;
    return true;
 }
 
 bool NabzUI_HandleChartClick(NabzUIState &ui, const int /*px*/, const int /*py*/)
 {
-   // Click empty chart while moving → drop/lock panel
-   if(ui.panelDragging)
-   {
-      NabzUI_SetDragging(ui, false);
-      return true;
-   }
+   // Intentionally ignore chart clicks for drop.
+   // In MT5, CHARTEVENT_CLICK races OBJECT_CLICK on the MOVE button and was
+   // immediately cancelling sticky-move (panel looked "locked").
+   // Lock only via the DROP HERE button.
    return false;
 }
 

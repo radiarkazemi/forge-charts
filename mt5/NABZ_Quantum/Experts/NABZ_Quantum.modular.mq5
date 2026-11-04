@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "Forge Charts / NABZ"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "2.50"
-#property description "NABZ Quantum v2.5 — sticky MOVE, no chart-scroll wipe glitch"
+#property version   "2.60"
+#property description "NABZ Quantum v2.6 — MOVE bar drag, sample Prop/News, no click-race"
 
 #include <NABZ_Quantum/NabzUI.mqh>
 
@@ -98,6 +98,16 @@ int OnInit()
    g_ui.journal.weekMode = true;
    g_ui.candleLeft = "00:00";
    g_ui.panelDragging = false;
+   g_ui.panelHoldDrag = false;
+   g_ui.dragOffX = 0;
+   g_ui.dragOffY = 0;
+   g_ui.lastMouseX = 40;
+   g_ui.lastMouseY = 40;
+   g_ui.moveBarX = 0;
+   g_ui.moveBarY = 0;
+   g_ui.moveBarW = 0;
+   g_ui.moveBarH = 0;
+   g_ui.dragToggleMs = 0;
    g_ui.savePosOpen = false;
    g_ui.savePosTicket = 0;
    g_ui.bottomReserve = InpBottomReserve;
@@ -153,8 +163,8 @@ void OnTimer()
    NabzAutoRiskFreeByR(g_ui.risk, _Symbol);
 
    NabzUI_SyncDragFromChart(g_ui);
-   // Do not fight sticky MOVE with a full redraw
-   if(!g_ui.panelDragging)
+   // Do not fight active panel drag with a timer redraw
+   if(!g_ui.panelDragging && !g_ui.panelHoldDrag)
       NabzUI_Redraw(g_ui);
 
    // Prop DD soft alert
@@ -291,11 +301,15 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    if(id == CHARTEVENT_MOUSE_MOVE)
    {
       uint state = (uint)StringToInteger(sparam);
-      // HandleMouseMove shifts objects in place — do not full-redraw
       if(NabzUI_HandleMouseMove(g_ui, (int)lparam, (int)dparam, state))
+      {
+         // Rebuild at new XY (objects update in place — no wipe)
+         NabzUI_Redraw(g_ui);
          return;
+      }
    }
 
+   // Chart click can race OBJECT_CLICK on MOVE — handler debounces
    if(id == CHARTEVENT_CLICK)
    {
       if(NabzUI_HandleChartClick(g_ui, (int)lparam, (int)dparam))
