@@ -1,17 +1,23 @@
-# NABZ Quantum v2.3 — Obsidian Gold
+# NABZ Quantum v2.5 — Obsidian Gold
 
 ## Download
 
 https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/nabz-quantum-ea-390d/mt5/NABZ_Quantum/NABZ_Quantum.mq5
 
-Copy → `MQL5/Experts/NABZ_Quantum.mq5` → Compile (F7) → **remove old EA from chart** → attach again. Header must show **v2.3.0**.
+Copy → `MQL5/Experts/NABZ_Quantum.mq5` → Compile (F7) → **remove old EA from chart** → attach again. Header must show **v2.5.0**.
 
-## What’s new in 2.3
+## What’s new in 2.5
+
+| Fix | Detail |
+|-----|--------|
+| Sticky **MOVE** | Click **MOVE** → move mouse → click **DROP** or empty chart to lock |
+| Chart pan no longer glitches | UI is not wiped on scroll/pan; chart scroll locked while moving panel |
+| Fits above terminal bars | Input `Bottom reserve` (default 160px) |
+
+## Features
 
 | Feature | How |
 |---------|-----|
-| Fits above terminal bars | Input `Bottom reserve` (default 140px) |
-| Move panel | Click **MOVE** in header → click chart to place |
 | Minimize | **—** in header / **▢** on mini bar |
 | Save Profit | Per-position **$** or **Save Pos** → popup `0.25` / `0.50` / `0.75` / `CLOSE` |
 | Risk Free | Per-position **R** or global **RISK FREE** |

@@ -212,12 +212,16 @@ void NabzUI_DrawHeader(NabzUIState &ui, const int x, int &y)
    NabzUI_Rect("hdr_accent", x, y, L.panelW - 2 * L.pad, 3, COL_GOLD, COL_GOLD, 2);
    y += 10;
 
-   // Invisible drag strip across header (hold left mouse & drag anywhere on title row)
-   NabzUI_Rect("hdr_drag", x, y - 4, L.panelW - 2 * L.pad - 36, 34, COL_BG1, COL_BG1, 0);
-   ObjectSetString(0, NABZ_PREFIX + "hdr_drag", OBJPROP_TOOLTIP, "Drag to move panel");
-
    NabzUI_Label("hdr_title", x, y, NABZ_TITLE, COL_GOLD_GLOW, L.fontTitle, "Segoe UI Semibold");
    NabzUI_Label("hdr_ver", x + 58, y + 5, "v" + NABZ_VERSION, COL_MUTED, L.fontTiny);
+
+   // Sticky MOVE: click once, then move mouse — click MOVE again (or chart) to drop
+   NabzUI_Button("btn_move", x + 118, y - 2, 56, 28,
+                 ui.panelDragging ? "DROP" : "MOVE",
+                 ui.panelDragging ? COL_WARN : COL_BG3,
+                 ui.panelDragging ? COL_BG0 : COL_GOLD);
+   ObjectSetString(0, NABZ_PREFIX + "btn_move", OBJPROP_TOOLTIP,
+                  ui.panelDragging ? "Click to drop panel here" : "Click MOVE, then move mouse to place panel");
 
    int right = x + L.panelW - 2 * L.pad;
    NabzUI_Button("btn_minmax", right - 30, y - 2, 30, 28, "—", COL_BG3, COL_TEXT);
@@ -226,7 +230,7 @@ void NabzUI_DrawHeader(NabzUIState &ui, const int x, int &y)
    if(ui.risk.showCandleTimer)
    {
       NabzUI_Chip("hdr_timer", right - 108, y - 2, 70, 28, ui.candleLeft, COL_BG3, COL_GOLD_GLOW, 10);
-      NabzUI_Chip("hdr_sp", right - 182, y - 2, 68, 28,
+      NabzUI_Chip("hdr_sp", right - 186, y - 2, 68, 28,
                   StringFormat("SP %.1f", spread), COL_BG3, (spread > 50 ? COL_WARN : COL_INFO), 9);
    }
    else
@@ -1106,12 +1110,28 @@ void NabzUI_ReadSessionEdits(NabzUIState &ui)
    }
 }
 
+void NabzUI_SetDragging(NabzUIState &ui, const bool on)
+{
+   ui.panelDragging = on;
+   // Lock chart pan/zoom while placing the panel (stops chart-move glitch)
+   ChartSetInteger(0, CHART_MOUSE_SCROLL, on ? false : true);
+   if(on)
+      Comment("NABZ MOVE: move mouse · click DROP or empty chart to lock");
+   else
+      Comment("");
+}
+
 // Returns true if the click was handled here
 bool NabzUI_HandleClick(NabzUIState &ui, const string key)
 {
    if(key == "btn_minmax")
    {
       NabzUI_ToggleMinimize(ui);
+      return true;
+   }
+   if(key == "btn_move")
+   {
+      NabzUI_SetDragging(ui, !ui.panelDragging);
       return true;
    }
    if(key == "eco_x")
@@ -1188,54 +1208,63 @@ bool NabzUI_HandleClick(NabzUIState &ui, const string key)
    return false;
 }
 
-// Continuous drag: hold left mouse on header area and move
-bool NabzUI_HandleMouseMove(NabzUIState &ui, const int mx, const int my, const uint state)
+// Shift all screen-corner UI objects (skip price/time objects)
+void NabzUI_ShiftAll(const int dx, const int dy)
 {
-   bool left = ((state & 1) == 1);
-   NabzLayout L = ui.layout;
-   int x0 = L.panelX;
-   int y0 = L.panelY;
-   int hdrH = 56;
-   bool inHeader = (mx >= x0 && mx <= x0 + L.panelW - 34 &&
-                    my >= y0 && my <= y0 + hdrH);
-
-   static bool s_down = false;
-   if(left && !s_down)
+   if(dx == 0 && dy == 0)
+      return;
+   int total = ObjectsTotal(0, -1, -1);
+   for(int i = total - 1; i >= 0; --i)
    {
-      if(inHeader && !ui.minimized)
-      {
-         ui.panelDragging = true;
-         ui.dragOffX = mx - x0;
-         ui.dragOffY = my - y0;
-      }
+      string n = ObjectName(0, i, -1, -1);
+      if(StringFind(n, NABZ_PREFIX) != 0)
+         continue;
+      ENUM_OBJECT t = (ENUM_OBJECT)ObjectGetInteger(0, n, OBJPROP_TYPE);
+      if(t == OBJ_HLINE || t == OBJ_TREND || t == OBJ_RECTANGLE || t == OBJ_TEXT ||
+         t == OBJ_CHANNEL || t == OBJ_FIBO)
+         continue;
+      ObjectSetInteger(0, n, OBJPROP_XDISTANCE,
+                       (int)ObjectGetInteger(0, n, OBJPROP_XDISTANCE) + dx);
+      ObjectSetInteger(0, n, OBJPROP_YDISTANCE,
+                       (int)ObjectGetInteger(0, n, OBJPROP_YDISTANCE) + dy);
    }
-   if(!left)
-   {
-      ui.panelDragging = false;
-   }
-   s_down = left;
-
-   if(ui.panelDragging && left)
-   {
-      int chartW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
-      int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
-      int maxBottom = chartH - ui.bottomReserve;
-      ui.layout.panelX = mx - ui.dragOffX;
-      ui.layout.panelY = my - ui.dragOffY;
-      if(ui.layout.panelX < 4) ui.layout.panelX = 4;
-      if(ui.layout.panelY < 4) ui.layout.panelY = 4;
-      if(ui.layout.panelX > chartW - L.panelW - 4)
-         ui.layout.panelX = chartW - L.panelW - 4;
-      if(ui.layout.panelY > maxBottom - 100)
-         ui.layout.panelY = maxBottom - 100;
-      return true;
-   }
-   return false;
 }
 
-bool NabzUI_HandleChartClick(NabzUIState &ui, const int px, const int py)
+// Sticky MOVE: panel follows mouse; caller should NOT full-redraw (we shift in place)
+bool NabzUI_HandleMouseMove(NabzUIState &ui, const int mx, const int my, const uint /*state*/)
 {
-   // kept for compatibility — drag uses mouse move now
+   if(!ui.panelDragging || ui.minimized)
+      return false;
+
+   NabzLayout L = ui.layout;
+   int chartW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+   int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+   int maxBottom = chartH - ui.bottomReserve;
+
+   int nx = mx - L.panelW / 3;
+   int ny = my - 24;
+   if(nx < 4) nx = 4;
+   if(ny < 4) ny = 4;
+   if(nx > chartW - L.panelW - 4)
+      nx = MathMax(4, chartW - L.panelW - 4);
+   if(ny > maxBottom - 100)
+      ny = MathMax(4, maxBottom - 100);
+
+   NabzUI_ShiftAll(nx - ui.layout.panelX, ny - ui.layout.panelY);
+   ui.layout.panelX = nx;
+   ui.layout.panelY = ny;
+   ChartRedraw(0);
+   return true;
+}
+
+bool NabzUI_HandleChartClick(NabzUIState &ui, const int /*px*/, const int /*py*/)
+{
+   // Click empty chart while moving → drop/lock panel
+   if(ui.panelDragging)
+   {
+      NabzUI_SetDragging(ui, false);
+      return true;
+   }
    return false;
 }
 

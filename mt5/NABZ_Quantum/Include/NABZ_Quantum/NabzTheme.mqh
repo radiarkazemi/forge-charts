@@ -6,7 +6,7 @@
 
 #define NABZ_PREFIX     "NABZ2_"
 #define NABZ_SESS_PFX   "NABZSESS_"
-#define NABZ_VERSION    "2.4.0"  // real drag, fit clamp, no overflow glitch
+#define NABZ_VERSION    "2.5.0"  // sticky MOVE, no chart-scroll wipe glitch
 #define NABZ_TITLE      "NABZ"
 
 //--- Base layout (scaled at runtime via NabzLayout)

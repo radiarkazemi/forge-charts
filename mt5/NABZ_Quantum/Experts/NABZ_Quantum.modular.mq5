@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "Forge Charts / NABZ"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "2.40"
-#property description "NABZ Quantum v2.4 — continuous drag, fit clamp, ECO popup, no overflow"
+#property version   "2.50"
+#property description "NABZ Quantum v2.5 — sticky MOVE, no chart-scroll wipe glitch"
 
 #include <NABZ_Quantum/NabzUI.mqh>
 
@@ -47,7 +47,7 @@ input string InpUrlWebsite      = "https://github.com/radiarkazemi/forge-charts"
 input group "═══ UI ═══"
 input bool   InpCandleTimer     = true;       // Show candle countdown in panel header
 input bool   InpStartMinimized  = false;      // Start with panel minimized
-input int    InpBottomReserve   = 140;        // Pixels kept clear above MT5 terminal bars
+input int    InpBottomReserve   = 160;        // Pixels kept clear above MT5 terminal bars
 input bool   InpOnlyThisSymbol  = true;       // Journal filter: chart symbol
 
 //--- Global state
@@ -127,6 +127,7 @@ int OnInit()
 void OnDeinit(const int reason)
 {
    EventKillTimer();
+   ChartSetInteger(0, CHART_MOUSE_SCROLL, true);
    NabzUI_DeleteAll();
    NabzSessionsClear();
    Comment("");
@@ -152,7 +153,9 @@ void OnTimer()
    NabzAutoRiskFreeByR(g_ui.risk, _Symbol);
 
    NabzUI_SyncDragFromChart(g_ui);
-   NabzUI_Redraw(g_ui);
+   // Do not fight sticky MOVE with a full redraw
+   if(!g_ui.panelDragging)
+      NabzUI_Redraw(g_ui);
 
    // Prop DD soft alert
    static datetime lastAlert = 0;
@@ -263,12 +266,34 @@ void NabzApplySettingsEdits()
 //+------------------------------------------------------------------+
 void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
+   // Resize only — never wipe on pan/scroll (that caused the chart-move glitch)
    if(id == CHARTEVENT_CHART_CHANGE)
    {
-      NabzLayoutCompute(g_ui.layout, g_ui.bottomReserve);
-      ObjectsDeleteAll(0, NABZ_PREFIX);
-      NabzUI_Redraw(g_ui);
+      static int s_lastW = 0, s_lastH = 0;
+      int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+      int h = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+      if(w != s_lastW || h != s_lastH)
+      {
+         s_lastW = w;
+         s_lastH = h;
+         NabzLayoutCompute(g_ui.layout, g_ui.bottomReserve);
+         int maxBottom = h - g_ui.bottomReserve;
+         if(g_ui.layout.panelX > w - g_ui.layout.panelW - 4)
+            g_ui.layout.panelX = MathMax(4, w - g_ui.layout.panelW - 4);
+         if(g_ui.layout.panelY > maxBottom - 100)
+            g_ui.layout.panelY = MathMax(4, maxBottom - 100);
+         if(!g_ui.panelDragging)
+            NabzUI_Redraw(g_ui);
+      }
       return;
+   }
+
+   if(id == CHARTEVENT_MOUSE_MOVE)
+   {
+      uint state = (uint)StringToInteger(sparam);
+      // HandleMouseMove shifts objects in place — do not full-redraw
+      if(NabzUI_HandleMouseMove(g_ui, (int)lparam, (int)dparam, state))
+         return;
    }
 
    if(id == CHARTEVENT_CLICK)
@@ -464,12 +489,8 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    }
    else if(key == "nav_2")
    {
-      g_ui.view = (g_ui.view == NABZ_VIEW_ECO ? NABZ_VIEW_NONE : NABZ_VIEW_ECO);
       NabzNewsFetchToday(g_ui.news);
-      // ECO uses news strip; also open a light focus
-      if(g_ui.view == NABZ_VIEW_ECO)
-         Alert("NABZ ECO — calendar refreshed (", IntegerToString(g_ui.news.count), " events)");
-      g_ui.view = NABZ_VIEW_NONE;
+      g_ui.view = (g_ui.view == NABZ_VIEW_ECO ? NABZ_VIEW_NONE : NABZ_VIEW_ECO);
    }
    else if(key == "nav_3")
    {
