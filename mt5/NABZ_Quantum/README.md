@@ -1,44 +1,32 @@
-# NABZ Quantum v2 — Obsidian Gold
+# NABZ Quantum v2.1 — Obsidian Gold
 
-MetaTrader 5 Expert Advisor: trade panel, risk engine, prop live analysis, journal, sessions, news, chart tools.
+Roomier panel, minimize/expand, responsive width, candle countdown in the **header** (no floating chart timer glitch).
 
 ## Install (one file)
 
-Copy **only** this file:
+Copy:
 
 ```
 mt5/NABZ_Quantum/NABZ_Quantum.mq5
 ```
 
-into:
+→ `MQL5/Experts/NABZ_Quantum.mq5` → Compile (F7) → attach to chart.
 
-```
-<MT5 Data Folder>/MQL5/Experts/NABZ_Quantum.mq5
-```
+Remove any old chart objects named `NABZ2_timer_*` if a leftover yellow timer remains (or re-attach the EA).
 
-Then in MetaEditor: open it → **Compile (F7)** → attach to a chart with **Algo Trading** on.
+## UI tips
 
-No `Include` folder. No extra `.mqh` files. One file is enough.
+| Control | Action |
+|---------|--------|
+| **—** (header) | Minimize panel to a slim bar |
+| **▢** (mini bar) | Expand panel again |
+| Header **mm:ss** | Candle countdown (Settings → Header Timer) |
+| Inputs → **Start minimized** | Attach collapsed |
 
-(Terminal → **File → Open Data Folder** to find `MQL5/Experts/`.)
-
-## Optional modular sources
-
-For development, headers also live under `Include/NABZ_Quantum/` and a copy under `Experts/`.  
-**Traders should use the single-file `NABZ_Quantum.mq5` at the package root.**
-
-## Features
-
-| Area | Details |
-|------|---------|
-| Risk engine | `%` · `$` · `LOT` · `BAL` |
-| Execution | BUY/SELL, pending, DRAG, SOS, CLOSE ALL, RISK FREE, … |
-| Prop live | Total/Daily DD, Target, Floating risk |
-| Journal | WEEK/MONTH stats + curve |
-| Sessions / News / Settings / Coach / % | as in the panel |
-| Chart | Candle timer, DRAG SL/TP/RR box |
+Panel width scales with chart size (~28% width, 300–380px).
 
 ## Notes
 
-- Places and manages trades — test on demo first.
-- Design preview: `preview/nabz-ui-preview.html`
+- Demo first — places/manages trades.
+- Modular sources: `Include/NABZ_Quantum/` (for development).
+- Preview: `preview/nabz-ui-preview.html`
