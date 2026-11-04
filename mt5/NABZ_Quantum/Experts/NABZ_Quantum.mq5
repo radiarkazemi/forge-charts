@@ -8,7 +8,7 @@
 #property version   "2.00"
 #property description "NABZ Quantum v2 — Obsidian Gold UI, risk engine, prop live analysis, journal, sessions, news"
 
-#include "NabzUI.mqh"
+#include <NABZ_Quantum/NabzUI.mqh>
 
 //--- Inputs
 input group "═══ Identity ═══"

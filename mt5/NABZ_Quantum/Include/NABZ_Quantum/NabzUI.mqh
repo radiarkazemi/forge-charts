@@ -4,13 +4,13 @@
 #ifndef NABZ_UI_MQH
 #define NABZ_UI_MQH
 
-#include "NabzTheme.mqh"
-#include "NabzRisk.mqh"
-#include "NabzTrade.mqh"
-#include "NabzProp.mqh"
-#include "NabzNews.mqh"
-#include "NabzJournal.mqh"
-#include "NabzSessions.mqh"
+#include <NABZ_Quantum/NabzTheme.mqh>
+#include <NABZ_Quantum/NabzRisk.mqh>
+#include <NABZ_Quantum/NabzTrade.mqh>
+#include <NABZ_Quantum/NabzProp.mqh>
+#include <NABZ_Quantum/NabzNews.mqh>
+#include <NABZ_Quantum/NabzJournal.mqh>
+#include <NABZ_Quantum/NabzSessions.mqh>
 
 //--- Shared UI state
 struct NabzUIState

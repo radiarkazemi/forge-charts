@@ -5,7 +5,7 @@
 #define NABZ_TRADE_MQH
 
 #include <Trade/Trade.mqh>
-#include "NabzRisk.mqh"
+#include <NABZ_Quantum/NabzRisk.mqh>
 
 CTrade g_nabzTrade;
 

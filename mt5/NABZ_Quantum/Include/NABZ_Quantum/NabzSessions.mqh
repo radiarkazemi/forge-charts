@@ -4,7 +4,7 @@
 #ifndef NABZ_SESSIONS_MQH
 #define NABZ_SESSIONS_MQH
 
-#include "NabzTheme.mqh"
+#include <NABZ_Quantum/NabzTheme.mqh>
 
 struct NabzSessionHours
 {

@@ -4,7 +4,7 @@
 #ifndef NABZ_RISK_MQH
 #define NABZ_RISK_MQH
 
-#include "NabzTheme.mqh"
+#include <NABZ_Quantum/NabzTheme.mqh>
 
 struct NabzRiskState
 {

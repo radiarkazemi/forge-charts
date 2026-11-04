@@ -4,7 +4,7 @@
 #ifndef NABZ_JOURNAL_MQH
 #define NABZ_JOURNAL_MQH
 
-#include "NabzSessions.mqh"
+#include <NABZ_Quantum/NabzSessions.mqh>
 
 struct NabzDayStat
 {
