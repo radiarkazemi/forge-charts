@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NABZ Quantum v2 — Obsidian Gold</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg0: #080a0e;
+      --bg1: #0e1118;
+      --bg2: #141821;
+      --bg3: #1c2230;
+      --border: #2a3244;
+      --gold: #f0b429;
+      --gold-dim: #a0761c;
+      --gold-glow: #ffd25a;
+      --buy: #00c9a7;
+      --sell: #ff4d6d;
+      --warn: #ffb020;
+      --info: #58c4dc;
+      --text: #e6edf3;
+      --muted: #788496;
+      --dim: #465060;
+      --sos: #b41428;
+      --font: "IBM Plex Sans", system-ui, sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      font-family: var(--font);
+      color: var(--text);
+      background:
+        radial-gradient(1200px 600px at 20% 0%, #1a1408 0%, transparent 55%),
+        radial-gradient(900px 500px at 80% 20%, #0a1a22 0%, transparent 50%),
+        linear-gradient(180deg, #0a0c12, #06070b);
+      display: grid;
+      place-items: center;
+      padding: 32px 16px 48px;
+    }
+    .stage {
+      width: min(1120px, 100%);
+      display: grid;
+      grid-template-columns: 268px 1fr;
+      gap: 18px;
+      align-items: start;
+    }
+    @media (max-width: 860px) {
+      .stage { grid-template-columns: 1fr; }
+    }
+    .brand {
+      grid-column: 1 / -1;
+      margin-bottom: 4px;
+    }
+    .brand h1 {
+      font-size: 13px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--gold-glow);
+      font-weight: 600;
+    }
+    .brand p {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 13px;
+      max-width: 52ch;
+      line-height: 1.45;
+    }
+    .panel, .journal {
+      position: relative;
+      background: linear-gradient(180deg, #12161f, #0e1118 40%, #0c0f15);
+      border: 1px solid var(--border);
+      box-shadow:
+        0 0 0 1px rgba(240, 180, 41, 0.08),
+        0 24px 60px rgba(0,0,0,0.55),
+        inset 0 1px 0 rgba(255,255,255,0.04);
+      overflow: hidden;
+    }
+    .panel::before, .journal::before {
+      content: "";
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 3px;
+    }
+    .panel::before { background: linear-gradient(180deg, var(--gold-glow), var(--gold-dim)); }
+    .journal::before { background: linear-gradient(180deg, var(--info), #1a5a6a); }
+    .panel { width: 268px; padding: 12px 10px 10px; animation: rise 0.7s ease both; }
+    .journal { padding: 14px; animation: rise 0.7s 0.08s ease both; }
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: none; }
+    }
+    .hdr {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      padding-top: 6px;
+      border-top: 3px solid var(--gold);
+    }
+    .hdr .title { font-weight: 700; font-size: 18px; color: var(--gold-glow); letter-spacing: 0.04em; }
+    .hdr .ver { color: var(--muted); font-size: 11px; margin-left: 6px; font-weight: 500; }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 22px;
+      padding: 0 10px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      color: var(--info);
+      font-size: 11px;
+      font-family: var(--mono);
+      font-weight: 500;
+    }
+    .sec {
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      color: var(--muted);
+      font-weight: 600;
+      margin: 10px 0 8px;
+    }
+    .risk {
+      display: grid;
+      grid-template-columns: 30px 1fr 30px repeat(4, 26px);
+      gap: 4px;
+      margin-bottom: 8px;
+    }
+    .btn {
+      border: 1px solid var(--border);
+      background: var(--bg3);
+      color: var(--text);
+      font-family: var(--font);
+      font-weight: 600;
+      font-size: 11px;
+      height: 30px;
+      cursor: pointer;
+      transition: transform 0.12s ease, filter 0.12s ease, background 0.15s ease;
+    }
+    .btn:hover { filter: brightness(1.12); transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .edit {
+      background: var(--bg3);
+      border: 1px solid var(--gold-dim);
+      color: var(--gold);
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 12px;
+      height: 30px;
+    }
+    .mode.on { background: var(--gold); color: #0a0c10; border-color: var(--gold); }
+    .grid3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+    .buy { background: var(--buy); color: #04120f; border-color: #00a88c; }
+    .sell { background: var(--sell); color: #1a050a; border-color: #d63a55; }
+    .gold { background: var(--gold); color: #0a0c10; border-color: var(--gold-dim); }
+    .warn { background: var(--warn); color: #1a1200; border-color: #d49210; }
+    .sos { background: var(--sos); color: #fff; border-color: #7a0c1c; }
+    .dim { color: var(--muted); }
+    .pos {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      padding: 5px 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      margin-bottom: 4px;
+    }
+    .pos .side { color: var(--sell); font-weight: 700; width: 32px; }
+    .pos .pl { color: var(--buy); margin-left: auto; font-family: var(--mono); }
+    .mini { width: 20px; height: 20px; font-size: 10px; padding: 0; }
+    .sum { font-size: 11px; color: var(--muted); margin: 6px 0 4px; }
+    .metric { display: flex; justify-content: space-between; font-size: 11px; margin-top: 6px; }
+    .metric b { font-weight: 500; }
+    .bar {
+      height: 5px;
+      background: #202836;
+      margin-top: 6px;
+      overflow: hidden;
+    }
+    .bar > i {
+      display: block;
+      height: 100%;
+      background: linear-gradient(90deg, var(--warn), var(--gold));
+      width: var(--w, 40%);
+      animation: fill 1.2s ease both;
+    }
+    .bar.cyan > i { background: linear-gradient(90deg, var(--info), #8aefd8); }
+    .bar.gold > i { background: linear-gradient(90deg, var(--gold-dim), var(--gold-glow)); height: 6px; }
+    @keyframes fill { from { width: 0; } }
+    .live {
+      float: right;
+      height: 16px;
+      padding: 0 8px;
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      color: var(--info);
+      background: rgba(88,196,220,0.12);
+      border: 1px solid rgba(88,196,220,0.25);
+      animation: pulse 2s ease infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.55; }
+    }
+    .news {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      padding: 8px;
+      font-size: 10px;
+      line-height: 1.55;
+      color: var(--muted);
+      min-height: 54px;
+    }
+    .news strong { color: var(--text); font-weight: 500; }
+    .nav {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 4px;
+      margin-top: 10px;
+    }
+    .nav .btn { height: 26px; font-size: 10px; }
+    .nav .on { background: var(--gold); color: #0a0c10; }
+    .links {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .links .btn { height: 24px; color: var(--muted); background: var(--bg2); font-size: 10px; }
+    .j-hdr {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .j-hdr h2 { font-size: 15px; color: var(--gold-glow); letter-spacing: 0.06em; }
+    .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+    .days {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 6px;
+      margin: 12px 0;
+    }
+    .day {
+      background: rgba(0,201,167,0.12);
+      border: 1px solid rgba(0,201,167,0.25);
+      padding: 8px;
+      min-height: 52px;
+    }
+    .day.idle { background: var(--bg2); border-color: var(--border); }
+    .day .d { font-size: 10px; color: var(--muted); }
+    .day .p { font-size: 13px; font-weight: 700; color: var(--buy); margin-top: 4px; font-family: var(--mono); }
+    .day .m { font-size: 10px; color: var(--dim); margin-top: 4px; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    .stats .l { font-size: 10px; color: var(--muted); letter-spacing: 0.08em; }
+    .stats .v { font-size: 18px; font-weight: 700; margin-top: 4px; font-family: var(--mono); }
+    .stats .v.gold { color: var(--gold); background: none; border: 0; height: auto; }
+    .curve {
+      height: 110px;
+      background: var(--bg0);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: flex-end;
+      gap: 3px;
+      padding: 8px;
+    }
+    .curve span {
+      flex: 1;
+      background: linear-gradient(180deg, var(--buy), #007a66);
+      min-height: 4px;
+      animation: rise 0.8s ease both;
+    }
+    .curve span:last-child { background: linear-gradient(180deg, var(--warn), #a76a00); }
+    .foot { display: flex; gap: 6px; margin-top: 10px; }
+    .foot .btn { height: 22px; padding: 0 12px; }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <div class="brand">
+      <h1>NABZ Quantum · Obsidian Gold</h1>
+      <p>Creative redesign of the trade panel — charcoal glass, molten-gold rail, teal/crimson execution, cyan prop telemetry. This preview mirrors the MT5 Expert UI.</p>
+    </div>
+
+    <aside class="panel" aria-label="Main control panel">
+      <div class="hdr">
+        <div><span class="title">NABZ</span><span class="ver">v2.0.0</span></div>
+        <span class="chip">SP 34.0</span>
+      </div>
+
+      <div class="sec">RISK ENGINE</div>
+      <div class="risk">
+        <button class="btn">−</button>
+        <input class="edit" value="0.50" readonly />
+        <button class="btn">+</button>
+        <button class="btn mode on">%</button>
+        <button class="btn mode">$</button>
+        <button class="btn mode">LOT</button>
+        <button class="btn mode">BAL</button>
+      </div>
+
+      <div class="grid3">
+        <button class="btn buy">BUY</button>
+        <button class="btn sell">SELL</button>
+        <button class="btn">DRAG</button>
+        <button class="btn">P.Buy</button>
+        <button class="btn">P.Sell</button>
+        <button class="btn dim">CancelP</button>
+        <button class="btn gold">ACTIVE</button>
+        <button class="btn sos">SOS</button>
+        <button class="btn dim">CANCEL</button>
+        <button class="btn">CLOSE ALL</button>
+        <button class="btn">Save Pos</button>
+        <button class="btn warn">RISK FREE</button>
+      </div>
+
+      <div class="sec">POSITIONS</div>
+      <div class="pos">
+        <span class="side">SELL</span>
+        <span>XAUUSD · 0.51%</span>
+        <span class="pl">+0.21%</span>
+        <button class="btn mini warn">R</button>
+        <button class="btn mini sell">✕</button>
+      </div>
+      <div class="sum">Open 1 &nbsp; Risk +0.51% &nbsp; P/L +0.21%</div>
+
+      <div class="sec">LIVE ANALYSIS · PROP <span class="live">LIVE</span></div>
+      <div class="metric"><span>Total DD</span><b>0.00%</b></div>
+      <div class="bar" style="--w:8%"><i></i></div>
+      <div class="metric"><span>Daily DD</span><b>0.22%</b></div>
+      <div class="bar cyan" style="--w:18%"><i></i></div>
+      <div class="metric"><span>Target</span><b style="color:var(--buy)">1.71%</b></div>
+      <div class="bar gold" style="--w:22%"><i></i></div>
+      <div class="sum">Floating risk −0.51%</div>
+
+      <div class="sec">ECONOMIC NEWS · TODAY</div>
+      <div class="news">
+        <div><strong>USD</strong> · Columbus Day · 03:30 · RELEASED</div>
+        <div><strong>CAD</strong> · Thanksgiving · 03:30 · RELEASED</div>
+        <div><strong>MXN</strong> · Columbus Day · 03:30 · RELEASED</div>
+      </div>
+
+      <div class="nav">
+        <button class="btn on">JOU</button>
+        <button class="btn">SESS</button>
+        <button class="btn">ECO</button>
+        <button class="btn">Coach</button>
+        <button class="btn">%</button>
+        <button class="btn">Sett</button>
+      </div>
+      <div class="links">
+        <button class="btn">SIGNAL</button>
+        <button class="btn">EDUCATION</button>
+        <button class="btn">WEBSITE</button>
+      </div>
+    </aside>
+
+    <section class="journal" aria-label="Trading journal">
+      <div class="j-hdr">
+        <h2>TRADING JOURNAL</h2>
+        <span class="chip" style="color:var(--muted)">2026/10/10 → 10/16</span>
+      </div>
+      <div class="tabs">
+        <button class="btn gold" style="height:24px;padding:0 14px">WEEK</button>
+        <button class="btn" style="height:24px;padding:0 14px;color:var(--muted)">MONTH</button>
+        <span class="chip" style="color:var(--muted)">CAL · Gregorian</span>
+        <span class="chip" style="color:var(--muted)">P/L · $</span>
+      </div>
+      <div class="days">
+        <div class="day">
+          <div class="d">MON 10/12</div>
+          <div class="p">+$428.76</div>
+          <div class="m">WR 79% · N 14</div>
+        </div>
+        <div class="day idle"><div class="d">TUE 10/13</div><div class="p" style="color:var(--muted)">$0.00</div></div>
+        <div class="day idle"><div class="d">WED 10/14</div><div class="p" style="color:var(--muted)">$0.00</div></div>
+        <div class="day idle"><div class="d">THU 10/15</div><div class="p" style="color:var(--muted)">$0.00</div></div>
+        <div class="day idle"><div class="d">FRI 10/16</div><div class="p" style="color:var(--muted)">$0.00</div></div>
+      </div>
+      <div class="stats">
+        <div><div class="l">NET</div><div class="v" style="color:var(--buy)">+$428.76</div></div>
+        <div><div class="l">WIN RATE</div><div class="v">78.6%</div></div>
+        <div><div class="l">TRADES</div><div class="v">14</div></div>
+        <div><div class="l">PROFIT FACTOR</div><div class="v gold">380.43</div></div>
+        <div><div class="l">AVG / TRADE</div><div class="v">+$30.63</div></div>
+        <div><div class="l">STREAKS</div><div class="v">W7 / L2</div></div>
+      </div>
+      <div class="sec" style="margin-top:0">BALANCE / EQUITY CURVE</div>
+      <div class="curve" id="curve"></div>
+      <div class="foot">
+        <button class="btn" style="color:var(--buy)">BAL</button>
+        <button class="btn" style="color:var(--warn)">EQUITY</button>
+        <button class="btn gold">BOTH</button>
+        <span class="chip" style="color:var(--muted);margin-left:auto">X · TRADES</span>
+      </div>
+    </section>
+  </div>
+  <script>
+    const curve = document.getElementById("curve");
+    const heights = [18,22,28,26,35,42,40,48,55,52,60,68,72,78,85,88,82,90,95,100];
+    heights.forEach((h, i) => {
+      const s = document.createElement("span");
+      s.style.height = h + "%";
+      s.style.animationDelay = (i * 0.03) + "s";
+      curve.appendChild(s);
+    });
+  </script>
+</body>
+</html>
