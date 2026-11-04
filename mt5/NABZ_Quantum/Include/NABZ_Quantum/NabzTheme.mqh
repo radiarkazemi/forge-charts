@@ -6,7 +6,7 @@
 
 #define NABZ_PREFIX     "NABZ2_"
 #define NABZ_SESS_PFX   "NABZSESS_"
-#define NABZ_VERSION    "2.1.0"  // roomier + minimize + header timer
+#define NABZ_VERSION    "2.2.0"  // stale pos fix + panel R:R + position cards
 #define NABZ_TITLE      "NABZ"
 
 //--- Base layout (scaled at runtime via NabzLayout)

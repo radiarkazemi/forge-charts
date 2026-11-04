@@ -224,11 +224,21 @@ void NabzUI_DrawHeader(NabzUIState &ui, const int x, int &y)
    y += 34;
 }
 
+void NabzUI_ApplyRRToDrag(NabzUIState &ui)
+{
+   if(!ui.drag.active || !ui.risk.autoRR) return;
+   double r = MathAbs(ui.drag.entry - ui.drag.sl);
+   if(r <= 0) return;
+   ui.drag.tp = ui.drag.isBuy
+      ? ui.drag.entry + r * ui.risk.defaultRR
+      : ui.drag.entry - r * ui.risk.defaultRR;
+}
+
 void NabzUI_DrawRisk(NabzUIState &ui, const int x, int &y)
 {
    NabzLayout L = ui.layout;
    NabzUI_Label("risk_lab", x, y, "RISK ENGINE", COL_MUTED, L.fontSec, "Segoe UI Semibold");
-   y += 18;
+   y += 20;
 
    int inner = L.panelW - 2 * L.pad;
    int modeW = 34;
@@ -250,7 +260,18 @@ void NabzUI_DrawRisk(NabzUIState &ui, const int x, int &y)
       NabzUI_Button("risk_mode_" + IntegerToString(i), bx + i * (modeW + 4), y, modeW, L.btnH,
                     NabzRiskModeLabel(m), on ? COL_GOLD : COL_BG3, on ? COL_BG0 : COL_MUTED);
    }
-   y += L.btnH + L.gap + 2;
+   y += L.btnH + L.gap + 4;
+
+   // R:R row — always visible & editable on the main panel
+   NabzUI_Label("rr_lab", x, y + 8, "R:R", COL_MUTED, L.fontSec, "Segoe UI Semibold");
+   NabzUI_Button("rr_minus", x + 36, y, 30, L.btnH, "−", COL_BG3, COL_TEXT);
+   NabzUI_Edit("rr_val", x + 70, y, 64, L.btnH, DoubleToString(ui.risk.defaultRR, 2), COL_BG3, COL_GOLD);
+   NabzUI_Button("rr_plus", x + 138, y, 30, L.btnH, "+", COL_BG3, COL_TEXT);
+   NabzUI_Button("rr_auto", x + 176, y, inner - 176, L.btnH,
+                 ui.risk.autoRR ? "Auto R:R  ON" : "Auto R:R  OFF",
+                 ui.risk.autoRR ? COL_BUY_DIM : COL_BG3,
+                 ui.risk.autoRR ? COL_TEXT : COL_MUTED);
+   y += L.btnH + L.gap + 4;
 }
 
 void NabzUI_DrawExec(NabzUIState &ui, const int x, int &y)
@@ -285,64 +306,92 @@ void NabzUI_DrawExec(NabzUIState &ui, const int x, int &y)
    y += h + L.section;
 }
 
+bool NabzUI_SymbolMatch(const string posSym)
+{
+   if(posSym == _Symbol) return true;
+   // brokers often alias GOLD / XAUUSD / XAUUSDm
+   string a = posSym, b = _Symbol;
+   StringToUpper(a); StringToUpper(b);
+   if(a == b) return true;
+   bool aGold = (StringFind(a, "XAU") >= 0 || StringFind(a, "GOLD") >= 0);
+   bool bGold = (StringFind(b, "XAU") >= 0 || StringFind(b, "GOLD") >= 0);
+   return (aGold && bGold);
+}
+
 void NabzUI_DrawPositions(NabzUIState &ui, const int x, int &y)
 {
+   // Drop previous position cards so closed trades cannot linger / overlap
+   ObjectsDeleteAll(0, NABZ_PREFIX + "pos");
+
    NabzLayout L = ui.layout;
    NabzUI_Label("pos_lab", x, y, "POSITIONS", COL_MUTED, L.fontSec, "Segoe UI Semibold");
-   y += 18;
+   y += 20;
 
    int shown = 0;
    double totRisk = 0, totPl = 0;
    int openN = 0;
-   int rowH = 28;
+   int rowH = 52; // two-line card: side/pl + Entry / Risk Free
+   int pw = L.panelW - 2 * L.pad;
+   int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
 
-   for(int i = 0; i < PositionsTotal(); ++i)
+   for(int i = PositionsTotal() - 1; i >= 0; --i)
    {
       ulong ticket = PositionGetTicket(i);
-      if(ticket == 0) continue;
+      if(ticket == 0 || !PositionSelectByTicket(ticket)) continue;
       string sym = PositionGetString(POSITION_SYMBOL);
-      if(sym != _Symbol) continue;
+      if(!NabzUI_SymbolMatch(sym)) continue;
+
       openN++;
       long type = PositionGetInteger(POSITION_TYPE);
       double vol = PositionGetDouble(POSITION_VOLUME);
       double open = PositionGetDouble(POSITION_PRICE_OPEN);
       double sl = PositionGetDouble(POSITION_SL);
       double profit = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
-      double riskPct = (sl > 0) ? NabzPositionRiskPct(sym, vol, open, sl) : 0;
+      double riskPct = (sl > 0.0) ? NabzPositionRiskPct(sym, vol, open, sl) : 0.0;
       double plPct = NabzProfitPct(profit);
       totRisk += riskPct;
       totPl += plPct;
 
-      if(shown < 3)
-      {
-         string side = (type == POSITION_TYPE_BUY ? "BUY" : "SELL");
-         color sideCol = (type == POSITION_TYPE_BUY ? COL_BUY : COL_SELL);
-         int pw = L.panelW - 2 * L.pad;
-         NabzUI_Rect("posr_" + IntegerToString(shown), x, y, pw, rowH, COL_BG2, COL_BORDER, 1);
-         NabzUI_Label("pos_side_" + IntegerToString(shown), x + 8, y + 7, side, sideCol, L.fontSec, "Segoe UI Semibold");
-         NabzUI_Label("pos_info_" + IntegerToString(shown), x + 48, y + 7,
-                      StringFormat("%s  %.2f%%", sym, riskPct), COL_TEXT, L.fontSec);
-         NabzUI_Label("pos_pl_" + IntegerToString(shown), x + pw - 78, y + 7,
-                      NabzPctFmt(plPct, 2), (plPct >= 0 ? COL_BUY : COL_SELL), L.fontSec, "Segoe UI", ANCHOR_RIGHT_UPPER);
-         NabzUI_Button("pos_rf_" + IntegerToString(shown), x + pw - 52, y + 3, 22, 22, "R", COL_WARN, COL_BG0);
-         NabzUI_Button("pos_x_" + IntegerToString(shown), x + pw - 26, y + 3, 22, 22, "✕", COL_SELL_DIM, COL_TEXT);
-         ObjectSetString(0, NABZ_PREFIX + "pos_rf_" + IntegerToString(shown), OBJPROP_TOOLTIP, IntegerToString(ticket));
-         ObjectSetString(0, NABZ_PREFIX + "pos_x_" + IntegerToString(shown), OBJPROP_TOOLTIP, IntegerToString(ticket));
-         y += rowH + 4;
-         shown++;
-      }
+      if(shown >= 3) continue;
+
+      string side = (type == POSITION_TYPE_BUY ? "BUY" : "SELL");
+      color sideCol = (type == POSITION_TYPE_BUY ? COL_BUY : COL_SELL);
+      string idx = IntegerToString(shown);
+
+      NabzUI_Rect("posr_" + idx, x, y, pw, rowH, COL_BG2, COL_BORDER, 1);
+      // Line 1: side · symbol · risk% · p/l
+      NabzUI_Label("pos_side_" + idx, x + 8, y + 6, side, sideCol, L.fontSec, "Segoe UI Semibold");
+      NabzUI_Label("pos_info_" + idx, x + 48, y + 6,
+                   StringFormat("%s   ×%.2f%%", sym, riskPct), COL_TEXT, L.fontSec);
+      NabzUI_Label("pos_pl_" + idx, x + pw - 8, y + 6,
+                   NabzPctFmt(plPct, 2), (plPct >= 0 ? COL_BUY : COL_SELL), L.fontSec,
+                   "Segoe UI Semibold", ANCHOR_RIGHT_UPPER);
+
+      // Line 2: Entry price + Risk Free under Entry + close
+      NabzUI_Label("pos_entry_" + idx, x + 8, y + 28,
+                   "Entry  " + DoubleToString(open, digits), COL_MUTED, L.fontTiny);
+      int btnY = y + 24;
+      int btnH = 24;
+      NabzUI_Button("pos_rf_" + idx, x + pw - 118, btnY, 70, btnH, "Risk Free", COL_WARN, COL_BG0);
+      NabzUI_Button("pos_x_" + idx, x + pw - 42, btnY, 34, btnH, "✕", COL_SELL_DIM, COL_TEXT);
+      ObjectSetString(0, NABZ_PREFIX + "pos_rf_" + idx, OBJPROP_TOOLTIP, IntegerToString(ticket));
+      ObjectSetString(0, NABZ_PREFIX + "pos_x_" + idx, OBJPROP_TOOLTIP, IntegerToString(ticket));
+
+      y += rowH + 8;
+      shown++;
    }
 
    if(openN == 0)
    {
       NabzUI_Label("pos_empty", x, y, "No open positions — ready.", COL_DIM, L.fontBody);
-      y += 20;
+      y += 22;
    }
 
    NabzUI_Label("pos_sum", x, y,
-                StringFormat("Open %d    Risk %s    P/L %s", openN, NabzPctFmt(totRisk, 2), NabzPctFmt(totPl, 2)),
+                StringFormat("Open: %d     Risk: %s     P/L: %s",
+                             openN, NabzPctFmt(totRisk, 2), NabzPctFmt(totPl, 2)),
                 COL_MUTED, L.fontSec);
-   y += 22;
+   y += 26;
 }
 
 void NabzUI_DrawProp(NabzUIState &ui, const int x, int &y)
@@ -352,30 +401,30 @@ void NabzUI_DrawProp(NabzUIState &ui, const int x, int &y)
    NabzUI_Label("prop_lab", x, y, "LIVE ANALYSIS  ·  PROP", COL_MUTED, L.fontSec, "Segoe UI Semibold");
    NabzUI_Chip("prop_live", x + pw - 52, y - 2, 52, 18, "LIVE",
                NabzMix(COL_INFO, COL_BG1, 70), COL_INFO, 8);
-   y += 20;
+   y += 24;
 
    NabzUI_Label("dd_t_l", x, y, "Total DD", COL_MUTED, L.fontSec);
    NabzUI_Label("dd_t_v", x + pw, y, StringFormat("%.2f%%", ui.prop.totalDD), COL_TEXT, L.fontSec, "Segoe UI", ANCHOR_RIGHT_UPPER);
-   y += 16;
-   NabzUI_Progress("dd_t", x, y, pw, 7, ui.prop.totalDD / MathMax(0.01, ui.propCfg.maxTotalDD),
+   y += 18;
+   NabzUI_Progress("dd_t", x, y, pw, 8, ui.prop.totalDD / MathMax(0.01, ui.propCfg.maxTotalDD),
                    (ui.prop.totalDD > ui.propCfg.maxTotalDD * 0.7 ? COL_DANGER : COL_WARN), COL_PROGRESS_BG);
-   y += 14;
+   y += 16;
 
    NabzUI_Label("dd_d_l", x, y, "Daily DD", COL_MUTED, L.fontSec);
    NabzUI_Label("dd_d_v", x + pw, y, StringFormat("%.2f%%", ui.prop.dailyDD), COL_TEXT, L.fontSec, "Segoe UI", ANCHOR_RIGHT_UPPER);
-   y += 16;
-   NabzUI_Progress("dd_d", x, y, pw, 7, ui.prop.dailyDD / MathMax(0.01, ui.propCfg.maxDailyDD),
+   y += 18;
+   NabzUI_Progress("dd_d", x, y, pw, 8, ui.prop.dailyDD / MathMax(0.01, ui.propCfg.maxDailyDD),
                    (ui.prop.dailyDD > ui.propCfg.maxDailyDD * 0.7 ? COL_DANGER : COL_INFO), COL_PROGRESS_BG);
-   y += 14;
+   y += 16;
 
    NabzUI_Label("tgt_l", x, y, "Target", COL_MUTED, L.fontSec);
    NabzUI_Label("tgt_v", x + pw, y, StringFormat("%.1f%%", ui.prop.targetPct), COL_BUY, L.fontSec, "Segoe UI", ANCHOR_RIGHT_UPPER);
+   y += 18;
+   NabzUI_Progress("tgt", x, y, pw, 9, ui.prop.targetPct / 100.0, COL_GOLD, COL_PROGRESS_BG);
    y += 16;
-   NabzUI_Progress("tgt", x, y, pw, 8, ui.prop.targetPct / 100.0, COL_GOLD, COL_PROGRESS_BG);
-   y += 14;
 
    NabzUI_Label("frisk", x, y, StringFormat("Floating risk   %s", NabzPctFmt(-ui.prop.floatingRisk, 2)), COL_MUTED, L.fontSec);
-   y += 20;
+   y += 24;
 }
 
 void NabzUI_DrawNews(NabzUIState &ui, const int x, int &y)
@@ -828,15 +877,22 @@ void NabzUI_PickCoachTip(NabzUIState &ui)
    ui.coachTip = tips[(int)(TimeCurrent() % 6)];
 }
 
+bool NabzUI_ToggleMinimize(NabzUIState &ui)
+{
+   ui.minimized = !ui.minimized;
+   if(ui.minimized)
+      ui.view = NABZ_VIEW_NONE;
+   return true;
+}
+
 void NabzUI_Redraw(NabzUIState &ui)
 {
    static bool s_init = false;
    static bool s_wasMin = false;
+   // Full wipe only on first paint / minimize toggle (keeps edit fields usable)
    if(!s_init || s_wasMin != ui.minimized)
    {
       ObjectsDeleteAll(0, NABZ_PREFIX);
-      // also wipe any leftover chart timer boxes from v2.0
-      ObjectsDeleteAll(0, NABZ_PREFIX + "timer_");
       s_wasMin = ui.minimized;
       s_init = true;
    }
@@ -851,12 +907,45 @@ void NabzUI_Redraw(NabzUIState &ui)
    ChartRedraw(0);
 }
 
-bool NabzUI_ToggleMinimize(NabzUIState &ui)
+// Returns true if the click was handled here
+bool NabzUI_HandleClick(NabzUIState &ui, const string key)
 {
-   ui.minimized = !ui.minimized;
-   if(ui.minimized)
-      ui.view = NABZ_VIEW_NONE;
-   return true;
+   if(key == "btn_minmax")
+   {
+      NabzUI_ToggleMinimize(ui);
+      return true;
+   }
+   if(key == "rr_minus")
+   {
+      ui.risk.defaultRR = MathMax(0.5, ui.risk.defaultRR - 0.25);
+      NabzUI_ApplyRRToDrag(ui);
+      return true;
+   }
+   if(key == "rr_plus")
+   {
+      ui.risk.defaultRR = MathMin(10.0, ui.risk.defaultRR + 0.25);
+      NabzUI_ApplyRRToDrag(ui);
+      return true;
+   }
+   if(key == "rr_auto")
+   {
+      ui.risk.autoRR = !ui.risk.autoRR;
+      NabzUI_ApplyRRToDrag(ui);
+      return true;
+   }
+   return false;
+}
+
+void NabzUI_ReadRREdit(NabzUIState &ui)
+{
+   string n = NABZ_PREFIX + "rr_val";
+   if(ObjectFind(0, n) < 0) return;
+   double v = StringToDouble(ObjectGetString(0, n, OBJPROP_TEXT));
+   if(v >= 0.5 && v <= 20.0)
+   {
+      ui.risk.defaultRR = v;
+      NabzUI_ApplyRRToDrag(ui);
+   }
 }
 
 #endif
