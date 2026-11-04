@@ -51,14 +51,14 @@ string NabzSessionName(const datetime t, const NabzSessionHours &h)
 
 void NabzSessionsClear()
 {
-   ObjectsDeleteAll(0, NABZ_PREFIX + "SESS_");
+   ObjectsDeleteAll(0, NABZ_SESS_PFX);
 }
 
 void NabzDrawOneSession(const string tag, const datetime t0, const datetime t1,
                         const double hi, const double lo, const color col)
 {
-   string box = NABZ_PREFIX + "SESS_" + tag + "_BOX";
-   string lab = NABZ_PREFIX + "SESS_" + tag + "_LAB";
+   string box = NABZ_SESS_PFX + tag + "_BOX";
+   string lab = NABZ_SESS_PFX + tag + "_LAB";
    if(ObjectFind(0, box) < 0)
       ObjectCreate(0, box, OBJ_RECTANGLE, 0, t0, hi, t1, lo);
    ObjectSetInteger(0, box, OBJPROP_TIME, 0, t0);

@@ -5,57 +5,55 @@
 //+------------------------------------------------------------------+
 #property copyright "Forge Charts / NABZ"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "2.00"
-#property description "NABZ Quantum v2 — Obsidian Gold UI, risk engine, prop live analysis, journal, sessions, news"
+#property version   "2.10"
+#property description "NABZ Quantum v2.1 — roomier UI, minimize, header candle timer, responsive layout"
 
-// Single-file build — copy ONLY this .mq5 into MQL5/Experts/ (no Include folder needed)
+// Single-file build v2.1 — copy ONLY this .mq5 into MQL5/Experts/
 #include <Trade/Trade.mqh>
 
 
 //===== BEGIN NabzTheme.mqh =====
 //+------------------------------------------------------------------+
 //| NabzTheme.mqh — Obsidian Gold visual system                      |
-//| Creative dark UI: charcoal glass + molten gold accents           |
 //+------------------------------------------------------------------+
 
 #define NABZ_PREFIX     "NABZ2_"
-#define NABZ_VERSION    "2.0.0"
+#define NABZ_SESS_PFX   "NABZSESS_"
+#define NABZ_VERSION    "2.1.0"  // roomier + minimize + header timer
 #define NABZ_TITLE      "NABZ"
 
-//--- Layout
-#define NABZ_PANEL_W    268
-#define NABZ_PANEL_X    12
-#define NABZ_PANEL_Y    28
-#define NABZ_PAD        10
-#define NABZ_ROW_H      28
-#define NABZ_BTN_H      30
-#define NABZ_GAP        6
-#define NABZ_SECTION_GAP 10
-#define NABZ_RADIUS_HINT 6
+//--- Base layout (scaled at runtime via NabzLayout)
+#define NABZ_PANEL_W0   330
+#define NABZ_PANEL_X0   14
+#define NABZ_PANEL_Y0   24
+#define NABZ_PAD0       14
+#define NABZ_BTN_H0     36
+#define NABZ_GAP0       8
+#define NABZ_SECTION0   14
 
-//--- Obsidian Gold palette (MQL5 color = BGR via C'R,G,B')
-#define COL_BG0         C'8,10,14'         // deepest void
-#define COL_BG1         C'14,17,24'        // panel body
-#define COL_BG2         C'20,24,33'        // raised surface
-#define COL_BG3         C'28,34,46'        // chip / input
-#define COL_BORDER      C'42,50,68'        // soft edge
-#define COL_BORDER_HI   C'70,82,108'       // focus edge
-#define COL_GOLD        C'240,180,41'      // molten gold
-#define COL_GOLD_DIM    C'160,118,28'      // muted gold
-#define COL_GOLD_GLOW   C'255,210,90'      // highlight
-#define COL_BUY         C'0,201,167'       // teal buy
+//--- Obsidian Gold palette
+#define COL_BG0         C'8,10,14'
+#define COL_BG1         C'14,17,24'
+#define COL_BG2         C'20,24,33'
+#define COL_BG3         C'28,34,46'
+#define COL_BORDER      C'42,50,68'
+#define COL_BORDER_HI   C'70,82,108'
+#define COL_GOLD        C'240,180,41'
+#define COL_GOLD_DIM    C'160,118,28'
+#define COL_GOLD_GLOW   C'255,210,90'
+#define COL_BUY         C'0,201,167'
 #define COL_BUY_DIM     C'0,120,100'
-#define COL_SELL        C'255,77,109'      // crimson sell
+#define COL_SELL        C'255,77,109'
 #define COL_SELL_DIM    C'150,40,60'
-#define COL_WARN        C'255,176,32'      // amber
-#define COL_INFO        C'88,196,220'      // cyan
-#define COL_TEXT        C'230,237,243'     // primary text
-#define COL_MUTED       C'120,132,150'     // secondary
-#define COL_DIM         C'70,80,96'        // tertiary
-#define COL_OK          C'63,185,80'       // success green
-#define COL_DANGER      C'248,81,73'       // danger
-#define COL_ACTIVE      C'240,180,41'      // active chip
-#define COL_SOS         C'180,20,40'       // emergency
+#define COL_WARN        C'255,176,32'
+#define COL_INFO        C'88,196,220'
+#define COL_TEXT        C'230,237,243'
+#define COL_MUTED       C'120,132,150'
+#define COL_DIM         C'70,80,96'
+#define COL_OK          C'63,185,80'
+#define COL_DANGER      C'248,81,73'
+#define COL_ACTIVE      C'240,180,41'
+#define COL_SOS         C'180,20,40'
 #define COL_PROGRESS_BG C'32,40,54'
 #define COL_SESSION_LON C'56,100,180'
 #define COL_SESSION_NY  C'180,90,50'
@@ -63,10 +61,10 @@
 
 enum ENUM_NABZ_RISK_MODE
 {
-   NABZ_RISK_PCT  = 0,  // % of equity
-   NABZ_RISK_USD  = 1,  // fixed $
-   NABZ_RISK_LOT  = 2,  // fixed lot
-   NABZ_RISK_BAL  = 3   // % of balance
+   NABZ_RISK_PCT  = 0,
+   NABZ_RISK_USD  = 1,
+   NABZ_RISK_LOT  = 2,
+   NABZ_RISK_BAL  = 3
 };
 
 enum ENUM_NABZ_VIEW
@@ -85,6 +83,22 @@ enum ENUM_NABZ_DETAIL_UNIT
    NABZ_UNIT_PERCENT = 0,
    NABZ_UNIT_MONEY   = 1,
    NABZ_UNIT_POINTS  = 2
+};
+
+struct NabzLayout
+{
+   int panelW;
+   int panelX;
+   int panelY;
+   int pad;
+   int btnH;
+   int gap;
+   int section;
+   int fontTitle;
+   int fontBody;
+   int fontSec;
+   int fontTiny;
+   int miniH;
 };
 
 string NabzRiskModeLabel(const ENUM_NABZ_RISK_MODE m)
@@ -108,6 +122,42 @@ color NabzMix(const color a, const color b, const int pctTowardB)
    int g = ag + (bg - ag) * p / 100;
    int bl = ab + (bb - ab) * p / 100;
    return (color)(r | (g << 8) | (bl << 16));
+}
+
+void NabzLayoutCompute(NabzLayout &L)
+{
+   int chartW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+   int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+   if(chartW < 400) chartW = 1200;
+   if(chartH < 300) chartH = 800;
+
+   // Target ~28% of chart width, clamped
+   int w = (int)MathRound(chartW * 0.28);
+   if(w < 300) w = 300;
+   if(w > 380) w = 380;
+   if(w > chartW - 80) w = chartW - 80;
+
+   double scale = (double)w / (double)NABZ_PANEL_W0;
+   if(scale < 0.92) scale = 0.92;
+   if(scale > 1.15) scale = 1.15;
+
+   // Short charts → slightly tighter vertical rhythm
+   double vScale = 1.0;
+   if(chartH < 700) vScale = 0.92;
+   if(chartH < 560) vScale = 0.86;
+
+   L.panelW   = w;
+   L.panelX   = NABZ_PANEL_X0;
+   L.panelY   = NABZ_PANEL_Y0;
+   L.pad      = (int)MathRound(NABZ_PAD0 * scale);
+   L.btnH     = (int)MathRound(NABZ_BTN_H0 * scale * vScale);
+   L.gap      = (int)MathRound(NABZ_GAP0 * scale);
+   L.section  = (int)MathRound(NABZ_SECTION0 * scale * vScale);
+   L.fontTitle = (scale >= 1.05 ? 16 : 15);
+   L.fontBody  = (scale >= 1.05 ? 11 : 10);
+   L.fontSec   = 9;
+   L.fontTiny  = 8;
+   L.miniH     = 52;
 }
 
 //+------------------------------------------------------------------+
@@ -707,14 +757,14 @@ string NabzSessionName(const datetime t, const NabzSessionHours &h)
 
 void NabzSessionsClear()
 {
-   ObjectsDeleteAll(0, NABZ_PREFIX + "SESS_");
+   ObjectsDeleteAll(0, NABZ_SESS_PFX);
 }
 
 void NabzDrawOneSession(const string tag, const datetime t0, const datetime t1,
                         const double hi, const double lo, const color col)
 {
-   string box = NABZ_PREFIX + "SESS_" + tag + "_BOX";
-   string lab = NABZ_PREFIX + "SESS_" + tag + "_LAB";
+   string box = NABZ_SESS_PFX + tag + "_BOX";
+   string lab = NABZ_SESS_PFX + tag + "_LAB";
    if(ObjectFind(0, box) < 0)
       ObjectCreate(0, box, OBJ_RECTANGLE, 0, t0, hi, t1, lo);
    ObjectSetInteger(0, box, OBJPROP_TIME, 0, t0);
@@ -1029,34 +1079,41 @@ string NabzPctFmt(const double v, const int digits = 2)
 
 //===== BEGIN NabzUI.mqh =====
 //+------------------------------------------------------------------+
-//| NabzUI.mqh — Obsidian Gold interactive panel                     |
+//| NabzUI.mqh — Obsidian Gold interactive panel (v2.1)              |
 //+------------------------------------------------------------------+
 
 
-//--- Shared UI state
 struct NabzUIState
 {
-   NabzRiskState   risk;
-   NabzPropConfig  propCfg;
+   NabzRiskState    risk;
+   NabzPropConfig   propCfg;
    NabzPropSnapshot prop;
-   NabzNewsState   news;
+   NabzNewsState    news;
    NabzJournalStats journal;
    NabzSessionHours sessions;
-   NabzDragPlan    drag;
-   ENUM_NABZ_VIEW  view;
-   bool            eaActive;
-   bool            showSessions;
-   int             panelH;
-   int             pulse;          // 0/1 for ACTIVE glow
-   datetime        lastLossPauseUntil;
-   string          coachTip;
-   int             settingsTab;    // 0 RISK 1 Account 2 NEWS 3 MANAGE 4 ALERT
+   NabzDragPlan     drag;
+   NabzLayout       layout;
+   ENUM_NABZ_VIEW   view;
+   bool             eaActive;
+   bool             showSessions;
+   bool             minimized;
+   int              panelH;
+   int              pulse;
+   datetime         lastLossPauseUntil;
+   string           coachTip;
+   int              settingsTab;
+   string           candleLeft;   // mm:ss shown in header
 };
 
-//+------------------------------------------------------------------+
 void NabzUI_DeleteAll()
 {
    ObjectsDeleteAll(0, NABZ_PREFIX);
+}
+
+void NabzUI_EnsureVis(const string n)
+{
+   ObjectSetInteger(0, n, OBJPROP_HIDDEN, false);
+   ObjectSetInteger(0, n, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
 }
 
 bool NabzUI_Rect(const string name, const int x, const int y, const int w, const int h,
@@ -1068,8 +1125,8 @@ bool NabzUI_Rect(const string name, const int x, const int y, const int w, const
    ObjectSetInteger(0, n, OBJPROP_CORNER, CORNER_LEFT_UPPER);
    ObjectSetInteger(0, n, OBJPROP_XDISTANCE, x);
    ObjectSetInteger(0, n, OBJPROP_YDISTANCE, y);
-   ObjectSetInteger(0, n, OBJPROP_XSIZE, w);
-   ObjectSetInteger(0, n, OBJPROP_YSIZE, h);
+   ObjectSetInteger(0, n, OBJPROP_XSIZE, MathMax(1, w));
+   ObjectSetInteger(0, n, OBJPROP_YSIZE, MathMax(1, h));
    ObjectSetInteger(0, n, OBJPROP_BGCOLOR, bg);
    ObjectSetInteger(0, n, OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetInteger(0, n, OBJPROP_COLOR, border);
@@ -1077,11 +1134,12 @@ bool NabzUI_Rect(const string name, const int x, const int y, const int w, const
    ObjectSetInteger(0, n, OBJPROP_BACK, false);
    ObjectSetInteger(0, n, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, n, OBJPROP_ZORDER, z);
+   NabzUI_EnsureVis(n);
    return true;
 }
 
 bool NabzUI_Label(const string name, const int x, const int y, const string text,
-                  const color clr, const int size = 9, const string font = "Segoe UI",
+                  const color clr, const int size = 10, const string font = "Segoe UI",
                   const ENUM_ANCHOR_POINT anchor = ANCHOR_LEFT_UPPER, const int z = 1)
 {
    string n = NABZ_PREFIX + name;
@@ -1097,6 +1155,7 @@ bool NabzUI_Label(const string name, const int x, const int y, const string text
    ObjectSetInteger(0, n, OBJPROP_COLOR, clr);
    ObjectSetInteger(0, n, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, n, OBJPROP_ZORDER, z);
+   NabzUI_EnsureVis(n);
    return true;
 }
 
@@ -1109,17 +1168,18 @@ bool NabzUI_Button(const string name, const int x, const int y, const int w, con
    ObjectSetInteger(0, n, OBJPROP_CORNER, CORNER_LEFT_UPPER);
    ObjectSetInteger(0, n, OBJPROP_XDISTANCE, x);
    ObjectSetInteger(0, n, OBJPROP_YDISTANCE, y);
-   ObjectSetInteger(0, n, OBJPROP_XSIZE, w);
-   ObjectSetInteger(0, n, OBJPROP_YSIZE, h);
+   ObjectSetInteger(0, n, OBJPROP_XSIZE, MathMax(1, w));
+   ObjectSetInteger(0, n, OBJPROP_YSIZE, MathMax(1, h));
    ObjectSetString(0, n, OBJPROP_TEXT, text);
    ObjectSetString(0, n, OBJPROP_FONT, "Segoe UI Semibold");
-   ObjectSetInteger(0, n, OBJPROP_FONTSIZE, 9);
+   ObjectSetInteger(0, n, OBJPROP_FONTSIZE, 10);
    ObjectSetInteger(0, n, OBJPROP_COLOR, fg);
    ObjectSetInteger(0, n, OBJPROP_BGCOLOR, bg);
    ObjectSetInteger(0, n, OBJPROP_BORDER_COLOR, NabzMix(bg, COL_BORDER_HI, 35));
    ObjectSetInteger(0, n, OBJPROP_STATE, false);
    ObjectSetInteger(0, n, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, n, OBJPROP_ZORDER, z);
+   NabzUI_EnsureVis(n);
    return true;
 }
 
@@ -1132,17 +1192,18 @@ bool NabzUI_Edit(const string name, const int x, const int y, const int w, const
    ObjectSetInteger(0, n, OBJPROP_CORNER, CORNER_LEFT_UPPER);
    ObjectSetInteger(0, n, OBJPROP_XDISTANCE, x);
    ObjectSetInteger(0, n, OBJPROP_YDISTANCE, y);
-   ObjectSetInteger(0, n, OBJPROP_XSIZE, w);
-   ObjectSetInteger(0, n, OBJPROP_YSIZE, h);
+   ObjectSetInteger(0, n, OBJPROP_XSIZE, MathMax(1, w));
+   ObjectSetInteger(0, n, OBJPROP_YSIZE, MathMax(1, h));
    ObjectSetString(0, n, OBJPROP_TEXT, text);
    ObjectSetString(0, n, OBJPROP_FONT, "Consolas");
-   ObjectSetInteger(0, n, OBJPROP_FONTSIZE, 10);
+   ObjectSetInteger(0, n, OBJPROP_FONTSIZE, 11);
    ObjectSetInteger(0, n, OBJPROP_COLOR, fg);
    ObjectSetInteger(0, n, OBJPROP_BGCOLOR, bg);
    ObjectSetInteger(0, n, OBJPROP_BORDER_COLOR, COL_GOLD_DIM);
    ObjectSetInteger(0, n, OBJPROP_ALIGN, ALIGN_CENTER);
    ObjectSetInteger(0, n, OBJPROP_READONLY, false);
    ObjectSetInteger(0, n, OBJPROP_ZORDER, 3);
+   NabzUI_EnsureVis(n);
    return true;
 }
 
@@ -1151,102 +1212,160 @@ void NabzUI_Progress(const string name, const int x, const int y, const int w, c
 {
    double p = MathMax(0.0, MathMin(1.0, pct01));
    NabzUI_Rect(name + "_trk", x, y, w, h, track, track, 1);
-   int fw = (int)MathMax(2, w * p);
+   int fw = (int)MathMax(3, w * p);
    NabzUI_Rect(name + "_fil", x, y, fw, h, fill, fill, 2);
 }
 
 void NabzUI_Chip(const string name, const int x, const int y, const int w, const int h,
-                 const string text, const color bg, const color fg)
+                 const string text, const color bg, const color fg, const int fontSize = 9)
 {
    NabzUI_Rect(name + "_bg", x, y, w, h, bg, NabzMix(bg, COL_BORDER_HI, 40), 1);
-   NabzUI_Label(name + "_tx", x + w / 2, y + h / 2 - 6, text, fg, 8, "Segoe UI Semibold", ANCHOR_CENTER, 2);
+   NabzUI_Label(name + "_tx", x + w / 2, y + h / 2, text, fg, fontSize, "Segoe UI Semibold", ANCHOR_CENTER, 2);
+}
+
+string NabzUI_CandleLeftText()
+{
+   datetime t0 = iTime(_Symbol, PERIOD_CURRENT, 0);
+   int sec = PeriodSeconds(_Period);
+   int left = (int)(t0 + sec - TimeCurrent());
+   if(left < 0) left = 0;
+   return StringFormat("%02d:%02d", left / 60, left % 60);
 }
 
 //+------------------------------------------------------------------+
+void NabzUI_DrawMiniBar(NabzUIState &ui)
+{
+   NabzLayout L = ui.layout;
+   int x0 = L.panelX;
+   int y0 = L.panelY;
+   int w  = L.panelW;
+   int h  = L.miniH;
+
+   NabzUI_Rect("panel_glow", x0 - 2, y0 - 2, w + 4, h + 4,
+               NabzMix(COL_GOLD, COL_BG0, 88), NabzMix(COL_GOLD, COL_BG0, 75), 0);
+   NabzUI_Rect("panel_body", x0, y0, w, h, COL_BG1, COL_BORDER, 1);
+   NabzUI_Rect("panel_rail", x0, y0, 3, h, COL_GOLD, COL_GOLD, 2);
+
+   NabzUI_Label("hdr_title", x0 + L.pad, y0 + 14, NABZ_TITLE, COL_GOLD_GLOW, L.fontTitle, "Segoe UI Semibold");
+   NabzUI_Label("hdr_ver", x0 + L.pad + 58, y0 + 18, "v" + NABZ_VERSION, COL_MUTED, L.fontTiny);
+
+   double spread = (SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID))
+                   / SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   NabzUI_Chip("hdr_sp", x0 + w - L.pad - 148, y0 + 12, 70, 28,
+               StringFormat("SP %.1f", spread), COL_BG3, (spread > 50 ? COL_WARN : COL_INFO), 9);
+
+   if(ui.risk.showCandleTimer)
+      NabzUI_Chip("hdr_timer", x0 + w - L.pad - 74, y0 + 12, 40, 28,
+                  ui.candleLeft, COL_BG3, COL_GOLD_GLOW, 9);
+
+   // Expand button
+   NabzUI_Button("btn_minmax", x0 + w - L.pad - 28, y0 + 12, 28, 28, "▢", COL_GOLD, COL_BG0);
+   ObjectSetString(0, NABZ_PREFIX + "btn_minmax", OBJPROP_TOOLTIP, "Expand NABZ panel");
+
+   ui.panelH = h;
+}
+
 void NabzUI_DrawHeader(NabzUIState &ui, const int x, int &y)
 {
+   NabzLayout L = ui.layout;
    double spread = (SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID))
                    / SymbolInfoDouble(_Symbol, SYMBOL_POINT);
 
-   // Gold accent bar under title
-   NabzUI_Rect("hdr_accent", x, y, NABZ_PANEL_W - 2 * NABZ_PAD, 3, COL_GOLD, COL_GOLD, 2);
-   y += 8;
+   NabzUI_Rect("hdr_accent", x, y, L.panelW - 2 * L.pad, 3, COL_GOLD, COL_GOLD, 2);
+   y += 10;
 
-   NabzUI_Label("hdr_title", x, y, NABZ_TITLE, COL_GOLD_GLOW, 14, "Segoe UI Semibold");
-   NabzUI_Label("hdr_ver", x + 62, y + 4, "v" + NABZ_VERSION, COL_MUTED, 8, "Segoe UI");
+   NabzUI_Label("hdr_title", x, y, NABZ_TITLE, COL_GOLD_GLOW, L.fontTitle, "Segoe UI Semibold");
+   NabzUI_Label("hdr_ver", x + 64, y + 5, "v" + NABZ_VERSION, COL_MUTED, L.fontTiny);
 
-   string sp = StringFormat("SP %.1f", spread);
-   color spCol = (spread > 50 ? COL_WARN : COL_INFO);
-   NabzUI_Chip("hdr_sp", x + NABZ_PANEL_W - 2 * NABZ_PAD - 72, y - 2, 72, 22, sp, COL_BG3, spCol);
-   y += 28;
+   int right = x + L.panelW - 2 * L.pad;
+   NabzUI_Button("btn_minmax", right - 30, y - 2, 30, 28, "—", COL_BG3, COL_TEXT);
+   ObjectSetString(0, NABZ_PREFIX + "btn_minmax", OBJPROP_TOOLTIP, "Minimize NABZ panel");
+
+   if(ui.risk.showCandleTimer)
+   {
+      NabzUI_Chip("hdr_timer", right - 108, y - 2, 72, 28, ui.candleLeft, COL_BG3, COL_GOLD_GLOW, 10);
+      NabzUI_Chip("hdr_sp", right - 186, y - 2, 72, 28,
+                  StringFormat("SP %.1f", spread), COL_BG3, (spread > 50 ? COL_WARN : COL_INFO), 9);
+   }
+   else
+   {
+      NabzUI_Chip("hdr_sp", right - 108, y - 2, 72, 28,
+                  StringFormat("SP %.1f", spread), COL_BG3, (spread > 50 ? COL_WARN : COL_INFO), 9);
+   }
+   y += 34;
 }
 
 void NabzUI_DrawRisk(NabzUIState &ui, const int x, int &y)
 {
-   NabzUI_Label("risk_lab", x, y, "RISK ENGINE", COL_MUTED, 8, "Segoe UI Semibold");
-   y += 16;
+   NabzLayout L = ui.layout;
+   NabzUI_Label("risk_lab", x, y, "RISK ENGINE", COL_MUTED, L.fontSec, "Segoe UI Semibold");
+   y += 18;
 
-   NabzUI_Button("risk_minus", x, y, 30, NABZ_BTN_H, "−", COL_BG3, COL_TEXT);
-   NabzUI_Edit("risk_val", x + 34, y, 70, NABZ_BTN_H, DoubleToString(ui.risk.value, 2), COL_BG3, COL_GOLD);
-   NabzUI_Button("risk_plus", x + 108, y, 30, NABZ_BTN_H, "+", COL_BG3, COL_TEXT);
+   int inner = L.panelW - 2 * L.pad;
+   int modeW = 34;
+   int modes = 4 * modeW + 3 * 4;
+   int leftW = inner - modes - L.gap;
+   int minusW = 34;
+   int plusW = 34;
+   int editW = leftW - minusW - plusW - 8;
 
-   int bx = x + 144;
-   int bw = 26;
+   NabzUI_Button("risk_minus", x, y, minusW, L.btnH, "−", COL_BG3, COL_TEXT);
+   NabzUI_Edit("risk_val", x + minusW + 4, y, editW, L.btnH, DoubleToString(ui.risk.value, 2), COL_BG3, COL_GOLD);
+   NabzUI_Button("risk_plus", x + minusW + 4 + editW + 4, y, plusW, L.btnH, "+", COL_BG3, COL_TEXT);
+
+   int bx = x + leftW + L.gap;
    for(int i = 0; i < 4; ++i)
    {
       ENUM_NABZ_RISK_MODE m = (ENUM_NABZ_RISK_MODE)i;
       bool on = (ui.risk.mode == m);
-      color bg = on ? COL_GOLD : COL_BG3;
-      color fg = on ? COL_BG0 : COL_MUTED;
-      NabzUI_Button("risk_mode_" + IntegerToString(i), bx + i * (bw + 3), y, bw, NABZ_BTN_H,
-                    NabzRiskModeLabel(m), bg, fg);
+      NabzUI_Button("risk_mode_" + IntegerToString(i), bx + i * (modeW + 4), y, modeW, L.btnH,
+                    NabzRiskModeLabel(m), on ? COL_GOLD : COL_BG3, on ? COL_BG0 : COL_MUTED);
    }
-   y += NABZ_BTN_H + NABZ_GAP;
+   y += L.btnH + L.gap + 2;
 }
 
 void NabzUI_DrawExec(NabzUIState &ui, const int x, int &y)
 {
-   int bw = (NABZ_PANEL_W - 2 * NABZ_PAD - 2 * NABZ_GAP) / 3;
-   int h = NABZ_BTN_H + 2;
+   NabzLayout L = ui.layout;
+   int bw = (L.panelW - 2 * L.pad - 2 * L.gap) / 3;
+   int h = L.btnH + 2;
 
-   // Row 1
    NabzUI_Button("btn_buy",  x, y, bw, h, "BUY", COL_BUY, COL_BG0);
-   NabzUI_Button("btn_sell", x + bw + NABZ_GAP, y, bw, h, "SELL", COL_SELL, COL_BG0);
-   NabzUI_Button("btn_drag", x + 2 * (bw + NABZ_GAP), y, bw, h,
+   NabzUI_Button("btn_sell", x + bw + L.gap, y, bw, h, "SELL", COL_SELL, COL_BG0);
+   NabzUI_Button("btn_drag", x + 2 * (bw + L.gap), y, bw, h,
                  ui.drag.active ? "DRAG ●" : "DRAG",
                  ui.drag.active ? COL_GOLD : COL_BG3,
                  ui.drag.active ? COL_BG0 : COL_TEXT);
-   y += h + NABZ_GAP;
+   y += h + L.gap;
 
-   // Row 2
    NabzUI_Button("btn_pbuy",  x, y, bw, h, "P.Buy", NabzMix(COL_BUY, COL_BG2, 55), COL_TEXT);
-   NabzUI_Button("btn_psell", x + bw + NABZ_GAP, y, bw, h, "P.Sell", NabzMix(COL_SELL, COL_BG2, 55), COL_TEXT);
-   NabzUI_Button("btn_cancelp", x + 2 * (bw + NABZ_GAP), y, bw, h, "CancelP", COL_BG3, COL_MUTED);
-   y += h + NABZ_GAP;
+   NabzUI_Button("btn_psell", x + bw + L.gap, y, bw, h, "P.Sell", NabzMix(COL_SELL, COL_BG2, 55), COL_TEXT);
+   NabzUI_Button("btn_cancelp", x + 2 * (bw + L.gap), y, bw, h, "CancelP", COL_BG3, COL_MUTED);
+   y += h + L.gap;
 
-   // Row 3
    color actBg = ui.eaActive ? (ui.pulse ? COL_GOLD : COL_GOLD_DIM) : COL_BG3;
    color actFg = ui.eaActive ? COL_BG0 : COL_MUTED;
    NabzUI_Button("btn_active", x, y, bw, h, ui.eaActive ? "ACTIVE" : "PAUSED", actBg, actFg);
-   NabzUI_Button("btn_sos", x + bw + NABZ_GAP, y, bw, h, "SOS", COL_SOS, COL_TEXT);
-   NabzUI_Button("btn_cancel", x + 2 * (bw + NABZ_GAP), y, bw, h, "CANCEL", COL_BG3, COL_MUTED);
-   y += h + NABZ_GAP;
+   NabzUI_Button("btn_sos", x + bw + L.gap, y, bw, h, "SOS", COL_SOS, COL_TEXT);
+   NabzUI_Button("btn_cancel", x + 2 * (bw + L.gap), y, bw, h, "CANCEL", COL_BG3, COL_MUTED);
+   y += h + L.gap;
 
-   // Row 4
    NabzUI_Button("btn_closeall", x, y, bw, h, "CLOSE ALL", NabzMix(COL_INFO, COL_BG2, 40), COL_TEXT);
-   NabzUI_Button("btn_savepos", x + bw + NABZ_GAP, y, bw, h, "Save Pos", COL_BG3, COL_TEXT);
-   NabzUI_Button("btn_riskfree", x + 2 * (bw + NABZ_GAP), y, bw, h, "RISK FREE", COL_WARN, COL_BG0);
-   y += h + NABZ_SECTION_GAP;
+   NabzUI_Button("btn_savepos", x + bw + L.gap, y, bw, h, "Save Pos", COL_BG3, COL_TEXT);
+   NabzUI_Button("btn_riskfree", x + 2 * (bw + L.gap), y, bw, h, "RISK FREE", COL_WARN, COL_BG0);
+   y += h + L.section;
 }
 
 void NabzUI_DrawPositions(NabzUIState &ui, const int x, int &y)
 {
-   NabzUI_Label("pos_lab", x, y, "POSITIONS", COL_MUTED, 8, "Segoe UI Semibold");
-   y += 16;
+   NabzLayout L = ui.layout;
+   NabzUI_Label("pos_lab", x, y, "POSITIONS", COL_MUTED, L.fontSec, "Segoe UI Semibold");
+   y += 18;
 
    int shown = 0;
    double totRisk = 0, totPl = 0;
    int openN = 0;
+   int rowH = 28;
 
    for(int i = 0; i < PositionsTotal(); ++i)
    {
@@ -1259,8 +1378,7 @@ void NabzUI_DrawPositions(NabzUIState &ui, const int x, int &y)
       double vol = PositionGetDouble(POSITION_VOLUME);
       double open = PositionGetDouble(POSITION_PRICE_OPEN);
       double sl = PositionGetDouble(POSITION_SL);
-      double profit = PositionGetDouble(POSITION_PROFIT)
-                    + PositionGetDouble(POSITION_SWAP);
+      double profit = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
       double riskPct = (sl > 0) ? NabzPositionRiskPct(sym, vol, open, sl) : 0;
       double plPct = NabzProfitPct(profit);
       totRisk += riskPct;
@@ -1270,85 +1388,78 @@ void NabzUI_DrawPositions(NabzUIState &ui, const int x, int &y)
       {
          string side = (type == POSITION_TYPE_BUY ? "BUY" : "SELL");
          color sideCol = (type == POSITION_TYPE_BUY ? COL_BUY : COL_SELL);
-         NabzUI_Rect("posr_" + IntegerToString(shown), x, y, NABZ_PANEL_W - 2 * NABZ_PAD, 24, COL_BG2, COL_BORDER, 1);
-         NabzUI_Label("pos_side_" + IntegerToString(shown), x + 6, y + 5,
-                      side, sideCol, 8, "Segoe UI Semibold");
-         NabzUI_Label("pos_info_" + IntegerToString(shown), x + 42, y + 5,
-                      StringFormat("%s  %.2f%%", sym, riskPct), COL_TEXT, 8);
-         NabzUI_Label("pos_pl_" + IntegerToString(shown), x + 150, y + 5,
-                      NabzPctFmt(plPct, 2), (plPct >= 0 ? COL_BUY : COL_SELL), 8);
-         NabzUI_Button("pos_rf_" + IntegerToString(shown), x + 198, y + 2, 20, 20, "R", COL_WARN, COL_BG0);
-         NabzUI_Button("pos_x_" + IntegerToString(shown), x + 220, y + 2, 20, 20, "✕", COL_SELL_DIM, COL_TEXT);
-         // store ticket mapping via object tooltip
+         int pw = L.panelW - 2 * L.pad;
+         NabzUI_Rect("posr_" + IntegerToString(shown), x, y, pw, rowH, COL_BG2, COL_BORDER, 1);
+         NabzUI_Label("pos_side_" + IntegerToString(shown), x + 8, y + 7, side, sideCol, L.fontSec, "Segoe UI Semibold");
+         NabzUI_Label("pos_info_" + IntegerToString(shown), x + 48, y + 7,
+                      StringFormat("%s  %.2f%%", sym, riskPct), COL_TEXT, L.fontSec);
+         NabzUI_Label("pos_pl_" + IntegerToString(shown), x + pw - 78, y + 7,
+                      NabzPctFmt(plPct, 2), (plPct >= 0 ? COL_BUY : COL_SELL), L.fontSec, "Segoe UI", ANCHOR_RIGHT_UPPER);
+         NabzUI_Button("pos_rf_" + IntegerToString(shown), x + pw - 52, y + 3, 22, 22, "R", COL_WARN, COL_BG0);
+         NabzUI_Button("pos_x_" + IntegerToString(shown), x + pw - 26, y + 3, 22, 22, "✕", COL_SELL_DIM, COL_TEXT);
          ObjectSetString(0, NABZ_PREFIX + "pos_rf_" + IntegerToString(shown), OBJPROP_TOOLTIP, IntegerToString(ticket));
          ObjectSetString(0, NABZ_PREFIX + "pos_x_" + IntegerToString(shown), OBJPROP_TOOLTIP, IntegerToString(ticket));
-         y += 26;
+         y += rowH + 4;
          shown++;
       }
    }
 
    if(openN == 0)
    {
-      NabzUI_Label("pos_empty", x, y, "No open positions — ready.", COL_DIM, 8);
-      y += 18;
+      NabzUI_Label("pos_empty", x, y, "No open positions — ready.", COL_DIM, L.fontBody);
+      y += 20;
    }
 
    NabzUI_Label("pos_sum", x, y,
-                StringFormat("Open %d   Risk %s   P/L %s", openN, NabzPctFmt(totRisk, 2), NabzPctFmt(totPl, 2)),
-                COL_MUTED, 8);
-   y += 18;
+                StringFormat("Open %d    Risk %s    P/L %s", openN, NabzPctFmt(totRisk, 2), NabzPctFmt(totPl, 2)),
+                COL_MUTED, L.fontSec);
+   y += 22;
 }
 
 void NabzUI_DrawProp(NabzUIState &ui, const int x, int &y)
 {
-   NabzUI_Label("prop_lab", x, y, "LIVE ANALYSIS  ·  PROP", COL_MUTED, 8, "Segoe UI Semibold");
-   NabzUI_Chip("prop_live", x + NABZ_PANEL_W - 2 * NABZ_PAD - 48, y - 2, 48, 16, "LIVE",
-               NabzMix(COL_INFO, COL_BG1, 70), COL_INFO);
-   y += 18;
+   NabzLayout L = ui.layout;
+   int pw = L.panelW - 2 * L.pad;
+   NabzUI_Label("prop_lab", x, y, "LIVE ANALYSIS  ·  PROP", COL_MUTED, L.fontSec, "Segoe UI Semibold");
+   NabzUI_Chip("prop_live", x + pw - 52, y - 2, 52, 18, "LIVE",
+               NabzMix(COL_INFO, COL_BG1, 70), COL_INFO, 8);
+   y += 20;
 
-   // Total DD
-   NabzUI_Label("dd_t_l", x, y, "Total DD", COL_MUTED, 8);
-   NabzUI_Label("dd_t_v", x + NABZ_PANEL_W - 2 * NABZ_PAD, y,
-                StringFormat("%.2f%%", ui.prop.totalDD), COL_TEXT, 8, "Segoe UI", ANCHOR_RIGHT_UPPER);
-   y += 14;
-   NabzUI_Progress("dd_t", x, y, NABZ_PANEL_W - 2 * NABZ_PAD, 5,
-                   ui.prop.totalDD / MathMax(0.01, ui.propCfg.maxTotalDD),
+   NabzUI_Label("dd_t_l", x, y, "Total DD", COL_MUTED, L.fontSec);
+   NabzUI_Label("dd_t_v", x + pw, y, StringFormat("%.2f%%", ui.prop.totalDD), COL_TEXT, L.fontSec, "Segoe UI", ANCHOR_RIGHT_UPPER);
+   y += 16;
+   NabzUI_Progress("dd_t", x, y, pw, 7, ui.prop.totalDD / MathMax(0.01, ui.propCfg.maxTotalDD),
                    (ui.prop.totalDD > ui.propCfg.maxTotalDD * 0.7 ? COL_DANGER : COL_WARN), COL_PROGRESS_BG);
-   y += 10;
-
-   // Daily DD
-   NabzUI_Label("dd_d_l", x, y, "Daily DD", COL_MUTED, 8);
-   NabzUI_Label("dd_d_v", x + NABZ_PANEL_W - 2 * NABZ_PAD, y,
-                StringFormat("%.2f%%", ui.prop.dailyDD), COL_TEXT, 8, "Segoe UI", ANCHOR_RIGHT_UPPER);
    y += 14;
-   NabzUI_Progress("dd_d", x, y, NABZ_PANEL_W - 2 * NABZ_PAD, 5,
-                   ui.prop.dailyDD / MathMax(0.01, ui.propCfg.maxDailyDD),
+
+   NabzUI_Label("dd_d_l", x, y, "Daily DD", COL_MUTED, L.fontSec);
+   NabzUI_Label("dd_d_v", x + pw, y, StringFormat("%.2f%%", ui.prop.dailyDD), COL_TEXT, L.fontSec, "Segoe UI", ANCHOR_RIGHT_UPPER);
+   y += 16;
+   NabzUI_Progress("dd_d", x, y, pw, 7, ui.prop.dailyDD / MathMax(0.01, ui.propCfg.maxDailyDD),
                    (ui.prop.dailyDD > ui.propCfg.maxDailyDD * 0.7 ? COL_DANGER : COL_INFO), COL_PROGRESS_BG);
-   y += 10;
-
-   // Target
-   NabzUI_Label("tgt_l", x, y, "Target", COL_MUTED, 8);
-   NabzUI_Label("tgt_v", x + NABZ_PANEL_W - 2 * NABZ_PAD, y,
-                StringFormat("%.1f%%", ui.prop.targetPct), COL_BUY, 8, "Segoe UI", ANCHOR_RIGHT_UPPER);
    y += 14;
-   NabzUI_Progress("tgt", x, y, NABZ_PANEL_W - 2 * NABZ_PAD, 6,
-                   ui.prop.targetPct / 100.0, COL_GOLD, COL_PROGRESS_BG);
-   y += 12;
 
-   NabzUI_Label("frisk", x, y,
-                StringFormat("Floating risk  %s", NabzPctFmt(-ui.prop.floatingRisk, 2)),
-                COL_MUTED, 8);
-   y += 18;
+   NabzUI_Label("tgt_l", x, y, "Target", COL_MUTED, L.fontSec);
+   NabzUI_Label("tgt_v", x + pw, y, StringFormat("%.1f%%", ui.prop.targetPct), COL_BUY, L.fontSec, "Segoe UI", ANCHOR_RIGHT_UPPER);
+   y += 16;
+   NabzUI_Progress("tgt", x, y, pw, 8, ui.prop.targetPct / 100.0, COL_GOLD, COL_PROGRESS_BG);
+   y += 14;
+
+   NabzUI_Label("frisk", x, y, StringFormat("Floating risk   %s", NabzPctFmt(-ui.prop.floatingRisk, 2)), COL_MUTED, L.fontSec);
+   y += 20;
 }
 
 void NabzUI_DrawNews(NabzUIState &ui, const int x, int &y)
 {
-   NabzUI_Label("news_lab", x, y, "ECONOMIC NEWS  ·  TODAY", COL_MUTED, 8, "Segoe UI Semibold");
-   NabzUI_Button("news_prev", x + NABZ_PANEL_W - 2 * NABZ_PAD - 48, y - 4, 22, 20, "‹", COL_BG3, COL_TEXT);
-   NabzUI_Button("news_next", x + NABZ_PANEL_W - 2 * NABZ_PAD - 24, y - 4, 22, 20, "›", COL_BG3, COL_TEXT);
-   y += 18;
+   NabzLayout L = ui.layout;
+   int pw = L.panelW - 2 * L.pad;
+   NabzUI_Label("news_lab", x, y, "ECONOMIC NEWS  ·  TODAY", COL_MUTED, L.fontSec, "Segoe UI Semibold");
+   NabzUI_Button("news_prev", x + pw - 56, y - 4, 26, 24, "‹", COL_BG3, COL_TEXT);
+   NabzUI_Button("news_next", x + pw - 26, y - 4, 26, 24, "›", COL_BG3, COL_TEXT);
+   y += 22;
 
-   NabzUI_Rect("news_box", x, y, NABZ_PANEL_W - 2 * NABZ_PAD, 54, COL_BG2, COL_BORDER, 1);
+   int boxH = 72;
+   NabzUI_Rect("news_box", x, y, pw, boxH, COL_BG2, COL_BORDER, 1);
    for(int i = 0; i < 3; ++i)
    {
       int idx = ui.news.offset + i;
@@ -1356,45 +1467,54 @@ void NabzUI_DrawNews(NabzUIState &ui, const int x, int &y)
       color c = COL_MUTED;
       if(idx < ui.news.count)
          c = ui.news.items[idx].released ? COL_DIM : COL_TEXT;
-      NabzUI_Label("news_l" + IntegerToString(i), x + 6, y + 4 + i * 16, line, c, 7, "Segoe UI");
+      NabzUI_Label("news_l" + IntegerToString(i), x + 8, y + 8 + i * 20, line, c, L.fontSec, "Segoe UI");
    }
-   y += 60;
+   y += boxH + L.section;
 }
 
 void NabzUI_DrawNav(NabzUIState &ui, const int x, int &y)
 {
+   NabzLayout L = ui.layout;
    string tabs[6] = {"JOU", "SESS", "ECO", "Coach", "%", "Sett"};
    ENUM_NABZ_VIEW views[6] = {NABZ_VIEW_JOURNAL, NABZ_VIEW_SESSIONS, NABZ_VIEW_ECO,
                               NABZ_VIEW_COACH, NABZ_VIEW_PCT, NABZ_VIEW_SETTINGS};
-   int bw = (NABZ_PANEL_W - 2 * NABZ_PAD - 5 * 4) / 6;
+   int bw = (L.panelW - 2 * L.pad - 5 * 5) / 6;
+   int bh = 30;
    for(int i = 0; i < 6; ++i)
    {
       bool on = (ui.view == views[i]);
-      NabzUI_Button("nav_" + IntegerToString(i), x + i * (bw + 4), y, bw, 26,
+      NabzUI_Button("nav_" + IntegerToString(i), x + i * (bw + 5), y, bw, bh,
                     tabs[i], on ? COL_GOLD : COL_BG3, on ? COL_BG0 : COL_MUTED);
    }
-   y += 32;
+   y += bh + L.gap + 2;
 
-   int fw = (NABZ_PANEL_W - 2 * NABZ_PAD - 2 * NABZ_GAP) / 3;
-   NabzUI_Button("lnk_signal", x, y, fw, 24, "SIGNAL", COL_BG2, COL_INFO);
-   NabzUI_Button("lnk_edu", x + fw + NABZ_GAP, y, fw, 24, "EDUCATION", COL_BG2, COL_MUTED);
-   NabzUI_Button("lnk_web", x + 2 * (fw + NABZ_GAP), y, fw, 24, "WEBSITE", COL_BG2, COL_MUTED);
-   y += 30;
+   int fw = (L.panelW - 2 * L.pad - 2 * L.gap) / 3;
+   NabzUI_Button("lnk_signal", x, y, fw, 28, "SIGNAL", COL_BG2, COL_INFO);
+   NabzUI_Button("lnk_edu", x + fw + L.gap, y, fw, 28, "EDUCATION", COL_BG2, COL_MUTED);
+   NabzUI_Button("lnk_web", x + 2 * (fw + L.gap), y, fw, 28, "WEBSITE", COL_BG2, COL_MUTED);
+   y += 34;
 }
 
-//+------------------------------------------------------------------+
 void NabzUI_DrawMainPanel(NabzUIState &ui)
 {
-   int x0 = NABZ_PANEL_X;
-   int y0 = NABZ_PANEL_Y;
-   int x = x0 + NABZ_PAD;
-   int y = y0 + NABZ_PAD;
+   NabzLayoutCompute(ui.layout);
+   ui.candleLeft = NabzUI_CandleLeftText();
 
-   // Soft outer glow frame
-   NabzUI_Rect("panel_glow", x0 - 2, y0 - 2, NABZ_PANEL_W + 4, ui.panelH + 4,
+   if(ui.minimized)
+   {
+      NabzUI_DrawMiniBar(ui);
+      return;
+   }
+
+   NabzLayout L = ui.layout;
+   int x0 = L.panelX;
+   int y0 = L.panelY;
+   int x = x0 + L.pad;
+   int y = y0 + L.pad;
+
+   NabzUI_Rect("panel_glow", x0 - 2, y0 - 2, L.panelW + 4, ui.panelH + 4,
                NabzMix(COL_GOLD, COL_BG0, 88), NabzMix(COL_GOLD, COL_BG0, 75), 0);
-   NabzUI_Rect("panel_body", x0, y0, NABZ_PANEL_W, ui.panelH, COL_BG1, COL_BORDER, 1);
-   // Left gold rail
+   NabzUI_Rect("panel_body", x0, y0, L.panelW, ui.panelH, COL_BG1, COL_BORDER, 1);
    NabzUI_Rect("panel_rail", x0, y0, 3, ui.panelH, COL_GOLD, COL_GOLD, 2);
 
    NabzUI_DrawHeader(ui, x, y);
@@ -1405,8 +1525,7 @@ void NabzUI_DrawMainPanel(NabzUIState &ui)
    NabzUI_DrawNews(ui, x, y);
    NabzUI_DrawNav(ui, x, y);
 
-   ui.panelH = (y - y0) + NABZ_PAD;
-   // resize body to measured height
+   ui.panelH = (y - y0) + L.pad;
    ObjectSetInteger(0, NABZ_PREFIX + "panel_body", OBJPROP_YSIZE, ui.panelH);
    ObjectSetInteger(0, NABZ_PREFIX + "panel_glow", OBJPROP_YSIZE, ui.panelH + 4);
    ObjectSetInteger(0, NABZ_PREFIX + "panel_rail", OBJPROP_YSIZE, ui.panelH);
@@ -1415,46 +1534,43 @@ void NabzUI_DrawMainPanel(NabzUIState &ui)
 //+------------------------------------------------------------------+
 void NabzUI_DrawJournal(NabzUIState &ui)
 {
-   if(ui.view != NABZ_VIEW_JOURNAL)
+   if(ui.view != NABZ_VIEW_JOURNAL || ui.minimized)
    {
       ObjectsDeleteAll(0, NABZ_PREFIX + "jou_");
       return;
    }
-
    ObjectsDeleteAll(0, NABZ_PREFIX + "jou_");
 
-   int x0 = NABZ_PANEL_X + NABZ_PANEL_W + 16;
-   int y0 = NABZ_PANEL_Y;
-   int w = 420;
-   int h = 460;
-   int x = x0 + 14;
-   int y = y0 + 12;
+   NabzLayout L = ui.layout;
+   int x0 = L.panelX + L.panelW + 16;
+   int y0 = L.panelY;
+   int w = 440;
+   int h = 480;
+   int x = x0 + 16;
+   int y = y0 + 14;
 
    NabzUI_Rect("jou_glow", x0 - 2, y0 - 2, w + 4, h + 4, NabzMix(COL_INFO, COL_BG0, 90), COL_BORDER, 0);
    NabzUI_Rect("jou_body", x0, y0, w, h, COL_BG1, COL_BORDER, 1);
    NabzUI_Rect("jou_rail", x0, y0, 3, h, COL_INFO, COL_INFO, 2);
 
-   NabzUI_Label("jou_title", x, y, "TRADING JOURNAL", COL_GOLD_GLOW, 12, "Segoe UI Semibold");
-   NabzUI_Button("jou_close", x0 + w - 36, y0 + 10, 24, 24, "✕", COL_BG3, COL_MUTED);
+   NabzUI_Label("jou_title", x, y, "TRADING JOURNAL", COL_GOLD_GLOW, 13, "Segoe UI Semibold");
+   NabzUI_Button("jou_close", x0 + w - 40, y0 + 12, 28, 28, "✕", COL_BG3, COL_MUTED);
+   y += 30;
 
-   y += 26;
-   NabzUI_Button("jou_week", x, y, 70, 24, "WEEK",
-                 ui.journal.weekMode ? COL_GOLD : COL_BG3,
-                 ui.journal.weekMode ? COL_BG0 : COL_MUTED);
-   NabzUI_Button("jou_month", x + 76, y, 70, 24, "MONTH",
-                 !ui.journal.weekMode ? COL_GOLD : COL_BG3,
-                 !ui.journal.weekMode ? COL_BG0 : COL_MUTED);
-   NabzUI_Chip("jou_cal", x + 160, y, 100, 24, "CAL · Gregorian", COL_BG3, COL_MUTED);
-   NabzUI_Chip("jou_plu", x + 268, y, 60, 24, "P/L · $", COL_BG3, COL_MUTED);
-   y += 32;
+   NabzUI_Button("jou_week", x, y, 78, 28, "WEEK",
+                 ui.journal.weekMode ? COL_GOLD : COL_BG3, ui.journal.weekMode ? COL_BG0 : COL_MUTED);
+   NabzUI_Button("jou_month", x + 86, y, 78, 28, "MONTH",
+                 !ui.journal.weekMode ? COL_GOLD : COL_BG3, !ui.journal.weekMode ? COL_BG0 : COL_MUTED);
+   NabzUI_Chip("jou_cal", x + 176, y, 110, 28, "CAL · Gregorian", COL_BG3, COL_MUTED, 9);
+   NabzUI_Chip("jou_plu", x + 294, y, 70, 28, "P/L · $", COL_BG3, COL_MUTED, 9);
+   y += 36;
 
    string range = TimeToString(ui.journal.rangeFrom, TIME_DATE) + "  →  " +
                   TimeToString(ui.journal.rangeTo, TIME_DATE);
-   NabzUI_Label("jou_range", x, y, range, COL_MUTED, 8);
-   y += 18;
+   NabzUI_Label("jou_range", x, y, range, COL_MUTED, L.fontSec);
+   y += 20;
 
-   // Day strip
-   int dw = 72;
+   int dw = 76;
    int shown = 0;
    for(int i = 0; i < ui.journal.dayCount && shown < 5; ++i)
    {
@@ -1463,55 +1579,48 @@ void NabzUI_DrawJournal(NabzUIState &ui)
       string names[7] = {"SUN","MON","TUE","WED","THU","FRI","SAT"};
       bool profit = ds.net > 0;
       color bg = profit ? NabzMix(COL_BUY, COL_BG1, 70) : COL_BG2;
-      NabzUI_Rect("jou_d" + IntegerToString(shown), x + shown * (dw + 6), y, dw, 52, bg, COL_BORDER, 1);
-      NabzUI_Label("jou_dn" + IntegerToString(shown), x + shown * (dw + 6) + 6, y + 4,
-                   StringFormat("%s %d/%02d", names[dt.day_of_week], dt.mon, dt.day), COL_MUTED, 7);
-      NabzUI_Label("jou_dp" + IntegerToString(shown), x + shown * (dw + 6) + 6, y + 18,
-                   NabzMoneyFmt(ds.net), profit ? COL_BUY : COL_SELL, 9, "Segoe UI Semibold");
-      NabzUI_Label("jou_dw" + IntegerToString(shown), x + shown * (dw + 6) + 6, y + 34,
-                   StringFormat("WR %.0f%%  N %d", ds.winRate, ds.trades), COL_DIM, 7);
+      NabzUI_Rect("jou_d" + IntegerToString(shown), x + shown * (dw + 6), y, dw, 58, bg, COL_BORDER, 1);
+      NabzUI_Label("jou_dn" + IntegerToString(shown), x + shown * (dw + 6) + 6, y + 5,
+                   StringFormat("%s %d/%02d", names[dt.day_of_week], dt.mon, dt.day), COL_MUTED, 8);
+      NabzUI_Label("jou_dp" + IntegerToString(shown), x + shown * (dw + 6) + 6, y + 22,
+                   NabzMoneyFmt(ds.net), profit ? COL_BUY : COL_SELL, 10, "Segoe UI Semibold");
+      NabzUI_Label("jou_dw" + IntegerToString(shown), x + shown * (dw + 6) + 6, y + 40,
+                   StringFormat("WR %.0f%%  N %d", ds.winRate, ds.trades), COL_DIM, 8);
       shown++;
    }
    if(shown == 0)
-   {
-      NabzUI_Label("jou_empty", x, y + 10, "No closed trades in this range yet.", COL_DIM, 9);
-   }
-   y += 64;
+      NabzUI_Label("jou_empty", x, y + 12, "No closed trades in this range yet.", COL_DIM, L.fontBody);
+   y += 70;
 
-   // Stats grid
-   NabzUI_Rect("jou_stats", x, y, w - 28, 120, COL_BG2, COL_BORDER, 1);
-   int cx = x + 10, cy = y + 8;
-   NabzUI_Label("jou_net_l", cx, cy, "NET", COL_MUTED, 7);
-   NabzUI_Label("jou_net_v", cx, cy + 14, NabzMoneyFmt(ui.journal.net),
-                ui.journal.net >= 0 ? COL_BUY : COL_SELL, 12, "Segoe UI Semibold");
-   NabzUI_Label("jou_wr_l", cx + 130, cy, "WIN RATE", COL_MUTED, 7);
-   NabzUI_Label("jou_wr_v", cx + 130, cy + 14, StringFormat("%.1f%%", ui.journal.winRate), COL_TEXT, 12, "Segoe UI Semibold");
-   NabzUI_Label("jou_tr_l", cx + 250, cy, "TRADES", COL_MUTED, 7);
-   NabzUI_Label("jou_tr_v", cx + 250, cy + 14, IntegerToString(ui.journal.trades), COL_TEXT, 12, "Segoe UI Semibold");
-
-   cy += 42;
-   NabzUI_Label("jou_pf_l", cx, cy, "PROFIT FACTOR", COL_MUTED, 7);
-   NabzUI_Label("jou_pf_v", cx, cy + 14, DoubleToString(ui.journal.profitFactor, 2), COL_GOLD, 11, "Segoe UI Semibold");
-   NabzUI_Label("jou_avg_l", cx + 130, cy, "AVG / TRADE", COL_MUTED, 7);
-   NabzUI_Label("jou_avg_v", cx + 130, cy + 14, NabzMoneyFmt(ui.journal.avgTrade), COL_TEXT, 11, "Segoe UI Semibold");
-   NabzUI_Label("jou_st_l", cx + 250, cy, "STREAKS", COL_MUTED, 7);
-   NabzUI_Label("jou_st_v", cx + 250, cy + 14,
-                StringFormat("W%d / L%d", ui.journal.winStreak, ui.journal.lossStreak), COL_TEXT, 11);
-
-   cy += 42;
+   NabzUI_Rect("jou_stats", x, y, w - 32, 128, COL_BG2, COL_BORDER, 1);
+   int cx = x + 12, cy = y + 10;
+   NabzUI_Label("jou_net_l", cx, cy, "NET", COL_MUTED, 8);
+   NabzUI_Label("jou_net_v", cx, cy + 16, NabzMoneyFmt(ui.journal.net),
+                ui.journal.net >= 0 ? COL_BUY : COL_SELL, 13, "Segoe UI Semibold");
+   NabzUI_Label("jou_wr_l", cx + 140, cy, "WIN RATE", COL_MUTED, 8);
+   NabzUI_Label("jou_wr_v", cx + 140, cy + 16, StringFormat("%.1f%%", ui.journal.winRate), COL_TEXT, 13, "Segoe UI Semibold");
+   NabzUI_Label("jou_tr_l", cx + 270, cy, "TRADES", COL_MUTED, 8);
+   NabzUI_Label("jou_tr_v", cx + 270, cy + 16, IntegerToString(ui.journal.trades), COL_TEXT, 13, "Segoe UI Semibold");
+   cy += 48;
+   NabzUI_Label("jou_pf_l", cx, cy, "PROFIT FACTOR", COL_MUTED, 8);
+   NabzUI_Label("jou_pf_v", cx, cy + 16, DoubleToString(ui.journal.profitFactor, 2), COL_GOLD, 12, "Segoe UI Semibold");
+   NabzUI_Label("jou_avg_l", cx + 140, cy, "AVG / TRADE", COL_MUTED, 8);
+   NabzUI_Label("jou_avg_v", cx + 140, cy + 16, NabzMoneyFmt(ui.journal.avgTrade), COL_TEXT, 12, "Segoe UI Semibold");
+   NabzUI_Label("jou_st_l", cx + 270, cy, "STREAKS", COL_MUTED, 8);
+   NabzUI_Label("jou_st_v", cx + 270, cy + 16,
+                StringFormat("W%d / L%d", ui.journal.winStreak, ui.journal.lossStreak), COL_TEXT, 12);
+   cy += 48;
    NabzUI_Label("jou_best", cx, cy,
                 "BEST  " + (ui.journal.bestDay > 0 ? TimeToString(ui.journal.bestDay, TIME_DATE) : "—") +
-                "  " + NabzMoneyFmt(ui.journal.bestDayNet), COL_MUTED, 8);
-   NabzUI_Label("jou_sess", cx + 200, cy,
+                "  " + NabzMoneyFmt(ui.journal.bestDayNet), COL_MUTED, 9);
+   NabzUI_Label("jou_sess", cx + 210, cy,
                 "BEST SESSION  " + ui.journal.bestSession + "  " + NabzMoneyFmt(ui.journal.bestSessionNet),
-                COL_MUTED, 8);
-   y += 132;
+                COL_MUTED, 9);
+   y += 140;
 
-   // Equity curve (ASCII-ish spark via labels + mini bars)
-   NabzUI_Label("jou_curve_t", x, y, "BALANCE  /  EQUITY CURVE", COL_MUTED, 8, "Segoe UI Semibold");
-   y += 16;
-   NabzUI_Rect("jou_curve_bg", x, y, w - 28, 110, COL_BG0, COL_BORDER, 1);
-
+   NabzUI_Label("jou_curve_t", x, y, "BALANCE  /  EQUITY CURVE", COL_MUTED, L.fontSec, "Segoe UI Semibold");
+   y += 18;
+   NabzUI_Rect("jou_curve_bg", x, y, w - 32, 118, COL_BG0, COL_BORDER, 1);
    if(ui.journal.curveN > 1)
    {
       double mn = ui.journal.curve[0], mx = ui.journal.curve[0];
@@ -1521,8 +1630,8 @@ void NabzUI_DrawJournal(NabzUIState &ui)
          if(ui.journal.curve[i] > mx) mx = ui.journal.curve[i];
       }
       double span = MathMax(1.0, mx - mn);
-      int plotW = w - 40;
-      int plotH = 90;
+      int plotW = w - 48;
+      int plotH = 96;
       int samples = MathMin(ui.journal.curveN, 40);
       for(int i = 0; i < samples; ++i)
       {
@@ -1530,223 +1639,190 @@ void NabzUI_DrawJournal(NabzUIState &ui)
          double v = ui.journal.curve[src];
          int barH = (int)((v - mn) / span * plotH);
          if(barH < 2) barH = 2;
-         int bx = x + 8 + i * (plotW / samples);
-         int by = y + 100 - barH;
+         int bx = x + 10 + i * (plotW / samples);
+         int by = y + 108 - barH;
          NabzUI_Rect("jou_bar_" + IntegerToString(i), bx, by, MathMax(2, plotW / samples - 2), barH,
                      (i == samples - 1 ? COL_WARN : COL_BUY), (i == samples - 1 ? COL_WARN : COL_BUY), 2);
       }
-      NabzUI_Label("jou_cmin", x + 8, y + 96, DoubleToString(mn, 0), COL_DIM, 7);
-      NabzUI_Label("jou_cmax", x + 8, y + 4, DoubleToString(mx, 0), COL_DIM, 7);
+      NabzUI_Label("jou_cmin", x + 10, y + 100, DoubleToString(mn, 0), COL_DIM, 8);
+      NabzUI_Label("jou_cmax", x + 10, y + 6, DoubleToString(mx, 0), COL_DIM, 8);
    }
    else
-   {
-      NabzUI_Label("jou_cnodata", x + 12, y + 40, "Curve appears after closed trades.", COL_DIM, 9);
-   }
-   y += 118;
-   NabzUI_Button("jou_bal", x, y, 60, 22, "BAL", COL_BG3, COL_BUY);
-   NabzUI_Button("jou_eq", x + 66, y, 70, 22, "EQUITY", COL_BG3, COL_WARN);
-   NabzUI_Button("jou_both", x + 142, y, 60, 22, "BOTH", COL_GOLD, COL_BG0);
-   NabzUI_Chip("jou_xaxis", x + 220, y, 90, 22, "X · TRADES", COL_BG3, COL_MUTED);
+      NabzUI_Label("jou_cnodata", x + 14, y + 44, "Curve appears after closed trades.", COL_DIM, L.fontBody);
+   y += 126;
+   NabzUI_Button("jou_bal", x, y, 64, 26, "BAL", COL_BG3, COL_BUY);
+   NabzUI_Button("jou_eq", x + 72, y, 74, 26, "EQUITY", COL_BG3, COL_WARN);
+   NabzUI_Button("jou_both", x + 154, y, 64, 26, "BOTH", COL_GOLD, COL_BG0);
+   NabzUI_Chip("jou_xaxis", x + 230, y, 100, 26, "X · TRADES", COL_BG3, COL_MUTED, 9);
 }
 
-//+------------------------------------------------------------------+
 void NabzUI_DrawSettings(NabzUIState &ui)
 {
-   if(ui.view != NABZ_VIEW_SETTINGS)
+   if(ui.view != NABZ_VIEW_SETTINGS || ui.minimized)
    {
       ObjectsDeleteAll(0, NABZ_PREFIX + "set_");
       return;
    }
-
    ObjectsDeleteAll(0, NABZ_PREFIX + "set_");
 
-   int x0 = NABZ_PANEL_X + NABZ_PANEL_W + 16;
-   int y0 = NABZ_PANEL_Y;
-   int w = 360;
-   int h = 420;
-   int x = x0 + 14;
-   int y = y0 + 12;
+   NabzLayout L = ui.layout;
+   int x0 = L.panelX + L.panelW + 16;
+   int y0 = L.panelY;
+   int w = 380;
+   int h = 440;
+   int x = x0 + 16;
+   int y = y0 + 14;
 
    NabzUI_Rect("set_glow", x0 - 2, y0 - 2, w + 4, h + 4, NabzMix(COL_GOLD, COL_BG0, 90), COL_BORDER, 0);
    NabzUI_Rect("set_body", x0, y0, w, h, COL_BG1, COL_BORDER, 1);
    NabzUI_Rect("set_rail", x0, y0, 3, h, COL_GOLD, COL_GOLD, 2);
 
-   NabzUI_Label("set_title", x, y, "NABZ  /  SETTINGS", COL_GOLD_GLOW, 12, "Segoe UI Semibold");
-   NabzUI_Button("set_close", x0 + w - 36, y0 + 10, 24, 24, "✕", COL_BG3, COL_MUTED);
-   y += 28;
+   NabzUI_Label("set_title", x, y, "NABZ  /  SETTINGS", COL_GOLD_GLOW, 13, "Segoe UI Semibold");
+   NabzUI_Button("set_close", x0 + w - 40, y0 + 12, 28, 28, "✕", COL_BG3, COL_MUTED);
+   y += 32;
 
    string tabs[5] = {"RISK", "Account", "NEWS", "MANAGE", "ALERT"};
-   int tw = 62;
+   int tw = 66;
    for(int i = 0; i < 5; ++i)
    {
       bool on = (ui.settingsTab == i);
-      NabzUI_Button("set_tab_" + IntegerToString(i), x + i * (tw + 4), y, tw, 24,
+      NabzUI_Button("set_tab_" + IntegerToString(i), x + i * (tw + 4), y, tw, 28,
                     tabs[i], on ? COL_GOLD : COL_BG3, on ? COL_BG0 : COL_MUTED);
    }
-   y += 36;
+   y += 40;
 
-   if(ui.settingsTab == 3) // MANAGE
+   if(ui.settingsTab == 3)
    {
-      NabzUI_Label("set_auto_h", x, y, "AUTOMATION", COL_MUTED, 8, "Segoe UI Semibold");
-      y += 18;
-      NabzUI_Button("set_arf", x, y, 150, 26,
+      NabzUI_Label("set_auto_h", x, y, "AUTOMATION", COL_MUTED, L.fontSec, "Segoe UI Semibold");
+      y += 20;
+      NabzUI_Button("set_arf", x, y, 160, 30,
                     ui.risk.autoRiskFree ? "Auto Risk Free  ON" : "Auto Risk Free  OFF",
                     ui.risk.autoRiskFree ? COL_BUY_DIM : COL_BG3, COL_TEXT);
-      NabzUI_Button("set_arr", x + 160, y, 150, 26,
+      NabzUI_Button("set_arr", x + 170, y, 160, 30,
                     ui.risk.autoRR ? "Auto R:R  ON" : "Auto R:R  OFF",
                     ui.risk.autoRR ? COL_BUY_DIM : COL_BG3, COL_TEXT);
-      y += 32;
-      NabzUI_Label("set_rr_l", x, y + 4, "Default Reward (R)", COL_MUTED, 8);
-      NabzUI_Edit("set_rr_v", x + 140, y, 60, 24, DoubleToString(ui.risk.defaultRR, 2), COL_BG3, COL_GOLD);
-      NabzUI_Button("set_asp", x + 210, y, 100, 24,
-                    ui.risk.autoSaveProfit ? "Save Profit ON" : "Save Profit OFF",
-                    ui.risk.autoSaveProfit ? COL_BUY_DIM : COL_BG3, COL_TEXT);
       y += 36;
+      NabzUI_Label("set_rr_l", x, y + 6, "Default Reward (R)", COL_MUTED, L.fontSec);
+      NabzUI_Edit("set_rr_v", x + 150, y, 64, 28, DoubleToString(ui.risk.defaultRR, 2), COL_BG3, COL_GOLD);
+      NabzUI_Button("set_asp", x + 224, y, 106, 28,
+                    ui.risk.autoSaveProfit ? "Save ON" : "Save OFF",
+                    ui.risk.autoSaveProfit ? COL_BUY_DIM : COL_BG3, COL_TEXT);
+      y += 40;
 
-      NabzUI_Label("set_part_h", x, y, "PARTIAL SCALE-OUT", COL_MUTED, 8, "Segoe UI Semibold");
-      y += 18;
+      NabzUI_Label("set_part_h", x, y, "PARTIAL SCALE-OUT", COL_MUTED, L.fontSec, "Segoe UI Semibold");
+      y += 20;
       for(int i = 0; i < 3; ++i)
       {
-         NabzUI_Label("set_prl" + IntegerToString(i), x, y + 4,
-                      StringFormat("Reward %d", i + 1), COL_TEXT, 8);
-         NabzUI_Edit("set_prv" + IntegerToString(i), x + 70, y, 50, 24,
-                     DoubleToString(ui.risk.partialR[i], 2), COL_BG3, COL_TEXT);
-         NabzUI_Button("set_pc25_" + IntegerToString(i), x + 130, y, 44, 24, "0.25",
+         NabzUI_Label("set_prl" + IntegerToString(i), x, y + 6, StringFormat("Reward %d", i + 1), COL_TEXT, L.fontSec);
+         NabzUI_Edit("set_prv" + IntegerToString(i), x + 78, y, 54, 28, DoubleToString(ui.risk.partialR[i], 2), COL_BG3, COL_TEXT);
+         NabzUI_Button("set_pc25_" + IntegerToString(i), x + 140, y, 48, 28, "0.25",
                        MathAbs(ui.risk.partialClose[i] - 0.25) < 0.01 ? COL_GOLD : COL_BG3,
                        MathAbs(ui.risk.partialClose[i] - 0.25) < 0.01 ? COL_BG0 : COL_MUTED);
-         NabzUI_Button("set_pc50_" + IntegerToString(i), x + 178, y, 44, 24, "0.50",
+         NabzUI_Button("set_pc50_" + IntegerToString(i), x + 192, y, 48, 28, "0.50",
                        MathAbs(ui.risk.partialClose[i] - 0.50) < 0.01 ? COL_GOLD : COL_BG3,
                        MathAbs(ui.risk.partialClose[i] - 0.50) < 0.01 ? COL_BG0 : COL_MUTED);
-         NabzUI_Button("set_pc75_" + IntegerToString(i), x + 226, y, 44, 24, "0.75",
+         NabzUI_Button("set_pc75_" + IntegerToString(i), x + 244, y, 48, 28, "0.75",
                        MathAbs(ui.risk.partialClose[i] - 0.75) < 0.01 ? COL_GOLD : COL_BG3,
                        MathAbs(ui.risk.partialClose[i] - 0.75) < 0.01 ? COL_BG0 : COL_MUTED);
-         y += 30;
+         y += 34;
       }
 
-      NabzUI_Label("set_vis_h", x, y, "VISUAL  &  DISCIPLINE", COL_MUTED, 8, "Segoe UI Semibold");
-      y += 18;
-      NabzUI_Button("set_timer", x, y, 150, 26,
-                    ui.risk.showCandleTimer ? "Candle Timer  ON" : "Candle Timer  OFF",
+      NabzUI_Label("set_vis_h", x, y, "VISUAL  &  DISCIPLINE", COL_MUTED, L.fontSec, "Segoe UI Semibold");
+      y += 20;
+      NabzUI_Button("set_timer", x, y, 160, 30,
+                    ui.risk.showCandleTimer ? "Header Timer  ON" : "Header Timer  OFF",
                     ui.risk.showCandleTimer ? COL_BUY_DIM : COL_BG3, COL_TEXT);
-      NabzUI_Button("set_m1", x + 160, y, 150, 26,
+      NabzUI_Button("set_m1", x + 170, y, 160, 30,
                     ui.risk.blockM1 ? "Block M1  ON" : "Block M1  OFF",
                     ui.risk.blockM1 ? COL_WARN : COL_BG3, COL_BG0);
-      y += 30;
-      NabzUI_Button("set_pause", x, y, 150, 26,
+      y += 34;
+      NabzUI_Button("set_pause", x, y, 160, 30,
                     ui.risk.pauseAfterLoss ? "15m Pause  ON" : "15m Pause  OFF",
                     ui.risk.pauseAfterLoss ? COL_WARN : COL_BG3, ui.risk.pauseAfterLoss ? COL_BG0 : COL_MUTED);
-      NabzUI_Button("set_rrlive", x + 160, y, 150, 26,
+      NabzUI_Button("set_rrlive", x + 170, y, 160, 30,
                     ui.risk.showRRLive ? "RR Live  ON" : "RR Live  OFF",
                     ui.risk.showRRLive ? COL_BUY_DIM : COL_BG3, COL_TEXT);
-      y += 30;
-      NabzUI_Button("set_detail", x, y, 150, 26,
+      y += 34;
+      NabzUI_Button("set_detail", x, y, 160, 30,
                     ui.risk.showTpSlDetail ? "TP/SL Detail  ON" : "TP/SL Detail  OFF",
                     ui.risk.showTpSlDetail ? COL_BUY_DIM : COL_BG3, COL_TEXT);
-      NabzUI_Chip("set_unit", x + 160, y, 150, 26,
+      NabzUI_Chip("set_unit", x + 170, y, 160, 30,
                   ui.risk.detailUnit == NABZ_UNIT_PERCENT ? "Unit · PERCENT" :
                   (ui.risk.detailUnit == NABZ_UNIT_MONEY ? "Unit · MONEY" : "Unit · POINTS"),
-                  COL_BG3, COL_MUTED);
+                  COL_BG3, COL_MUTED, 9);
    }
-   else if(ui.settingsTab == 1) // Account / Prop
+   else if(ui.settingsTab == 1)
    {
-      NabzUI_Label("set_acc_h", x, y, "PROP LIMITS", COL_MUTED, 8, "Segoe UI Semibold");
-      y += 18;
-      NabzUI_Label("set_mtdd_l", x, y + 4, "Max Total DD %", COL_TEXT, 8);
-      NabzUI_Edit("set_mtdd", x + 140, y, 70, 24, DoubleToString(ui.propCfg.maxTotalDD, 1), COL_BG3, COL_TEXT);
-      y += 30;
-      NabzUI_Label("set_mddd_l", x, y + 4, "Max Daily DD %", COL_TEXT, 8);
-      NabzUI_Edit("set_mddd", x + 140, y, 70, 24, DoubleToString(ui.propCfg.maxDailyDD, 1), COL_BG3, COL_TEXT);
-      y += 30;
-      NabzUI_Label("set_pt_l", x, y + 4, "Profit Target %", COL_TEXT, 8);
-      NabzUI_Edit("set_pt", x + 140, y, 70, 24, DoubleToString(ui.propCfg.profitTarget, 1), COL_BG3, COL_GOLD);
-      y += 30;
-      NabzUI_Label("set_sb_l", x, y + 4, "Start Balance", COL_TEXT, 8);
-      NabzUI_Edit("set_sb", x + 140, y, 100, 24, DoubleToString(ui.propCfg.startBalance, 2), COL_BG3, COL_TEXT);
-      y += 36;
-      NabzUI_Button("set_reset_peak", x, y, 160, 28, "Reset Peak Equity", COL_BG3, COL_WARN);
+      NabzUI_Label("set_acc_h", x, y, "PROP LIMITS", COL_MUTED, L.fontSec, "Segoe UI Semibold");
+      y += 20;
+      NabzUI_Label("set_mtdd_l", x, y + 6, "Max Total DD %", COL_TEXT, L.fontSec);
+      NabzUI_Edit("set_mtdd", x + 150, y, 74, 28, DoubleToString(ui.propCfg.maxTotalDD, 1), COL_BG3, COL_TEXT);
+      y += 34;
+      NabzUI_Label("set_mddd_l", x, y + 6, "Max Daily DD %", COL_TEXT, L.fontSec);
+      NabzUI_Edit("set_mddd", x + 150, y, 74, 28, DoubleToString(ui.propCfg.maxDailyDD, 1), COL_BG3, COL_TEXT);
+      y += 34;
+      NabzUI_Label("set_pt_l", x, y + 6, "Profit Target %", COL_TEXT, L.fontSec);
+      NabzUI_Edit("set_pt", x + 150, y, 74, 28, DoubleToString(ui.propCfg.profitTarget, 1), COL_BG3, COL_GOLD);
+      y += 34;
+      NabzUI_Label("set_sb_l", x, y + 6, "Start Balance", COL_TEXT, L.fontSec);
+      NabzUI_Edit("set_sb", x + 150, y, 110, 28, DoubleToString(ui.propCfg.startBalance, 2), COL_BG3, COL_TEXT);
+      y += 40;
+      NabzUI_Button("set_reset_peak", x, y, 170, 30, "Reset Peak Equity", COL_BG3, COL_WARN);
    }
    else if(ui.settingsTab == 0)
-   {
-      NabzUI_Label("set_risk_h", x, y, "Default risk value & mode live on the main panel.", COL_MUTED, 9);
-      y += 24;
-      NabzUI_Label("set_risk_n", x, y, "Tip: switch % / $ / LOT / BAL from the RISK ENGINE row.", COL_DIM, 8);
-   }
+      NabzUI_Label("set_risk_h", x, y, "Risk value & mode live on the main panel.", COL_MUTED, L.fontBody);
    else if(ui.settingsTab == 2)
    {
-      NabzUI_Label("set_news_h", x, y, "News uses the MetaTrader economic calendar.", COL_MUTED, 9);
-      y += 24;
-      NabzUI_Button("set_news_ref", x, y, 140, 28, "Refresh News", COL_INFO, COL_BG0);
+      NabzUI_Label("set_news_h", x, y, "News uses the MetaTrader economic calendar.", COL_MUTED, L.fontBody);
+      y += 28;
+      NabzUI_Button("set_news_ref", x, y, 150, 30, "Refresh News", COL_INFO, COL_BG0);
    }
    else
-   {
-      NabzUI_Label("set_alert_h", x, y, "Alerts fire on SOS, DD breach, and news soon.", COL_MUTED, 9);
-      y += 24;
-      NabzUI_Label("set_alert_n", x, y, "Enable push alerts in terminal options for mobile.", COL_DIM, 8);
-   }
+      NabzUI_Label("set_alert_h", x, y, "Alerts fire on SOS, DD breach, and news soon.", COL_MUTED, L.fontBody);
 }
 
-//+------------------------------------------------------------------+
 void NabzUI_DrawCoach(NabzUIState &ui)
 {
-   if(ui.view != NABZ_VIEW_COACH)
+   if(ui.view != NABZ_VIEW_COACH || ui.minimized)
    {
       ObjectsDeleteAll(0, NABZ_PREFIX + "coach_");
       return;
    }
-   int x0 = NABZ_PANEL_X + NABZ_PANEL_W + 16;
-   int y0 = NABZ_PANEL_Y;
-   int w = 320, h = 200;
+   NabzLayout L = ui.layout;
+   int x0 = L.panelX + L.panelW + 16;
+   int y0 = L.panelY;
+   int w = 340, h = 210;
    NabzUI_Rect("coach_body", x0, y0, w, h, COL_BG1, COL_BORDER, 1);
    NabzUI_Rect("coach_rail", x0, y0, 3, h, COL_WARN, COL_WARN, 2);
-   NabzUI_Label("coach_t", x0 + 14, y0 + 12, "COACH", COL_WARN, 12, "Segoe UI Semibold");
-   NabzUI_Button("coach_close", x0 + w - 36, y0 + 10, 24, 24, "✕", COL_BG3, COL_MUTED);
-   NabzUI_Label("coach_tip", x0 + 14, y0 + 48, ui.coachTip, COL_TEXT, 9);
-   NabzUI_Label("coach_sub", x0 + 14, y0 + 100,
+   NabzUI_Label("coach_t", x0 + 16, y0 + 14, "COACH", COL_WARN, 13, "Segoe UI Semibold");
+   NabzUI_Button("coach_close", x0 + w - 40, y0 + 12, 28, 28, "✕", COL_BG3, COL_MUTED);
+   NabzUI_Label("coach_tip", x0 + 16, y0 + 52, ui.coachTip, COL_TEXT, L.fontBody);
+   NabzUI_Label("coach_sub", x0 + 16, y0 + 110,
                 "Protect process over outcome.\nOne risk unit. One plan. Journal every exit.",
-                COL_MUTED, 8);
+                COL_MUTED, L.fontSec);
 }
 
 void NabzUI_DrawPctTool(NabzUIState &ui)
 {
-   if(ui.view != NABZ_VIEW_PCT)
+   if(ui.view != NABZ_VIEW_PCT || ui.minimized)
    {
       ObjectsDeleteAll(0, NABZ_PREFIX + "pct_");
       return;
    }
-   int x0 = NABZ_PANEL_X + NABZ_PANEL_W + 16;
-   int y0 = NABZ_PANEL_Y;
-   int w = 280, h = 160;
+   NabzLayout L = ui.layout;
+   int x0 = L.panelX + L.panelW + 16;
+   int y0 = L.panelY;
+   int w = 300, h = 170;
    double bal = AccountInfoDouble(ACCOUNT_BALANCE);
    double eq = AccountInfoDouble(ACCOUNT_EQUITY);
    NabzUI_Rect("pct_body", x0, y0, w, h, COL_BG1, COL_BORDER, 1);
-   NabzUI_Label("pct_t", x0 + 14, y0 + 12, "% CALCULATOR", COL_INFO, 12, "Segoe UI Semibold");
-   NabzUI_Button("pct_close", x0 + w - 36, y0 + 10, 24, 24, "✕", COL_BG3, COL_MUTED);
-   NabzUI_Label("pct_b", x0 + 14, y0 + 48, "Balance  " + DoubleToString(bal, 2), COL_TEXT, 9);
-   NabzUI_Label("pct_e", x0 + 14, y0 + 70, "Equity   " + DoubleToString(eq, 2), COL_TEXT, 9);
-   NabzUI_Label("pct_r", x0 + 14, y0 + 100,
+   NabzUI_Label("pct_t", x0 + 16, y0 + 14, "% CALCULATOR", COL_INFO, 13, "Segoe UI Semibold");
+   NabzUI_Button("pct_close", x0 + w - 40, y0 + 12, 28, 28, "✕", COL_BG3, COL_MUTED);
+   NabzUI_Label("pct_b", x0 + 16, y0 + 52, "Balance  " + DoubleToString(bal, 2), COL_TEXT, L.fontBody);
+   NabzUI_Label("pct_e", x0 + 16, y0 + 76, "Equity   " + DoubleToString(eq, 2), COL_TEXT, L.fontBody);
+   NabzUI_Label("pct_r", x0 + 16, y0 + 110,
                 StringFormat("1%% of equity = %.2f %s", eq * 0.01, AccountInfoString(ACCOUNT_CURRENCY)),
-                COL_GOLD, 9);
-}
-
-//+------------------------------------------------------------------+
-void NabzUI_DrawCandleTimer(NabzUIState &ui)
-{
-   ObjectsDeleteAll(0, NABZ_PREFIX + "timer_");
-   if(!ui.risk.showCandleTimer) return;
-
-   datetime t0 = iTime(_Symbol, PERIOD_CURRENT, 0);
-   int sec = PeriodSeconds(_Period);
-   int left = (int)(t0 + sec - TimeCurrent());
-   if(left < 0) left = 0;
-   string txt = StringFormat("%02d:%02d", left / 60, left % 60);
-
-   // Place near right price scale using chart pixel size
-   int chartW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
-   int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
-   int tx = chartW - 90;
-   int ty = chartH / 2 - 20;
-   NabzUI_Rect("timer_bg", tx, ty, 70, 28, COL_BG1, COL_GOLD_DIM, 5);
-   NabzUI_Label("timer_tx", tx + 35, ty + 6, txt, COL_GOLD_GLOW, 12, "Consolas", ANCHOR_UPPER);
+                COL_GOLD, L.fontBody);
 }
 
 void NabzUI_DrawDragLines(NabzUIState &ui)
@@ -1779,9 +1855,7 @@ void NabzUI_DrawDragLines(NabzUIState &ui)
       double reward = MathAbs(ui.drag.tp - ui.drag.entry);
       double rr = (risk > 0 ? reward / risk : 0);
       double riskPct = 0;
-      // approximate using 1 lot then scale — show price %
-      double mid = ui.drag.entry;
-      if(mid > 0) riskPct = risk / mid * 100.0;
+      if(ui.drag.entry > 0) riskPct = risk / ui.drag.entry * 100.0;
       string lab = NABZ_PREFIX + "drag_lab";
       ObjectCreate(0, lab, OBJ_TEXT, 0, TimeCurrent(), ui.drag.sl);
       ObjectSetString(0, lab, OBJPROP_TEXT,
@@ -1789,11 +1863,10 @@ void NabzUI_DrawDragLines(NabzUIState &ui)
                                    (ui.drag.isBuy ? "-" : "+") + DoubleToString(riskPct, 2),
                                    riskPct, rr));
       ObjectSetInteger(0, lab, OBJPROP_COLOR, COL_TEXT);
-      ObjectSetInteger(0, lab, OBJPROP_FONTSIZE, 8);
+      ObjectSetInteger(0, lab, OBJPROP_FONTSIZE, 9);
       ObjectSetString(0, lab, OBJPROP_FONT, "Segoe UI");
    }
 
-   // RR box
    string box = NABZ_PREFIX + "drag_box";
    ObjectCreate(0, box, OBJ_RECTANGLE, 0, iTime(_Symbol, PERIOD_CURRENT, 20), ui.drag.sl,
                 iTime(_Symbol, PERIOD_CURRENT, 0), ui.drag.tp);
@@ -1814,19 +1887,6 @@ void NabzUI_SyncDragFromChart(NabzUIState &ui)
    if(ObjectFind(0, t) >= 0) ui.drag.tp = ObjectGetDouble(0, t, OBJPROP_PRICE);
 }
 
-//+------------------------------------------------------------------+
-void NabzUI_Redraw(NabzUIState &ui)
-{
-   NabzUI_DrawMainPanel(ui);
-   NabzUI_DrawJournal(ui);
-   NabzUI_DrawSettings(ui);
-   NabzUI_DrawCoach(ui);
-   NabzUI_DrawPctTool(ui);
-   NabzUI_DrawCandleTimer(ui);
-   NabzUI_DrawDragLines(ui);
-   ChartRedraw(0);
-}
-
 void NabzUI_PickCoachTip(NabzUIState &ui)
 {
    string tips[6];
@@ -1836,8 +1896,38 @@ void NabzUI_PickCoachTip(NabzUIState &ui)
    tips[3] = "News window: flat or tiny size. Ego is expensive.";
    tips[4] = "Journal the WHY, not just the P/L.";
    tips[5] = "ASIA/EU overlap is a scalpel — not a hammer.";
-   int idx = (int)(TimeCurrent() % 6);
-   ui.coachTip = tips[idx];
+   ui.coachTip = tips[(int)(TimeCurrent() % 6)];
+}
+
+void NabzUI_Redraw(NabzUIState &ui)
+{
+   static bool s_init = false;
+   static bool s_wasMin = false;
+   if(!s_init || s_wasMin != ui.minimized)
+   {
+      ObjectsDeleteAll(0, NABZ_PREFIX);
+      // also wipe any leftover chart timer boxes from v2.0
+      ObjectsDeleteAll(0, NABZ_PREFIX + "timer_");
+      s_wasMin = ui.minimized;
+      s_init = true;
+   }
+
+   ui.candleLeft = NabzUI_CandleLeftText();
+   NabzUI_DrawMainPanel(ui);
+   NabzUI_DrawJournal(ui);
+   NabzUI_DrawSettings(ui);
+   NabzUI_DrawCoach(ui);
+   NabzUI_DrawPctTool(ui);
+   NabzUI_DrawDragLines(ui);
+   ChartRedraw(0);
+}
+
+bool NabzUI_ToggleMinimize(NabzUIState &ui)
+{
+   ui.minimized = !ui.minimized;
+   if(ui.minimized)
+      ui.view = NABZ_VIEW_NONE;
+   return true;
 }
 
 //+------------------------------------------------------------------+
@@ -1877,7 +1967,8 @@ input string InpUrlEducation    = "https://github.com/radiarkazemi/forge-charts"
 input string InpUrlWebsite      = "https://github.com/radiarkazemi/forge-charts";
 
 input group "═══ UI ═══"
-input bool   InpCandleTimer     = true;       // Candle timer
+input bool   InpCandleTimer     = true;       // Show candle countdown in panel header
+input bool   InpStartMinimized  = false;      // Start with panel minimized
 input bool   InpOnlyThisSymbol  = true;       // Journal filter: chart symbol
 
 //--- Global state
@@ -1918,12 +2009,15 @@ int OnInit()
 
    g_ui.view = NABZ_VIEW_NONE;
    g_ui.eaActive = true;
-   g_ui.panelH = 620;
+   g_ui.minimized = InpStartMinimized;
+   g_ui.panelH = 720;
    g_ui.pulse = 0;
    g_ui.settingsTab = 3;
    g_ui.drag.active = false;
    g_ui.lastLossPauseUntil = 0;
    g_ui.journal.weekMode = true;
+   g_ui.candleLeft = "00:00";
+   NabzLayoutCompute(g_ui.layout);
    NabzUI_PickCoachTip(g_ui);
 
    NabzTradeInit(InpMagic, InpDeviation);
@@ -1947,6 +2041,7 @@ void OnDeinit(const int reason)
 {
    EventKillTimer();
    NabzUI_DeleteAll();
+   ObjectsDeleteAll(0, NABZ_PREFIX + "timer_"); // leftover v2.0 chart timers
    NabzSessionsClear();
    Comment("");
 }
@@ -1999,8 +2094,6 @@ void OnTick()
       NabzUI_SyncDragFromChart(g_ui);
       NabzUI_DrawDragLines(g_ui);
    }
-   if(g_ui.risk.showCandleTimer)
-      NabzUI_DrawCandleTimer(g_ui);
 }
 
 void OnTradeTransaction(const MqlTradeTransaction &trans,
@@ -2085,6 +2178,14 @@ void NabzApplySettingsEdits()
 //+------------------------------------------------------------------+
 void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
+   if(id == CHARTEVENT_CHART_CHANGE)
+   {
+      NabzLayoutCompute(g_ui.layout);
+      ObjectsDeleteAll(0, NABZ_PREFIX); // force rebuild at new scale
+      NabzUI_Redraw(g_ui);
+      return;
+   }
+
    if(id == CHARTEVENT_OBJECT_ENDEDIT)
    {
       if(StringFind(sparam, NABZ_PREFIX + "risk_val") == 0)
@@ -2187,6 +2288,10 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    }
    else if(key == "btn_cancelp")
       NabzCancelPendings(_Symbol);
+   else if(key == "btn_minmax")
+   {
+      NabzUI_ToggleMinimize(g_ui);
+   }
    else if(key == "btn_active")
    {
       g_ui.eaActive = !g_ui.eaActive;
