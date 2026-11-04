@@ -6,7 +6,7 @@
 
 #define NABZ_PREFIX     "NABZ2_"
 #define NABZ_SESS_PFX   "NABZSESS_"
-#define NABZ_VERSION    "2.2.0"  // stale pos fix + panel R:R + position cards
+#define NABZ_VERSION    "2.3.0"  // drag panel, Save Pos, sessions, auto RF R1-R3
 #define NABZ_TITLE      "NABZ"
 
 //--- Base layout (scaled at runtime via NabzLayout)
@@ -86,6 +86,8 @@ struct NabzLayout
    int fontSec;
    int fontTiny;
    int miniH;
+   int bottomReserve; // keep clear of MT5 terminal / toolbox
+   int maxH;          // max panel height in pixels
 };
 
 string NabzRiskModeLabel(const ENUM_NABZ_RISK_MODE m)
@@ -111,40 +113,54 @@ color NabzMix(const color a, const color b, const int pctTowardB)
    return (color)(r | (g << 8) | (bl << 16));
 }
 
-void NabzLayoutCompute(NabzLayout &L)
+void NabzLayoutCompute(NabzLayout &L, const int bottomReserve = 140)
 {
    int chartW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
    int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
    if(chartW < 400) chartW = 1200;
    if(chartH < 300) chartH = 800;
 
-   // Target ~28% of chart width, clamped
-   int w = (int)MathRound(chartW * 0.28);
+   L.bottomReserve = bottomReserve;
+   if(L.bottomReserve < 60) L.bottomReserve = 60;
+
+   // Target ~26% of chart width, clamped — leave room for chart
+   int w = (int)MathRound(chartW * 0.26);
    if(w < 300) w = 300;
-   if(w > 380) w = 380;
-   if(w > chartW - 80) w = chartW - 80;
+   if(w > 360) w = 360;
+   if(w > chartW - 100) w = chartW - 100;
 
    double scale = (double)w / (double)NABZ_PANEL_W0;
-   if(scale < 0.92) scale = 0.92;
-   if(scale > 1.15) scale = 1.15;
+   if(scale < 0.90) scale = 0.90;
+   if(scale > 1.12) scale = 1.12;
 
-   // Short charts → slightly tighter vertical rhythm
+   // Available height above terminal / toolbox
+   int usableH = chartH - L.bottomReserve - 20;
+   if(usableH < 360) usableH = 360;
+   L.maxH = usableH;
+
    double vScale = 1.0;
-   if(chartH < 700) vScale = 0.92;
-   if(chartH < 560) vScale = 0.86;
+   if(usableH < 720) vScale = 0.90;
+   if(usableH < 580) vScale = 0.82;
+   if(usableH < 480) vScale = 0.74;
+
+   // Keep user drag offsets if already set
+   if(L.panelX < 4) L.panelX = NABZ_PANEL_X0;
+   if(L.panelY < 4) L.panelY = NABZ_PANEL_Y0;
+   if(L.panelX > chartW - 80) L.panelX = chartW - 80;
+   if(L.panelY > chartH - L.bottomReserve - 60)
+      L.panelY = MathMax(8, chartH - L.bottomReserve - 60);
 
    L.panelW   = w;
-   L.panelX   = NABZ_PANEL_X0;
-   L.panelY   = NABZ_PANEL_Y0;
    L.pad      = (int)MathRound(NABZ_PAD0 * scale);
    L.btnH     = (int)MathRound(NABZ_BTN_H0 * scale * vScale);
+   if(L.btnH < 26) L.btnH = 26;
    L.gap      = (int)MathRound(NABZ_GAP0 * scale);
    L.section  = (int)MathRound(NABZ_SECTION0 * scale * vScale);
-   L.fontTitle = (scale >= 1.05 ? 16 : 15);
-   L.fontBody  = (scale >= 1.05 ? 11 : 10);
-   L.fontSec   = 9;
+   L.fontTitle = (scale >= 1.05 ? 15 : 14);
+   L.fontBody  = (vScale < 0.85 ? 9 : 10);
+   L.fontSec   = (vScale < 0.85 ? 8 : 9);
    L.fontTiny  = 8;
-   L.miniH     = 52;
+   L.miniH     = 48;
 }
 
 #endif

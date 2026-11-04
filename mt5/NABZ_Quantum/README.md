@@ -1,32 +1,27 @@
-# NABZ Quantum v2.1 — Obsidian Gold
+# NABZ Quantum v2.3 — Obsidian Gold
 
-Roomier panel, minimize/expand, responsive width, candle countdown in the **header** (no floating chart timer glitch).
+## Download
 
-## Install (one file)
+https://raw.githubusercontent.com/radiarkazemi/forge-charts/cursor/nabz-quantum-ea-390d/mt5/NABZ_Quantum/NABZ_Quantum.mq5
 
-Copy:
+Copy → `MQL5/Experts/NABZ_Quantum.mq5` → Compile (F7) → **remove old EA from chart** → attach again. Header must show **v2.3.0**.
 
-```
-mt5/NABZ_Quantum/NABZ_Quantum.mq5
-```
+## What’s new in 2.3
 
-→ `MQL5/Experts/NABZ_Quantum.mq5` → Compile (F7) → attach to chart.
+| Feature | How |
+|---------|-----|
+| Fits above terminal bars | Input `Bottom reserve` (default 140px) |
+| Move panel | Click **MOVE** in header → click chart to place |
+| Minimize | **—** in header / **▢** on mini bar |
+| Save Profit | Per-position **$** or **Save Pos** → popup `0.25` / `0.50` / `0.75` / `CLOSE` |
+| Risk Free | Per-position **R** or global **RISK FREE** |
+| Close one | Per-position **✕** |
+| R:R on panel | `−` value `+` + Auto R:R |
+| Auto Risk Free | Settings → MANAGE → cycles **OFF / R1 / R2 / R3** |
+| Sessions | Settings → **SESS**: hours, border/fill, on/off |
+| Journal | **JOU** week/month stats + curve |
 
-Remove any old chart objects named `NABZ2_timer_*` if a leftover yellow timer remains (or re-attach the EA).
+## Tips
 
-## UI tips
-
-| Control | Action |
-|---------|--------|
-| **—** (header) | Minimize panel to a slim bar |
-| **▢** (mini bar) | Expand panel again |
-| Header **mm:ss** | Candle countdown (Settings → Header Timer) |
-| Inputs → **Start minimized** | Attach collapsed |
-
-Panel width scales with chart size (~28% width, 300–380px).
-
-## Notes
-
-- Demo first — places/manages trades.
-- Modular sources: `Include/NABZ_Quantum/` (for development).
-- Preview: `preview/nabz-ui-preview.html`
+- Short charts auto-hide the news strip so the panel stays above the toolbox.
+- Demo first — this EA places and manages trades.

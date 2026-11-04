@@ -30,8 +30,17 @@ struct NabzUIState
    int              pulse;
    datetime         lastLossPauseUntil;
    string           coachTip;
-   int              settingsTab;
-   string           candleLeft;   // mm:ss shown in header
+   int              settingsTab;      // 0 RISK 1 Account 2 NEWS 3 MANAGE 4 ALERT 5 SESS
+   string           candleLeft;
+   // panel drag
+   bool             panelDragging;
+   int              dragOffX;
+   int              dragOffY;
+   int              bottomReserve;
+   // Save Pos popup
+   bool             savePosOpen;
+   ulong            savePosTicket;   // 0 = all matching symbol positions
+   bool             compactMode;     // auto when chart is short
 };
 
 void NabzUI_DeleteAll()
@@ -205,6 +214,9 @@ void NabzUI_DrawHeader(NabzUIState &ui, const int x, int &y)
 
    NabzUI_Label("hdr_title", x, y, NABZ_TITLE, COL_GOLD_GLOW, L.fontTitle, "Segoe UI Semibold");
    NabzUI_Label("hdr_ver", x + 64, y + 5, "v" + NABZ_VERSION, COL_MUTED, L.fontTiny);
+   // Drag handle — click & drag header to move panel on chart
+   NabzUI_Button("btn_move", x + 118, y - 2, 52, 28, "MOVE", COL_BG3, COL_GOLD);
+   ObjectSetString(0, NABZ_PREFIX + "btn_move", OBJPROP_TOOLTIP, "Drag panel: click MOVE then drag chart");
 
    int right = x + L.panelW - 2 * L.pad;
    NabzUI_Button("btn_minmax", right - 30, y - 2, 30, 28, "—", COL_BG3, COL_TEXT);
@@ -362,18 +374,21 @@ void NabzUI_DrawPositions(NabzUIState &ui, const int x, int &y)
       // Line 1: side · symbol · risk% · p/l
       NabzUI_Label("pos_side_" + idx, x + 8, y + 6, side, sideCol, L.fontSec, "Segoe UI Semibold");
       NabzUI_Label("pos_info_" + idx, x + 48, y + 6,
-                   StringFormat("%s   ×%.2f%%", sym, riskPct), COL_TEXT, L.fontSec);
-      NabzUI_Label("pos_pl_" + idx, x + pw - 8, y + 6,
+                   StringFormat("%s  ×%.2f%%", sym, riskPct), COL_TEXT, L.fontSec);
+      NabzUI_Label("pos_pl_" + idx, x + pw - 100, y + 6,
                    NabzPctFmt(plPct, 2), (plPct >= 0 ? COL_BUY : COL_SELL), L.fontSec,
                    "Segoe UI Semibold", ANCHOR_RIGHT_UPPER);
 
-      // Line 2: Entry price + Risk Free under Entry + close
+      // Line 2: Entry + [S]=Save Profit  [R]=Risk Free  [X]=Close  (sample layout)
       NabzUI_Label("pos_entry_" + idx, x + 8, y + 28,
-                   "Entry  " + DoubleToString(open, digits), COL_MUTED, L.fontTiny);
+                   "Entry " + DoubleToString(open, digits), COL_MUTED, L.fontTiny);
       int btnY = y + 24;
-      int btnH = 24;
-      NabzUI_Button("pos_rf_" + idx, x + pw - 118, btnY, 70, btnH, "Risk Free", COL_WARN, COL_BG0);
-      NabzUI_Button("pos_x_" + idx, x + pw - 42, btnY, 34, btnH, "✕", COL_SELL_DIM, COL_TEXT);
+      int btnSz = 24;
+      int bx0 = x + pw - 3 * (btnSz + 4) - 4;
+      NabzUI_Button("pos_sv_" + idx, bx0, btnY, btnSz, btnSz, "$", COL_BUY_DIM, COL_TEXT);
+      NabzUI_Button("pos_rf_" + idx, bx0 + btnSz + 4, btnY, btnSz, btnSz, "R", COL_WARN, COL_BG0);
+      NabzUI_Button("pos_x_" + idx, bx0 + 2 * (btnSz + 4), btnY, btnSz, btnSz, "✕", COL_SELL_DIM, COL_TEXT);
+      ObjectSetString(0, NABZ_PREFIX + "pos_sv_" + idx, OBJPROP_TOOLTIP, "Save Profit|" + IntegerToString(ticket));
       ObjectSetString(0, NABZ_PREFIX + "pos_rf_" + idx, OBJPROP_TOOLTIP, IntegerToString(ticket));
       ObjectSetString(0, NABZ_PREFIX + "pos_x_" + idx, OBJPROP_TOOLTIP, IntegerToString(ticket));
 
@@ -473,14 +488,18 @@ void NabzUI_DrawNav(NabzUIState &ui, const int x, int &y)
    y += 34;
 }
 
+void NabzUI_DrawSavePosPopup(NabzUIState &ui); // forward
+
 void NabzUI_DrawMainPanel(NabzUIState &ui)
 {
-   NabzLayoutCompute(ui.layout);
+   NabzLayoutCompute(ui.layout, ui.bottomReserve);
    ui.candleLeft = NabzUI_CandleLeftText();
+   ui.compactMode = (ui.layout.maxH < 560);
 
    if(ui.minimized)
    {
       NabzUI_DrawMiniBar(ui);
+      if(ui.savePosOpen) NabzUI_DrawSavePosPopup(ui);
       return;
    }
 
@@ -499,14 +518,58 @@ void NabzUI_DrawMainPanel(NabzUIState &ui)
    NabzUI_DrawRisk(ui, x, y);
    NabzUI_DrawExec(ui, x, y);
    NabzUI_DrawPositions(ui, x, y);
+
+   // When short on vertical space, skip news to stay above terminal bars
+   bool drawNews = !ui.compactMode;
    NabzUI_DrawProp(ui, x, y);
-   NabzUI_DrawNews(ui, x, y);
+   if(drawNews)
+      NabzUI_DrawNews(ui, x, y);
+   else
+      ObjectsDeleteAll(0, NABZ_PREFIX + "news");
    NabzUI_DrawNav(ui, x, y);
 
    ui.panelH = (y - y0) + L.pad;
+   // Clamp so panel bottom stays above MT5 terminal / toolbox
+   int maxBottom = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS) - L.bottomReserve;
+   if(y0 + ui.panelH > maxBottom)
+      ui.panelH = MathMax(L.miniH + 20, maxBottom - y0);
+
    ObjectSetInteger(0, NABZ_PREFIX + "panel_body", OBJPROP_YSIZE, ui.panelH);
    ObjectSetInteger(0, NABZ_PREFIX + "panel_glow", OBJPROP_YSIZE, ui.panelH + 4);
    ObjectSetInteger(0, NABZ_PREFIX + "panel_rail", OBJPROP_YSIZE, ui.panelH);
+
+   if(ui.savePosOpen)
+      NabzUI_DrawSavePosPopup(ui);
+   else
+      ObjectsDeleteAll(0, NABZ_PREFIX + "svp_");
+}
+
+//+------------------------------------------------------------------+
+void NabzUI_DrawSavePosPopup(NabzUIState &ui)
+{
+   ObjectsDeleteAll(0, NABZ_PREFIX + "svp_");
+   NabzLayout L = ui.layout;
+   int x0 = L.panelX + L.panelW + 12;
+   int y0 = L.panelY + 90;
+   int w = 156;
+   int h = 200;
+
+   NabzUI_Rect("svp_glow", x0 - 2, y0 - 2, w + 4, h + 4, NabzMix(COL_BUY, COL_BG0, 85), COL_BORDER, 0);
+   NabzUI_Rect("svp_body", x0, y0, w, h, COL_BG1, COL_BORDER, 1);
+   NabzUI_Rect("svp_rail", x0, y0, 3, h, COL_BUY, COL_BUY, 2);
+   NabzUI_Label("svp_title", x0 + 12, y0 + 12, "Save Pos", COL_BUY, 12, "Segoe UI Semibold");
+   NabzUI_Button("svp_x", x0 + w - 32, y0 + 10, 24, 24, "✕", COL_BG3, COL_MUTED);
+   NabzUI_Label("svp_sub", x0 + 12, y0 + 40, "Take partial profit", COL_MUTED, 8);
+
+   string tip = (ui.savePosTicket == 0 ? "all" : IntegerToString(ui.savePosTicket));
+   NabzUI_Button("svp_25", x0 + 12, y0 + 62, w - 24, 30, "0.25", COL_BUY, COL_BG0);
+   NabzUI_Button("svp_50", x0 + 12, y0 + 96, w - 24, 30, "0.50", COL_BUY, COL_BG0);
+   NabzUI_Button("svp_75", x0 + 12, y0 + 130, w - 24, 30, "0.75", COL_BUY, COL_BG0);
+   NabzUI_Button("svp_full", x0 + 12, y0 + 164, w - 24, 28, "CLOSE", COL_SOS, COL_TEXT);
+   ObjectSetString(0, NABZ_PREFIX + "svp_25", OBJPROP_TOOLTIP, tip);
+   ObjectSetString(0, NABZ_PREFIX + "svp_50", OBJPROP_TOOLTIP, tip);
+   ObjectSetString(0, NABZ_PREFIX + "svp_75", OBJPROP_TOOLTIP, tip);
+   ObjectSetString(0, NABZ_PREFIX + "svp_full", OBJPROP_TOOLTIP, tip);
 }
 
 //+------------------------------------------------------------------+
@@ -646,8 +709,8 @@ void NabzUI_DrawSettings(NabzUIState &ui)
    NabzLayout L = ui.layout;
    int x0 = L.panelX + L.panelW + 16;
    int y0 = L.panelY;
-   int w = 380;
-   int h = 440;
+   int w = 400;
+   int h = 520;
    int x = x0 + 16;
    int y = y0 + 14;
 
@@ -659,9 +722,9 @@ void NabzUI_DrawSettings(NabzUIState &ui)
    NabzUI_Button("set_close", x0 + w - 40, y0 + 12, 28, 28, "✕", COL_BG3, COL_MUTED);
    y += 32;
 
-   string tabs[5] = {"RISK", "Account", "NEWS", "MANAGE", "ALERT"};
-   int tw = 66;
-   for(int i = 0; i < 5; ++i)
+   string tabs[6] = {"RISK", "Acct", "NEWS", "MANAGE", "ALERT", "SESS"};
+   int tw = 58;
+   for(int i = 0; i < 6; ++i)
    {
       bool on = (ui.settingsTab == i);
       NabzUI_Button("set_tab_" + IntegerToString(i), x + i * (tw + 4), y, tw, 28,
@@ -669,39 +732,46 @@ void NabzUI_DrawSettings(NabzUIState &ui)
    }
    y += 40;
 
-   if(ui.settingsTab == 3)
+   if(ui.settingsTab == 3) // MANAGE
    {
       NabzUI_Label("set_auto_h", x, y, "AUTOMATION", COL_MUTED, L.fontSec, "Segoe UI Semibold");
       y += 20;
-      NabzUI_Button("set_arf", x, y, 160, 30,
-                    ui.risk.autoRiskFree ? "Auto Risk Free  ON" : "Auto Risk Free  OFF",
-                    ui.risk.autoRiskFree ? COL_BUY_DIM : COL_BG3, COL_TEXT);
-      NabzUI_Button("set_arr", x + 170, y, 160, 30,
+      string arf = "Auto Risk Free  OFF";
+      color arfBg = COL_BG3;
+      if(ui.risk.autoRiskFreeAt == 1) { arf = "Auto Risk Free  R1"; arfBg = COL_BUY_DIM; }
+      else if(ui.risk.autoRiskFreeAt == 2) { arf = "Auto Risk Free  R2"; arfBg = COL_BUY_DIM; }
+      else if(ui.risk.autoRiskFreeAt == 3) { arf = "Auto Risk Free  R3"; arfBg = COL_BUY_DIM; }
+      else if(ui.risk.autoRiskFree) { arf = "Auto Risk Free  R1"; arfBg = COL_BUY_DIM; ui.risk.autoRiskFreeAt = 1; }
+      NabzUI_Button("set_arf", x, y, 170, 30, arf, arfBg, COL_TEXT);
+      NabzUI_Button("set_arr", x + 178, y, 150, 30,
                     ui.risk.autoRR ? "Auto R:R  ON" : "Auto R:R  OFF",
                     ui.risk.autoRR ? COL_BUY_DIM : COL_BG3, COL_TEXT);
       y += 36;
       NabzUI_Label("set_rr_l", x, y + 6, "Default Reward (R)", COL_MUTED, L.fontSec);
       NabzUI_Edit("set_rr_v", x + 150, y, 64, 28, DoubleToString(ui.risk.defaultRR, 2), COL_BG3, COL_GOLD);
-      NabzUI_Button("set_asp", x + 224, y, 106, 28,
+      NabzUI_Button("set_asp", x + 224, y, 104, 28,
                     ui.risk.autoSaveProfit ? "Save ON" : "Save OFF",
                     ui.risk.autoSaveProfit ? COL_BUY_DIM : COL_BG3, COL_TEXT);
       y += 40;
 
-      NabzUI_Label("set_part_h", x, y, "PARTIAL SCALE-OUT", COL_MUTED, L.fontSec, "Segoe UI Semibold");
+      NabzUI_Label("set_part_h", x, y, "REWARD LEVELS  ·  partial close", COL_MUTED, L.fontSec, "Segoe UI Semibold");
       y += 20;
       for(int i = 0; i < 3; ++i)
       {
-         NabzUI_Label("set_prl" + IntegerToString(i), x, y + 6, StringFormat("Reward %d", i + 1), COL_TEXT, L.fontSec);
-         NabzUI_Edit("set_prv" + IntegerToString(i), x + 78, y, 54, 28, DoubleToString(ui.risk.partialR[i], 2), COL_BG3, COL_TEXT);
-         NabzUI_Button("set_pc25_" + IntegerToString(i), x + 140, y, 48, 28, "0.25",
+         NabzUI_Label("set_prl" + IntegerToString(i), x, y + 6, StringFormat("R%d", i + 1), COL_TEXT, L.fontSec);
+         NabzUI_Edit("set_prv" + IntegerToString(i), x + 36, y, 50, 28, DoubleToString(ui.risk.partialR[i], 2), COL_BG3, COL_TEXT);
+         NabzUI_Button("set_pc25_" + IntegerToString(i), x + 94, y, 48, 28, "0.25",
                        MathAbs(ui.risk.partialClose[i] - 0.25) < 0.01 ? COL_GOLD : COL_BG3,
                        MathAbs(ui.risk.partialClose[i] - 0.25) < 0.01 ? COL_BG0 : COL_MUTED);
-         NabzUI_Button("set_pc50_" + IntegerToString(i), x + 192, y, 48, 28, "0.50",
+         NabzUI_Button("set_pc50_" + IntegerToString(i), x + 146, y, 48, 28, "0.50",
                        MathAbs(ui.risk.partialClose[i] - 0.50) < 0.01 ? COL_GOLD : COL_BG3,
                        MathAbs(ui.risk.partialClose[i] - 0.50) < 0.01 ? COL_BG0 : COL_MUTED);
-         NabzUI_Button("set_pc75_" + IntegerToString(i), x + 244, y, 48, 28, "0.75",
+         NabzUI_Button("set_pc75_" + IntegerToString(i), x + 198, y, 48, 28, "0.75",
                        MathAbs(ui.risk.partialClose[i] - 0.75) < 0.01 ? COL_GOLD : COL_BG3,
                        MathAbs(ui.risk.partialClose[i] - 0.75) < 0.01 ? COL_BG0 : COL_MUTED);
+         NabzUI_Button("set_pc00_" + IntegerToString(i), x + 250, y, 48, 28, "0",
+                       MathAbs(ui.risk.partialClose[i]) < 0.01 ? COL_GOLD : COL_BG3,
+                       MathAbs(ui.risk.partialClose[i]) < 0.01 ? COL_BG0 : COL_MUTED);
          y += 34;
       }
 
@@ -724,10 +794,34 @@ void NabzUI_DrawSettings(NabzUIState &ui)
       NabzUI_Button("set_detail", x, y, 160, 30,
                     ui.risk.showTpSlDetail ? "TP/SL Detail  ON" : "TP/SL Detail  OFF",
                     ui.risk.showTpSlDetail ? COL_BUY_DIM : COL_BG3, COL_TEXT);
-      NabzUI_Chip("set_unit", x + 170, y, 160, 30,
-                  ui.risk.detailUnit == NABZ_UNIT_PERCENT ? "Unit · PERCENT" :
-                  (ui.risk.detailUnit == NABZ_UNIT_MONEY ? "Unit · MONEY" : "Unit · POINTS"),
-                  COL_BG3, COL_MUTED, 9);
+      NabzUI_Button("set_sessb", x + 170, y, 160, 30,
+                    ui.sessions.borderOnly ? "Session  BORDER" : "Session  FILL",
+                    COL_BG3, COL_GOLD);
+   }
+   else if(ui.settingsTab == 5) // SESSIONS
+   {
+      NabzUI_Label("set_sess_h", x, y, "SESSION HOURS  (broker time)", COL_MUTED, L.fontSec, "Segoe UI Semibold");
+      y += 22;
+      NabzUI_Label("set_asia_l", x, y + 6, "ASIA start/end", COL_TEXT, L.fontSec);
+      NabzUI_Edit("set_asia0", x + 130, y, 50, 28, IntegerToString(ui.sessions.asiaStart), COL_BG3, COL_TEXT);
+      NabzUI_Edit("set_asia1", x + 186, y, 50, 28, IntegerToString(ui.sessions.asiaEnd), COL_BG3, COL_TEXT);
+      y += 34;
+      NabzUI_Label("set_lon_l", x, y + 6, "LON start/end", COL_TEXT, L.fontSec);
+      NabzUI_Edit("set_lon0", x + 130, y, 50, 28, IntegerToString(ui.sessions.lonStart), COL_BG3, COL_TEXT);
+      NabzUI_Edit("set_lon1", x + 186, y, 50, 28, IntegerToString(ui.sessions.lonEnd), COL_BG3, COL_TEXT);
+      y += 34;
+      NabzUI_Label("set_ny_l", x, y + 6, "NY start/end", COL_TEXT, L.fontSec);
+      NabzUI_Edit("set_ny0", x + 130, y, 50, 28, IntegerToString(ui.sessions.nyStart), COL_BG3, COL_TEXT);
+      NabzUI_Edit("set_ny1", x + 186, y, 50, 28, IntegerToString(ui.sessions.nyEnd), COL_BG3, COL_TEXT);
+      y += 40;
+      NabzUI_Button("set_sessb2", x, y, 160, 30,
+                    ui.sessions.borderOnly ? "Draw  BORDER" : "Draw  FILL",
+                    COL_BG3, COL_GOLD);
+      NabzUI_Button("set_sesson", x + 170, y, 160, 30,
+                    ui.sessions.enabled ? "Sessions  ON" : "Sessions  OFF",
+                    ui.sessions.enabled ? COL_BUY_DIM : COL_BG3, COL_TEXT);
+      y += 36;
+      NabzUI_Button("set_sessapply", x, y, 200, 30, "Apply & Redraw", COL_GOLD, COL_BG0);
    }
    else if(ui.settingsTab == 1)
    {
@@ -907,12 +1001,63 @@ void NabzUI_Redraw(NabzUIState &ui)
    ChartRedraw(0);
 }
 
+ulong NabzUI_TipTicket(const string tip)
+{
+   if(tip == "" || tip == "all") return 0;
+   int pipe = StringFind(tip, "|");
+   if(pipe >= 0)
+      return (ulong)StringToInteger(StringSubstr(tip, pipe + 1));
+   return (ulong)StringToInteger(tip);
+}
+
+void NabzUI_ApplySaveFraction(NabzUIState &ui, const double frac, const bool fullClose)
+{
+   if(ui.savePosTicket == 0)
+   {
+      if(fullClose) NabzCloseAll(_Symbol);
+      else NabzPartialCloseAll(frac, _Symbol);
+   }
+   else
+   {
+      if(fullClose) g_nabzTrade.PositionClose(ui.savePosTicket);
+      else NabzPartialClose(ui.savePosTicket, frac);
+   }
+   ui.savePosOpen = false;
+}
+
+void NabzUI_ReadSessionEdits(NabzUIState &ui)
+{
+   string keys[6] = {"set_asia0","set_asia1","set_lon0","set_lon1","set_ny0","set_ny1"};
+   for(int i = 0; i < 6; ++i)
+   {
+      string n = NABZ_PREFIX + keys[i];
+      if(ObjectFind(0, n) < 0) continue;
+      int v = (int)StringToInteger(ObjectGetString(0, n, OBJPROP_TEXT));
+      if(v < 0) v = 0; if(v > 23) v = 23;
+      if(i == 0) ui.sessions.asiaStart = v;
+      if(i == 1) ui.sessions.asiaEnd = v;
+      if(i == 2) ui.sessions.lonStart = v;
+      if(i == 3) ui.sessions.lonEnd = v;
+      if(i == 4) ui.sessions.nyStart = v;
+      if(i == 5) ui.sessions.nyEnd = v;
+   }
+}
+
 // Returns true if the click was handled here
 bool NabzUI_HandleClick(NabzUIState &ui, const string key)
 {
    if(key == "btn_minmax")
    {
       NabzUI_ToggleMinimize(ui);
+      return true;
+   }
+   if(key == "btn_move")
+   {
+      ui.panelDragging = !ui.panelDragging;
+      if(ui.panelDragging)
+         Comment("NABZ: MOVE mode — click chart to place panel top-left");
+      else
+         Comment("");
       return true;
    }
    if(key == "rr_minus")
@@ -933,7 +1078,56 @@ bool NabzUI_HandleClick(NabzUIState &ui, const string key)
       NabzUI_ApplyRRToDrag(ui);
       return true;
    }
+   // Save Pos popup
+   if(key == "svp_x") { ui.savePosOpen = false; return true; }
+   if(key == "svp_25") { NabzUI_ApplySaveFraction(ui, 0.25, false); return true; }
+   if(key == "svp_50") { NabzUI_ApplySaveFraction(ui, 0.50, false); return true; }
+   if(key == "svp_75") { NabzUI_ApplySaveFraction(ui, 0.75, false); return true; }
+   if(key == "svp_full") { NabzUI_ApplySaveFraction(ui, 1.0, true); return true; }
+
+   if(key == "set_arf")
+   {
+      ui.risk.autoRiskFreeAt = (ui.risk.autoRiskFreeAt + 1) % 4; // OFF→R1→R2→R3
+      ui.risk.autoRiskFree = (ui.risk.autoRiskFreeAt > 0);
+      return true;
+   }
+   if(key == "set_sessb" || key == "set_sessb2")
+   {
+      ui.sessions.borderOnly = !ui.sessions.borderOnly;
+      NabzSessionsRedraw(ui.sessions);
+      return true;
+   }
+   if(key == "set_sesson")
+   {
+      ui.sessions.enabled = !ui.sessions.enabled;
+      ui.showSessions = ui.sessions.enabled;
+      NabzSessionsRedraw(ui.sessions);
+      return true;
+   }
+   if(key == "set_sessapply")
+   {
+      NabzUI_ReadSessionEdits(ui);
+      NabzSessionsRedraw(ui.sessions);
+      return true;
+   }
+   if(StringFind(key, "set_pc00_") == 0)
+   {
+      int i = (int)StringToInteger(StringSubstr(key, 9));
+      if(i >= 0 && i < 3) ui.risk.partialClose[i] = 0.0;
+      return true;
+   }
    return false;
+}
+
+// Chart click while MOVE mode — place panel
+bool NabzUI_HandleChartClick(NabzUIState &ui, const int px, const int py)
+{
+   if(!ui.panelDragging) return false;
+   ui.layout.panelX = MathMax(4, px - 20);
+   ui.layout.panelY = MathMax(4, py - 10);
+   ui.panelDragging = false;
+   Comment("");
+   return true;
 }
 
 void NabzUI_ReadRREdit(NabzUIState &ui)

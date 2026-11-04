@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "Forge Charts / NABZ"
 #property link      "https://github.com/radiarkazemi/forge-charts"
-#property version   "2.20"
-#property description "NABZ Quantum v2.2 — live positions, panel R:R, Risk Free under Entry"
+#property version   "2.30"
+#property description "NABZ Quantum v2.3 — drag panel, Save Pos, sessions, Auto RF R1-R3, fits above terminal"
 
 #include <NABZ_Quantum/NabzUI.mqh>
 
@@ -30,6 +30,7 @@ input double InpStartBalance    = 0.0;        // Start balance (0 = auto)
 
 input group "═══ Sessions (broker hours) ═══"
 input bool   InpShowSessions    = true;       // Draw session boxes
+input bool   InpSessionBorder   = true;       // Border-only (not filled)
 input int    InpAsiaStart       = 0;
 input int    InpAsiaEnd         = 9;
 input int    InpLonStart        = 8;
@@ -46,6 +47,7 @@ input string InpUrlWebsite      = "https://github.com/radiarkazemi/forge-charts"
 input group "═══ UI ═══"
 input bool   InpCandleTimer     = true;       // Show candle countdown in panel header
 input bool   InpStartMinimized  = false;      // Start with panel minimized
+input int    InpBottomReserve   = 140;        // Pixels kept clear above MT5 terminal bars
 input bool   InpOnlyThisSymbol  = true;       // Journal filter: chart symbol
 
 //--- Global state
@@ -82,11 +84,12 @@ int OnInit()
    g_ui.sessions.nyEnd = InpNyEnd;
    g_ui.sessions.lookbackDays = InpSessionDays;
    g_ui.sessions.enabled = InpShowSessions;
+   g_ui.sessions.borderOnly = InpSessionBorder;
    g_ui.showSessions = InpShowSessions;
 
    g_ui.view = NABZ_VIEW_NONE;
    g_ui.eaActive = true;
-   g_ui.minimized = false;
+   g_ui.minimized = InpStartMinimized;
    g_ui.panelH = 720;
    g_ui.pulse = 0;
    g_ui.settingsTab = 3;
@@ -94,7 +97,14 @@ int OnInit()
    g_ui.lastLossPauseUntil = 0;
    g_ui.journal.weekMode = true;
    g_ui.candleLeft = "00:00";
-   NabzLayoutCompute(g_ui.layout);
+   g_ui.panelDragging = false;
+   g_ui.savePosOpen = false;
+   g_ui.savePosTicket = 0;
+   g_ui.bottomReserve = InpBottomReserve;
+   g_ui.compactMode = false;
+   g_ui.layout.panelX = 14;
+   g_ui.layout.panelY = 24;
+   NabzLayoutCompute(g_ui.layout, g_ui.bottomReserve);
    NabzUI_PickCoachTip(g_ui);
 
    NabzTradeInit(InpMagic, InpDeviation);
@@ -138,9 +148,8 @@ void OnTimer()
       g_lastJournal = TimeCurrent();
    }
 
-   // Auto risk-free
-   if(g_ui.risk.autoRiskFree)
-      NabzRiskFreeAll(_Symbol);
+   // Auto risk-free at configured R1/R2/R3
+   NabzAutoRiskFreeByR(g_ui.risk, _Symbol);
 
    NabzUI_SyncDragFromChart(g_ui);
    NabzUI_Redraw(g_ui);
@@ -254,6 +263,23 @@ void NabzApplySettingsEdits()
 //+------------------------------------------------------------------+
 void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
+   if(id == CHARTEVENT_CHART_CHANGE)
+   {
+      NabzLayoutCompute(g_ui.layout, g_ui.bottomReserve);
+      ObjectsDeleteAll(0, NABZ_PREFIX);
+      NabzUI_Redraw(g_ui);
+      return;
+   }
+
+   if(id == CHARTEVENT_CLICK)
+   {
+      if(NabzUI_HandleChartClick(g_ui, (int)lparam, (int)dparam))
+      {
+         NabzUI_Redraw(g_ui);
+         return;
+      }
+   }
+
    if(id == CHARTEVENT_OBJECT_ENDEDIT)
    {
       if(StringFind(sparam, NABZ_PREFIX + "risk_val") == 0)
@@ -261,7 +287,10 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       if(StringFind(sparam, NABZ_PREFIX + "rr_val") == 0)
          NabzUI_ReadRREdit(g_ui);
       if(StringFind(sparam, NABZ_PREFIX + "set_") == 0)
+      {
          NabzApplySettingsEdits();
+         NabzUI_ReadSessionEdits(g_ui);
+      }
       NabzUI_Redraw(g_ui);
       return;
    }
@@ -388,19 +417,22 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       NabzRiskFreeAll(_Symbol);
    else if(key == "btn_savepos")
    {
-      // Save Pos → risk-free + journal refresh (lock gains intent)
-      NabzRiskFreeAll(_Symbol);
-      NabzJournalCompute(g_ui.journal, g_ui.sessions, g_ui.journal.weekMode, InpOnlyThisSymbol);
-      Print("NABZ: positions saved (BE applied where profitable)");
+      g_ui.savePosTicket = 0; // all symbol positions
+      g_ui.savePosOpen = true;
    }
-   //--- Per-position buttons
-   else if(StringFind(key, "pos_rf_") == 0 || StringFind(key, "pos_x_") == 0)
+   //--- Per-position buttons: $ Save · R Risk Free · X Close
+   else if(StringFind(key, "pos_sv_") == 0 || StringFind(key, "pos_rf_") == 0 || StringFind(key, "pos_x_") == 0)
    {
       string tip = ObjectGetString(0, sparam, OBJPROP_TOOLTIP);
-      ulong ticket = (ulong)StringToInteger(tip);
+      ulong ticket = NabzUI_TipTicket(tip);
       if(ticket > 0)
       {
-         if(StringFind(key, "pos_rf_") == 0)
+         if(StringFind(key, "pos_sv_") == 0)
+         {
+            g_ui.savePosTicket = ticket;
+            g_ui.savePosOpen = true;
+         }
+         else if(StringFind(key, "pos_rf_") == 0)
             NabzRiskFreePosition(ticket);
          else
             g_nabzTrade.PositionClose(ticket);
@@ -420,13 +452,15 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    }
    else if(key == "nav_1")
    {
-      g_ui.showSessions = !g_ui.showSessions;
-      g_ui.sessions.enabled = g_ui.showSessions;
-      g_ui.view = NABZ_VIEW_SESSIONS;
-      if(g_ui.showSessions) NabzSessionsRedraw(g_ui.sessions);
-      else NabzSessionsClear();
-      // toggle feel — collapse view flag after
-      g_ui.view = NABZ_VIEW_NONE;
+      // SESS — open settings Sessions tab + redraw boxes
+      g_ui.view = NABZ_VIEW_SETTINGS;
+      g_ui.settingsTab = 5;
+      if(!g_ui.sessions.enabled)
+      {
+         g_ui.sessions.enabled = true;
+         g_ui.showSessions = true;
+      }
+      NabzSessionsRedraw(g_ui.sessions);
    }
    else if(key == "nav_2")
    {
@@ -469,7 +503,6 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    //--- Settings
    else if(StringFind(key, "set_tab_") == 0)
       g_ui.settingsTab = (int)StringToInteger(StringSubstr(key, 8));
-   else if(key == "set_arf") g_ui.risk.autoRiskFree = !g_ui.risk.autoRiskFree;
    else if(key == "set_arr") g_ui.risk.autoRR = !g_ui.risk.autoRR;
    else if(key == "set_asp") g_ui.risk.autoSaveProfit = !g_ui.risk.autoSaveProfit;
    else if(key == "set_timer") g_ui.risk.showCandleTimer = !g_ui.risk.showCandleTimer;

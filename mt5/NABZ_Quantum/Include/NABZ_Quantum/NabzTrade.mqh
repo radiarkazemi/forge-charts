@@ -167,6 +167,62 @@ int NabzRiskFreeAll(const string symbolFilter = "")
    return n;
 }
 
+bool NabzPartialClose(const ulong ticket, const double fraction)
+{
+   if(!PositionSelectByTicket(ticket)) return false;
+   double frac = MathMax(0.01, MathMin(1.0, fraction));
+   string sym = PositionGetString(POSITION_SYMBOL);
+   double vol = PositionGetDouble(POSITION_VOLUME);
+   double closeVol = NabzNormalizeLot(sym, vol * frac);
+   double minLot = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
+   if(closeVol < minLot) closeVol = minLot;
+   if(closeVol >= vol - minLot * 0.5)
+      return g_nabzTrade.PositionClose(ticket);
+   return g_nabzTrade.PositionClosePartial(ticket, closeVol);
+}
+
+int NabzPartialCloseAll(const double fraction, const string symbolFilter = "")
+{
+   int n = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; --i)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+      if(symbolFilter != "" && PositionGetString(POSITION_SYMBOL) != symbolFilter) continue;
+      if(NabzPartialClose(ticket, fraction)) n++;
+   }
+   return n;
+}
+
+// Auto BE when open R reaches configured reward level
+int NabzAutoRiskFreeByR(const NabzRiskState &risk, const string symbolFilter = "")
+{
+   int level = risk.autoRiskFreeAt;
+   if(level <= 0 && !risk.autoRiskFree) return 0;
+   if(level <= 0) level = 1; // legacy ON → R1
+   if(level > 3) level = 3;
+   double needR = risk.partialR[level - 1];
+   if(needR <= 0.0) needR = (double)level;
+
+   int n = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; --i)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+      if(!PositionSelectByTicket(ticket)) continue;
+      if(symbolFilter != "" && PositionGetString(POSITION_SYMBOL) != symbolFilter) continue;
+      double sl = PositionGetDouble(POSITION_SL);
+      double open = PositionGetDouble(POSITION_PRICE_OPEN);
+      long type = PositionGetInteger(POSITION_TYPE);
+      // already risk-free? SL at/beyond entry
+      if(type == POSITION_TYPE_BUY && sl >= open - 1e-8) continue;
+      if(type == POSITION_TYPE_SELL && sl > 0 && sl <= open + 1e-8) continue;
+      if(NabzPositionOpenR(ticket) + 1e-9 < needR) continue;
+      if(NabzRiskFreePosition(ticket)) n++;
+   }
+   return n;
+}
+
 void NabzInitDrag(NabzDragPlan &d, const bool isBuy)
 {
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
