@@ -57,20 +57,22 @@ export interface MultiTfDealingRangesOptions extends BaseDrOptions, DealingRange
   readonly timezoneOffset: number;
 }
 
-/** Defaults: chart TF + 1H / 4H / 1D HTF slots; ICT green/red halves. */
+/** Defaults: chart TF on; HTF slots available but off until chosen. */
 export const DEFAULT_DR_HTF_SLOTS: readonly DrHtfSlot[] = [
   { enable: false, htf: "15" },
-  { enable: true, htf: "60" },
-  { enable: true, htf: "240" },
-  { enable: true, htf: "1D" },
+  { enable: false, htf: "60" },
+  { enable: false, htf: "240" },
+  { enable: false, htf: "1D" },
 ];
 
 export const MULTI_TF_DR_DEFAULTS: MultiTfDealingRangesOptions = {
-  maxRanges: 2,
+  /** One clean range — avoids overlapping muddy fills. */
+  maxRanges: 1,
   lookbackDays: 90,
   fromDate: "",
   toDate: "",
-  showFibs: true,
+  /** Only 0 / 0.5 / 1 by default (OTE optional). */
+  showFibs: false,
   pivotLeft: 1,
   pivotRight: 1,
   extendBars: 12,
@@ -79,17 +81,19 @@ export const MULTI_TF_DR_DEFAULTS: MultiTfDealingRangesOptions = {
   slots: DEFAULT_DR_HTF_SLOTS,
   dailyOpenMode: "midnight",
   timezoneOffset: 0,
-  discountColor: "#00A000",
-  premiumColor: "#FF0000",
-  midColor: "#F44336",
-  midWidth: 2,
+  /** TradingView-style green / red halves. */
+  discountColor: "#089981",
+  premiumColor: "#F23645",
+  midColor: "#D1D4DC",
+  midWidth: 1,
   showMid: true,
   showZeroOne: true,
-  zeroOneColor: "#787B86",
+  zeroOneColor: "#9598A1",
+  /** Level tags on 0 / 0.5 / 1 only — no Premium/Discount pills. */
   showLabels: true,
   fib618Color: "#A5D6A7",
   fib786Color: "#4DD0E1",
-  fillOpacity: 14,
+  fillOpacity: 16,
   extendToLast: true,
 };
 
@@ -142,10 +146,10 @@ function chartTfLabel(interval: string): string {
 }
 
 /**
- * Paint one confirmed DR with ICT halves:
- *   • 0 → 0.5 (bot → mid) = green discount
- *   • 0.5 → 1 (mid → top) = red premium
- *   • midline at 0.5 (EQ)
+ * Paint one confirmed DR — professional ICT box:
+ *   • 0 → 0.5 (bot → mid) = green
+ *   • 0.5 → 1 (mid → top) = red
+ *   • levels drawn: 0 / 0.5 / 1 only (fibs optional)
  */
 export function dealingRangeHalfCmds(
   dr: ConfirmedDealingRange,
@@ -155,16 +159,17 @@ export function dealingRangeHalfCmds(
   const discount = normalizeHex(style.discountColor, MULTI_TF_DR_DEFAULTS.discountColor);
   const premium = normalizeHex(style.premiumColor, MULTI_TF_DR_DEFAULTS.premiumColor);
   const midColor = normalizeHex(style.midColor, MULTI_TF_DR_DEFAULTS.midColor);
-  const zeroOne = normalizeHex(style.zeroOneColor, MULTI_TF_DR_DEFAULTS.zeroOneColor);
+  const edgeColor = normalizeHex(style.zeroOneColor, MULTI_TF_DR_DEFAULTS.zeroOneColor);
   const fib618 = normalizeHex(style.fib618Color, MULTI_TF_DR_DEFAULTS.fib618Color);
   const fib786 = normalizeHex(style.fib786Color, MULTI_TF_DR_DEFAULTS.fib786Color);
-  const alpha = Math.max(0.04, Math.min(0.4, Number(style.fillOpacity) / 100));
+  const alpha = Math.max(0.06, Math.min(0.35, Number(style.fillOpacity) / 100));
   const t0 = dr.t0;
   const t2 = Math.max(opts.tEnd, dr.t1, t0 + 1);
-  const tag = opts.tfLabel ? `${opts.tfLabel} ` : "";
+  const tf = (opts.tfLabel || "").trim();
+  const level = (n: string) => (style.showLabels ? (tf ? `${tf} ${n}` : n) : undefined);
   const cmds: DrawCmd[] = [];
 
-  // Premium first (upper), then discount — paint order keeps labels readable.
+  // Two clean halves — no borders (borders stack into muddy bands).
   cmds.push({
     kind: "rect",
     t1: t0,
@@ -174,7 +179,7 @@ export function dealingRangeHalfCmds(
     color: premium,
     fill: premium,
     fillAlpha: alpha,
-    borderWidth: 1,
+    borderWidth: 0,
     style: "solid",
   });
   cmds.push({
@@ -186,10 +191,11 @@ export function dealingRangeHalfCmds(
     color: discount,
     fill: discount,
     fillAlpha: alpha,
-    borderWidth: 1,
+    borderWidth: 0,
     style: "solid",
   });
 
+  // 1.0 (top)
   if (style.showZeroOne) {
     cmds.push({
       kind: "line",
@@ -197,24 +203,14 @@ export function dealingRangeHalfCmds(
       p1: dr.top,
       t2,
       p2: dr.top,
-      color: zeroOne,
+      color: edgeColor,
       width: 1,
-      style: "dotted",
-      text: style.showLabels ? `${tag}1.0` : undefined,
-    });
-    cmds.push({
-      kind: "line",
-      t1: t0,
-      p1: dr.bot,
-      t2,
-      p2: dr.bot,
-      color: zeroOne,
-      width: 1,
-      style: "dotted",
-      text: style.showLabels ? `${tag}0` : undefined,
+      style: "solid",
+      text: level("1"),
     });
   }
 
+  // 0.5 (EQ) — always the focal line
   if (style.showMid) {
     cmds.push({
       kind: "line",
@@ -223,14 +219,28 @@ export function dealingRangeHalfCmds(
       t2,
       p2: dr.mid,
       color: midColor,
-      width: Math.max(1, Math.min(4, Math.floor(style.midWidth))),
+      width: Math.max(1, Math.min(3, Math.floor(style.midWidth))),
       style: "dashed",
-      text: style.showLabels
-        ? `${tag}${dr.bullish ? "DR↑" : "DR↓"} 0.5`
-        : undefined,
+      text: level("0.5"),
     });
   }
 
+  // 0 (bottom)
+  if (style.showZeroOne) {
+    cmds.push({
+      kind: "line",
+      t1: t0,
+      p1: dr.bot,
+      t2,
+      p2: dr.bot,
+      color: edgeColor,
+      width: 1,
+      style: "solid",
+      text: level("0"),
+    });
+  }
+
+  // Optional OTE — off by default; never the primary view.
   if (style.showFibs) {
     cmds.push({
       kind: "line",
@@ -253,25 +263,6 @@ export function dealingRangeHalfCmds(
       width: 1,
       style: "dotted",
       text: style.showLabels ? "0.786" : undefined,
-    });
-  }
-
-  if (style.showLabels) {
-    cmds.push({
-      kind: "label",
-      t1: Math.max(t0, Math.min(t2, dr.t1)),
-      p1: (dr.top + dr.mid) / 2,
-      color: premium,
-      fill: premium,
-      text: `${tag}Premium`,
-    });
-    cmds.push({
-      kind: "label",
-      t1: Math.max(t0, Math.min(t2, dr.t1)),
-      p1: (dr.bot + dr.mid) / 2,
-      color: discount,
-      fill: discount,
-      text: `${tag}Discount`,
     });
   }
 

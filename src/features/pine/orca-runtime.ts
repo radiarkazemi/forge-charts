@@ -868,7 +868,7 @@ export async function paintOrcaOnChart(
         const fillHex = clColor(cmd.fill ?? cmd.color, stroke);
         const alpha = Math.max(0.04, Math.min(0.85, cmd.fillAlpha ?? 0.2));
         const transparency = Math.round((1 - alpha) * 100);
-        const border = Math.max(0, Math.min(4, cmd.borderWidth ?? 1));
+        const border = Math.max(0, Math.min(4, cmd.borderWidth ?? 0));
         const id = await chart.createMultipointShape(
           [
             { time: cmd.t1 as never, price: cmd.p1 },
@@ -879,13 +879,22 @@ export async function paintOrcaOnChart(
             shape: "rectangle",
             overrides: {
               color: fillHex,
-              linecolor: fillHex,
+              linecolor: border > 0 ? fillHex : fillHex,
               backgroundColor: fillHex,
               fillBackground: true,
               filled: true,
               linewidth: border,
+              // Hide rect border stroke when borderWidth is 0 (clean half fills).
               transparency,
               linestyle: linestyleMap[cmd.style ?? "solid"],
+              ...(border === 0
+                ? {
+                    linewidth: 0,
+                    // Match fill so any residual stroke is invisible.
+                    color: fillHex,
+                    linecolor: fillHex,
+                  }
+                : {}),
             },
           },
         );

@@ -16,8 +16,8 @@ import {
 import type { DailyOpenMode } from "@/features/htf-candles/runtime";
 
 export const DEALING_RANGES_STUDY_NAME = "Dealing Ranges";
-/** Bumped to -2 so saved studies pick up multi-TF + ICT half defaults. */
-export const DEALING_RANGES_STUDY_ID = "DealingRanges@tv-basicstudies-2";
+/** Bumped to -3 — clean 0/0.5/1 only, TV green/red halves, no OTE clutter. */
+export const DEALING_RANGES_STUDY_ID = "DealingRanges@tv-basicstudies-3";
 
 const HTF_OPTIONS: DrHtfPreset[] = ["5", "15", "30", "60", "240", "1D", "1W", "1M"];
 const DAILY_OPEN_OPTIONS: DailyOpenMode[] = ["midnight", "830", "930", "exchange"];
@@ -157,7 +157,7 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
       id: DEALING_RANGES_STUDY_ID as never,
       name: DEALING_RANGES_STUDY_NAME,
       description: DEALING_RANGES_STUDY_NAME,
-      shortDescription: "MTF DR · 0–0.5 green · 0.5–1 red",
+      shortDescription: "DR · 0 / 0.5 / 1 · green–red",
       isCustomIndicator: true,
       is_price_study: true,
       linkedToSeries: true,
@@ -245,13 +245,13 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
         },
         {
           id: "showFibs",
-          name: "Show 0.618 / 0.786 OTE",
+          name: "Show 0.618 / 0.786 OTE (off = 0 / 0.5 / 1 only)",
           defval: DEALING_RANGES_DEFAULTS.showFibs,
           type: "bool",
         },
         {
           id: "showLabels",
-          name: "Show Premium / Discount labels",
+          name: "Show level tags (0 / 0.5 / 1)",
           defval: DEALING_RANGES_DEFAULTS.showLabels,
           type: "bool",
         },
@@ -293,19 +293,19 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
         },
         {
           id: "discountColor",
-          name: "Style · 0–0.5 Discount green (#hex)",
+          name: "Style · 0–0.5 green (#hex)",
           defval: DEALING_RANGES_DEFAULTS.discountColor,
           type: "text",
         },
         {
           id: "premiumColor",
-          name: "Style · 0.5–1 Premium red (#hex)",
+          name: "Style · 0.5–1 red (#hex)",
           defval: DEALING_RANGES_DEFAULTS.premiumColor,
           type: "text",
         },
         {
           id: "midColor",
-          name: "Style · Middle / EQ (#hex)",
+          name: "Style · 0.5 middle line (#hex)",
           defval: DEALING_RANGES_DEFAULTS.midColor,
           type: "text",
         },
