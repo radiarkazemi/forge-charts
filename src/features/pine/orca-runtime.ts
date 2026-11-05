@@ -759,11 +759,12 @@ function priceToTicks(priceDiff: number, minTick: number): number {
 export async function paintOrcaOnChart(
   chart: IChartWidgetApi,
   cmds: readonly DrawCmd[],
-  options?: { readonly ownerStudyId?: EntityId },
+  options?: { readonly ownerStudyId?: EntityId; readonly maxCmds?: number },
 ): Promise<EntityId[]> {
   const ids: EntityId[] = [];
-  // Cap drawing volume for CL performance; keep newest (signals live at the end).
-  const limited = cmds.length > 60 ? cmds.slice(cmds.length - 60) : cmds;
+  // Cap drawing volume for CL performance; keep newest (signals / DRs live at the end).
+  const maxCmds = Math.max(20, Math.min(200, Math.floor(options?.maxCmds ?? 60)));
+  const limited = cmds.length > maxCmds ? cmds.slice(cmds.length - maxCmds) : cmds;
   const ownerStudyId = options?.ownerStudyId;
   const minTick = resolveMinTick(chart);
 
