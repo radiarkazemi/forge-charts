@@ -18,6 +18,7 @@ import { createStructureIntelligenceIndicator } from "@/features/chart/structure
 import { createReplayMentorIndicator } from "@/features/chart/replay-mentor-indicator";
 import { createForgeTradingAssistantIndicator } from "@/features/chart/forge-trading-assistant-indicator";
 import { createForgeCertaintyIndicator } from "@/features/chart/forge-certainty-indicator";
+import { createFractalIgorIndicator } from "@/features/chart/fractal-igor-indicator";
 
 export interface WidgetOptionsInput {
   readonly container: HTMLElement;
@@ -297,6 +298,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
       drawingTools: FAVORITE_DRAWING_TOOLS,
       // Titles must match study `description` / UI name exactly.
       indicators: [
+        "Fractal (igor-T)",
         "Forge Certainty",
         "Forge Trading Assistant",
         "Forge Replay Mentor",
@@ -324,6 +326,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
     user_id: secondary ? `local-pane-${input.symbol}` : "local",
     custom_indicators_getter: (PineJS) =>
       Promise.resolve([
+        createFractalIgorIndicator(PineJS as never) as CustomIndicator,
         createDealingRangesIndicator(PineJS as never) as CustomIndicator,
         createStructureIntelligenceIndicator(PineJS as never) as CustomIndicator,
         createSessionsIndicator(PineJS as never) as CustomIndicator,
