@@ -135,17 +135,24 @@ fi
 REMOTE
 
 echo "Ensuring nginx serves charting_library + stable forge-app entry (no CF 404 cache)"
-"${SSH[@]}" "${USER}@${HOST}" bash -s <<'REMOTE'
+# HOST is expanded into the remote script so index.html can advertise the CF bypass URL.
+"${SSH[@]}" "${USER}@${HOST}" bash -s <<REMOTE
 set -euo pipefail
+ORIGIN_HOST='${HOST}'
 SNIP=/etc/nginx/snippets/forge-charting-library.conf
-cat > "$SNIP" <<'EOF'
+cat > "\$SNIP" <<'EOF'
 # Charting Library at /charting_library/ → /var/www/forge-web/charts/charting_library/
+# Long cache: ~2k bundles; short TTL forces IR/CF clients to re-open many TCP flows
+# (connection reset risk). Entry script stays no-cache.
 location ^~ /charting_library/ {
     root /var/www/forge-web/charts;
-    expires 5m;
-    add_header Cache-Control "public, max-age=300, must-revalidate" always;
+    sendfile on;
+    tcp_nopush on;
+    send_timeout 120s;
+    expires 7d;
+    add_header Cache-Control "public, max-age=604800" always;
     add_header X-Content-Type-Options nosniff always;
-    try_files $uri =404;
+    try_files \$uri =404;
 }
 # Entry script: avoid Cloudflare caching a temporary 404 for hours.
 location = /charting_library/charting_library.js {
@@ -160,7 +167,7 @@ EOF
 
 # Stable SPA entry + never let Cloudflare cache a missing hashed bundle.
 ASSET_SNIP=/etc/nginx/snippets/forge-assets.conf
-cat > "$ASSET_SNIP" <<'EOF'
+cat > "\$ASSET_SNIP" <<'EOF'
 # Stable entries — overwritten each deploy; must not be immutable-cached.
 # forge-app.js kept as alias for any mid-flight HTML; forge-main.js is current.
 location = /assets/forge/forge-main.js {
@@ -189,10 +196,11 @@ location = /assets/forge/forge-app.js {
 }
 location /assets/forge/ {
     root /var/www/forge-web;
+    send_timeout 120s;
     expires 7d;
     add_header Cache-Control "public, max-age=604800" always;
     add_header X-Content-Type-Options nosniff always;
-    try_files $uri @forge_asset_miss;
+    try_files \$uri @forge_asset_miss;
 }
 # Stale HTML sometimes asks for an old hashed entry (index-XXXX.js). Never let
 # Cloudflare cache that 404 as immutable — send them the stable forge-main.js.
@@ -200,16 +208,81 @@ location @forge_asset_miss {
     default_type text/plain;
     add_header Cache-Control "no-store" always;
     add_header CDN-Cache-Control "no-store" always;
-    if ($uri ~* "^/assets/forge/index-.+\.js$") {
+    if (\$uri ~* "^/assets/forge/index-.+\.js\$") {
         return 302 /assets/forge/forge-main.js;
     }
     return 404;
 }
 EOF
 
-for conf in /etc/nginx/sites-enabled/forgechart /etc/nginx/sites-enabled/forge-landing-8088; do
-  [[ -f "$conf" ]] || continue
-  python3 - "$conf" <<'PY'
+# HTTP :8089 Forge-only fallback (bypasses Cloudflare — for IR "connection was reset").
+FALLBACK=/etc/nginx/sites-enabled/forge-charts-fallback
+cat > "\$FALLBACK" <<EOF
+# Forge charts HTTP fallback — dedicated Forge tree only (no Anil homepage).
+# Port 8089 is not proxied by Cloudflare; use when forgechart.ir RST mid-TLS.
+server {
+    listen 8089;
+    listen [::]:8089;
+    server_name _;
+
+    client_max_body_size 12m;
+    sendfile on;
+    tcp_nodelay on;
+    send_timeout 120s;
+    keepalive_timeout 75s;
+
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 256;
+    gzip_types text/css application/javascript application/json font/woff2 image/svg+xml text/plain;
+
+    root /var/www/forge-web;
+
+    location = / {
+        return 302 /charts/;
+    }
+
+    location /charts/ {
+        try_files \\\$uri \\\$uri/ /charts/index.html;
+        add_header Cache-Control "no-store" always;
+    }
+
+    include /etc/nginx/snippets/forge-charting-library.conf;
+    include /etc/nginx/snippets/forge-assets.conf;
+    include /etc/nginx/snippets/cp-fetcher-api.conf;
+}
+EOF
+
+# Inject origin fallback URL into charts index (helps users who get HTML but not bundles).
+CHART_INDEX=/var/www/forge-web/charts/index.html
+if [[ -f "\$CHART_INDEX" ]]; then
+  python3 - "\$CHART_INDEX" "\$ORIGIN_HOST" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+host = sys.argv[2].strip()
+text = p.read_text()
+fallback = f"http://{host}:8088/charts/"
+snippet = f'<script>window.__FORGE_ORIGIN_FALLBACK__={fallback!r};</script>\n'
+import re
+# Boot UI references the name as a string — only replace an existing assignment tag.
+assign_re = re.compile(
+    r"<script>window\.__FORGE_ORIGIN_FALLBACK__=.*?</script>\n?",
+)
+if assign_re.search(text):
+    text = assign_re.sub(snippet, text, count=1)
+elif "</head>" in text:
+    text = text.replace("</head>", snippet + "</head>", 1)
+else:
+    text = snippet + text
+p.write_text(text)
+print(f"injected origin fallback → {fallback}")
+PY
+fi
+
+for conf in /etc/nginx/sites-enabled/forgechart /etc/nginx/sites-enabled/forge-landing-8088 /etc/nginx/sites-enabled/forge-charts-fallback; do
+  [[ -f "\$conf" ]] || continue
+  python3 - "\$conf" <<'PY'
 from pathlib import Path
 import re
 import sys
@@ -217,7 +290,42 @@ p = Path(sys.argv[1])
 text = p.read_text()
 changed = False
 
-# Per server-block: ensure forge-assets.conf is included (HTTP + HTTPS).
+# Restore visitor IPs behind Cloudflare (logging / rate limits).
+realip = "include /etc/nginx/snippets/cloudflare-realip.conf;\n"
+if "forgechart.ir" in text and "cloudflare-realip.conf" not in text:
+    # Insert once after the first server_name line in each server block that names forgechart.
+    lines = text.splitlines(keepends=True)
+    out = []
+    i = 0
+    while i < len(lines):
+        if re.match(r"server\s*\{", lines[i].strip()) or lines[i].strip() == "server {":
+            block = [lines[i]]
+            depth = lines[i].count("{") - lines[i].count("}")
+            i += 1
+            while i < len(lines) and depth > 0:
+                block.append(lines[i])
+                depth += lines[i].count("{") - lines[i].count("}")
+                i += 1
+            blk = "".join(block)
+            if "forgechart.ir" in blk and "cloudflare-realip.conf" not in blk:
+                inserted = False
+                for j, line in enumerate(block):
+                    if "server_name" in line and "forgechart.ir" in line:
+                        block.insert(j + 1, "    " + realip)
+                        inserted = True
+                        break
+                if not inserted:
+                    block.insert(1, "    " + realip)
+                blk = "".join(block)
+                changed = True
+                print(f"patched real_ip in {p}")
+            out.append(blk)
+            continue
+        out.append(lines[i])
+        i += 1
+    text = "".join(out)
+
+# Per server-block: ensure forge-assets.conf is included (HTTP + HTTPS + 8089).
 lines = text.splitlines(keepends=True)
 out = []
 i = 0
@@ -232,7 +340,7 @@ while i < len(lines):
             depth += lines[i].count("{") - lines[i].count("}")
             i += 1
         blk = "".join(block)
-        needs = ("forge-web" in blk or "forgechart.ir" in blk or "8088" in blk) and (
+        needs = ("forge-web" in blk or "forgechart.ir" in blk or "8088" in blk or "8089" in blk) and (
             "forge-assets.conf" not in blk
         )
         if needs:
@@ -282,6 +390,20 @@ if n:
     text = new_text
     changed = True
     print(f"commented {n} inline /assets/forge/ in {p}")
+
+# Longer send/keepalive on forgechart HTTPS (large CL fan-out).
+if "forgechart.ir" in text and "send_timeout 120s" not in text:
+    text2, n2 = re.subn(
+        r"(listen \[::\]:443 ssl http2;\n)",
+        r"\1    send_timeout 120s;\n    keepalive_timeout 75s;\n",
+        text,
+        count=1,
+    )
+    if n2:
+        text = text2
+        changed = True
+        print(f"patched timeouts in {p}")
+
 if changed:
     p.write_text(text)
 PY
@@ -291,5 +413,6 @@ REMOTE
 
 echo "Done."
 echo "  https://forgechart.ir/charts/"
-echo "  http://${HOST}:8088/charts/"
+echo "  http://${HOST}:8088/charts/   # CF bypass (IR connection-reset)"
+echo "  http://${HOST}:8089/charts/   # CF bypass (Forge-only)"
 echo "  http://${HOST}/charts/"
