@@ -21,6 +21,7 @@ import { useForgeCertaintyStudy } from "./useForgeCertaintyStudy";
 import { useFractalIgorStudy } from "./useFractalIgorStudy";
 import { useRealSwingsStudy } from "./useRealSwingsStudy";
 import { useBosMssStudy } from "./useBosMssStudy";
+import { useIrlErlStudy } from "./useIrlErlStudy";
 import { SessionsDashboard } from "@/features/sessions/SessionsDashboard";
 import { useTradingViewWidget } from "./useTradingViewWidget";
 import { RADIAR_LAYOUT_NAME } from "@/infrastructure/tradingview";
@@ -262,6 +263,7 @@ export function TradingViewChart({
   useFractalIgorStudy(true);
   useRealSwingsStudy(true);
   useBosMssStudy(true);
+  useIrlErlStudy(true);
 
   return (
     <Box
