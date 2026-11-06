@@ -1,0 +1,17 @@
+//@version=5
+// Reference stub — live Forge Charts study is the CL custom indicator
+// “IRL / ERL” (IrlErlLiquidity@tv-basicstudies-1).
+//
+// ERL = external range liquidity at dealing-range high/low.
+// IRL = internal EQH/EQL (equal highs/lows) inside the dealing range.
+indicator("IRL / ERL (reference)", overlay=true, max_lines_count=500)
+
+leftBars = input.int(5, "Swing left")
+rightBars = input.int(5, "Swing right")
+eqTol = input.float(0.05, "EQ tolerance %", step=0.01)
+
+ph = ta.pivothigh(high, leftBars, rightBars)
+pl = ta.pivotlow(low, leftBars, rightBars)
+
+plotshape(not na(ph), title="Pivot H", style=shape.triangledown, location=location.abovebar, color=color.new(color.blue, 40), size=size.tiny)
+plotshape(not na(pl), title="Pivot L", style=shape.triangleup, location=location.belowbar, color=color.new(color.purple, 40), size=size.tiny)
