@@ -1,19 +1,23 @@
 /**
- * Multi-timeframe Dealing Ranges — ICT HH↔LL + BOS confirmation.
+ * Multi-timeframe Dealing Ranges — rejected swing → opposite major swing.
  *
- * Bearish: swing HH → later swing LL → BOS below that LL → range HH–LL
- * Bullish: swing LL → later swing HH → BOS above that HH → range LL–HH
+ * Bearish DR: swing High (rejected) → later major swing Low → range H↔L.
+ *   Price revisiting ~50% (EQ) is the dealing area for continuation lower.
+ * Bullish DR: swing Low (rejected) → later major swing High → range L↔H.
+ *   EQ revisit → continuation higher.
  *
- * Intended dealing-range narrative (refine when PDF arrives):
- * After a rejected High, price drives into a major swing Low → dealing range
- * between that H and L; when price revisits ~50% (EQ) expect continuation
- * lower (mirror for uptrend: rejected Low → major High → 50% revisit long).
+ * Default: range confirms when the second swing prints (no BOS wait).
+ * Optional `requireBosConfirm` restores the older “break the 2nd extreme” gate.
  *
  * Paint: 0→0.5 green · 0.5→1 red · 0 / 0.5 / 1 levels (OTE optional).
- * Deploy note: cache-bust build 2026-11-06T15:06 Asia/Tehran — rotate hashed asset URLs.
  */
 
 import { intervalSeconds } from "@/domain";
+import {
+  DEFAULT_STRUCTURE_SCALES,
+  resolveStructureScales,
+  scaleStrength,
+} from "@/features/chart/structure-scales";
 import {
   aggregateHtfBars,
   htfLabel,
@@ -66,6 +70,14 @@ export interface MultiTfDealingRangesOptions extends DealingRangesStyle {
   readonly extendBars: number;
   readonly breakOnWick: boolean;
   /**
+   * When true, wait for a break of the 2nd extreme before drawing (legacy).
+   * Default false — DR forms as soon as rejected H→major L (or L→H) completes.
+   */
+  readonly requireBosConfirm: boolean;
+  /** Run several pivot widths so minor + major DRs show together. */
+  readonly smartScales: boolean;
+  readonly scalesText: string;
+  /**
    * Drop HH↔LL legs smaller than this % of mid-price
    * (filters micro noise so majors match hand-drawn DRs).
    */
@@ -86,18 +98,21 @@ export const DEFAULT_DR_HTF_SLOTS: readonly DrHtfSlot[] = [
 ];
 
 export const MULTI_TF_DR_DEFAULTS: MultiTfDealingRangesOptions = {
-  maxRanges: 2,
+  maxRanges: 6,
   lookbackDays: 90,
   fromDate: "",
   toDate: "",
   showFibs: false,
   /** Wider pivots = swings closer to hand-drawn majors. */
-  pivotLeft: 3,
-  pivotRight: 3,
+  pivotLeft: 5,
+  pivotRight: 5,
   extendBars: 12,
   breakOnWick: false,
-  /** ~0.25% of mid — kills micro 5m noise on gold/FX. */
-  minRangePct: 0.25,
+  requireBosConfirm: false,
+  smartScales: true,
+  scalesText: DEFAULT_STRUCTURE_SCALES.join(","),
+  /** ~0.15% of mid — keep real legs, drop pure noise. */
+  minRangePct: 0.15,
   showChartTf: true,
   slots: DEFAULT_DR_HTF_SLOTS,
   dailyOpenMode: "midnight",
@@ -209,6 +224,14 @@ function parseDateEndSec(iso: string): number | null {
   return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
 }
 
+interface SwingPivot {
+  kind: "high" | "low";
+  index: number;
+  time: number;
+  price: number;
+  scale: number;
+}
+
 interface PendingLeg {
   /** +1 = bullish (LL→HH); -1 = bearish (HH→LL). */
   side: 1 | -1;
@@ -216,11 +239,200 @@ interface PendingLeg {
   firstBar: number;
   secondPrice: number;
   secondBar: number;
+  scale: number;
+}
+
+function collectSwings(
+  bars: readonly OrcaBar[],
+  left: number,
+  right: number,
+  scale: number,
+): SwingPivot[] {
+  const out: SwingPivot[] = [];
+  for (let i = 0; i < bars.length; i += 1) {
+    const ph = pivotHigh(bars, i, left, right);
+    const pl = pivotLow(bars, i, left, right);
+    if (ph != null) {
+      out.push({
+        kind: "high",
+        index: i - right,
+        time: bars[i - right]!.time,
+        price: ph,
+        scale,
+      });
+    }
+    if (pl != null) {
+      out.push({
+        kind: "low",
+        index: i - right,
+        time: bars[i - right]!.time,
+        price: pl,
+        scale,
+      });
+    }
+  }
+  out.sort((a, b) => a.index - b.index || (a.kind === "high" ? -1 : 1));
+  return out;
+}
+
+/** Keep alternating H↔L; same-side keeps the more extreme pivot. */
+function alternateSwings(pivots: readonly SwingPivot[]): SwingPivot[] {
+  if (pivots.length === 0) return [];
+  const out: SwingPivot[] = [];
+  for (const p of pivots) {
+    const last = out[out.length - 1];
+    if (!last) {
+      out.push(p);
+      continue;
+    }
+    if (last.kind === p.kind) {
+      if (p.kind === "high" && p.price >= last.price) out[out.length - 1] = p;
+      if (p.kind === "low" && p.price <= last.price) out[out.length - 1] = p;
+      continue;
+    }
+    out.push(p);
+  }
+  return out;
+}
+
+function makeRange(
+  side: 1 | -1,
+  firstPrice: number,
+  firstBar: number,
+  secondPrice: number,
+  secondBar: number,
+  bars: readonly OrcaBar[],
+  confirmBar: number,
+): ConfirmedDealingRange {
+  const topP = Math.max(firstPrice, secondPrice);
+  const botP = Math.min(firstPrice, secondPrice);
+  const mid = (topP + botP) / 2;
+  const rng = topP - botP;
+  const earlierBar = Math.min(firstBar, secondBar);
+  return {
+    bullish: side === 1,
+    name: side === 1 ? "Bullish DR" : "Bearish DR",
+    top: topP,
+    bot: botP,
+    mid,
+    ote618: topP - rng * 0.618,
+    ote786: topP - rng * 0.786,
+    t0: bars[earlierBar]!.time,
+    t1: bars[confirmBar]!.time,
+    confirmBar,
+  };
 }
 
 /**
- * ICT dealing ranges confirmed by BOS after the second extreme.
- * Returns chronological ConfirmedDealingRange (oldest → newest).
+ * Single-scale dealing ranges.
+ * Default: rejected High → major Low (or Low → High) confirms the range immediately.
+ */
+export function computeIctConfirmedRangesAtScale(
+  bars: readonly OrcaBar[],
+  opts: Pick<
+    MultiTfDealingRangesOptions,
+    | "breakOnWick"
+    | "minRangePct"
+    | "requireBosConfirm"
+  >,
+  left: number,
+  right: number,
+  scale: number,
+): ConfirmedDealingRange[] {
+  const L = Math.max(1, Math.min(50, Math.floor(left)));
+  const R = Math.max(1, Math.min(50, Math.floor(right)));
+  if (bars.length < L + R + 5) return [];
+
+  const swings = alternateSwings(collectSwings(bars, L, R, scale));
+  const minPct = Math.max(0, opts.minRangePct);
+  const completed: ConfirmedDealingRange[] = [];
+  let pending: PendingLeg | null = null;
+
+  const confirmNow = (confirmBar: number) => {
+    if (!pending) return;
+    if (confirmBar < pending.secondBar) return;
+    if (!rangeMeetsMinPct(
+      Math.max(pending.firstPrice, pending.secondPrice),
+      Math.min(pending.firstPrice, pending.secondPrice),
+      minPct,
+    )) {
+      pending = null;
+      return;
+    }
+    completed.push(
+      makeRange(
+        pending.side,
+        pending.firstPrice,
+        pending.firstBar,
+        pending.secondPrice,
+        pending.secondBar,
+        bars,
+        confirmBar,
+      ),
+    );
+    pending = null;
+  };
+
+  // Build legs from alternating swings (H→L bearish, L→H bullish).
+  for (let s = 1; s < swings.length; s += 1) {
+    const a = swings[s - 1]!;
+    const b = swings[s]!;
+    let leg: PendingLeg | null = null;
+    if (a.kind === "high" && b.kind === "low" && b.index > a.index && b.price < a.price) {
+      if (!rangeMeetsMinPct(a.price, b.price, minPct)) continue;
+      leg = {
+        side: -1,
+        firstPrice: a.price,
+        firstBar: a.index,
+        secondPrice: b.price,
+        secondBar: b.index,
+        scale,
+      };
+    } else if (a.kind === "low" && b.kind === "high" && b.index > a.index && b.price > a.price) {
+      if (!rangeMeetsMinPct(b.price, a.price, minPct)) continue;
+      leg = {
+        side: 1,
+        firstPrice: a.price,
+        firstBar: a.index,
+        secondPrice: b.price,
+        secondBar: b.index,
+        scale,
+      };
+    }
+    if (!leg) continue;
+
+    if (!opts.requireBosConfirm) {
+      pending = leg;
+      confirmNow(b.index);
+      continue;
+    }
+
+    // Legacy: wait for break of the 2nd extreme after the leg forms.
+    pending = leg;
+    let confirmed = false;
+    for (let i = leg.secondBar + 1; i < bars.length; i += 1) {
+      const bar = bars[i]!;
+      const useHigh = opts.breakOnWick ? bar.high : bar.close;
+      const useLow = opts.breakOnWick ? bar.low : bar.close;
+      if (leg.side === -1 && useLow < leg.secondPrice) {
+        confirmNow(i);
+        confirmed = true;
+        break;
+      }
+      if (leg.side === 1 && useHigh > leg.secondPrice) {
+        confirmNow(i);
+        confirmed = true;
+        break;
+      }
+    }
+    if (!confirmed) pending = null;
+  }
+
+  return completed;
+}
+
+/**
+ * ICT dealing ranges — multi-scale minor→major, confirm on H↔L (default).
  */
 export function computeIctConfirmedRanges(
   bars: readonly OrcaBar[],
@@ -234,167 +446,54 @@ export function computeIctConfirmedRanges(
     | "fromDate"
     | "toDate"
     | "lookbackDays"
+    | "requireBosConfirm"
+    | "smartScales"
+    | "scalesText"
   >,
   nowSec = Math.floor(Date.now() / 1000),
 ): ConfirmedDealingRange[] {
-  const left = Math.max(1, Math.floor(opts.pivotLeft));
-  const right = Math.max(1, Math.floor(opts.pivotRight));
-  if (bars.length < left + right + 5) return [];
-
   const toSec = parseDateEndSec(opts.toDate) ?? nowSec;
   const fromSec =
     parseDateStartSec(opts.fromDate) ??
     toSec - Math.max(1, opts.lookbackDays) * 86_400;
-  const minPct = Math.max(0, opts.minRangePct);
 
-  let anchorHigh: number | null = null;
-  let anchorHighBar: number | null = null;
-  let anchorLow: number | null = null;
-  let anchorLowBar: number | null = null;
-  let pending: PendingLeg | null = null;
-  const completed: ConfirmedDealingRange[] = [];
+  const scales = resolveStructureScales({
+    smartScales: opts.smartScales !== false,
+    scalesText: opts.scalesText || DEFAULT_STRUCTURE_SCALES.join(","),
+    single: Math.max(opts.pivotLeft, opts.pivotRight),
+  });
 
-  const confirmPending = (bosBar: number) => {
-    if (!pending) return;
-    if (bosBar <= pending.secondBar) return;
-    const topP = Math.max(pending.firstPrice, pending.secondPrice);
-    const botP = Math.min(pending.firstPrice, pending.secondPrice);
-    if (!rangeMeetsMinPct(topP, botP, minPct)) {
-      pending = null;
-      return;
-    }
-    const mid = (topP + botP) / 2;
-    const rng = topP - botP;
-    const earlierBar = Math.min(pending.firstBar, pending.secondBar);
-    const laterExtreme = Math.max(pending.firstBar, pending.secondBar);
-    const t0 = bars[earlierBar]!.time;
-    const t1 = bars[bosBar]!.time;
-    // Absolute ICT OTE (always measured from premium / high).
-    completed.push({
-      bullish: pending.side === 1,
-      name: pending.side === 1 ? "Bullish DR" : "Bearish DR",
-      top: topP,
-      bot: botP,
-      mid,
-      ote618: topP - rng * 0.618,
-      ote786: topP - rng * 0.786,
-      t0,
-      t1,
-      confirmBar: bosBar,
-    });
-    // Seed next leg from the second extreme (continuation structure).
-    if (pending.side === -1) {
-      anchorLow = pending.secondPrice;
-      anchorLowBar = pending.secondBar;
-      anchorHigh = null;
-      anchorHighBar = null;
-    } else {
-      anchorHigh = pending.secondPrice;
-      anchorHighBar = pending.secondBar;
-      anchorLow = null;
-      anchorLowBar = null;
-    }
-    pending = null;
-    void laterExtreme;
-  };
-
-  for (let i = 0; i < bars.length; i += 1) {
-    const bar = bars[i]!;
-    const ph = pivotHigh(bars, i, left, right);
-    const pl = pivotLow(bars, i, left, right);
-
-    if (ph != null) {
-      const shBar = i - right;
-      // While waiting for BOS on a bullish pending leg, raise the HH if price prints a higher one.
-      if (
-        pending != null &&
-        pending.side === 1 &&
-        shBar > pending.firstBar &&
-        ph > pending.secondPrice
-      ) {
-        pending.secondPrice = ph;
-        pending.secondBar = shBar;
-      } else if (pending == null) {
-        if (anchorHigh == null || ph >= anchorHigh) {
-          anchorHigh = ph;
-          anchorHighBar = shBar;
-        }
-        // Bullish candidate: LL → later HH.
-        if (
-          anchorLow != null &&
-          anchorLowBar != null &&
-          shBar > anchorLowBar &&
-          ph > anchorLow &&
-          rangeMeetsMinPct(ph, anchorLow, minPct)
-        ) {
-          pending = {
-            side: 1,
-            firstPrice: anchorLow,
-            firstBar: anchorLowBar,
-            secondPrice: ph,
-            secondBar: shBar,
-          };
-          anchorLow = null;
-          anchorLowBar = null;
-          anchorHigh = null;
-          anchorHighBar = null;
-        }
+  // Prefer larger-scale (major) ranges when two boxes nearly overlap.
+  const byKey = new Map<string, ConfirmedDealingRange & { scale: number }>();
+  for (const scale of scales) {
+    const tier = computeIctConfirmedRangesAtScale(
+      bars,
+      opts,
+      scale,
+      scale,
+      scale,
+    );
+    const strength = scaleStrength(scale, scales);
+    for (const dr of tier) {
+      // Coarse key so near-identical majors/minors collapse to the major.
+      const topK = Math.round(dr.top * 1e5) / 1e5;
+      const botK = Math.round(dr.bot * 1e5) / 1e5;
+      const key = `${dr.bullish ? "B" : "S"}|${dr.t0}|${topK}|${botK}`;
+      const prev = byKey.get(key);
+      if (!prev || scale > prev.scale) {
+        byKey.set(key, { ...dr, scale });
       }
-    }
-
-    if (pl != null) {
-      const slBar = i - right;
-      if (
-        pending != null &&
-        pending.side === -1 &&
-        slBar > pending.firstBar &&
-        pl < pending.secondPrice
-      ) {
-        pending.secondPrice = pl;
-        pending.secondBar = slBar;
-      } else if (pending == null) {
-        if (anchorLow == null || pl <= anchorLow) {
-          anchorLow = pl;
-          anchorLowBar = slBar;
-        }
-        // Bearish candidate: HH → later LL.
-        if (
-          anchorHigh != null &&
-          anchorHighBar != null &&
-          slBar > anchorHighBar &&
-          pl < anchorHigh &&
-          rangeMeetsMinPct(anchorHigh, pl, minPct)
-        ) {
-          pending = {
-            side: -1,
-            firstPrice: anchorHigh,
-            firstBar: anchorHighBar,
-            secondPrice: pl,
-            secondBar: slBar,
-          };
-          anchorHigh = null;
-          anchorHighBar = null;
-          anchorLow = null;
-          anchorLowBar = null;
-        }
-      }
-    }
-
-    const useHigh = opts.breakOnWick ? bar.high : bar.close;
-    const useLow = opts.breakOnWick ? bar.low : bar.close;
-
-    if (pending && i > pending.secondBar) {
-      if (pending.side === -1 && useLow < pending.secondPrice) {
-        confirmPending(i);
-      } else if (pending.side === 1 && useHigh > pending.secondPrice) {
-        confirmPending(i);
-      }
+      void strength;
     }
   }
 
-  const filtered = completed.filter((r) => r.t1 >= fromSec && r.t1 <= toSec);
+  const completed = [...byKey.values()]
+    .map(({ scale: _s, ...dr }) => dr)
+    .filter((r) => r.t1 >= fromSec && r.t1 <= toSec)
+    .sort((a, b) => a.t1 - b.t1);
+
   const maxN = Math.max(1, Math.min(20, Math.floor(opts.maxRanges)));
-  return filtered.slice(-maxN);
+  return completed.slice(-maxN);
 }
 
 /**
