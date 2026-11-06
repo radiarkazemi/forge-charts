@@ -1,22 +1,23 @@
 #!/usr/bin/env bash
 # Deploy Forge Charts (latest build) to the cp_fetcher / goldanil VPS.
 # Usage:
-#   VPS_HOST=185.222.163.116 VPS_USER=root ./scripts/deploy-vps.sh
+#   VPS_HOST=[REDACTED].116 VPS_USER=root ./scripts/deploy-vps.sh
 # Password auth: SSHPASS='...' ./scripts/deploy-vps.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-HOST="${VPS_HOST:-185.222.163.116}"
+HOST="${VPS_HOST:-[REDACTED].116}"
 USER="${VPS_USER:-root}"
 REMOTE_APP="${REMOTE_APP:-/var/www/forge-charts}"
 REMOTE_ANIL_CHARTS="${REMOTE_ANIL_CHARTS:-/var/www/anil/frontend/dist/charts}"
 REMOTE_ANIL_ASSETS="${REMOTE_ANIL_ASSETS:-/var/www/anil/frontend/dist/assets/forge}"
+REMOTE_FORGE_WEB="${REMOTE_FORGE_WEB:-/var/www/forge-web}"
 
-SSH=(ssh -o StrictHostKeyChecking=accept-new)
-SCP=(scp -o StrictHostKeyChecking=accept-new)
+SSH=(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o ServerAliveInterval=10)
+SCP=(scp -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30)
 if [[ -n "${SSHPASS:-}" ]]; then
-  SSH=(sshpass -e ssh -o StrictHostKeyChecking=accept-new)
-  SCP=(sshpass -e scp -o StrictHostKeyChecking=accept-new)
+  SSH=(sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o ServerAliveInterval=10)
+  SCP=(sshpass -e scp -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30)
 fi
 
 cd "$ROOT"
@@ -64,35 +65,43 @@ if [[ -f SUPERCHART-PARITY.md ]]; then
 fi
 "${SSH[@]}" "${USER}@${HOST}" "chown -R www-data:www-data '${REMOTE_ANIL_CHARTS}'"
 
-echo "Mirroring slim dist → ${REMOTE_APP} (excludes charting_library)"
-tar -C dist --exclude=charting_library --exclude=charts -cf - . | "${SSH[@]}" "${USER}@${HOST}" \
-  "tar -C '${REMOTE_APP}' -xf - && chown -R www-data:www-data '${REMOTE_APP}'"
-
-
-REMOTE_FORGE_WEB="${REMOTE_FORGE_WEB:-/var/www/forge-web}"
-echo "Syncing Forge web root → ${REMOTE_FORGE_WEB}"
+# Critical: forgechart.ir nginx serves /assets/forge/ + /charts/ from forge-web.
+# Sync immediately after Anil upload so a later SSH timeout cannot leave
+# index.html pointing at a missing hashed bundle (Cloudflare then caches 404).
+echo "Syncing Forge web root → ${REMOTE_FORGE_WEB} (critical path)"
 "${SSH[@]}" "${USER}@${HOST}" bash -s <<REMOTE
 set -euo pipefail
 ANIL_DIST='/var/www/anil/frontend/dist'
 REMOTE_FORGE_WEB='${REMOTE_FORGE_WEB}'
-REMOTE_APP='${REMOTE_APP}'
 mkdir -p "\${REMOTE_FORGE_WEB}/charts" "\${REMOTE_FORGE_WEB}/assets/forge"
 if [[ -d "\${ANIL_DIST}/charts" && -d "\${ANIL_DIST}/assets/forge" ]]; then
-  # Sync app files only — never delete an existing charting_library tree.
   rsync -a --delete --exclude charting_library "\${ANIL_DIST}/charts/" "\${REMOTE_FORGE_WEB}/charts/"
   rsync -a --delete "\${ANIL_DIST}/assets/forge/" "\${REMOTE_FORGE_WEB}/assets/forge/"
   if [[ -d "\${ANIL_DIST}/charts/brand" ]]; then
     rsync -a "\${ANIL_DIST}/charts/brand/" "\${REMOTE_FORGE_WEB}/charts/brand/"
   fi
-  chown -R www-data:www-data "\${REMOTE_FORGE_WEB}"
-  echo "Synced forge-web from Anil dist"
+  chown -R www-data:www-data "\${REMOTE_FORGE_WEB}/charts" "\${REMOTE_FORGE_WEB}/assets/forge"
+  INDEX_JS=\$(grep -oE 'index-[^\"/]+\\.js' "\${REMOTE_FORGE_WEB}/charts/index.html" | head -1 || true)
+  if [[ -n "\${INDEX_JS}" && ! -f "\${REMOTE_FORGE_WEB}/assets/forge/\${INDEX_JS}" ]]; then
+    echo "ERROR: forge-web missing \${INDEX_JS} after sync" >&2
+    exit 1
+  fi
+  echo "Synced forge-web from Anil dist (\${INDEX_JS:-ok})"
 else
-  echo "WARN: Anil dist missing charts/assets" >&2
+  echo "ERROR: Anil dist missing charts/assets" >&2
+  exit 1
 fi
+REMOTE
 
-# Nginx serves /charting_library/ from forge-web. Always restore it from the
-# full tree under forge-charts (deploys historically left forge-web without it,
-# which produced “Failed to load TradingView library from /charting_library/”).
+echo "Mirroring slim dist → ${REMOTE_APP} (excludes charting_library)"
+tar -C dist --exclude=charting_library --exclude=charts -cf - . | "${SSH[@]}" "${USER}@${HOST}" \
+  "tar -C '${REMOTE_APP}' -xf - && chown -R www-data:www-data '${REMOTE_APP}'"
+
+echo "Restoring charting_library under forge-web"
+"${SSH[@]}" "${USER}@${HOST}" bash -s <<REMOTE
+set -euo pipefail
+REMOTE_FORGE_WEB='${REMOTE_FORGE_WEB}'
+REMOTE_APP='${REMOTE_APP}'
 CLIB_SRC=""
 for candidate in \
   "\${REMOTE_APP}/charting_library" \
@@ -159,4 +168,3 @@ echo "Done."
 echo "  https://forgechart.ir/charts/"
 echo "  http://${HOST}:8088/charts/"
 echo "  http://${HOST}/charts/"
-
