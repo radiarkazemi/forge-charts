@@ -1,14 +1,12 @@
 /**
  * IRL / ERL — Internal & External Range Liquidity (ICT).
  *
- * Built on the same dealing-range legs as Dealing Ranges:
- *   rejected High → major Low (bearish DR) or Low → High (bullish DR).
+ * One (or few) main dealing range(s):
+ *   ERL+ = range high (buy-side stops outside)
+ *   ERL− = range low  (sell-side stops outside)
+ *   IRL+ / IRL− = EQH/EQL and significant swings *inside* that range
  *
- * ERL — liquidity resting *outside* the range (stops beyond the extremes):
- *   ERL+ at range high (buy-side) · ERL− at range low (sell-side).
- *
- * IRL — liquidity resting *inside* the range (EQH / EQL clusters):
- *   IRL+ equal highs · IRL− equal lows, strictly between top and bot.
+ * Nested micro-ranges are dropped so the chart is not a stack of ERL labels.
  */
 
 import type { EntityId, IChartWidgetApi } from "@/infrastructure/tradingview";
@@ -16,7 +14,7 @@ import {
   computeIctConfirmedRanges,
   MULTI_TF_DR_DEFAULTS,
 } from "@/features/dealing-ranges/runtime";
-import type { OrcaBar } from "@/features/pine/orca-runtime";
+import type { ConfirmedDealingRange, OrcaBar } from "@/features/pine/orca-runtime";
 import {
   DEFAULT_STRUCTURE_SCALES,
   resolveStructureScales,
@@ -35,10 +33,14 @@ export interface IrlErlInputs {
   readonly minRangePct: number;
   readonly maxRanges: number;
   readonly lookbackDays: number;
-  /** Max absolute % of mid-price for two pivots to count as equal. */
+  /** Drop DRs nested inside a larger one (keep the main / bigger range). */
+  readonly hideNested: boolean;
+  /** Max % of mid for two pivots to count as equal (EQH/EQL). */
   readonly eqTolerancePct: number;
   /** Also mark lone internal swings (not only EQH/EQL). */
   readonly includeSingleSwings: boolean;
+  /** Ignore internal pivots within this fraction of range height from ERL edges. */
+  readonly edgeMarginPct: number;
   readonly showIrlPlus: boolean;
   readonly showIrlMinus: boolean;
   readonly showErlPlus: boolean;
@@ -67,10 +69,14 @@ export const IRL_ERL_DEFAULTS: IrlErlInputs = {
   smartScales: true,
   scalesText: DEFAULT_STRUCTURE_SCALES.join(","),
   minRangePct: MULTI_TF_DR_DEFAULTS.minRangePct,
-  maxRanges: 6,
+  /** Few main ranges — not every minor DR. */
+  maxRanges: 2,
   lookbackDays: 90,
-  eqTolerancePct: 0.05,
-  includeSingleSwings: false,
+  hideNested: true,
+  /** ~0.2% of mid — real EQH/EQL on FX/gold; 0.05 was too tight → no IRL. */
+  eqTolerancePct: 0.2,
+  includeSingleSwings: true,
+  edgeMarginPct: 8,
   showIrlPlus: true,
   showIrlMinus: true,
   showErlPlus: true,
@@ -90,7 +96,7 @@ export const IRL_ERL_DEFAULTS: IrlErlInputs = {
   irlLineStyle: 2,
   erlLineStyle: 0,
   fontSize: 12,
-  maxEvents: 160,
+  maxEvents: 40,
 };
 
 export interface IrlErlLevel {
@@ -189,15 +195,47 @@ function nearlyEqual(a: number, b: number, mid: number, tolPct: number): boolean
   return (Math.abs(a - b) / mid) * 100 <= Math.max(0, tolPct);
 }
 
+/** Keep larger DRs; drop boxes fully inside another. */
+function filterNestedRanges(
+  ranges: readonly ConfirmedDealingRange[],
+  hideNested: boolean,
+  tEnd?: number,
+): ConfirmedDealingRange[] {
+  if (!hideNested || ranges.length <= 1) return [...ranges];
+  const scored = ranges
+    .map((r) => {
+      const height = Math.max(0, r.top - r.bot);
+      const end = Math.max(r.t1, tEnd ?? r.t1, r.t0 + 1);
+      return { r, height, area: height * Math.max(1, end - r.t0) };
+    })
+    .sort((a, b) => b.area - a.area || b.height - a.height);
+
+  const kept: ConfirmedDealingRange[] = [];
+  for (const cand of scored) {
+    const nested = kept.some((outer) => {
+      const outerH = Math.max(0, outer.top - outer.bot);
+      if (!(outerH > 0) || cand.height >= outerH * 0.98) return false;
+      if (cand.r.bot < outer.bot - outerH * 0.001) return false;
+      if (cand.r.top > outer.top + outerH * 0.001) return false;
+      const outerEnd = Math.max(outer.t1, tEnd ?? outer.t1, outer.t0 + 1);
+      if (cand.r.t0 < outer.t0 - 1) return false;
+      if (cand.r.t0 > outerEnd + 1) return false;
+      return true;
+    });
+    if (!nested) kept.push(cand.r);
+  }
+  return kept.sort((a, b) => a.t1 - b.t1);
+}
+
 function findEqualClusters(
   pivots: readonly Pivot[],
   side: "high" | "low",
   mid: number,
   tolPct: number,
-): Array<{ price: number; t1: number; firstIndex: number }> {
+): Array<{ price: number; t1: number }> {
   const filtered = pivots.filter((p) => p.kind === side);
   const used = new Set<number>();
-  const clusters: Array<{ price: number; t1: number; firstIndex: number }> = [];
+  const clusters: Array<{ price: number; t1: number }> = [];
   for (let i = 0; i < filtered.length; i += 1) {
     if (used.has(i)) continue;
     const a = filtered[i]!;
@@ -217,7 +255,7 @@ function findEqualClusters(
         ? Math.max(...members.map((m) => m.price))
         : Math.min(...members.map((m) => m.price));
     const first = members.reduce((best, m) => (m.index < best.index ? m : best), members[0]!);
-    clusters.push({ price, t1: first.time, firstIndex: first.index });
+    clusters.push({ price, t1: first.time });
   }
   return clusters;
 }
@@ -229,9 +267,39 @@ function barIndexAtOrAfter(bars: readonly OrcaBar[], t: number): number {
   return bars.length - 1;
 }
 
+/** Merge levels at the same kind + nearly-same price into one segment. */
+function dedupeLevels(
+  levels: readonly IrlErlLevel[],
+  midHint: number,
+  tolPct: number,
+): IrlErlLevel[] {
+  const out: IrlErlLevel[] = [];
+  for (const lv of levels) {
+    const mid = midHint > 0 ? midHint : lv.price;
+    const hit = out.findIndex(
+      (x) => x.kind === lv.kind && nearlyEqual(x.price, lv.price, mid, Math.max(tolPct, 0.05)),
+    );
+    if (hit < 0) {
+      out.push(lv);
+      continue;
+    }
+    const prev = out[hit]!;
+    out[hit] = {
+      kind: prev.kind,
+      t1: Math.min(prev.t1, lv.t1),
+      t2: Math.max(prev.t2, lv.t2),
+      price: lv.kind.endsWith("+")
+        ? Math.max(prev.price, lv.price)
+        : Math.min(prev.price, lv.price),
+      scale: Math.max(prev.scale, lv.scale),
+    };
+  }
+  return out.sort((a, b) => a.t1 - b.t1 || a.price - b.price);
+}
+
 /**
- * Detect IRL / ERL levels from chart bars.
- * ERL from dealing-range extremes; IRL from EQH/EQL (and optional singles) inside each DR.
+ * Detect IRL / ERL from chart bars.
+ * ERL only on main (non-nested) dealing-range extremes; IRL inside those ranges.
  */
 export function detectIrlErl(
   bars: readonly OrcaBar[],
@@ -239,12 +307,14 @@ export function detectIrlErl(
 ): IrlErlLevel[] {
   if (bars.length < 20) return [];
   const lastTime = bars[bars.length - 1]!.time;
-  const ranges = computeIctConfirmedRanges(bars, {
+
+  // Pull extra candidates then nest-filter down to the main ranges.
+  const raw = computeIctConfirmedRanges(bars, {
     pivotLeft: inputs.leftBars,
     pivotRight: inputs.rightBars,
     breakOnWick: false,
     minRangePct: inputs.minRangePct,
-    maxRanges: inputs.maxRanges,
+    maxRanges: Math.max(inputs.maxRanges * 3, 8),
     fromDate: "",
     toDate: "",
     lookbackDays: inputs.lookbackDays,
@@ -252,32 +322,37 @@ export function detectIrlErl(
     smartScales: inputs.smartScales,
     scalesText: inputs.scalesText,
   });
-  if (ranges.length === 0) return [];
+  if (raw.length === 0) return [];
+
+  const ranges = filterNestedRanges(raw, inputs.hideNested !== false, lastTime)
+    .sort((a, b) => a.t1 - b.t1)
+    .slice(-Math.max(1, Math.min(6, inputs.maxRanges)));
 
   const scales = resolveStructureScales({
     smartScales: inputs.smartScales,
     scalesText: inputs.scalesText,
     single: Math.max(inputs.leftBars, inputs.rightBars),
   });
-  // Internal pivots: prefer a slightly tighter scale so EQH/EQL form inside majors.
-  const irlScale = Math.max(2, Math.min(...scales, Math.max(inputs.leftBars, inputs.rightBars)));
+  // Tighter pivot for internal liquidity than the DR legs.
+  const irlScale = Math.max(
+    2,
+    Math.min(Math.min(...scales), Math.max(2, Math.floor(Math.max(inputs.leftBars, inputs.rightBars) / 2))),
+  );
   const pivots = collectPivots(bars, irlScale, irlScale);
 
   const levels: IrlErlLevel[] = [];
-  const tEndDefault = lastTime;
+  let midHint = 0;
 
   for (const dr of ranges) {
-    const tEnd = inputs.extendToLast ? Math.max(tEndDefault, dr.t1) : dr.t1;
+    const tEnd = inputs.extendToLast ? Math.max(lastTime, dr.t1) : dr.t1;
     const mid = dr.mid > 0 ? dr.mid : (dr.top + dr.bot) / 2;
+    midHint = mid;
+    const height = Math.max(0, dr.top - dr.bot);
+    const margin = height * (Math.max(0, Math.min(40, inputs.edgeMarginPct)) / 100);
     const startIdx = barIndexAtOrAfter(bars, dr.t0);
+    // Internal structure only after the range is confirmed (2nd extreme).
+    const confirmIdx = barIndexAtOrAfter(bars, dr.t1);
     const endIdx = barIndexAtOrAfter(bars, tEnd);
-    const inside = pivots.filter(
-      (p) =>
-        p.index >= startIdx &&
-        p.index <= endIdx &&
-        p.price < dr.top &&
-        p.price > dr.bot,
-    );
 
     if (inputs.showErlPlus) {
       levels.push({
@@ -285,7 +360,7 @@ export function detectIrlErl(
         t1: dr.t0,
         t2: tEnd,
         price: dr.top,
-        scale: irlScale,
+        scale: Math.max(...scales),
       });
     }
     if (inputs.showErlMinus) {
@@ -294,78 +369,85 @@ export function detectIrlErl(
         t1: dr.t0,
         t2: tEnd,
         price: dr.bot,
-        scale: irlScale,
+        scale: Math.max(...scales),
       });
     }
 
-    if (inputs.showIrlPlus || inputs.showIrlMinus) {
-      const eqHighs = findEqualClusters(inside, "high", mid, inputs.eqTolerancePct);
-      const eqLows = findEqualClusters(inside, "low", mid, inputs.eqTolerancePct);
+    if (!(inputs.showIrlPlus || inputs.showIrlMinus) || !(height > 0)) continue;
 
+    const inside = pivots.filter(
+      (p) =>
+        p.index >= confirmIdx &&
+        p.index <= endIdx &&
+        p.index >= startIdx &&
+        p.price <= dr.top - margin &&
+        p.price >= dr.bot + margin,
+    );
+
+    const eqHighs = findEqualClusters(inside, "high", mid, inputs.eqTolerancePct);
+    const eqLows = findEqualClusters(inside, "low", mid, inputs.eqTolerancePct);
+    const eqHighSet = eqHighs.map((c) => c.price);
+    const eqLowSet = eqLows.map((c) => c.price);
+
+    if (inputs.showIrlPlus) {
+      for (const c of eqHighs) {
+        levels.push({
+          kind: "IRL+",
+          t1: c.t1,
+          t2: tEnd,
+          price: c.price,
+          scale: irlScale,
+        });
+      }
+    }
+    if (inputs.showIrlMinus) {
+      for (const c of eqLows) {
+        levels.push({
+          kind: "IRL-",
+          t1: c.t1,
+          t2: tEnd,
+          price: c.price,
+          scale: irlScale,
+        });
+      }
+    }
+
+    if (inputs.includeSingleSwings) {
+      // Most recent internal swings that are not already EQ clusters / near ERL.
+      const highs = inside.filter((p) => p.kind === "high").slice(-4);
+      const lows = inside.filter((p) => p.kind === "low").slice(-4);
       if (inputs.showIrlPlus) {
-        for (const c of eqHighs) {
+        for (const p of highs) {
+          if (eqHighSet.some((px) => nearlyEqual(px, p.price, mid, inputs.eqTolerancePct))) {
+            continue;
+          }
           levels.push({
             kind: "IRL+",
-            t1: c.t1,
+            t1: p.time,
             t2: tEnd,
-            price: c.price,
+            price: p.price,
             scale: irlScale,
           });
         }
       }
       if (inputs.showIrlMinus) {
-        for (const c of eqLows) {
+        for (const p of lows) {
+          if (eqLowSet.some((px) => nearlyEqual(px, p.price, mid, inputs.eqTolerancePct))) {
+            continue;
+          }
           levels.push({
             kind: "IRL-",
-            t1: c.t1,
+            t1: p.time,
             t2: tEnd,
-            price: c.price,
+            price: p.price,
             scale: irlScale,
           });
-        }
-      }
-
-      if (inputs.includeSingleSwings) {
-        const eqHighPrices = new Set(eqHighs.map((c) => c.price));
-        const eqLowPrices = new Set(eqLows.map((c) => c.price));
-        for (const p of inside) {
-          if (p.kind === "high" && inputs.showIrlPlus) {
-            if ([...eqHighPrices].some((px) => nearlyEqual(px, p.price, mid, inputs.eqTolerancePct))) {
-              continue;
-            }
-            levels.push({
-              kind: "IRL+",
-              t1: p.time,
-              t2: tEnd,
-              price: p.price,
-              scale: irlScale,
-            });
-          }
-          if (p.kind === "low" && inputs.showIrlMinus) {
-            if ([...eqLowPrices].some((px) => nearlyEqual(px, p.price, mid, inputs.eqTolerancePct))) {
-              continue;
-            }
-            levels.push({
-              kind: "IRL-",
-              t1: p.time,
-              t2: tEnd,
-              price: p.price,
-              scale: irlScale,
-            });
-          }
         }
       }
     }
   }
 
-  // Dedupe near-identical levels (same kind + coarse price + start).
-  const byKey = new Map<string, IrlErlLevel>();
-  for (const lv of levels) {
-    const key = `${lv.kind}|${Math.round(lv.price * 1e5) / 1e5}|${lv.t1}`;
-    const prev = byKey.get(key);
-    if (!prev || lv.t2 > prev.t2) byKey.set(key, lv);
-  }
-  return [...byKey.values()].sort((a, b) => a.t1 - b.t1 || a.price - b.price);
+  return dedupeLevels(levels, midHint, inputs.eqTolerancePct);
 }
 
 function kindEnabled(kind: IrlErlKind, inputs: IrlErlInputs): boolean {
@@ -426,7 +508,7 @@ export function irlErlDrawCmds(
     });
   }
 
-  const cap = Math.max(10, Math.min(500, Math.floor(inputs.maxEvents)));
+  const cap = Math.max(4, Math.min(80, Math.floor(inputs.maxEvents)));
   return cmds.length > cap ? cmds.slice(-cap) : cmds;
 }
 
@@ -476,7 +558,8 @@ export async function paintIrlErl(
             textcolor: cmd.color,
             fontsize: cmd.fontSize,
             bold: true,
-            horzLabelsAlign: "center",
+            // One label at the right end — avoids “ERL+ ERL+ ERL+” along the line.
+            horzLabelsAlign: "right",
             vertLabelsAlign: "middle",
             showPrice: false,
             extendLeft: false,

@@ -9,7 +9,8 @@ import { IRL_ERL_DEFAULTS } from "@/features/irl-erl/runtime";
 import { buildStylePlots, stylePlotNaNs } from "./study-style-plots";
 
 export const IRL_ERL_STUDY_NAME = "IRL / ERL";
-export const IRL_ERL_STUDY_ID = "IrlErlLiquidity@tv-basicstudies-1";
+/** Bumped to -2 — main-range ERL only + real IRL + dedupe. */
+export const IRL_ERL_STUDY_ID = "IrlErlLiquidity@tv-basicstudies-2";
 
 export const IRL_STYLE_PLUS = "plot_irl_plus";
 export const IRL_STYLE_MINUS = "plot_irl_minus";
@@ -24,8 +25,10 @@ export const IRL_ERL_STUDY_DEFAULTS = {
   minRangePct: IRL_ERL_DEFAULTS.minRangePct,
   maxRanges: IRL_ERL_DEFAULTS.maxRanges,
   lookbackDays: IRL_ERL_DEFAULTS.lookbackDays,
+  hideNested: IRL_ERL_DEFAULTS.hideNested,
   eqTolerancePct: IRL_ERL_DEFAULTS.eqTolerancePct,
   includeSingleSwings: IRL_ERL_DEFAULTS.includeSingleSwings,
+  edgeMarginPct: IRL_ERL_DEFAULTS.edgeMarginPct,
   showLines: IRL_ERL_DEFAULTS.showLines,
   showLabels: IRL_ERL_DEFAULTS.showLabels,
   extendToLast: IRL_ERL_DEFAULTS.extendToLast,
@@ -90,7 +93,7 @@ export function createIrlErlIndicator(PineJS: {
       id: IRL_ERL_STUDY_ID as never,
       name: IRL_ERL_STUDY_NAME,
       description: IRL_ERL_STUDY_NAME,
-      shortDescription: "IRL+ · IRL- · ERL+ · ERL-",
+      shortDescription: "IRL+ · IRL- · ERL+ · ERL- · v2",
       isCustomIndicator: true,
       is_price_study: true,
       linkedToSeries: true,
@@ -140,11 +143,11 @@ export function createIrlErlIndicator(PineJS: {
         },
         {
           id: "maxRanges",
-          name: "Max dealing ranges",
+          name: "Max main ranges (ERL pairs)",
           defval: IRL_ERL_STUDY_DEFAULTS.maxRanges,
           type: "integer",
           min: 1,
-          max: 20,
+          max: 6,
         },
         {
           id: "lookbackDays",
@@ -153,6 +156,12 @@ export function createIrlErlIndicator(PineJS: {
           type: "integer",
           min: 1,
           max: 3650,
+        },
+        {
+          id: "hideNested",
+          name: "Hide nested ranges (keep larger / main)",
+          defval: IRL_ERL_STUDY_DEFAULTS.hideNested,
+          type: "bool",
         },
         {
           id: "eqTolerancePct",
@@ -167,6 +176,14 @@ export function createIrlErlIndicator(PineJS: {
           name: "IRL includes single internal swings",
           defval: IRL_ERL_STUDY_DEFAULTS.includeSingleSwings,
           type: "bool",
+        },
+        {
+          id: "edgeMarginPct",
+          name: "IRL edge margin (% of range · away from ERL)",
+          defval: IRL_ERL_STUDY_DEFAULTS.edgeMarginPct,
+          type: "float",
+          min: 0,
+          max: 40,
         },
         {
           id: "extendToLast",

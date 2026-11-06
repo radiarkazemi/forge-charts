@@ -194,12 +194,13 @@ export function useIrlErlStudy(enabled = true): void {
           minRangePct: Math.max(0, Math.min(5, num("minRangePct", IRL_ERL_STUDY_DEFAULTS.minRangePct))),
           maxRanges: Math.max(
             1,
-            Math.min(20, Math.floor(num("maxRanges", IRL_ERL_STUDY_DEFAULTS.maxRanges))),
+            Math.min(6, Math.floor(num("maxRanges", IRL_ERL_STUDY_DEFAULTS.maxRanges))),
           ),
           lookbackDays: Math.max(
             1,
             Math.min(3650, Math.floor(num("lookbackDays", IRL_ERL_STUDY_DEFAULTS.lookbackDays))),
           ),
+          hideNested: bool("hideNested", IRL_ERL_STUDY_DEFAULTS.hideNested),
           eqTolerancePct: Math.max(
             0,
             Math.min(1, num("eqTolerancePct", IRL_ERL_STUDY_DEFAULTS.eqTolerancePct)),
@@ -207,6 +208,10 @@ export function useIrlErlStudy(enabled = true): void {
           includeSingleSwings: bool(
             "includeSingleSwings",
             IRL_ERL_STUDY_DEFAULTS.includeSingleSwings,
+          ),
+          edgeMarginPct: Math.max(
+            0,
+            Math.min(40, num("edgeMarginPct", IRL_ERL_STUDY_DEFAULTS.edgeMarginPct)),
           ),
           showIrlPlus: irlPlus.visible,
           showIrlMinus: irlMinus.visible,
@@ -228,8 +233,8 @@ export function useIrlErlStudy(enabled = true): void {
           erlLineStyle: erlPlus.linestyle ?? erlLineStyleInput,
           fontSize,
           maxEvents: Math.max(
-            10,
-            Math.min(400, Math.floor(num("maxEvents", IRL_ERL_STUDY_DEFAULTS.maxEvents))),
+            4,
+            Math.min(80, Math.floor(num("maxEvents", IRL_ERL_STUDY_DEFAULTS.maxEvents))),
           ),
         };
       } catch {
