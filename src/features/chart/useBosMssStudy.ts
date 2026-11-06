@@ -1,5 +1,9 @@
 /**
- * Watches Indicators “BOS / MSS” and paints BOS+/BOS-/MSS+/MSS- markers.
+ * Watches Indicators “BOS / MSS” and paints BOS+/BOS-/MSS+/MSS- segments.
+ * Colors / visibility / linewidth come from the Style tab (getStyleValues).
+ *
+ * Refresh guard: paint-then-swap, mute study events while painting, and never
+ * force-clear when the fingerprint is unchanged (stops the flicker loop).
  */
 
 import { useEffect, useRef } from "react";
@@ -8,27 +12,39 @@ import { useStore } from "@/shared/hooks/useStore";
 import type { EntityId } from "@/infrastructure/tradingview";
 import { barsFromChartExport } from "@/features/pine/orca-runtime";
 import {
+  BOS_MSS_DEFAULTS,
   computeBosMss,
   paintBosMss,
   type BosMssDrawCmd,
   type BosMssInputs,
 } from "@/features/bos-mss/runtime";
-import { BOS_MSS_STUDY_DEFAULTS } from "./bos-mss-indicator";
+import {
+  BOS_MSS_STUDY_DEFAULTS,
+  BOS_STYLE_MINUS,
+  BOS_STYLE_PLUS,
+  MSS_STYLE_MINUS,
+  MSS_STYLE_PLUS,
+} from "./bos-mss-indicator";
+import {
+  applyTransparency,
+  linewidthToFontSize,
+  readStylePlot,
+} from "./study-style-plots";
 import { studyIsVisible } from "./study-paint-gate";
 
 const MAX_BARS = 3_000;
 const STUDY_DEBOUNCE_MS = 500;
-const PRESENCE_POLL_MS = 6_000;
-const LIVE_REFRESH_MS = 15_000;
+const PRESENCE_POLL_MS = 8_000;
+const LIVE_REFRESH_MS = 20_000;
+/** Ignore study_event / properties while shapes are created/removed. */
+const PAINT_MUTE_MS = 1_500;
 
 function fingerprint(cmds: readonly BosMssDrawCmd[]): string {
   if (cmds.length === 0) return "empty";
   const head = cmds.slice(0, 4);
   const tail = cmds.length > 4 ? cmds.slice(-4) : [];
   const part = (c: BosMssDrawCmd) =>
-    c.kind === "line"
-      ? `ln:${c.t1}:${c.t2}:${c.p1}`
-      : `lb:${c.t1}:${c.p1}:${c.text}`;
+    `sg:${c.t1}:${c.t2}:${c.p1}:${c.text ?? ""}:${c.color}:${c.width}:${c.style}:${c.scale}`;
   return `${cmds.length}|${[...head, ...tail].map(part).join(";")}`;
 }
 
@@ -43,6 +59,7 @@ export function useBosMssStudy(enabled = true): void {
   const lastFpRef = useRef("");
   const genRef = useRef(0);
   const pendingRef = useRef(false);
+  const muteUntilRef = useRef(0);
 
   useEffect(() => {
     if (!enabled || !ready) return;
@@ -52,9 +69,16 @@ export function useBosMssStudy(enabled = true): void {
     let cancelled = false;
     let studyTimer: number | undefined;
 
+    const mutePaintEvents = () => {
+      muteUntilRef.current = Date.now() + PAINT_MUTE_MS;
+    };
+    const isMuted = () => Date.now() < muteUntilRef.current;
+
     const clearDrawings = () => {
       const ids = entityIdsRef.current;
       entityIdsRef.current = [];
+      if (ids.length === 0) return;
+      mutePaintEvents();
       for (const id of ids) {
         try {
           chart.removeEntity(id);
@@ -85,7 +109,7 @@ export function useBosMssStudy(enabled = true): void {
     const readOptions = (studyId: EntityId): BosMssInputs => {
       try {
         const api = widget.activeChart()?.getStudyById(studyId);
-        if (!api) return { ...BOS_MSS_STUDY_DEFAULTS };
+        if (!api) return { ...BOS_MSS_DEFAULTS };
         const values = api.getInputValues() ?? [];
         const map = new Map<string, unknown>();
         for (const item of values) map.set(String(item.id), item.value);
@@ -108,51 +132,96 @@ export function useBosMssStudy(enabled = true): void {
           const v = map.get(id);
           return typeof v === "string" && v.trim() ? v.trim() : fallback;
         };
+
+        const bosPlus = readStylePlot(api, BOS_STYLE_PLUS, {
+          color: BOS_MSS_DEFAULTS.bosPlusColor,
+          visible: BOS_MSS_DEFAULTS.showBosPlus,
+          transparency: 0,
+          linewidth: BOS_MSS_DEFAULTS.lineWidth,
+          linestyle: BOS_MSS_DEFAULTS.bosLineStyle,
+        });
+        const bosMinus = readStylePlot(api, BOS_STYLE_MINUS, {
+          color: BOS_MSS_DEFAULTS.bosMinusColor,
+          visible: BOS_MSS_DEFAULTS.showBosMinus,
+          transparency: 0,
+          linewidth: BOS_MSS_DEFAULTS.lineWidth,
+          linestyle: BOS_MSS_DEFAULTS.bosLineStyle,
+        });
+        const mssPlus = readStylePlot(api, MSS_STYLE_PLUS, {
+          color: BOS_MSS_DEFAULTS.mssPlusColor,
+          visible: BOS_MSS_DEFAULTS.showMssPlus,
+          transparency: 0,
+          linewidth: BOS_MSS_DEFAULTS.lineWidth,
+          linestyle: BOS_MSS_DEFAULTS.mssLineStyle,
+        });
+        const mssMinus = readStylePlot(api, MSS_STYLE_MINUS, {
+          color: BOS_MSS_DEFAULTS.mssMinusColor,
+          visible: BOS_MSS_DEFAULTS.showMssMinus,
+          transparency: 0,
+          linewidth: BOS_MSS_DEFAULTS.lineWidth,
+          linestyle: BOS_MSS_DEFAULTS.mssLineStyle,
+        });
+
+        const lineWidth = Math.max(
+          1,
+          Math.min(
+            4,
+            Math.round(
+              Math.max(bosPlus.linewidth, bosMinus.linewidth, mssPlus.linewidth, mssMinus.linewidth),
+            ),
+          ),
+        );
+        const fontSize = linewidthToFontSize(lineWidth, BOS_MSS_DEFAULTS.fontSize);
+        const bosLineStyleInput = Math.max(
+          0,
+          Math.min(2, Math.floor(num("bosLineStyle", BOS_MSS_STUDY_DEFAULTS.bosLineStyle))),
+        );
+        const mssLineStyleInput = Math.max(
+          0,
+          Math.min(2, Math.floor(num("mssLineStyle", BOS_MSS_STUDY_DEFAULTS.mssLineStyle))),
+        );
+
         return {
-          leftBars: Math.max(1, Math.min(50, Math.floor(num("leftBars", BOS_MSS_STUDY_DEFAULTS.leftBars)))),
+          leftBars: Math.max(
+            1,
+            Math.min(50, Math.floor(num("leftBars", BOS_MSS_STUDY_DEFAULTS.leftBars))),
+          ),
           rightBars: Math.max(
             1,
             Math.min(50, Math.floor(num("rightBars", BOS_MSS_STUDY_DEFAULTS.rightBars))),
           ),
           breakOnWick: bool("breakOnWick", BOS_MSS_STUDY_DEFAULTS.breakOnWick),
-          showBosPlus: bool("showBosPlus", BOS_MSS_STUDY_DEFAULTS.showBosPlus),
-          showBosMinus: bool("showBosMinus", BOS_MSS_STUDY_DEFAULTS.showBosMinus),
-          showMssPlus: bool("showMssPlus", BOS_MSS_STUDY_DEFAULTS.showMssPlus),
-          showMssMinus: bool("showMssMinus", BOS_MSS_STUDY_DEFAULTS.showMssMinus),
+          smartScales: bool("smartScales", BOS_MSS_STUDY_DEFAULTS.smartScales),
+          scalesText: str("scalesText", BOS_MSS_STUDY_DEFAULTS.scalesText),
+          showBosPlus: bosPlus.visible,
+          showBosMinus: bosMinus.visible,
+          showMssPlus: mssPlus.visible,
+          showMssMinus: mssMinus.visible,
           showLines: bool("showLines", BOS_MSS_STUDY_DEFAULTS.showLines),
           showLabels: bool("showLabels", BOS_MSS_STUDY_DEFAULTS.showLabels),
           bosPlusLabel: str("bosPlusLabel", BOS_MSS_STUDY_DEFAULTS.bosPlusLabel).slice(0, 12),
           bosMinusLabel: str("bosMinusLabel", BOS_MSS_STUDY_DEFAULTS.bosMinusLabel).slice(0, 12),
           mssPlusLabel: str("mssPlusLabel", BOS_MSS_STUDY_DEFAULTS.mssPlusLabel).slice(0, 12),
           mssMinusLabel: str("mssMinusLabel", BOS_MSS_STUDY_DEFAULTS.mssMinusLabel).slice(0, 12),
-          bosPlusColor: str("bosPlusColor", BOS_MSS_STUDY_DEFAULTS.bosPlusColor),
-          bosMinusColor: str("bosMinusColor", BOS_MSS_STUDY_DEFAULTS.bosMinusColor),
-          mssPlusColor: str("mssPlusColor", BOS_MSS_STUDY_DEFAULTS.mssPlusColor),
-          mssMinusColor: str("mssMinusColor", BOS_MSS_STUDY_DEFAULTS.mssMinusColor),
-          lineWidth: Math.max(1, Math.min(4, Math.floor(num("lineWidth", BOS_MSS_STUDY_DEFAULTS.lineWidth)))),
-          bosLineStyle: Math.max(
-            0,
-            Math.min(2, Math.floor(num("bosLineStyle", BOS_MSS_STUDY_DEFAULTS.bosLineStyle))),
-          ),
-          mssLineStyle: Math.max(
-            0,
-            Math.min(2, Math.floor(num("mssLineStyle", BOS_MSS_STUDY_DEFAULTS.mssLineStyle))),
-          ),
-          fontSize: Math.max(
-            8,
-            Math.min(24, Math.floor(num("fontSize", BOS_MSS_STUDY_DEFAULTS.fontSize))),
-          ),
+          bosPlusColor: applyTransparency(bosPlus.color, bosPlus.transparency),
+          bosMinusColor: applyTransparency(bosMinus.color, bosMinus.transparency),
+          mssPlusColor: applyTransparency(mssPlus.color, mssPlus.transparency),
+          mssMinusColor: applyTransparency(mssMinus.color, mssMinus.transparency),
+          lineWidth,
+          bosLineStyle: bosPlus.linestyle ?? bosLineStyleInput,
+          mssLineStyle: mssPlus.linestyle ?? mssLineStyleInput,
+          fontSize,
           maxEvents: Math.max(
             10,
             Math.min(400, Math.floor(num("maxEvents", BOS_MSS_STUDY_DEFAULTS.maxEvents))),
           ),
         };
       } catch {
-        return { ...BOS_MSS_STUDY_DEFAULTS };
+        return { ...BOS_MSS_DEFAULTS };
       }
     };
 
-    const repaint = async (force = false) => {
+    const repaint = async (_force = false) => {
       if (cancelled) return;
       if (busyRef.current) {
         pendingRef.current = true;
@@ -193,12 +262,13 @@ export function useBosMssStudy(enabled = true): void {
 
         const cmds = computeBosMss(bars, inputs);
         const fp = fingerprint(cmds);
-        if (!force && key === lastKeyRef.current && fp === lastFpRef.current) return;
+        // Never clear+redraw when nothing changed — force only used on first kickoff.
+        if (key === lastKeyRef.current && fp === lastFpRef.current) return;
 
-        clearDrawings();
-        if (cancelled || gen !== genRef.current) return;
+        mutePaintEvents();
         const ids = await paintBosMss(active, cmds, { ownerStudyId: studyId });
         if (cancelled || gen !== genRef.current) {
+          mutePaintEvents();
           for (const id of ids) {
             try {
               chart.removeEntity(id);
@@ -208,9 +278,19 @@ export function useBosMssStudy(enabled = true): void {
           }
           return;
         }
+        // Paint-then-swap: remove previous shapes after new ones are up (no blank flash).
+        const prev = entityIdsRef.current;
         entityIdsRef.current = ids;
         lastKeyRef.current = key;
         lastFpRef.current = fp;
+        mutePaintEvents();
+        for (const id of prev) {
+          try {
+            chart.removeEntity(id);
+          } catch {
+            /* ignore */
+          }
+        }
       } catch (err) {
         console.warn("[bos-mss] paint failed", err);
         lastKeyRef.current = "";
@@ -220,7 +300,7 @@ export function useBosMssStudy(enabled = true): void {
           pendingRef.current = false;
           window.setTimeout(() => {
             void repaint(false);
-          }, 120);
+          }, 200);
         }
       }
     };
@@ -228,11 +308,12 @@ export function useBosMssStudy(enabled = true): void {
     const scheduleRepaint = () => {
       window.clearTimeout(studyTimer);
       studyTimer = window.setTimeout(() => {
-        void repaint(true);
+        void repaint(false);
       }, STUDY_DEBOUNCE_MS);
     };
 
     const onStudyEvent = (...args: unknown[]) => {
+      if (isMuted()) return;
       const eventType = String(args[1] ?? args[0] ?? "");
       if (/remove/i.test(eventType)) {
         window.clearTimeout(studyTimer);
@@ -248,6 +329,7 @@ export function useBosMssStudy(enabled = true): void {
     };
 
     const onStudyProperties = (...args: unknown[]) => {
+      if (isMuted()) return;
       const id = String(args[0] ?? "");
       if (!id) return;
       if (findStudyIds().some((s) => String(s) === id)) scheduleRepaint();
@@ -279,9 +361,9 @@ export function useBosMssStudy(enabled = true): void {
     }, PRESENCE_POLL_MS);
 
     const livePoll = window.setInterval(() => {
-      if (cancelled || busyRef.current) return;
+      if (cancelled || busyRef.current || isMuted()) return;
       if (findStudyIds().length === 0) return;
-      void repaint(true);
+      void repaint(false);
     }, LIVE_REFRESH_MS);
 
     const onDataLoaded = () => {

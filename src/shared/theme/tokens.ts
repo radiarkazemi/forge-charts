@@ -54,4 +54,5 @@ export const TOKENS: Readonly<Record<ThemeMode, ThemeTokens>> = {
   },
 };
 
-export const FONT_FAMILY = "'Inter', 'Trebuchet MS', Roboto, Arial, sans-serif";
+/** Local/system stack only — no Google Fonts (blocked for many IR users). */
+export const FONT_FAMILY = "'Trebuchet MS', 'Segoe UI', Roboto, Arial, sans-serif";

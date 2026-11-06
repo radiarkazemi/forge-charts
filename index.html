@@ -10,12 +10,35 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <title>Forge Charts</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-    />
+    <!--
+      Do NOT load fonts.googleapis.com / fonts.gstatic.com here.
+      Many IR networks block Google; preconnect+stylesheet stalls boot for those
+      users while VPN users (and this agent) see a healthy chart.
+      UI falls back to Trebuchet / system sans from theme tokens.
+    -->
+    <script>
+      // Surface hashed-bundle load failures (stale cache / mid-deploy 404) instead of a blank page.
+      window.addEventListener(
+        "error",
+        function (ev) {
+          try {
+            var src = (ev && (ev.filename || (ev.target && ev.target.src))) || "";
+            if (!src || src.indexOf("/assets/forge/") === -1) return;
+            var root = document.getElementById("root");
+            if (!root || root.dataset.bootErr) return;
+            root.dataset.bootErr = "1";
+            root.innerHTML =
+              '<div style="font:14px/1.45 system-ui,sans-serif;padding:24px;max-width:420px;margin:10vh auto;color:#e8eaed;background:#12141a;border:1px solid #2a2e39;border-radius:8px">' +
+              "<strong>Forge Chart failed to load.</strong>" +
+              "<p style='margin:10px 0 0;color:#9aa0a6'>Hard-refresh this page (Ctrl+Shift+R / clear cache). If it still fails, open forgechart.ir/charts/ directly.</p>" +
+              "</div>";
+          } catch (_) {
+            /* ignore */
+          }
+        },
+        true,
+      );
+    </script>
   </head>
   <body>
     <div id="root"></div>

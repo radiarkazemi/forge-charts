@@ -31,9 +31,11 @@ const MAX_BARS = 2_500;
 /** Debounce study add/remove/input changes before expensive export+paint. */
 const STUDY_DEBOUNCE_MS = 550;
 /** Cheap presence check only (no export) while a study is active. */
-const PRESENCE_POLL_MS = 6_000;
-/** Multi-TF halves need more shapes than the default Orca cap. */
-const MAX_PAINT_CMDS = 120;
+const PRESENCE_POLL_MS = 8_000;
+/** Multi-TF + multi-scale halves need more shapes than the default Orca cap. */
+const MAX_PAINT_CMDS = 220;
+/** Ignore study_event feedback while shapes are created/removed. */
+const PAINT_MUTE_MS = 1_500;
 
 function fingerprintCmds(cmds: readonly DrawCmd[]): string {
   if (cmds.length === 0) return "empty";
@@ -59,6 +61,7 @@ export function useDealingRangesStudy(enabled = true): void {
   const lastFpRef = useRef("");
   const genRef = useRef(0);
   const pendingRef = useRef(false);
+  const muteUntilRef = useRef(0);
 
   useEffect(() => {
     if (!enabled || !ready) return;
@@ -68,9 +71,16 @@ export function useDealingRangesStudy(enabled = true): void {
     let cancelled = false;
     let studyTimer: number | undefined;
 
+    const mutePaintEvents = () => {
+      muteUntilRef.current = Date.now() + PAINT_MUTE_MS;
+    };
+    const isMuted = () => Date.now() < muteUntilRef.current;
+
     const clearDrawings = () => {
       const ids = entityIdsRef.current;
       entityIdsRef.current = [];
+      if (ids.length === 0) return;
+      mutePaintEvents();
       for (const id of ids) {
         try {
           chart.removeEntity(id);
@@ -175,6 +185,7 @@ export function useDealingRangesStudy(enabled = true): void {
         }
         if (cancelled || myGen !== genRef.current) return;
 
+        mutePaintEvents();
         const ids =
           cmds.length === 0
             ? ([] as EntityId[])
@@ -183,6 +194,7 @@ export function useDealingRangesStudy(enabled = true): void {
                 maxCmds: MAX_PAINT_CMDS,
               });
         if (cancelled || myGen !== genRef.current) {
+          mutePaintEvents();
           for (const id of ids) {
             try {
               chart.removeEntity(id);
@@ -197,6 +209,7 @@ export function useDealingRangesStudy(enabled = true): void {
         entityIdsRef.current = ids;
         lastKeyRef.current = key;
         lastFpRef.current = fp;
+        mutePaintEvents();
         for (const id of prev) {
           try {
             chart.removeEntity(id);
@@ -227,12 +240,13 @@ export function useDealingRangesStudy(enabled = true): void {
     const scheduleRepaint = () => {
       window.clearTimeout(studyTimer);
       studyTimer = window.setTimeout(() => {
-        void repaint(true);
+        void repaint(false);
       }, STUDY_DEBOUNCE_MS);
     };
 
     /** Only react to create/remove/property edits — ignore noise that would loop. */
     const onStudyEvent = (...args: unknown[]) => {
+      if (isMuted()) return;
       const eventType = String(args[1] ?? args[0] ?? "");
       if (/remove/i.test(eventType)) {
         window.clearTimeout(studyTimer);
@@ -251,6 +265,7 @@ export function useDealingRangesStudy(enabled = true): void {
     };
 
     const onStudyProperties = (...args: unknown[]) => {
+      if (isMuted()) return;
       const id = String(args[0] ?? "");
       if (!id) return;
       const ours = findStudyIds().some((s) => String(s) === id);

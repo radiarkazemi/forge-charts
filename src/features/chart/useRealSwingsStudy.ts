@@ -1,5 +1,8 @@
 /**
  * Watches Indicators “Real Swing High/Low” and paints styleable H/L markers.
+ * Colors / visibility / size come from the Style tab (getStyleValues).
+ *
+ * Refresh guard: paint-then-swap + mute study events while painting.
  */
 
 import { useEffect, useRef } from "react";
@@ -10,26 +13,37 @@ import { barsFromChartExport } from "@/features/pine/orca-runtime";
 import {
   computeRealSwings,
   paintRealSwings,
+  REAL_SWING_DEFAULTS,
   type RealSwingInputs,
   type SwingDisplayMode,
   type SwingDrawCmd,
 } from "@/features/real-swings/runtime";
-import { REAL_SWINGS_STUDY_DEFAULTS } from "./real-swings-indicator";
+import {
+  REAL_SWINGS_STUDY_DEFAULTS,
+  REAL_SWING_STYLE_HIGH,
+  REAL_SWING_STYLE_LOW,
+} from "./real-swings-indicator";
+import {
+  applyTransparency,
+  linewidthToFontSize,
+  readStylePlot,
+} from "./study-style-plots";
 import { studyIsVisible } from "./study-paint-gate";
 
 const MAX_BARS = 3_000;
 const STUDY_DEBOUNCE_MS = 450;
-const PRESENCE_POLL_MS = 6_000;
-const LIVE_REFRESH_MS = 15_000;
+const PRESENCE_POLL_MS = 8_000;
+const LIVE_REFRESH_MS = 20_000;
+const PAINT_MUTE_MS = 1_500;
 
 function fingerprint(cmds: readonly SwingDrawCmd[]): string {
   if (cmds.length === 0) return "empty";
   const head = cmds.slice(0, 4);
   const tail = cmds.length > 4 ? cmds.slice(-4) : [];
   const part = (c: SwingDrawCmd) => {
-    if (c.kind === "arrow") return `a:${c.dir}:${c.t1}:${c.p1}`;
-    if (c.kind === "dot") return `d:${c.t1}:${c.p1}`;
-    return `l:${c.t1}:${c.p1}:${c.text}`;
+    if (c.kind === "arrow") return `a:${c.dir}:${c.t1}:${c.p1}:${c.color}`;
+    if (c.kind === "dot") return `d:${c.t1}:${c.p1}:${c.color}`;
+    return `l:${c.t1}:${c.p1}:${c.text}:${c.color}`;
   };
   return `${cmds.length}|${[...head, ...tail].map(part).join(";")}`;
 }
@@ -45,6 +59,7 @@ export function useRealSwingsStudy(enabled = true): void {
   const lastFpRef = useRef("");
   const genRef = useRef(0);
   const pendingRef = useRef(false);
+  const muteUntilRef = useRef(0);
 
   useEffect(() => {
     if (!enabled || !ready) return;
@@ -54,9 +69,16 @@ export function useRealSwingsStudy(enabled = true): void {
     let cancelled = false;
     let studyTimer: number | undefined;
 
+    const mutePaintEvents = () => {
+      muteUntilRef.current = Date.now() + PAINT_MUTE_MS;
+    };
+    const isMuted = () => Date.now() < muteUntilRef.current;
+
     const clearDrawings = () => {
       const ids = entityIdsRef.current;
       entityIdsRef.current = [];
+      if (ids.length === 0) return;
+      mutePaintEvents();
       for (const id of ids) {
         try {
           chart.removeEntity(id);
@@ -87,7 +109,7 @@ export function useRealSwingsStudy(enabled = true): void {
     const readOptions = (studyId: EntityId): RealSwingInputs => {
       try {
         const api = widget.activeChart()?.getStudyById(studyId);
-        if (!api) return { ...REAL_SWINGS_STUDY_DEFAULTS };
+        if (!api) return { ...REAL_SWING_DEFAULTS };
         const values = api.getInputValues() ?? [];
         const map = new Map<string, unknown>();
         for (const item of values) map.set(String(item.id), item.value);
@@ -114,38 +136,69 @@ export function useRealSwingsStudy(enabled = true): void {
         const displayMode = (
           modeRaw >= 0 && modeRaw <= 5 ? modeRaw : REAL_SWINGS_STUDY_DEFAULTS.displayMode
         ) as SwingDisplayMode;
+
+        const highStyle = readStylePlot(api, REAL_SWING_STYLE_HIGH, {
+          color: REAL_SWING_DEFAULTS.highColor,
+          visible: REAL_SWING_DEFAULTS.showHighs,
+          transparency: 0,
+          linewidth: 2,
+          linestyle: 0,
+        });
+        const lowStyle = readStylePlot(api, REAL_SWING_STYLE_LOW, {
+          color: REAL_SWING_DEFAULTS.lowColor,
+          visible: REAL_SWING_DEFAULTS.showLows,
+          transparency: 0,
+          linewidth: 2,
+          linestyle: 0,
+        });
+        const fontSize = linewidthToFontSize(
+          Math.max(highStyle.linewidth, lowStyle.linewidth),
+          REAL_SWING_DEFAULTS.fontSize,
+        );
+
         return {
-          leftBars: Math.max(1, Math.min(50, Math.floor(num("leftBars", REAL_SWINGS_STUDY_DEFAULTS.leftBars)))),
+          leftBars: Math.max(
+            1,
+            Math.min(50, Math.floor(num("leftBars", REAL_SWINGS_STUDY_DEFAULTS.leftBars))),
+          ),
           rightBars: Math.max(
             1,
             Math.min(50, Math.floor(num("rightBars", REAL_SWINGS_STUDY_DEFAULTS.rightBars))),
           ),
+          smartScales: bool("smartScales", REAL_SWINGS_STUDY_DEFAULTS.smartScales),
+          scalesText: str("scalesText", REAL_SWINGS_STUDY_DEFAULTS.scalesText),
           alternateOnly: bool("alternateOnly", REAL_SWINGS_STUDY_DEFAULTS.alternateOnly),
-          minSwingAtr: Math.max(0, Math.min(10, num("minSwingAtr", REAL_SWINGS_STUDY_DEFAULTS.minSwingAtr))),
-          atrLen: Math.max(2, Math.min(100, Math.floor(num("atrLen", REAL_SWINGS_STUDY_DEFAULTS.atrLen)))),
-          showHighs: bool("showHighs", REAL_SWINGS_STUDY_DEFAULTS.showHighs),
-          showLows: bool("showLows", REAL_SWINGS_STUDY_DEFAULTS.showLows),
+          minSwingAtr: Math.max(
+            0,
+            Math.min(10, num("minSwingAtr", REAL_SWINGS_STUDY_DEFAULTS.minSwingAtr)),
+          ),
+          atrLen: Math.max(
+            2,
+            Math.min(100, Math.floor(num("atrLen", REAL_SWINGS_STUDY_DEFAULTS.atrLen))),
+          ),
+          showHighs: highStyle.visible,
+          showLows: lowStyle.visible,
           displayMode,
           highLabel: str("highLabel", REAL_SWINGS_STUDY_DEFAULTS.highLabel).slice(0, 8),
           lowLabel: str("lowLabel", REAL_SWINGS_STUDY_DEFAULTS.lowLabel).slice(0, 8),
-          highColor: str("highColor", REAL_SWINGS_STUDY_DEFAULTS.highColor),
-          lowColor: str("lowColor", REAL_SWINGS_STUDY_DEFAULTS.lowColor),
-          fontSize: Math.max(
-            8,
-            Math.min(28, Math.floor(num("fontSize", REAL_SWINGS_STUDY_DEFAULTS.fontSize))),
+          highColor: applyTransparency(highStyle.color, highStyle.transparency),
+          lowColor: applyTransparency(lowStyle.color, lowStyle.transparency),
+          fontSize,
+          offsetAtr: Math.max(
+            0,
+            Math.min(5, num("offsetAtr", REAL_SWINGS_STUDY_DEFAULTS.offsetAtr)),
           ),
-          offsetAtr: Math.max(0, Math.min(5, num("offsetAtr", REAL_SWINGS_STUDY_DEFAULTS.offsetAtr))),
           maxMarkers: Math.max(
             20,
             Math.min(500, Math.floor(num("maxMarkers", REAL_SWINGS_STUDY_DEFAULTS.maxMarkers))),
           ),
         };
       } catch {
-        return { ...REAL_SWINGS_STUDY_DEFAULTS };
+        return { ...REAL_SWING_DEFAULTS };
       }
     };
 
-    const repaint = async (force = false) => {
+    const repaint = async (_force = false) => {
       if (cancelled) return;
       if (busyRef.current) {
         pendingRef.current = true;
@@ -186,12 +239,12 @@ export function useRealSwingsStudy(enabled = true): void {
 
         const cmds = computeRealSwings(bars, inputs);
         const fp = fingerprint(cmds);
-        if (!force && key === lastKeyRef.current && fp === lastFpRef.current) return;
+        if (key === lastKeyRef.current && fp === lastFpRef.current) return;
 
-        clearDrawings();
-        if (cancelled || gen !== genRef.current) return;
+        mutePaintEvents();
         const ids = await paintRealSwings(active, cmds, { ownerStudyId: studyId });
         if (cancelled || gen !== genRef.current) {
+          mutePaintEvents();
           for (const id of ids) {
             try {
               chart.removeEntity(id);
@@ -201,9 +254,18 @@ export function useRealSwingsStudy(enabled = true): void {
           }
           return;
         }
+        const prev = entityIdsRef.current;
         entityIdsRef.current = ids;
         lastKeyRef.current = key;
         lastFpRef.current = fp;
+        mutePaintEvents();
+        for (const id of prev) {
+          try {
+            chart.removeEntity(id);
+          } catch {
+            /* ignore */
+          }
+        }
       } catch (err) {
         console.warn("[real-swings] paint failed", err);
         lastKeyRef.current = "";
@@ -213,7 +275,7 @@ export function useRealSwingsStudy(enabled = true): void {
           pendingRef.current = false;
           window.setTimeout(() => {
             void repaint(false);
-          }, 120);
+          }, 200);
         }
       }
     };
@@ -221,11 +283,12 @@ export function useRealSwingsStudy(enabled = true): void {
     const scheduleRepaint = () => {
       window.clearTimeout(studyTimer);
       studyTimer = window.setTimeout(() => {
-        void repaint(true);
+        void repaint(false);
       }, STUDY_DEBOUNCE_MS);
     };
 
     const onStudyEvent = (...args: unknown[]) => {
+      if (isMuted()) return;
       const eventType = String(args[1] ?? args[0] ?? "");
       if (/remove/i.test(eventType)) {
         window.clearTimeout(studyTimer);
@@ -241,6 +304,7 @@ export function useRealSwingsStudy(enabled = true): void {
     };
 
     const onStudyProperties = (...args: unknown[]) => {
+      if (isMuted()) return;
       const id = String(args[0] ?? "");
       if (!id) return;
       if (findStudyIds().some((s) => String(s) === id)) scheduleRepaint();
@@ -272,9 +336,9 @@ export function useRealSwingsStudy(enabled = true): void {
     }, PRESENCE_POLL_MS);
 
     const livePoll = window.setInterval(() => {
-      if (cancelled || busyRef.current) return;
+      if (cancelled || busyRef.current || isMuted()) return;
       if (findStudyIds().length === 0) return;
-      void repaint(true);
+      void repaint(false);
     }, LIVE_REFRESH_MS);
 
     const onDataLoaded = () => {

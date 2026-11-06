@@ -1,18 +1,22 @@
 /**
- * BOS+ / BOS− / MSS+ / MSS− structure marker.
+ * BOS+ / BOS− / MSS+ / MSS− structure marker — multi-scale (minor → major).
  *
- * Default ICT-style logic (easy to swap later in `detectBosMss`):
- * - Track confirmed swing high / swing low (left/right bars).
- * - Break above last swing high → bullish event:
- *     prior structure bearish → MSS+  else BOS+
- * - Break below last swing low → bearish event:
- *     prior structure bullish → MSS−  else BOS−
+ * Smart mode runs several pivot widths at once (default 2,5,10,20,30) so a
+ * 5-candle BOS and a 30-candle BOS both show — same idea as Dealing Ranges
+ * stacking chart TF + HTF structure.
  *
- * Customize later: change break source, swing definition, or MSS rules
- * inside `detectBosMss` without touching paint/UI.
+ * Visual: solid horizontal line swing → break, label centered on the line.
  */
 
 import type { EntityId, IChartWidgetApi } from "@/infrastructure/tradingview";
+import {
+  bosEventDedupeKey,
+  DEFAULT_STRUCTURE_SCALES,
+  resolveStructureScales,
+  scaleFontSize,
+  scaleLineWidth,
+  scaleStrength,
+} from "@/features/chart/structure-scales";
 
 export interface BosMssBar {
   readonly time: number;
@@ -30,6 +34,10 @@ export interface BosMssInputs {
   readonly rightBars: number;
   /** true = break on wick; false = break on close */
   readonly breakOnWick: boolean;
+  /** Run all scale tiers at once (minor → major). */
+  readonly smartScales: boolean;
+  /** Comma list of pivot widths, e.g. "2,5,10,20,30". */
+  readonly scalesText: string;
   readonly showBosPlus: boolean;
   readonly showBosMinus: boolean;
   readonly showMssPlus: boolean;
@@ -56,6 +64,8 @@ export const BOS_MSS_DEFAULTS: BosMssInputs = {
   leftBars: 2,
   rightBars: 2,
   breakOnWick: false,
+  smartScales: true,
+  scalesText: DEFAULT_STRUCTURE_SCALES.join(","),
   showBosPlus: true,
   showBosMinus: true,
   showMssPlus: true,
@@ -66,46 +76,39 @@ export const BOS_MSS_DEFAULTS: BosMssInputs = {
   bosMinusLabel: "BOS-",
   mssPlusLabel: "MSS+",
   mssMinusLabel: "MSS-",
-  bosPlusColor: "#26a69a",
-  bosMinusColor: "#ef5350",
-  mssPlusColor: "#00bcd4",
-  mssMinusColor: "#ff9800",
-  lineWidth: 2,
-  bosLineStyle: 1,
-  mssLineStyle: 2,
+  bosPlusColor: "#2962FF",
+  bosMinusColor: "#E53935",
+  mssPlusColor: "#00BCD4",
+  mssMinusColor: "#FF9800",
+  lineWidth: 1,
+  bosLineStyle: 0,
+  mssLineStyle: 0,
   fontSize: 12,
-  maxEvents: 120,
+  maxEvents: 180,
 };
 
 export interface BosMssEvent {
   readonly kind: BosMssKind;
-  /** Swing pivot time (line start). */
   readonly t1: number;
-  /** Break bar time (line end / label). */
   readonly t2: number;
   readonly price: number;
+  /** Pivot width used (bars each side). */
+  readonly scale: number;
 }
 
-export type BosMssDrawCmd =
-  | {
-      readonly kind: "line";
-      readonly t1: number;
-      readonly p1: number;
-      readonly t2: number;
-      readonly p2: number;
-      readonly color: string;
-      readonly width: number;
-      readonly style: number;
-    }
-  | {
-      readonly kind: "label";
-      readonly t1: number;
-      readonly p1: number;
-      readonly text: string;
-      readonly color: string;
-      readonly fill: string;
-      readonly fontSize: number;
-    };
+export interface BosMssDrawCmd {
+  readonly kind: "segment";
+  readonly t1: number;
+  readonly p1: number;
+  readonly t2: number;
+  readonly p2: number;
+  readonly color: string;
+  readonly width: number;
+  readonly style: number;
+  readonly text?: string;
+  readonly fontSize: number;
+  readonly scale: number;
+}
 
 function pivotHigh(
   bars: readonly BosMssBar[],
@@ -139,15 +142,16 @@ function pivotLow(
   return l;
 }
 
-/**
- * Core detector — edit this function when customizing BOS/MSS rules later.
- */
-export function detectBosMss(
+/** Single-scale detector (internal). */
+export function detectBosMssAtScale(
   bars: readonly BosMssBar[],
-  inputs: BosMssInputs,
+  leftBars: number,
+  rightBars: number,
+  breakOnWick: boolean,
+  scale: number,
 ): BosMssEvent[] {
-  const left = Math.max(1, Math.min(50, Math.floor(inputs.leftBars)));
-  const right = Math.max(1, Math.min(50, Math.floor(inputs.rightBars)));
+  const left = Math.max(1, Math.min(50, Math.floor(leftBars)));
+  const right = Math.max(1, Math.min(50, Math.floor(rightBars)));
   const events: BosMssEvent[] = [];
   if (bars.length < left + right + 3) return events;
 
@@ -157,7 +161,6 @@ export function detectBosMss(
   let lastSLBar: number | null = null;
   let brokenSHBar: number | null = null;
   let brokenSLBar: number | null = null;
-  /** 1 bullish structure · -1 bearish · 0 unknown */
   let structureDir = 0;
 
   for (let i = 0; i < bars.length; i += 1) {
@@ -173,8 +176,8 @@ export function detectBosMss(
       lastSLBar = i - right;
     }
 
-    const useHigh = inputs.breakOnWick ? bar.high : bar.close;
-    const useLow = inputs.breakOnWick ? bar.low : bar.close;
+    const useHigh = breakOnWick ? bar.high : bar.close;
+    const useLow = breakOnWick ? bar.low : bar.close;
     const preStructure = structureDir;
 
     const bullBreak =
@@ -195,6 +198,7 @@ export function detectBosMss(
         t1: bars[lastSHBar]!.time,
         t2: bar.time,
         price: lastSH,
+        scale,
       });
       brokenSHBar = lastSHBar;
       structureDir = 1;
@@ -207,6 +211,7 @@ export function detectBosMss(
         t1: bars[lastSLBar]!.time,
         t2: bar.time,
         price: lastSL,
+        scale,
       });
       brokenSLBar = lastSLBar;
       structureDir = -1;
@@ -214,6 +219,31 @@ export function detectBosMss(
   }
 
   return events;
+}
+
+/**
+ * Multi-scale detector — merges minor→major, keeps largest scale on exact dupes.
+ */
+export function detectBosMss(
+  bars: readonly BosMssBar[],
+  inputs: BosMssInputs,
+): BosMssEvent[] {
+  const scales = resolveStructureScales({
+    smartScales: inputs.smartScales,
+    scalesText: inputs.scalesText,
+    single: Math.max(inputs.leftBars, inputs.rightBars),
+  });
+  const byKey = new Map<string, BosMssEvent>();
+  for (const scale of scales) {
+    // Each tier uses equal left/right = scale (classic symmetric pivots).
+    const tier = detectBosMssAtScale(bars, scale, scale, inputs.breakOnWick, scale);
+    for (const ev of tier) {
+      const key = bosEventDedupeKey(ev);
+      const prev = byKey.get(key);
+      if (!prev || ev.scale > prev.scale) byKey.set(key, ev);
+    }
+  }
+  return [...byKey.values()].sort((a, b) => a.t2 - b.t2 || a.scale - b.scale);
 }
 
 function kindEnabled(kind: BosMssKind, inputs: BosMssInputs): boolean {
@@ -246,38 +276,35 @@ export function bosMssDrawCmds(
   inputs: BosMssInputs,
 ): BosMssDrawCmd[] {
   const cmds: BosMssDrawCmd[] = [];
-  const fontSize = Math.max(8, Math.min(24, Math.floor(inputs.fontSize)));
-  const width = Math.max(1, Math.min(4, Math.floor(inputs.lineWidth)));
+  const scales = resolveStructureScales({
+    smartScales: inputs.smartScales,
+    scalesText: inputs.scalesText,
+    single: Math.max(inputs.leftBars, inputs.rightBars),
+  });
+  const baseFont = Math.max(8, Math.min(24, Math.floor(inputs.fontSize)));
+  const baseWidth = Math.max(1, Math.min(4, Math.floor(inputs.lineWidth)));
 
   for (const ev of events) {
     if (!kindEnabled(ev.kind, inputs)) continue;
+    if (!inputs.showLines && !inputs.showLabels) continue;
     const color = kindColor(ev.kind, inputs);
-    if (inputs.showLines) {
-      cmds.push({
-        kind: "line",
-        t1: ev.t1,
-        p1: ev.price,
-        t2: ev.t2,
-        p2: ev.price,
-        color,
-        width,
-        style: Math.max(0, Math.min(2, Math.floor(kindLineStyle(ev.kind, inputs)))),
-      });
-    }
-    if (inputs.showLabels) {
-      cmds.push({
-        kind: "label",
-        t1: ev.t2,
-        p1: ev.price,
-        text: kindLabel(ev.kind, inputs),
-        color: "#ffffff",
-        fill: color,
-        fontSize,
-      });
-    }
+    const strength = scaleStrength(ev.scale, scales);
+    cmds.push({
+      kind: "segment",
+      t1: ev.t1,
+      p1: ev.price,
+      t2: ev.t2,
+      p2: ev.price,
+      color,
+      width: inputs.showLines ? scaleLineWidth(baseWidth, strength) : 1,
+      style: Math.max(0, Math.min(2, Math.floor(kindLineStyle(ev.kind, inputs)))),
+      text: inputs.showLabels ? kindLabel(ev.kind, inputs) : undefined,
+      fontSize: scaleFontSize(baseFont, strength),
+      scale: ev.scale,
+    });
   }
 
-  const cap = Math.max(10, Math.min(400, Math.floor(inputs.maxEvents))) * 2;
+  const cap = Math.max(10, Math.min(500, Math.floor(inputs.maxEvents)));
   return cmds.length > cap ? cmds.slice(-cap) : cmds;
 }
 
@@ -291,7 +318,7 @@ export function computeBosMss(
   return bosMssDrawCmds(capped, inputs);
 }
 
-const LINE_STYLES = [0, 1, 2] as const; // solid, dotted, dashed (CL)
+const LINE_STYLES = [0, 1, 2] as const;
 
 export async function paintBosMss(
   chart: IChartWidgetApi,
@@ -311,48 +338,34 @@ export async function paintBosMss(
   for (let i = 0; i < cmds.length; i += 1) {
     const cmd = cmds[i]!;
     try {
-      if (cmd.kind === "line") {
-        const id = await chart.createMultipointShape(
-          [
-            { time: cmd.t1 as never, price: cmd.p1 },
-            { time: cmd.t2 as never, price: cmd.p2 },
-          ],
-          {
-            ...common,
-            shape: "trend_line",
-            overrides: {
-              linecolor: cmd.color,
-              linewidth: cmd.width,
-              linestyle: LINE_STYLES[cmd.style] ?? 0,
-              showLabel: false,
-              showPrice: false,
-              extendLeft: false,
-              extendRight: false,
-            },
-          },
-        );
-        if (id) ids.push(id);
-      } else if (cmd.kind === "label") {
-        const id = await chart.createShape(
+      const label = (cmd.text ?? "").trim();
+      const id = await chart.createMultipointShape(
+        [
           { time: cmd.t1 as never, price: cmd.p1 },
-          {
-            ...common,
-            shape: "text",
-            text: ` ${cmd.text} `,
-            overrides: {
-              color: cmd.color,
-              fontsize: cmd.fontSize,
-              bold: true,
-              fillBackground: true,
-              backgroundColor: cmd.fill,
-              drawBorder: false,
-              horzLabelsAlign: "center",
-              vertLabelsAlign: "middle",
-            },
+          { time: cmd.t2 as never, price: cmd.p2 },
+        ],
+        {
+          ...common,
+          shape: "trend_line",
+          text: label,
+          overrides: {
+            linecolor: cmd.color,
+            linewidth: Math.max(1, cmd.width || 1),
+            linestyle: LINE_STYLES[cmd.style] ?? 0,
+            showLabel: label.length > 0,
+            text: label,
+            textcolor: cmd.color,
+            fontsize: cmd.fontSize,
+            bold: true,
+            horzLabelsAlign: "center",
+            vertLabelsAlign: "middle",
+            showPrice: false,
+            extendLeft: false,
+            extendRight: false,
           },
-        );
-        if (id) ids.push(id);
-      }
+        },
+      );
+      if (id) ids.push(id);
     } catch {
       /* skip */
     }

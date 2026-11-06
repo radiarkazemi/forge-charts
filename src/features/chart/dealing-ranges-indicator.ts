@@ -16,8 +16,8 @@ import {
 import type { DailyOpenMode } from "@/features/htf-candles/runtime";
 
 export const DEALING_RANGES_STUDY_NAME = "Dealing Ranges";
-/** Bumped to -4 — ICT HH↔LL+BOS detector (correct majors). */
-export const DEALING_RANGES_STUDY_ID = "DealingRanges@tv-basicstudies-4";
+/** Bumped to -5 — rejected H→major L (confirm on swing pair, smart scales). */
+export const DEALING_RANGES_STUDY_ID = "DealingRanges@tv-basicstudies-5";
 
 const HTF_OPTIONS: DrHtfPreset[] = ["5", "15", "30", "60", "240", "1D", "1W", "1M"];
 const DAILY_OPEN_OPTIONS: DailyOpenMode[] = ["midnight", "830", "930", "exchange"];
@@ -71,6 +71,9 @@ export const DEALING_RANGES_DEFAULTS = {
   pivotRight: MULTI_TF_DR_DEFAULTS.pivotRight,
   extendBars: MULTI_TF_DR_DEFAULTS.extendBars,
   breakOnWick: MULTI_TF_DR_DEFAULTS.breakOnWick,
+  requireBosConfirm: MULTI_TF_DR_DEFAULTS.requireBosConfirm,
+  smartScales: MULTI_TF_DR_DEFAULTS.smartScales,
+  scalesText: MULTI_TF_DR_DEFAULTS.scalesText,
   minRangePct: MULTI_TF_DR_DEFAULTS.minRangePct,
   discountColor: MULTI_TF_DR_DEFAULTS.discountColor,
   premiumColor: MULTI_TF_DR_DEFAULTS.premiumColor,
@@ -131,10 +134,19 @@ export function dealingRangesOptionsFromMap(map: Map<string, unknown>): MultiTfD
     showZeroOne: bool("showZeroOne", d.showZeroOne),
     showLabels: bool("showLabels", d.showLabels),
     extendToLast: bool("extendToLast", d.extendToLast),
-    pivotLeft: Math.max(1, Math.min(10, Math.floor(num("pivotLeft", d.pivotLeft)))),
-    pivotRight: Math.max(1, Math.min(10, Math.floor(num("pivotRight", d.pivotRight)))),
+    pivotLeft: Math.max(1, Math.min(50, Math.floor(num("pivotLeft", d.pivotLeft)))),
+    pivotRight: Math.max(1, Math.min(50, Math.floor(num("pivotRight", d.pivotRight)))),
     extendBars: Math.max(1, Math.min(100, Math.floor(num("extendBars", d.extendBars)))),
     breakOnWick: bool("breakOnWick", d.breakOnWick),
+    requireBosConfirm: bool(
+      "requireBosConfirm",
+      (d as { requireBosConfirm?: boolean }).requireBosConfirm ?? false,
+    ),
+    smartScales: bool("smartScales", (d as { smartScales?: boolean }).smartScales ?? true),
+    scalesText: str(
+      "scalesText",
+      (d as { scalesText?: string }).scalesText ?? "2,5,10,20,30",
+    ),
     minRangePct: Math.max(0, Math.min(5, num("minRangePct", d.minRangePct))),
     discountColor: str("discountColor", d.discountColor),
     premiumColor: str("premiumColor", d.premiumColor),
@@ -265,19 +277,31 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
         },
         {
           id: "pivotLeft",
-          name: "Pivot left bars",
+          name: "Pivot left bars (base)",
           defval: DEALING_RANGES_DEFAULTS.pivotLeft,
           type: "integer",
           min: 1,
-          max: 10,
+          max: 50,
         },
         {
           id: "pivotRight",
-          name: "Pivot right bars",
+          name: "Pivot right bars (base)",
           defval: DEALING_RANGES_DEFAULTS.pivotRight,
           type: "integer",
           min: 1,
-          max: 10,
+          max: 50,
+        },
+        {
+          id: "smartScales",
+          name: "Smart scales (minor→major DRs at once)",
+          defval: DEALING_RANGES_DEFAULTS.smartScales,
+          type: "bool",
+        },
+        {
+          id: "scalesText",
+          name: "Scales (bars) e.g. 2,5,10,20,30",
+          defval: DEALING_RANGES_DEFAULTS.scalesText,
+          type: "text",
         },
         {
           id: "extendBars",
@@ -288,8 +312,14 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
           max: 100,
         },
         {
+          id: "requireBosConfirm",
+          name: "Require BOS after 2nd swing (legacy · off = H↔L confirms)",
+          defval: DEALING_RANGES_DEFAULTS.requireBosConfirm,
+          type: "bool",
+        },
+        {
           id: "breakOnWick",
-          name: "BOS on wick (off = close)",
+          name: "BOS on wick (only if Require BOS on)",
           defval: DEALING_RANGES_DEFAULTS.breakOnWick,
           type: "bool",
         },

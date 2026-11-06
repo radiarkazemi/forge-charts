@@ -1,39 +1,78 @@
 /**
  * Charting Library custom study: “BOS / MSS”.
  * Inert plot — lines/labels painted by `useBosMssStudy`.
- * Detection lives in `src/features/bos-mss/runtime.ts` for later logic tweaks.
+ * Colors / visibility / linewidth live in the Style tab (native palette).
  */
 
 import type { CustomIndicator } from "@/infrastructure/tradingview";
 import { BOS_MSS_DEFAULTS } from "@/features/bos-mss/runtime";
+import { buildStylePlots, stylePlotNaNs } from "./study-style-plots";
 
 export const BOS_MSS_STUDY_NAME = "BOS / MSS";
 export const BOS_MSS_STUDY_ID = "BosMssStructure@tv-basicstudies-1";
+
+export const BOS_STYLE_PLUS = "plot_bos_plus";
+export const BOS_STYLE_MINUS = "plot_bos_minus";
+export const MSS_STYLE_PLUS = "plot_mss_plus";
+export const MSS_STYLE_MINUS = "plot_mss_minus";
 
 export const BOS_MSS_STUDY_DEFAULTS = {
   leftBars: BOS_MSS_DEFAULTS.leftBars,
   rightBars: BOS_MSS_DEFAULTS.rightBars,
   breakOnWick: BOS_MSS_DEFAULTS.breakOnWick,
-  showBosPlus: BOS_MSS_DEFAULTS.showBosPlus,
-  showBosMinus: BOS_MSS_DEFAULTS.showBosMinus,
-  showMssPlus: BOS_MSS_DEFAULTS.showMssPlus,
-  showMssMinus: BOS_MSS_DEFAULTS.showMssMinus,
+  smartScales: BOS_MSS_DEFAULTS.smartScales,
+  scalesText: BOS_MSS_DEFAULTS.scalesText,
   showLines: BOS_MSS_DEFAULTS.showLines,
   showLabels: BOS_MSS_DEFAULTS.showLabels,
   bosPlusLabel: BOS_MSS_DEFAULTS.bosPlusLabel,
   bosMinusLabel: BOS_MSS_DEFAULTS.bosMinusLabel,
   mssPlusLabel: BOS_MSS_DEFAULTS.mssPlusLabel,
   mssMinusLabel: BOS_MSS_DEFAULTS.mssMinusLabel,
-  bosPlusColor: BOS_MSS_DEFAULTS.bosPlusColor,
-  bosMinusColor: BOS_MSS_DEFAULTS.bosMinusColor,
-  mssPlusColor: BOS_MSS_DEFAULTS.mssPlusColor,
-  mssMinusColor: BOS_MSS_DEFAULTS.mssMinusColor,
-  lineWidth: BOS_MSS_DEFAULTS.lineWidth,
   bosLineStyle: BOS_MSS_DEFAULTS.bosLineStyle,
   mssLineStyle: BOS_MSS_DEFAULTS.mssLineStyle,
-  fontSize: BOS_MSS_DEFAULTS.fontSize,
   maxEvents: BOS_MSS_DEFAULTS.maxEvents,
 } as const;
+
+const STYLE_SPECS = [
+  {
+    id: BOS_STYLE_PLUS,
+    title: "BOS+",
+    color: BOS_MSS_DEFAULTS.bosPlusColor,
+    visible: BOS_MSS_DEFAULTS.showBosPlus,
+    transparency: 0,
+    linewidth: BOS_MSS_DEFAULTS.lineWidth,
+    legendHidden: false,
+  },
+  {
+    id: BOS_STYLE_MINUS,
+    title: "BOS-",
+    color: BOS_MSS_DEFAULTS.bosMinusColor,
+    visible: BOS_MSS_DEFAULTS.showBosMinus,
+    transparency: 0,
+    linewidth: BOS_MSS_DEFAULTS.lineWidth,
+    legendHidden: false,
+  },
+  {
+    id: MSS_STYLE_PLUS,
+    title: "MSS+",
+    color: BOS_MSS_DEFAULTS.mssPlusColor,
+    visible: BOS_MSS_DEFAULTS.showMssPlus,
+    transparency: 0,
+    linewidth: BOS_MSS_DEFAULTS.lineWidth,
+    legendHidden: false,
+  },
+  {
+    id: MSS_STYLE_MINUS,
+    title: "MSS-",
+    color: BOS_MSS_DEFAULTS.mssMinusColor,
+    visible: BOS_MSS_DEFAULTS.showMssMinus,
+    transparency: 0,
+    linewidth: BOS_MSS_DEFAULTS.lineWidth,
+    legendHidden: false,
+  },
+] as const;
+
+const { plots, stylesMeta, stylesDefaults } = buildStylePlots(STYLE_SPECS);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function createBosMssIndicator(PineJS: {
@@ -51,24 +90,12 @@ export function createBosMssIndicator(PineJS: {
       is_price_study: true,
       linkedToSeries: true,
       format: { type: "inherit" },
-      plots: [{ id: "plot_hidden", type: "line" }],
+      plots,
       defaults: {
-        styles: {
-          plot_hidden: {
-            linestyle: 0,
-            linewidth: 1,
-            plottype: 0,
-            trackPrice: false,
-            transparency: 100,
-            visible: false,
-            color: "#000000",
-          },
-        },
+        styles: stylesDefaults,
         inputs: { ...BOS_MSS_STUDY_DEFAULTS },
       },
-      styles: {
-        plot_hidden: { title: "Hidden", histogramBase: 0 },
-      },
+      styles: stylesMeta,
       inputs: [
         {
           id: "leftBars",
@@ -93,28 +120,16 @@ export function createBosMssIndicator(PineJS: {
           type: "bool",
         },
         {
-          id: "showBosPlus",
-          name: "Show BOS+",
-          defval: BOS_MSS_STUDY_DEFAULTS.showBosPlus,
+          id: "smartScales",
+          name: "Smart scales (minor→major at once)",
+          defval: BOS_MSS_STUDY_DEFAULTS.smartScales,
           type: "bool",
         },
         {
-          id: "showBosMinus",
-          name: "Show BOS-",
-          defval: BOS_MSS_STUDY_DEFAULTS.showBosMinus,
-          type: "bool",
-        },
-        {
-          id: "showMssPlus",
-          name: "Show MSS+",
-          defval: BOS_MSS_STUDY_DEFAULTS.showMssPlus,
-          type: "bool",
-        },
-        {
-          id: "showMssMinus",
-          name: "Show MSS-",
-          defval: BOS_MSS_STUDY_DEFAULTS.showMssMinus,
-          type: "bool",
+          id: "scalesText",
+          name: "Scales (bars) e.g. 2,5,10,20,30",
+          defval: BOS_MSS_STUDY_DEFAULTS.scalesText,
+          type: "text",
         },
         {
           id: "showLines",
@@ -124,7 +139,7 @@ export function createBosMssIndicator(PineJS: {
         },
         {
           id: "showLabels",
-          name: "Show labels",
+          name: "Show labels on line",
           defval: BOS_MSS_STUDY_DEFAULTS.showLabels,
           type: "bool",
         },
@@ -153,38 +168,6 @@ export function createBosMssIndicator(PineJS: {
           type: "text",
         },
         {
-          id: "bosPlusColor",
-          name: "BOS+ color",
-          defval: BOS_MSS_STUDY_DEFAULTS.bosPlusColor,
-          type: "text",
-        },
-        {
-          id: "bosMinusColor",
-          name: "BOS- color",
-          defval: BOS_MSS_STUDY_DEFAULTS.bosMinusColor,
-          type: "text",
-        },
-        {
-          id: "mssPlusColor",
-          name: "MSS+ color",
-          defval: BOS_MSS_STUDY_DEFAULTS.mssPlusColor,
-          type: "text",
-        },
-        {
-          id: "mssMinusColor",
-          name: "MSS- color",
-          defval: BOS_MSS_STUDY_DEFAULTS.mssMinusColor,
-          type: "text",
-        },
-        {
-          id: "lineWidth",
-          name: "Line width",
-          defval: BOS_MSS_STUDY_DEFAULTS.lineWidth,
-          type: "integer",
-          min: 1,
-          max: 4,
-        },
-        {
           id: "bosLineStyle",
           name: "BOS line style (0 solid · 1 dotted · 2 dashed)",
           defval: BOS_MSS_STUDY_DEFAULTS.bosLineStyle,
@@ -199,14 +182,6 @@ export function createBosMssIndicator(PineJS: {
           type: "integer",
           min: 0,
           max: 2,
-        },
-        {
-          id: "fontSize",
-          name: "Label font size",
-          defval: BOS_MSS_STUDY_DEFAULTS.fontSize,
-          type: "integer",
-          min: 8,
-          max: 24,
         },
         {
           id: "maxEvents",
@@ -230,7 +205,8 @@ export function createBosMssIndicator(PineJS: {
           (PineJS.Std as { na?: (v: number) => boolean }).na?.(raw) ?? !Number.isFinite(raw);
         const v = !na && Number.isFinite(raw) ? raw : (this._lastClose ?? raw);
         if (Number.isFinite(v) && v !== 0) this._lastClose = v;
-        return [Number.isFinite(this._lastClose) ? this._lastClose! : 1];
+        const out = Number.isFinite(this._lastClose) ? this._lastClose! : 1;
+        return [out, ...stylePlotNaNs(STYLE_SPECS.length)];
       };
     } as never,
   };
