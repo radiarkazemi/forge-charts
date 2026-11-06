@@ -759,11 +759,12 @@ function priceToTicks(priceDiff: number, minTick: number): number {
 export async function paintOrcaOnChart(
   chart: IChartWidgetApi,
   cmds: readonly DrawCmd[],
-  options?: { readonly ownerStudyId?: EntityId },
+  options?: { readonly ownerStudyId?: EntityId; readonly maxCmds?: number },
 ): Promise<EntityId[]> {
   const ids: EntityId[] = [];
-  // Cap drawing volume for CL performance; keep newest (signals live at the end).
-  const limited = cmds.length > 60 ? cmds.slice(cmds.length - 60) : cmds;
+  // Cap drawing volume for CL performance; keep newest (signals / DRs live at the end).
+  const maxCmds = Math.max(20, Math.min(200, Math.floor(options?.maxCmds ?? 60)));
+  const limited = cmds.length > maxCmds ? cmds.slice(cmds.length - maxCmds) : cmds;
   const ownerStudyId = options?.ownerStudyId;
   const minTick = resolveMinTick(chart);
 
@@ -867,7 +868,7 @@ export async function paintOrcaOnChart(
         const fillHex = clColor(cmd.fill ?? cmd.color, stroke);
         const alpha = Math.max(0.04, Math.min(0.85, cmd.fillAlpha ?? 0.2));
         const transparency = Math.round((1 - alpha) * 100);
-        const border = Math.max(0, Math.min(4, cmd.borderWidth ?? 1));
+        const border = Math.max(0, Math.min(4, cmd.borderWidth ?? 0));
         const id = await chart.createMultipointShape(
           [
             { time: cmd.t1 as never, price: cmd.p1 },
@@ -878,13 +879,22 @@ export async function paintOrcaOnChart(
             shape: "rectangle",
             overrides: {
               color: fillHex,
-              linecolor: fillHex,
+              linecolor: border > 0 ? fillHex : fillHex,
               backgroundColor: fillHex,
               fillBackground: true,
               filled: true,
               linewidth: border,
+              // Hide rect border stroke when borderWidth is 0 (clean half fills).
               transparency,
               linestyle: linestyleMap[cmd.style ?? "solid"],
+              ...(border === 0
+                ? {
+                    linewidth: 0,
+                    // Match fill so any residual stroke is invisible.
+                    color: fillHex,
+                    linecolor: fillHex,
+                  }
+                : {}),
             },
           },
         );

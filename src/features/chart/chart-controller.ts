@@ -17,6 +17,7 @@ import {
 } from "@/features/pine/orca-runtime";
 import { resolvePineStudy } from "@/features/pine/pine-runner";
 import { FTA_STUDY_ID } from "@/features/chart/forge-trading-assistant-indicator";
+import { DEALING_RANGES_STUDY_ID } from "@/features/chart/dealing-ranges-indicator";
 
 export interface ChartState {
   readonly symbol: string;
@@ -687,7 +688,7 @@ export class ChartController {
       const displayName = (info?.name || "").trim();
       if (!displayName) return null;
       const name = /dealing\s*ranges/i.test(displayName)
-        ? "DealingRanges@tv-basicstudies-1"
+        ? DEALING_RANGES_STUDY_ID
         : /forge\s*structure\s*intelligence|forge\s*si/i.test(displayName)
           ? "ForgeStructureIntelligence@tv-basicstudies-1"
           : /forge\s*sessions|sessions\s*\[luxalgo\]/i.test(displayName)
@@ -723,7 +724,7 @@ export class ChartController {
       name.includes("@")
         ? (name.split("@")[0] ?? name)
         : /dealing\s*ranges/i.test(name)
-          ? "DealingRanges@tv-basicstudies-1"
+          ? DEALING_RANGES_STUDY_ID
           : /forge\s*structure\s*intelligence|forge\s*si/i.test(name)
             ? "ForgeStructureIntelligence@tv-basicstudies-1"
             : /forge\s*sessions|sessions\s*\[luxalgo\]/i.test(name)
