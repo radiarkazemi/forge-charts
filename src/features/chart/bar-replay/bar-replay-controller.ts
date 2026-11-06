@@ -8,14 +8,17 @@ import {
 import type { TradingViewDatafeed } from "@/infrastructure/tradingview/datafeed";
 import type { EntityId, IChartingLibraryWidget } from "@/infrastructure/tradingview";
 
-/** Form-mode speeds (TF duration ÷ speed) plus candle-by-candle rates (×5–×30). */
-export type BarReplaySpeed = 0.5 | 1 | 2 | 5 | 10 | 20 | 30;
+/**
+ * On-bar (form) speeds: ×1–×5.
+ * Per-tick (candle-by-candle) speeds: ×5 / ×10 / ×20 / ×30.
+ */
+export type BarReplaySpeed = 1 | 2 | 3 | 4 | 5 | 10 | 20 | 30;
 
-/** Speeds shown when candle-by-candle (tick) play is on. */
+/** Speeds shown when candle-by-candle (per-tick) play is on. */
 export const CANDLE_BY_CANDLE_SPEEDS: readonly BarReplaySpeed[] = [5, 10, 20, 30];
 
-/** Speeds shown for realtime-form play. */
-export const FORM_PLAY_SPEEDS: readonly BarReplaySpeed[] = [0.5, 1, 2, 5, 10];
+/** Speeds shown for on-bar / realtime-form play (up to ×5). */
+export const FORM_PLAY_SPEEDS: readonly BarReplaySpeed[] = [1, 2, 3, 4, 5];
 
 export type BarReplayPhase = "idle" | "selecting" | "ready" | "playing";
 
@@ -24,8 +27,9 @@ export interface BarReplayState {
   readonly phase: BarReplayPhase;
   readonly speed: BarReplaySpeed;
   /**
-   * When true, Play advances one fully-closed candle at a time
-   * (1× ≈ 1 candle/sec). When false, each candle forms over real TF duration / speed.
+   * When true, Play advances one fully-closed candle per tick
+   * (×N ≈ N closed candles / second). When false, each candle forms over
+   * real TF duration ÷ speed (on-bar ×1–×5).
    */
   readonly candleByCandle: boolean;
   readonly resolution: string;
@@ -84,11 +88,11 @@ function tickIntervalMs(stepMs: number, speed: BarReplaySpeed): number {
 }
 
 /**
- * Wall ms between closed candles in candle-by-candle play.
- * ×N shortens the delay for each single candle (1s / N) — never advances N bars per tick.
+ * Target wall ms between closed-candle steps in per-tick play.
+ * ×5 → 200ms, ×10 → 100ms, ×20 → 50ms, ×30 → ~33ms (1 bar per step).
  */
-function candleStepIntervalMs(speed: BarReplaySpeed): number {
-  return Math.max(30, Math.round(1_000 / Math.max(0.25, speed)));
+export function candleStepIntervalMs(speed: BarReplaySpeed): number {
+  return Math.max(16, Math.round(1_000 / Math.max(1, speed)));
 }
 
 /** Prefer a denser TF for true intra-bar path when available. */
@@ -128,6 +132,13 @@ export class BarReplayController {
   private formingSubs: Bar[] = [];
   /** Prevent overlapping candle-by-candle advances while an async step is in flight. */
   private candleStepBusy = false;
+  /** Remember last speed per mode so toggling tick/on-bar keeps each menu’s choice. */
+  private lastFormSpeed: BarReplaySpeed = 1;
+  private lastTickSpeed: BarReplaySpeed = 5;
+  /** Candle-by-candle uses chained timeouts (not interval) so ×N isn’t lost to busy-skips. */
+  private candleStepChain = false;
+  /** Bumped on stop/restart so an in-flight step cannot schedule the next one. */
+  private candleStepGen = 0;
 
   attach(widget: IChartingLibraryWidget, datafeed: TradingViewDatafeed): void {
     this.widget = widget;
@@ -182,10 +193,13 @@ export class BarReplayController {
     this.buffer = [];
     this.microBuffer = [];
     const prev = this.state.get();
+    const speed = this.clampSpeedForMode(prev.candleByCandle, prev.speed);
+    if (prev.candleByCandle) this.lastTickSpeed = speed;
+    else this.lastFormSpeed = speed;
     this.state.set({
       active: true,
       phase: "selecting",
-      speed: prev.speed,
+      speed,
       candleByCandle: prev.candleByCandle,
       resolution,
       cursorIndex: -1,
@@ -253,9 +267,17 @@ export class BarReplayController {
   }
 
   setSpeed(speed: BarReplaySpeed): void {
-    const playing = this.state.get().phase === "playing" || this.playTimer !== 0;
+    const playing = this.isPlayClockActive();
     const candleMode = this.state.get().candleByCandle;
-    // Preserve mid-candle progress across speed changes (realtime-form mode only).
+    const allowed = candleMode ? CANDLE_BY_CANDLE_SPEEDS : FORM_PLAY_SPEEDS;
+    const next = (allowed as readonly number[]).includes(speed)
+      ? speed
+      : candleMode
+        ? this.lastTickSpeed
+        : this.lastFormSpeed;
+    if (candleMode) this.lastTickSpeed = next;
+    else this.lastFormSpeed = next;
+    // Preserve mid-candle progress across speed changes (on-bar form mode only).
     if (playing && this.formingTarget && !candleMode) {
       const stepMs = resolutionToStepMs(this.state.get().resolution);
       const prevSpeed = this.state.get().speed;
@@ -266,9 +288,9 @@ export class BarReplayController {
       );
       this.formProgressAtStart = progress;
       this.formStartedAtMs = Date.now();
-      this.patch({ speed, formProgress: progress });
+      this.patch({ speed: next, formProgress: progress });
     } else {
-      this.patch({ speed });
+      this.patch({ speed: next });
     }
     if (playing) {
       this.stopPlayTimer();
@@ -277,29 +299,24 @@ export class BarReplayController {
   }
 
   /**
-   * Toggle candle-by-candle play: each Play tick advances exactly one closed bar.
-   * Speed ×N only shortens the wait between those single bars (not bars-per-tick).
+   * Toggle candle-by-candle (per-tick) play: each step advances exactly one closed bar.
+   * Speed ×N targets N closed candles per second (delay only — never N bars in one step).
    */
   setCandleByCandle(enabled: boolean): void {
-    const playing = this.state.get().phase === "playing" || this.playTimer !== 0;
+    const playing = this.isPlayClockActive();
     const next = Boolean(enabled);
     if (next === this.state.get().candleByCandle) return;
 
-    const snapSpeed = (candleMode: boolean, speed: BarReplaySpeed): BarReplaySpeed => {
-      if (candleMode) {
-        return (CANDLE_BY_CANDLE_SPEEDS as readonly number[]).includes(speed)
-          ? speed
-          : 5;
-      }
-      return (FORM_PLAY_SPEEDS as readonly number[]).includes(speed) ? speed : 1;
-    };
+    // Persist the speed leaving this mode, restore the other mode’s last choice.
+    if (this.state.get().candleByCandle) this.lastTickSpeed = this.state.get().speed;
+    else this.lastFormSpeed = this.state.get().speed;
+    const speed = next ? this.lastTickSpeed : this.lastFormSpeed;
 
     if (playing && next && this.formingTarget) {
       // Switching into step mode mid-form — finish the current bar first.
       void this.commitFormingBar().then(() => {
-        const speed = snapSpeed(true, this.state.get().speed);
         this.patch({ candleByCandle: true, formProgress: 0, speed });
-        if (this.state.get().phase === "playing" || this.playTimer !== 0) {
+        if (this.isPlayClockActive()) {
           this.stopPlayTimer();
           this.startPlayTimer();
         }
@@ -310,14 +327,12 @@ export class BarReplayController {
     if (playing && next) {
       this.formingTarget = null;
       this.formingSubs = [];
-      const speed = snapSpeed(true, this.state.get().speed);
       this.patch({ candleByCandle: true, formProgress: 0, speed });
       this.stopPlayTimer();
       this.startPlayTimer();
       return;
     }
 
-    const speed = snapSpeed(next, this.state.get().speed);
     this.patch({
       candleByCandle: next,
       formProgress: next ? 0 : this.state.get().formProgress,
@@ -341,7 +356,7 @@ export class BarReplayController {
     const next = String(resolution || "").trim();
     if (!next || next === this.state.get().resolution) return;
 
-    const wasPlaying = this.state.get().phase === "playing" || this.playTimer !== 0;
+    const wasPlaying = this.isPlayClockActive();
     this.stopPlayTimer();
     this.formingTarget = null;
 
@@ -358,7 +373,7 @@ export class BarReplayController {
 
   async play(): Promise<void> {
     if (!this.state.get().active || this.state.get().cursorIndex < 0) return;
-    if (this.state.get().phase === "playing" || this.playTimer !== 0) {
+    if (this.isPlayClockActive()) {
       this.pause();
       return;
     }
@@ -583,7 +598,7 @@ export class BarReplayController {
       cursorIndex: index,
       startIndex,
       bufferLength: buffer.length,
-      phase: this.playTimer !== 0 || prev.phase === "playing" ? "playing" : "ready",
+      phase: this.isPlayClockActive() || prev.phase === "playing" ? "playing" : "ready",
       selecting: opts.selecting ?? false,
       formProgress: 0,
     });
@@ -661,7 +676,7 @@ export class BarReplayController {
     this.patch({
       cursorIndex: nextIndex,
       formProgress: 0,
-      phase: this.playTimer !== 0 ? "playing" : "ready",
+      phase: this.isPlayClockActive() ? "playing" : "ready",
     });
     await this.removeMarker();
     await this.drawMarker(target.time);
@@ -690,7 +705,7 @@ export class BarReplayController {
     this.formingSubs = [];
     datafeed.setReplayCutoff(bar.time);
     datafeed.setReplayClock(bar.time);
-    const keepPlaying = this.playTimer !== 0 || this.state.get().phase === "playing";
+    const keepPlaying = this.isPlayClockActive();
     this.patch({
       cursorIndex: index,
       phase: keepPlaying ? "playing" : "ready",
@@ -738,7 +753,7 @@ export class BarReplayController {
           this.pause();
           return;
         }
-        if (this.playTimer !== 0) {
+        if (this.isPlayClockActive()) {
           this.beginFormingNext();
         }
       });
@@ -749,11 +764,13 @@ export class BarReplayController {
   }
 
   /**
-   * Advance exactly one closed candle per timer fire.
-   * Speed only changes `candleStepIntervalMs` — never loop `speed` bars here.
+   * Advance exactly one closed candle per scheduled step.
+   * Speed only changes the wait via `candleStepIntervalMs` — never N bars in one step.
    */
   private async onCandleByCandleTick(): Promise<void> {
-    if (this.state.get().phase !== "playing" && this.playTimer === 0) return;
+    if (this.state.get().phase !== "playing" && this.playTimer === 0 && !this.candleStepChain) {
+      return;
+    }
     if (this.candleStepBusy) return;
     this.candleStepBusy = true;
     try {
@@ -821,23 +838,56 @@ export class BarReplayController {
     }
   }
 
+  private isPlayClockActive(): boolean {
+    return (
+      this.state.get().phase === "playing" ||
+      this.playTimer !== 0 ||
+      this.candleStepChain
+    );
+  }
+
+  private clampSpeedForMode(candleMode: boolean, speed: number): BarReplaySpeed {
+    const allowed = candleMode ? CANDLE_BY_CANDLE_SPEEDS : FORM_PLAY_SPEEDS;
+    if ((allowed as readonly number[]).includes(speed)) return speed as BarReplaySpeed;
+    return candleMode ? 5 : 1;
+  }
+
   private startPlayTimer(): void {
     this.stopPlayTimer();
     const { speed, candleByCandle, resolution } = this.state.get();
-    const ms = candleByCandle
-      ? candleStepIntervalMs(speed)
-      : tickIntervalMs(resolutionToStepMs(resolution), speed);
+    if (candleByCandle) {
+      // Chained timeouts: wait (interval − step cost) after each bar so ×10/×30
+      // stay faster than ×5 even when chart updates take tens of ms.
+      const gen = ++this.candleStepGen;
+      this.candleStepChain = true;
+      const stepOnce = async (): Promise<void> => {
+        if (gen !== this.candleStepGen || !this.candleStepChain) return;
+        if (this.state.get().phase !== "playing") return;
+        const started = Date.now();
+        await this.onCandleByCandleTick();
+        if (gen !== this.candleStepGen || !this.candleStepChain) return;
+        if (this.state.get().phase !== "playing") return;
+        const target = candleStepIntervalMs(this.state.get().speed);
+        const wait = Math.max(0, target - (Date.now() - started));
+        this.playTimer = window.setTimeout(() => {
+          this.playTimer = 0;
+          void stepOnce();
+        }, wait);
+      };
+      void stepOnce();
+      return;
+    }
+    const ms = tickIntervalMs(resolutionToStepMs(resolution), speed);
     this.playTimer = window.setInterval(() => {
       this.onFormTick();
     }, ms);
-    // Candle-by-candle: step immediately so Play feels responsive (then interval).
-    if (candleByCandle) {
-      void this.onCandleByCandleTick();
-    }
   }
 
   private stopPlayTimer(): void {
+    this.candleStepGen += 1;
+    this.candleStepChain = false;
     if (this.playTimer) {
+      window.clearTimeout(this.playTimer);
       window.clearInterval(this.playTimer);
       this.playTimer = 0;
     }
