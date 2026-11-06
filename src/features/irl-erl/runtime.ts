@@ -1,12 +1,9 @@
 /**
- * IRL / ERL — Internal & External Range Liquidity (ICT).
+ * IRL / ERL — Internal & External Range Liquidity (Trading Handbook pt.3).
  *
- * One (or few) main dealing range(s):
- *   ERL+ = range high (buy-side stops outside)
- *   ERL− = range low  (sell-side stops outside)
- *   IRL+ / IRL− = EQH/EQL and significant swings *inside* that range
- *
- * Nested micro-ranges are dropped so the chart is not a stack of ERL labels.
+ * ERL = outer edges of the chosen dealing range (H / L).
+ * IRL = levels inside that range; EQH/EQL = equal highs/lows (lesson 3.3).
+ * Nested micro-ranges are dropped so only the main DR drives ERL.
  */
 
 import type { EntityId, IChartWidgetApi } from "@/infrastructure/tradingview";
@@ -23,7 +20,7 @@ import {
   scaleStrength,
 } from "@/features/chart/structure-scales";
 
-export type IrlErlKind = "IRL+" | "IRL-" | "ERL+" | "ERL-";
+export type IrlErlKind = "IRL+" | "IRL-" | "EQH" | "EQL" | "ERL+" | "ERL-";
 
 export interface IrlErlInputs {
   readonly leftBars: number;
@@ -43,6 +40,8 @@ export interface IrlErlInputs {
   readonly edgeMarginPct: number;
   readonly showIrlPlus: boolean;
   readonly showIrlMinus: boolean;
+  readonly showEqh: boolean;
+  readonly showEql: boolean;
   readonly showErlPlus: boolean;
   readonly showErlMinus: boolean;
   readonly showLines: boolean;
@@ -50,10 +49,14 @@ export interface IrlErlInputs {
   readonly extendToLast: boolean;
   readonly irlPlusLabel: string;
   readonly irlMinusLabel: string;
+  readonly eqhLabel: string;
+  readonly eqlLabel: string;
   readonly erlPlusLabel: string;
   readonly erlMinusLabel: string;
   readonly irlPlusColor: string;
   readonly irlMinusColor: string;
+  readonly eqhColor: string;
+  readonly eqlColor: string;
   readonly erlPlusColor: string;
   readonly erlMinusColor: string;
   readonly lineWidth: number;
@@ -79,6 +82,8 @@ export const IRL_ERL_DEFAULTS: IrlErlInputs = {
   edgeMarginPct: 8,
   showIrlPlus: true,
   showIrlMinus: true,
+  showEqh: true,
+  showEql: true,
   showErlPlus: true,
   showErlMinus: true,
   showLines: true,
@@ -86,10 +91,14 @@ export const IRL_ERL_DEFAULTS: IrlErlInputs = {
   extendToLast: true,
   irlPlusLabel: "IRL+",
   irlMinusLabel: "IRL-",
+  eqhLabel: "EQH",
+  eqlLabel: "EQL",
   erlPlusLabel: "ERL+",
   erlMinusLabel: "ERL-",
   irlPlusColor: "#26A69A",
   irlMinusColor: "#AB47BC",
+  eqhColor: "#00897B",
+  eqlColor: "#8E24AA",
   erlPlusColor: "#42A5F5",
   erlMinusColor: "#EF5350",
   lineWidth: 1,
@@ -288,9 +297,10 @@ function dedupeLevels(
       kind: prev.kind,
       t1: Math.min(prev.t1, lv.t1),
       t2: Math.max(prev.t2, lv.t2),
-      price: lv.kind.endsWith("+")
-        ? Math.max(prev.price, lv.price)
-        : Math.min(prev.price, lv.price),
+      price:
+        lv.kind === "ERL+" || lv.kind === "IRL+" || lv.kind === "EQH"
+          ? Math.max(prev.price, lv.price)
+          : Math.min(prev.price, lv.price),
       scale: Math.max(prev.scale, lv.scale),
     };
   }
@@ -373,7 +383,12 @@ export function detectIrlErl(
       });
     }
 
-    if (!(inputs.showIrlPlus || inputs.showIrlMinus) || !(height > 0)) continue;
+    const wantInternal =
+      inputs.showEqh ||
+      inputs.showEql ||
+      inputs.showIrlPlus ||
+      inputs.showIrlMinus;
+    if (!wantInternal || !(height > 0)) continue;
 
     const inside = pivots.filter(
       (p) =>
@@ -389,10 +404,11 @@ export function detectIrlErl(
     const eqHighSet = eqHighs.map((c) => c.price);
     const eqLowSet = eqLows.map((c) => c.price);
 
-    if (inputs.showIrlPlus) {
+    // Handbook lesson 3.3 — equal highs/lows are first-class internal liquidity.
+    if (inputs.showEqh) {
       for (const c of eqHighs) {
         levels.push({
-          kind: "IRL+",
+          kind: "EQH",
           t1: c.t1,
           t2: tEnd,
           price: c.price,
@@ -400,10 +416,10 @@ export function detectIrlErl(
         });
       }
     }
-    if (inputs.showIrlMinus) {
+    if (inputs.showEql) {
       for (const c of eqLows) {
         levels.push({
-          kind: "IRL-",
+          kind: "EQL",
           t1: c.t1,
           t2: tEnd,
           price: c.price,
@@ -413,7 +429,7 @@ export function detectIrlErl(
     }
 
     if (inputs.includeSingleSwings) {
-      // Most recent internal swings that are not already EQ clusters / near ERL.
+      // Other internal swings (not already EQH/EQL).
       const highs = inside.filter((p) => p.kind === "high").slice(-4);
       const lows = inside.filter((p) => p.kind === "low").slice(-4);
       if (inputs.showIrlPlus) {
@@ -453,6 +469,8 @@ export function detectIrlErl(
 function kindEnabled(kind: IrlErlKind, inputs: IrlErlInputs): boolean {
   if (kind === "IRL+") return inputs.showIrlPlus;
   if (kind === "IRL-") return inputs.showIrlMinus;
+  if (kind === "EQH") return inputs.showEqh;
+  if (kind === "EQL") return inputs.showEql;
   if (kind === "ERL+") return inputs.showErlPlus;
   return inputs.showErlMinus;
 }
@@ -460,6 +478,8 @@ function kindEnabled(kind: IrlErlKind, inputs: IrlErlInputs): boolean {
 function kindColor(kind: IrlErlKind, inputs: IrlErlInputs): string {
   if (kind === "IRL+") return inputs.irlPlusColor;
   if (kind === "IRL-") return inputs.irlMinusColor;
+  if (kind === "EQH") return inputs.eqhColor;
+  if (kind === "EQL") return inputs.eqlColor;
   if (kind === "ERL+") return inputs.erlPlusColor;
   return inputs.erlMinusColor;
 }
@@ -467,12 +487,15 @@ function kindColor(kind: IrlErlKind, inputs: IrlErlInputs): string {
 function kindLabel(kind: IrlErlKind, inputs: IrlErlInputs): string {
   if (kind === "IRL+") return inputs.irlPlusLabel || "IRL+";
   if (kind === "IRL-") return inputs.irlMinusLabel || "IRL-";
+  if (kind === "EQH") return inputs.eqhLabel || "EQH";
+  if (kind === "EQL") return inputs.eqlLabel || "EQL";
   if (kind === "ERL+") return inputs.erlPlusLabel || "ERL+";
   return inputs.erlMinusLabel || "ERL-";
 }
 
 function kindLineStyle(kind: IrlErlKind, inputs: IrlErlInputs): number {
-  return kind.startsWith("IRL") ? inputs.irlLineStyle : inputs.erlLineStyle;
+  if (kind.startsWith("ERL")) return inputs.erlLineStyle;
+  return inputs.irlLineStyle;
 }
 
 export function irlErlDrawCmds(

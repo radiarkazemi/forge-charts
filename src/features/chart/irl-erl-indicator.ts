@@ -9,11 +9,13 @@ import { IRL_ERL_DEFAULTS } from "@/features/irl-erl/runtime";
 import { buildStylePlots, stylePlotNaNs } from "./study-style-plots";
 
 export const IRL_ERL_STUDY_NAME = "IRL / ERL";
-/** Bumped to -2 — main-range ERL only + real IRL + dedupe. */
-export const IRL_ERL_STUDY_ID = "IrlErlLiquidity@tv-basicstudies-2";
+/** Bumped to -3 — handbook EQH/EQL + main-range ERL. */
+export const IRL_ERL_STUDY_ID = "IrlErlLiquidity@tv-basicstudies-3";
 
 export const IRL_STYLE_PLUS = "plot_irl_plus";
 export const IRL_STYLE_MINUS = "plot_irl_minus";
+export const EQH_STYLE = "plot_eqh";
+export const EQL_STYLE = "plot_eql";
 export const ERL_STYLE_PLUS = "plot_erl_plus";
 export const ERL_STYLE_MINUS = "plot_erl_minus";
 
@@ -34,6 +36,8 @@ export const IRL_ERL_STUDY_DEFAULTS = {
   extendToLast: IRL_ERL_DEFAULTS.extendToLast,
   irlPlusLabel: IRL_ERL_DEFAULTS.irlPlusLabel,
   irlMinusLabel: IRL_ERL_DEFAULTS.irlMinusLabel,
+  eqhLabel: IRL_ERL_DEFAULTS.eqhLabel,
+  eqlLabel: IRL_ERL_DEFAULTS.eqlLabel,
   erlPlusLabel: IRL_ERL_DEFAULTS.erlPlusLabel,
   erlMinusLabel: IRL_ERL_DEFAULTS.erlMinusLabel,
   irlLineStyle: IRL_ERL_DEFAULTS.irlLineStyle,
@@ -43,26 +47,8 @@ export const IRL_ERL_STUDY_DEFAULTS = {
 
 const STYLE_SPECS = [
   {
-    id: IRL_STYLE_PLUS,
-    title: "IRL+",
-    color: IRL_ERL_DEFAULTS.irlPlusColor,
-    visible: IRL_ERL_DEFAULTS.showIrlPlus,
-    transparency: 0,
-    linewidth: IRL_ERL_DEFAULTS.lineWidth,
-    legendHidden: false,
-  },
-  {
-    id: IRL_STYLE_MINUS,
-    title: "IRL-",
-    color: IRL_ERL_DEFAULTS.irlMinusColor,
-    visible: IRL_ERL_DEFAULTS.showIrlMinus,
-    transparency: 0,
-    linewidth: IRL_ERL_DEFAULTS.lineWidth,
-    legendHidden: false,
-  },
-  {
     id: ERL_STYLE_PLUS,
-    title: "ERL+",
+    title: "ERL+ (range high)",
     color: IRL_ERL_DEFAULTS.erlPlusColor,
     visible: IRL_ERL_DEFAULTS.showErlPlus,
     transparency: 0,
@@ -71,9 +57,45 @@ const STYLE_SPECS = [
   },
   {
     id: ERL_STYLE_MINUS,
-    title: "ERL-",
+    title: "ERL- (range low)",
     color: IRL_ERL_DEFAULTS.erlMinusColor,
     visible: IRL_ERL_DEFAULTS.showErlMinus,
+    transparency: 0,
+    linewidth: IRL_ERL_DEFAULTS.lineWidth,
+    legendHidden: false,
+  },
+  {
+    id: EQH_STYLE,
+    title: "EQH (equal highs)",
+    color: IRL_ERL_DEFAULTS.eqhColor,
+    visible: IRL_ERL_DEFAULTS.showEqh,
+    transparency: 0,
+    linewidth: IRL_ERL_DEFAULTS.lineWidth,
+    legendHidden: false,
+  },
+  {
+    id: EQL_STYLE,
+    title: "EQL (equal lows)",
+    color: IRL_ERL_DEFAULTS.eqlColor,
+    visible: IRL_ERL_DEFAULTS.showEql,
+    transparency: 0,
+    linewidth: IRL_ERL_DEFAULTS.lineWidth,
+    legendHidden: false,
+  },
+  {
+    id: IRL_STYLE_PLUS,
+    title: "IRL+ (internal high)",
+    color: IRL_ERL_DEFAULTS.irlPlusColor,
+    visible: IRL_ERL_DEFAULTS.showIrlPlus,
+    transparency: 0,
+    linewidth: IRL_ERL_DEFAULTS.lineWidth,
+    legendHidden: false,
+  },
+  {
+    id: IRL_STYLE_MINUS,
+    title: "IRL- (internal low)",
+    color: IRL_ERL_DEFAULTS.irlMinusColor,
+    visible: IRL_ERL_DEFAULTS.showIrlMinus,
     transparency: 0,
     linewidth: IRL_ERL_DEFAULTS.lineWidth,
     legendHidden: false,
@@ -93,7 +115,7 @@ export function createIrlErlIndicator(PineJS: {
       id: IRL_ERL_STUDY_ID as never,
       name: IRL_ERL_STUDY_NAME,
       description: IRL_ERL_STUDY_NAME,
-      shortDescription: "IRL+ · IRL- · ERL+ · ERL- · v2",
+      shortDescription: "ERL · EQH/EQL · IRL · v3",
       isCustomIndicator: true,
       is_price_study: true,
       linkedToSeries: true,
@@ -204,18 +226,6 @@ export function createIrlErlIndicator(PineJS: {
           type: "bool",
         },
         {
-          id: "irlPlusLabel",
-          name: "IRL+ text",
-          defval: IRL_ERL_STUDY_DEFAULTS.irlPlusLabel,
-          type: "text",
-        },
-        {
-          id: "irlMinusLabel",
-          name: "IRL- text",
-          defval: IRL_ERL_STUDY_DEFAULTS.irlMinusLabel,
-          type: "text",
-        },
-        {
           id: "erlPlusLabel",
           name: "ERL+ text",
           defval: IRL_ERL_STUDY_DEFAULTS.erlPlusLabel,
@@ -225,6 +235,30 @@ export function createIrlErlIndicator(PineJS: {
           id: "erlMinusLabel",
           name: "ERL- text",
           defval: IRL_ERL_STUDY_DEFAULTS.erlMinusLabel,
+          type: "text",
+        },
+        {
+          id: "eqhLabel",
+          name: "EQH text",
+          defval: IRL_ERL_STUDY_DEFAULTS.eqhLabel,
+          type: "text",
+        },
+        {
+          id: "eqlLabel",
+          name: "EQL text",
+          defval: IRL_ERL_STUDY_DEFAULTS.eqlLabel,
+          type: "text",
+        },
+        {
+          id: "irlPlusLabel",
+          name: "IRL+ text",
+          defval: IRL_ERL_STUDY_DEFAULTS.irlPlusLabel,
+          type: "text",
+        },
+        {
+          id: "irlMinusLabel",
+          name: "IRL- text",
+          defval: IRL_ERL_STUDY_DEFAULTS.irlMinusLabel,
           type: "text",
         },
         {
