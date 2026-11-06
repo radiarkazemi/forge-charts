@@ -1,0 +1,51 @@
+//@version=5
+// Real Swing High/Low — confirmed structural pivots with styleable H/L markers (Forge).
+indicator("Real Swing High/Low", shorttitle="Real Swings", overlay=true, max_labels_count=500)
+
+leftBars = input.int(2, "Left bars", minval=1, maxval=50)
+rightBars = input.int(2, "Right bars", minval=1, maxval=50)
+alternateOnly = input.bool(true, "Alternate only (real structure)")
+showHighs = input.bool(true, "Show swing highs")
+showLows = input.bool(true, "Show swing lows")
+displayMode = input.string("Letters", "Style", options=["Letters", "Arrows", "Both", "Triangles", "Dots", "Badge"])
+highLabel = input.string("H", "High letter / text")
+lowLabel = input.string("L", "Low letter / text")
+highColor = input.color(color.new(#26a69a, 0), "High color")
+lowColor = input.color(color.new(#ef5350, 0), "Low color")
+
+ph = ta.pivothigh(high, leftBars, rightBars)
+pl = ta.pivotlow(low, leftBars, rightBars)
+
+var float lastKind = na // 1 high, -1 low
+isHigh = not na(ph)
+isLow = not na(pl)
+
+keepHigh = isHigh
+keepLow = isLow
+if alternateOnly
+    if isHigh and lastKind == 1
+        keepHigh := false
+    if isLow and lastKind == -1
+        keepLow := false
+
+if keepHigh and showHighs
+    lastKind := 1
+    if displayMode == "Letters" or displayMode == "Both" or displayMode == "Badge"
+        label.new(bar_index[rightBars], high[rightBars], highLabel, style=label.style_label_down, color=displayMode == "Badge" ? highColor : color.new(highColor, 100), textcolor=displayMode == "Badge" ? color.white : highColor, size=size.small)
+    if displayMode == "Arrows" or displayMode == "Both"
+        label.new(bar_index[rightBars], high[rightBars], "▼", style=label.style_none, textcolor=highColor, size=size.small)
+    if displayMode == "Triangles"
+        label.new(bar_index[rightBars], high[rightBars], "▼", style=label.style_none, textcolor=highColor, size=size.normal)
+    if displayMode == "Dots"
+        label.new(bar_index[rightBars], high[rightBars], "●", style=label.style_none, textcolor=highColor, size=size.small)
+
+if keepLow and showLows
+    lastKind := -1
+    if displayMode == "Letters" or displayMode == "Both" or displayMode == "Badge"
+        label.new(bar_index[rightBars], low[rightBars], lowLabel, style=label.style_label_up, color=displayMode == "Badge" ? lowColor : color.new(lowColor, 100), textcolor=displayMode == "Badge" ? color.white : lowColor, size=size.small)
+    if displayMode == "Arrows" or displayMode == "Both"
+        label.new(bar_index[rightBars], low[rightBars], "▲", style=label.style_none, textcolor=lowColor, size=size.small)
+    if displayMode == "Triangles"
+        label.new(bar_index[rightBars], low[rightBars], "▲", style=label.style_none, textcolor=lowColor, size=size.normal)
+    if displayMode == "Dots"
+        label.new(bar_index[rightBars], low[rightBars], "●", style=label.style_none, textcolor=lowColor, size=size.small)
