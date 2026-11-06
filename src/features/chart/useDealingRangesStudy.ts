@@ -22,9 +22,17 @@ import {
 } from "@/features/dealing-ranges/runtime";
 import {
   DEALING_RANGES_DEFAULTS,
+  DR_STYLE_DISCOUNT,
+  DR_STYLE_EDGES,
+  DR_STYLE_FIB618,
+  DR_STYLE_FIB786,
+  DR_STYLE_MID,
+  DR_STYLE_PREMIUM,
   dealingRangesOptionsFromMap,
 } from "./dealing-ranges-indicator";
+import { applyTransparency, readStylePlot } from "./study-style-plots";
 import { studyIsVisible } from "./study-paint-gate";
+import { MULTI_TF_DR_DEFAULTS as DR_STYLE_FALLBACK } from "@/features/dealing-ranges/runtime";
 
 /** Cap bars fed into Orca so 1m/seconds charts stay responsive. */
 const MAX_BARS = 2_500;
@@ -103,7 +111,78 @@ export function useDealingRangesStudy(enabled = true): void {
         for (const [k, v] of Object.entries(DEALING_RANGES_DEFAULTS)) {
           if (!map.has(k)) map.set(k, v);
         }
-        return dealingRangesOptionsFromMap(map);
+        const base = dealingRangesOptionsFromMap(map);
+
+        const premium = readStylePlot(api, DR_STYLE_PREMIUM, {
+          color: DR_STYLE_FALLBACK.premiumColor,
+          visible: true,
+          transparency: 100 - DR_STYLE_FALLBACK.fillOpacity,
+          linewidth: 1,
+          linestyle: 0,
+        });
+        const discount = readStylePlot(api, DR_STYLE_DISCOUNT, {
+          color: DR_STYLE_FALLBACK.discountColor,
+          visible: true,
+          transparency: 100 - DR_STYLE_FALLBACK.fillOpacity,
+          linewidth: 1,
+          linestyle: 0,
+        });
+        const mid = readStylePlot(api, DR_STYLE_MID, {
+          color: DR_STYLE_FALLBACK.midColor,
+          visible: DR_STYLE_FALLBACK.showMid,
+          transparency: 0,
+          linewidth: DR_STYLE_FALLBACK.midWidth,
+          linestyle: 2,
+        });
+        const edges = readStylePlot(api, DR_STYLE_EDGES, {
+          color: DR_STYLE_FALLBACK.zeroOneColor,
+          visible: DR_STYLE_FALLBACK.showZeroOne,
+          transparency: 0,
+          linewidth: 1,
+          linestyle: 0,
+        });
+        const fib618 = readStylePlot(api, DR_STYLE_FIB618, {
+          color: DR_STYLE_FALLBACK.fib618Color,
+          visible: DR_STYLE_FALLBACK.showFibs,
+          transparency: 0,
+          linewidth: 1,
+          linestyle: 1,
+        });
+        const fib786 = readStylePlot(api, DR_STYLE_FIB786, {
+          color: DR_STYLE_FALLBACK.fib786Color,
+          visible: DR_STYLE_FALLBACK.showFibs,
+          transparency: 0,
+          linewidth: 1,
+          linestyle: 1,
+        });
+
+        const fillFromTransparency = (t: number) =>
+          Math.max(4, Math.min(40, Math.round(100 - Math.max(0, Math.min(100, t)))));
+        const fillOpacity = Math.round(
+          (fillFromTransparency(premium.transparency) + fillFromTransparency(discount.transparency)) /
+            2,
+        );
+
+        // Halves only paint when their Style plot is visible.
+        const showPremium = premium.visible;
+        const showDiscount = discount.visible;
+
+        return {
+          ...base,
+          premiumColor: applyTransparency(premium.color, 0),
+          discountColor: applyTransparency(discount.color, 0),
+          midColor: applyTransparency(mid.color, mid.transparency),
+          zeroOneColor: applyTransparency(edges.color, edges.transparency),
+          fib618Color: applyTransparency(fib618.color, fib618.transparency),
+          fib786Color: applyTransparency(fib786.color, fib786.transparency),
+          midWidth: Math.max(1, Math.min(4, Math.round(mid.linewidth || base.midWidth))),
+          fillOpacity,
+          showPremium,
+          showDiscount,
+          showMid: mid.visible,
+          showZeroOne: edges.visible,
+          showFibs: fib618.visible || fib786.visible,
+        };
       } catch {
         return null;
       }
