@@ -264,14 +264,13 @@ host = sys.argv[2].strip()
 text = p.read_text()
 fallback = f"http://{host}:8088/charts/"
 snippet = f'<script>window.__FORGE_ORIGIN_FALLBACK__={fallback!r};</script>\n'
-if "__FORGE_ORIGIN_FALLBACK__" in text:
-    import re
-    text = re.sub(
-        r"<script>window\.__FORGE_ORIGIN_FALLBACK__=.*?</script>\n?",
-        snippet,
-        text,
-        count=1,
-    )
+import re
+# Boot UI references the name as a string — only replace an existing assignment tag.
+assign_re = re.compile(
+    r"<script>window\.__FORGE_ORIGIN_FALLBACK__=.*?</script>\n?",
+)
+if assign_re.search(text):
+    text = assign_re.sub(snippet, text, count=1)
 elif "</head>" in text:
     text = text.replace("</head>", snippet + "</head>", 1)
 else:
