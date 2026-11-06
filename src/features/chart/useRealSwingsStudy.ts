@@ -1,5 +1,6 @@
 /**
  * Watches Indicators “Real Swing High/Low” and paints styleable H/L markers.
+ * Colors / visibility / size come from the Style tab (getStyleValues).
  */
 
 import { useEffect, useRef } from "react";
@@ -10,11 +11,21 @@ import { barsFromChartExport } from "@/features/pine/orca-runtime";
 import {
   computeRealSwings,
   paintRealSwings,
+  REAL_SWING_DEFAULTS,
   type RealSwingInputs,
   type SwingDisplayMode,
   type SwingDrawCmd,
 } from "@/features/real-swings/runtime";
-import { REAL_SWINGS_STUDY_DEFAULTS } from "./real-swings-indicator";
+import {
+  REAL_SWINGS_STUDY_DEFAULTS,
+  REAL_SWING_STYLE_HIGH,
+  REAL_SWING_STYLE_LOW,
+} from "./real-swings-indicator";
+import {
+  applyTransparency,
+  linewidthToFontSize,
+  readStylePlot,
+} from "./study-style-plots";
 import { studyIsVisible } from "./study-paint-gate";
 
 const MAX_BARS = 3_000;
@@ -87,7 +98,7 @@ export function useRealSwingsStudy(enabled = true): void {
     const readOptions = (studyId: EntityId): RealSwingInputs => {
       try {
         const api = widget.activeChart()?.getStudyById(studyId);
-        if (!api) return { ...REAL_SWINGS_STUDY_DEFAULTS };
+        if (!api) return { ...REAL_SWING_DEFAULTS };
         const values = api.getInputValues() ?? [];
         const map = new Map<string, unknown>();
         for (const item of values) map.set(String(item.id), item.value);
@@ -114,34 +125,61 @@ export function useRealSwingsStudy(enabled = true): void {
         const displayMode = (
           modeRaw >= 0 && modeRaw <= 5 ? modeRaw : REAL_SWINGS_STUDY_DEFAULTS.displayMode
         ) as SwingDisplayMode;
+
+        const highStyle = readStylePlot(api, REAL_SWING_STYLE_HIGH, {
+          color: REAL_SWING_DEFAULTS.highColor,
+          visible: REAL_SWING_DEFAULTS.showHighs,
+          transparency: 0,
+          linewidth: 2,
+        });
+        const lowStyle = readStylePlot(api, REAL_SWING_STYLE_LOW, {
+          color: REAL_SWING_DEFAULTS.lowColor,
+          visible: REAL_SWING_DEFAULTS.showLows,
+          transparency: 0,
+          linewidth: 2,
+        });
+        const fontSize = linewidthToFontSize(
+          Math.max(highStyle.linewidth, lowStyle.linewidth),
+          REAL_SWING_DEFAULTS.fontSize,
+        );
+
         return {
-          leftBars: Math.max(1, Math.min(50, Math.floor(num("leftBars", REAL_SWINGS_STUDY_DEFAULTS.leftBars)))),
+          leftBars: Math.max(
+            1,
+            Math.min(50, Math.floor(num("leftBars", REAL_SWINGS_STUDY_DEFAULTS.leftBars))),
+          ),
           rightBars: Math.max(
             1,
             Math.min(50, Math.floor(num("rightBars", REAL_SWINGS_STUDY_DEFAULTS.rightBars))),
           ),
           alternateOnly: bool("alternateOnly", REAL_SWINGS_STUDY_DEFAULTS.alternateOnly),
-          minSwingAtr: Math.max(0, Math.min(10, num("minSwingAtr", REAL_SWINGS_STUDY_DEFAULTS.minSwingAtr))),
-          atrLen: Math.max(2, Math.min(100, Math.floor(num("atrLen", REAL_SWINGS_STUDY_DEFAULTS.atrLen)))),
-          showHighs: bool("showHighs", REAL_SWINGS_STUDY_DEFAULTS.showHighs),
-          showLows: bool("showLows", REAL_SWINGS_STUDY_DEFAULTS.showLows),
+          minSwingAtr: Math.max(
+            0,
+            Math.min(10, num("minSwingAtr", REAL_SWINGS_STUDY_DEFAULTS.minSwingAtr)),
+          ),
+          atrLen: Math.max(
+            2,
+            Math.min(100, Math.floor(num("atrLen", REAL_SWINGS_STUDY_DEFAULTS.atrLen))),
+          ),
+          showHighs: highStyle.visible,
+          showLows: lowStyle.visible,
           displayMode,
           highLabel: str("highLabel", REAL_SWINGS_STUDY_DEFAULTS.highLabel).slice(0, 8),
           lowLabel: str("lowLabel", REAL_SWINGS_STUDY_DEFAULTS.lowLabel).slice(0, 8),
-          highColor: str("highColor", REAL_SWINGS_STUDY_DEFAULTS.highColor),
-          lowColor: str("lowColor", REAL_SWINGS_STUDY_DEFAULTS.lowColor),
-          fontSize: Math.max(
-            8,
-            Math.min(28, Math.floor(num("fontSize", REAL_SWINGS_STUDY_DEFAULTS.fontSize))),
+          highColor: applyTransparency(highStyle.color, highStyle.transparency),
+          lowColor: applyTransparency(lowStyle.color, lowStyle.transparency),
+          fontSize,
+          offsetAtr: Math.max(
+            0,
+            Math.min(5, num("offsetAtr", REAL_SWINGS_STUDY_DEFAULTS.offsetAtr)),
           ),
-          offsetAtr: Math.max(0, Math.min(5, num("offsetAtr", REAL_SWINGS_STUDY_DEFAULTS.offsetAtr))),
           maxMarkers: Math.max(
             20,
             Math.min(500, Math.floor(num("maxMarkers", REAL_SWINGS_STUDY_DEFAULTS.maxMarkers))),
           ),
         };
       } catch {
-        return { ...REAL_SWINGS_STUDY_DEFAULTS };
+        return { ...REAL_SWING_DEFAULTS };
       }
     };
 

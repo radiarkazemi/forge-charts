@@ -1,13 +1,19 @@
 /**
  * Charting Library custom study: “Real Swing High/Low”.
  * Inert plot — markers painted by `useRealSwingsStudy`.
+ * Colors / visibility / size live in the Style tab (native palette).
  */
 
 import type { CustomIndicator } from "@/infrastructure/tradingview";
 import { REAL_SWING_DEFAULTS } from "@/features/real-swings/runtime";
+import { buildStylePlots, stylePlotNaNs } from "./study-style-plots";
 
 export const REAL_SWINGS_STUDY_NAME = "Real Swing High/Low";
 export const REAL_SWINGS_STUDY_ID = "RealSwingHighLow@tv-basicstudies-1";
+
+/** Style-tab plot ids (read via getStyleValues). */
+export const REAL_SWING_STYLE_HIGH = "plot_swing_high";
+export const REAL_SWING_STYLE_LOW = "plot_swing_low";
 
 export const REAL_SWINGS_STUDY_DEFAULTS = {
   leftBars: REAL_SWING_DEFAULTS.leftBars,
@@ -15,17 +21,35 @@ export const REAL_SWINGS_STUDY_DEFAULTS = {
   alternateOnly: REAL_SWING_DEFAULTS.alternateOnly,
   minSwingAtr: REAL_SWING_DEFAULTS.minSwingAtr,
   atrLen: REAL_SWING_DEFAULTS.atrLen,
-  showHighs: REAL_SWING_DEFAULTS.showHighs,
-  showLows: REAL_SWING_DEFAULTS.showLows,
   displayMode: REAL_SWING_DEFAULTS.displayMode,
   highLabel: REAL_SWING_DEFAULTS.highLabel,
   lowLabel: REAL_SWING_DEFAULTS.lowLabel,
-  highColor: REAL_SWING_DEFAULTS.highColor,
-  lowColor: REAL_SWING_DEFAULTS.lowColor,
-  fontSize: REAL_SWING_DEFAULTS.fontSize,
   offsetAtr: REAL_SWING_DEFAULTS.offsetAtr,
   maxMarkers: REAL_SWING_DEFAULTS.maxMarkers,
 } as const;
+
+const STYLE_SPECS = [
+  {
+    id: REAL_SWING_STYLE_HIGH,
+    title: "Swing High (H)",
+    color: REAL_SWING_DEFAULTS.highColor,
+    visible: REAL_SWING_DEFAULTS.showHighs,
+    transparency: 0,
+    linewidth: 2,
+    legendHidden: false,
+  },
+  {
+    id: REAL_SWING_STYLE_LOW,
+    title: "Swing Low (L)",
+    color: REAL_SWING_DEFAULTS.lowColor,
+    visible: REAL_SWING_DEFAULTS.showLows,
+    transparency: 0,
+    linewidth: 2,
+    legendHidden: false,
+  },
+] as const;
+
+const { plots, stylesMeta, stylesDefaults } = buildStylePlots(STYLE_SPECS);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function createRealSwingsIndicator(PineJS: {
@@ -43,24 +67,12 @@ export function createRealSwingsIndicator(PineJS: {
       is_price_study: true,
       linkedToSeries: true,
       format: { type: "inherit" },
-      plots: [{ id: "plot_hidden", type: "line" }],
+      plots,
       defaults: {
-        styles: {
-          plot_hidden: {
-            linestyle: 0,
-            linewidth: 1,
-            plottype: 0,
-            trackPrice: false,
-            transparency: 100,
-            visible: false,
-            color: "#000000",
-          },
-        },
+        styles: stylesDefaults,
         inputs: { ...REAL_SWINGS_STUDY_DEFAULTS },
       },
-      styles: {
-        plot_hidden: { title: "Hidden", histogramBase: 0 },
-      },
+      styles: stylesMeta,
       inputs: [
         {
           id: "leftBars",
@@ -101,20 +113,8 @@ export function createRealSwingsIndicator(PineJS: {
           max: 100,
         },
         {
-          id: "showHighs",
-          name: "Show swing highs",
-          defval: REAL_SWINGS_STUDY_DEFAULTS.showHighs,
-          type: "bool",
-        },
-        {
-          id: "showLows",
-          name: "Show swing lows",
-          defval: REAL_SWINGS_STUDY_DEFAULTS.showLows,
-          type: "bool",
-        },
-        {
           id: "displayMode",
-          name: "Style (0=Letters, 1=Arrows, 2=Both, 3=Triangles, 4=Dots, 5=Badge)",
+          name: "Marker style (0=H/L, 1=Arrows, 2=Both, 3=Triangles, 4=Dots, 5=Badge)",
           defval: REAL_SWINGS_STUDY_DEFAULTS.displayMode,
           type: "integer",
           min: 0,
@@ -131,26 +131,6 @@ export function createRealSwingsIndicator(PineJS: {
           name: "Low letter / text",
           defval: REAL_SWINGS_STUDY_DEFAULTS.lowLabel,
           type: "text",
-        },
-        {
-          id: "highColor",
-          name: "High color (#hex)",
-          defval: REAL_SWINGS_STUDY_DEFAULTS.highColor,
-          type: "text",
-        },
-        {
-          id: "lowColor",
-          name: "Low color (#hex)",
-          defval: REAL_SWINGS_STUDY_DEFAULTS.lowColor,
-          type: "text",
-        },
-        {
-          id: "fontSize",
-          name: "Font / marker size",
-          defval: REAL_SWINGS_STUDY_DEFAULTS.fontSize,
-          type: "integer",
-          min: 8,
-          max: 28,
         },
         {
           id: "offsetAtr",
@@ -182,7 +162,8 @@ export function createRealSwingsIndicator(PineJS: {
           (PineJS.Std as { na?: (v: number) => boolean }).na?.(raw) ?? !Number.isFinite(raw);
         const v = !na && Number.isFinite(raw) ? raw : (this._lastClose ?? raw);
         if (Number.isFinite(v) && v !== 0) this._lastClose = v;
-        return [Number.isFinite(this._lastClose) ? this._lastClose! : 1];
+        const out = Number.isFinite(this._lastClose) ? this._lastClose! : 1;
+        return [out, ...stylePlotNaNs(STYLE_SPECS.length)];
       };
     } as never,
   };

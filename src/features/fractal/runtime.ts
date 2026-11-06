@@ -1,9 +1,10 @@
 /**
  * Fractal (igor-T) — Chart Champions Williams-style swing markers.
  *
- * Swing high: centre bar high beats `periods` bars on each side → green ↓ arrow.
- * Swing low:  centre bar low  beats `periods` bars on each side → red ↑ arrow.
+ * Swing high: centre bar high beats `periods` bars on each side.
+ * Swing low:  centre bar low  beats `periods` bars on each side.
  * Confirmed only after the right-side bars have closed (no live-edge repaint).
+ * Markers support H/L letters and the same display modes as Real Swings.
  */
 
 import type { EntityId, IChartWidgetApi } from "@/infrastructure/tradingview";
@@ -18,12 +19,28 @@ export interface FractalBar {
   readonly volume?: number;
 }
 
+/**
+ * 0 Letters (H/L)
+ * 1 Arrows
+ * 2 Letters + arrows
+ * 3 Triangles (▲/▼)
+ * 4 Dots
+ * 5 Badge pills (filled H/L)
+ */
+export type FractalDisplayMode = 0 | 1 | 2 | 3 | 4 | 5;
+
 export interface FractalInputs {
   readonly periods: number;
   readonly showHighs: boolean;
   readonly showLows: boolean;
+  readonly displayMode: FractalDisplayMode;
+  readonly highLabel: string;
+  readonly lowLabel: string;
   readonly highColor: string;
   readonly lowColor: string;
+  readonly fontSize: number;
+  readonly offsetAtr: number;
+  readonly atrLen: number;
   readonly maxMarkers: number;
 }
 
@@ -31,8 +48,14 @@ export const FRACTAL_DEFAULTS: FractalInputs = {
   periods: 2,
   showHighs: true,
   showLows: true,
+  displayMode: 0,
+  highLabel: "H",
+  lowLabel: "L",
   highColor: "#26a69a",
   lowColor: "#ef5350",
+  fontSize: 13,
+  offsetAtr: 0.15,
+  atrLen: 14,
   maxMarkers: 250,
 };
 
@@ -40,16 +63,55 @@ export type FractalKind = "high" | "low";
 
 export interface FractalMarker {
   readonly kind: FractalKind;
+  readonly index: number;
   readonly time: number;
   readonly price: number;
 }
 
-export interface FractalDrawCmd {
-  readonly kind: "arrow";
-  readonly dir: 1 | -1;
-  readonly t1: number;
-  readonly p1: number;
-  readonly color: string;
+export type FractalDrawCmd =
+  | {
+      readonly kind: "arrow";
+      readonly dir: 1 | -1;
+      readonly t1: number;
+      readonly p1: number;
+      readonly color: string;
+    }
+  | {
+      readonly kind: "label";
+      readonly t1: number;
+      readonly p1: number;
+      readonly text: string;
+      readonly color: string;
+      readonly fill?: string;
+      readonly fontSize: number;
+      readonly badge: boolean;
+    }
+  | {
+      readonly kind: "dot";
+      readonly t1: number;
+      readonly p1: number;
+      readonly color: string;
+      readonly fontSize: number;
+    };
+
+function atrAt(bars: readonly FractalBar[], i: number, len: number): number {
+  const n = Math.max(1, Math.min(100, Math.floor(len)));
+  let sum = 0;
+  let count = 0;
+  for (let k = Math.max(1, i - n + 1); k <= i; k += 1) {
+    const cur = bars[k]!;
+    const prev = bars[k - 1]!;
+    const tr = Math.max(
+      cur.high - cur.low,
+      Math.abs(cur.high - prev.close),
+      Math.abs(cur.low - prev.close),
+    );
+    if (Number.isFinite(tr)) {
+      sum += tr;
+      count += 1;
+    }
+  }
+  return count > 0 ? sum / count : Math.max(1e-8, bars[i]!.high - bars[i]!.low);
 }
 
 /** Strict Williams fractal (TV / Igor-T / Chart Champions). */
@@ -72,36 +134,73 @@ export function detectFractals(
       if (!(mid.low < left.low && mid.low < right.low)) isLow = false;
       if (!isHigh && !isLow) break;
     }
-    if (isHigh) out.push({ kind: "high", time: mid.time, price: mid.high });
-    if (isLow) out.push({ kind: "low", time: mid.time, price: mid.low });
+    if (isHigh) out.push({ kind: "high", index: i, time: mid.time, price: mid.high });
+    if (isLow) out.push({ kind: "low", index: i, time: mid.time, price: mid.low });
   }
   return out;
 }
 
+function offsetPrice(
+  bars: readonly FractalBar[],
+  marker: FractalMarker,
+  inputs: FractalInputs,
+): number {
+  const atr = atrAt(bars, marker.index, inputs.atrLen);
+  const off = Math.max(0, inputs.offsetAtr) * atr;
+  return marker.kind === "high" ? marker.price + off : marker.price - off;
+}
+
 export function fractalDrawCmds(
+  bars: readonly FractalBar[],
   markers: readonly FractalMarker[],
   inputs: FractalInputs,
 ): FractalDrawCmd[] {
+  const mode = inputs.displayMode;
   const cmds: FractalDrawCmd[] = [];
+  const highText = (inputs.highLabel || "H").slice(0, 8);
+  const lowText = (inputs.lowLabel || "L").slice(0, 8);
+  const fontSize = Math.max(8, Math.min(28, Math.floor(inputs.fontSize)));
+
   for (const m of markers) {
-    if (m.kind === "high" && inputs.showHighs) {
+    if (m.kind === "high" && !inputs.showHighs) continue;
+    if (m.kind === "low" && !inputs.showLows) continue;
+
+    const price = offsetPrice(bars, m, inputs);
+    const color = m.kind === "high" ? inputs.highColor : inputs.lowColor;
+    const label = m.kind === "high" ? highText : lowText;
+    const dir: 1 | -1 = m.kind === "high" ? -1 : 1;
+
+    if (mode === 1 || mode === 2) {
+      cmds.push({ kind: "arrow", dir, t1: m.time, p1: price, color });
+    }
+    if (mode === 0 || mode === 2 || mode === 5) {
       cmds.push({
-        kind: "arrow",
-        dir: -1,
+        kind: "label",
         t1: m.time,
-        p1: m.price,
-        color: inputs.highColor,
-      });
-    } else if (m.kind === "low" && inputs.showLows) {
-      cmds.push({
-        kind: "arrow",
-        dir: 1,
-        t1: m.time,
-        p1: m.price,
-        color: inputs.lowColor,
+        p1: price,
+        text: label,
+        color: mode === 5 ? "#ffffff" : color,
+        fill: mode === 5 ? color : undefined,
+        fontSize,
+        badge: mode === 5,
       });
     }
+    if (mode === 3) {
+      cmds.push({
+        kind: "label",
+        t1: m.time,
+        p1: price,
+        text: m.kind === "high" ? "▼" : "▲",
+        color,
+        fontSize: fontSize + 2,
+        badge: false,
+      });
+    }
+    if (mode === 4) {
+      cmds.push({ kind: "dot", t1: m.time, p1: price, color, fontSize });
+    }
   }
+
   const cap = Math.max(20, Math.min(500, Math.floor(inputs.maxMarkers)));
   return cmds.length > cap ? cmds.slice(-cap) : cmds;
 }
@@ -110,7 +209,7 @@ export function computeFractal(
   bars: readonly FractalBar[],
   inputs: FractalInputs,
 ): FractalDrawCmd[] {
-  return fractalDrawCmds(detectFractals(bars, inputs.periods), inputs);
+  return fractalDrawCmds(bars, detectFractals(bars, inputs.periods), inputs);
 }
 
 export async function paintFractal(
@@ -131,19 +230,55 @@ export async function paintFractal(
   for (let i = 0; i < cmds.length; i += 1) {
     const cmd = cmds[i]!;
     try {
-      const id = await chart.createShape(
-        { time: cmd.t1 as never, price: cmd.p1 },
-        {
-          ...common,
-          shape: (cmd.dir === 1 ? "arrow_up" : "arrow_down") as never,
-          text: " ",
-          overrides: {
-            color: cmd.color,
-            fontsize: 12,
+      if (cmd.kind === "arrow") {
+        const id = await chart.createShape(
+          { time: cmd.t1 as never, price: cmd.p1 },
+          {
+            ...common,
+            shape: (cmd.dir === 1 ? "arrow_up" : "arrow_down") as never,
+            text: " ",
+            overrides: { color: cmd.color, fontsize: 12 },
           },
-        },
-      );
-      if (id) ids.push(id);
+        );
+        if (id) ids.push(id);
+      } else if (cmd.kind === "label") {
+        const text = cmd.badge ? ` ${cmd.text} ` : cmd.text;
+        const id = await chart.createShape(
+          { time: cmd.t1 as never, price: cmd.p1 },
+          {
+            ...common,
+            shape: "text",
+            text,
+            overrides: {
+              color: cmd.color,
+              fontsize: cmd.fontSize,
+              bold: true,
+              fillBackground: cmd.badge,
+              backgroundColor: cmd.fill ?? "rgba(0,0,0,0)",
+              drawBorder: false,
+              horzLabelsAlign: "center",
+              vertLabelsAlign: "middle",
+            },
+          },
+        );
+        if (id) ids.push(id);
+      } else if (cmd.kind === "dot") {
+        const id = await chart.createShape(
+          { time: cmd.t1 as never, price: cmd.p1 },
+          {
+            ...common,
+            shape: "text",
+            text: "●",
+            overrides: {
+              color: cmd.color,
+              fontsize: cmd.fontSize,
+              fillBackground: false,
+              drawBorder: false,
+            },
+          },
+        );
+        if (id) ids.push(id);
+      }
     } catch {
       /* skip */
     }

@@ -1,13 +1,20 @@
 //@version=5
 // Fractal (igor-T) — Chart Champions swing markers for Forge.
-// Green ↓ = swing high · Red ↑ = swing low (confirmed after right-side bars close).
+// Default markers are H / L letters (Style tab colors). Same display modes as Real Swings.
 indicator("Fractal (igor-T)", shorttitle="Fractal", overlay=true, max_labels_count=500)
 
 periods = input.int(2, "Periods (bars each side)", minval=1, maxval=10)
-showHighs = input.bool(true, "Show swing highs (green)")
-showLows = input.bool(true, "Show swing lows (red)")
-highColor = input.color(color.new(#26a69a, 0), "High arrow color")
-lowColor = input.color(color.new(#ef5350, 0), "Low arrow color")
+displayMode = input.int(0, "Marker style (0=H/L, 1=Arrows, 2=Both, 3=Triangles, 4=Dots, 5=Badge)", minval=0, maxval=5)
+highLabel = input.string("H", "High letter / text")
+lowLabel = input.string("L", "Low letter / text")
+offsetAtrMult = input.float(0.15, "Label offset (× ATR)", minval=0, maxval=5, step=0.05)
+atrLen = input.int(14, "ATR length (offset)", minval=2, maxval=100)
+
+highColor = input.color(color.new(#26a69a, 0), "Swing High (H)", group="Style")
+lowColor = input.color(color.new(#ef5350, 0), "Swing Low (L)", group="Style")
+showHighs = input.bool(true, "Show Swing High (H)", group="Style")
+showLows = input.bool(true, "Show Swing Low (L)", group="Style")
+fontSize = input.int(13, "Font / marker size", minval=8, maxval=28, group="Style")
 
 isHigh = true
 isLow = true
@@ -15,5 +22,29 @@ for j = 1 to periods
     isHigh := isHigh and high[periods] > high[periods - j] and high[periods] > high[periods + j]
     isLow := isLow and low[periods] < low[periods - j] and low[periods] < low[periods + j]
 
-plotshape(showHighs and isHigh, title="Swing High", style=shape.triangledown, location=location.abovebar, offset=-periods, color=highColor, size=size.tiny)
-plotshape(showLows and isLow, title="Swing Low", style=shape.triangleup, location=location.belowbar, offset=-periods, color=lowColor, size=size.tiny)
+atrVal = ta.atr(atrLen)
+off = offsetAtrMult * atrVal
+hiPrice = high[periods] + off
+loPrice = low[periods] - off
+
+useLetters = displayMode == 0 or displayMode == 2 or displayMode == 5
+useArrows = displayMode == 1 or displayMode == 2
+useTriangles = displayMode == 3
+useDots = displayMode == 4
+
+plotshape(showHighs and isHigh and useArrows, title="Swing High Arrow", style=shape.triangledown, location=location.absolute, offset=-periods, color=highColor, size=size.tiny, text="")
+plotshape(showLows and isLow and useArrows, title="Swing Low Arrow", style=shape.triangleup, location=location.absolute, offset=-periods, color=lowColor, size=size.tiny, text="")
+
+if barstate.isconfirmed
+    if showHighs and isHigh and useLetters
+        label.new(bar_index - periods, hiPrice, highLabel, style=displayMode == 5 ? label.style_label_center : label.style_none, color=displayMode == 5 ? highColor : color.new(highColor, 100), textcolor=displayMode == 5 ? color.white : highColor, size=size.small)
+    if showLows and isLow and useLetters
+        label.new(bar_index - periods, loPrice, lowLabel, style=displayMode == 5 ? label.style_label_center : label.style_none, color=displayMode == 5 ? lowColor : color.new(lowColor, 100), textcolor=displayMode == 5 ? color.white : lowColor, size=size.small)
+    if showHighs and isHigh and useTriangles
+        label.new(bar_index - periods, hiPrice, "▼", style=label.style_none, color=color.new(highColor, 100), textcolor=highColor, size=size.small)
+    if showLows and isLow and useTriangles
+        label.new(bar_index - periods, loPrice, "▲", style=label.style_none, color=color.new(lowColor, 100), textcolor=lowColor, size=size.small)
+    if showHighs and isHigh and useDots
+        label.new(bar_index - periods, hiPrice, "●", style=label.style_none, color=color.new(highColor, 100), textcolor=highColor, size=size.small)
+    if showLows and isLow and useDots
+        label.new(bar_index - periods, loPrice, "●", style=label.style_none, color=color.new(lowColor, 100), textcolor=lowColor, size=size.small)

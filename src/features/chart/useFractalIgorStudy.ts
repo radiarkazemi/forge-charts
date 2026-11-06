@@ -1,5 +1,6 @@
 /**
- * Watches Indicators “Fractal (igor-T)” and paints swing high/low arrows.
+ * Watches Indicators “Fractal (igor-T)” and paints swing high/low H/L markers.
+ * Colors / visibility / size come from the Style tab (getStyleValues).
  */
 
 import { useEffect, useRef } from "react";
@@ -9,11 +10,22 @@ import type { EntityId } from "@/infrastructure/tradingview";
 import { barsFromChartExport } from "@/features/pine/orca-runtime";
 import {
   computeFractal,
+  FRACTAL_DEFAULTS,
   paintFractal,
+  type FractalDisplayMode,
   type FractalDrawCmd,
   type FractalInputs,
 } from "@/features/fractal/runtime";
-import { FRACTAL_IGOR_STUDY_DEFAULTS } from "./fractal-igor-indicator";
+import {
+  FRACTAL_IGOR_STUDY_DEFAULTS,
+  FRACTAL_STYLE_HIGH,
+  FRACTAL_STYLE_LOW,
+} from "./fractal-igor-indicator";
+import {
+  applyTransparency,
+  linewidthToFontSize,
+  readStylePlot,
+} from "./study-style-plots";
 import { studyIsVisible } from "./study-paint-gate";
 
 const MAX_BARS = 3_000;
@@ -25,7 +37,12 @@ function fingerprint(cmds: readonly FractalDrawCmd[]): string {
   if (cmds.length === 0) return "empty";
   const head = cmds.slice(0, 4);
   const tail = cmds.length > 4 ? cmds.slice(-4) : [];
-  return `${cmds.length}|${[...head, ...tail].map((c) => `${c.dir}:${c.t1}:${c.p1}`).join(";")}`;
+  const part = (c: FractalDrawCmd) => {
+    if (c.kind === "arrow") return `a:${c.dir}:${c.t1}:${c.p1}`;
+    if (c.kind === "dot") return `d:${c.t1}:${c.p1}`;
+    return `l:${c.t1}:${c.p1}:${c.text}`;
+  };
+  return `${cmds.length}|${[...head, ...tail].map(part).join(";")}`;
 }
 
 export function useFractalIgorStudy(enabled = true): void {
@@ -81,7 +98,7 @@ export function useFractalIgorStudy(enabled = true): void {
     const readOptions = (studyId: EntityId): FractalInputs => {
       try {
         const api = widget.activeChart()?.getStudyById(studyId);
-        if (!api) return { ...FRACTAL_IGOR_STUDY_DEFAULTS };
+        if (!api) return { ...FRACTAL_DEFAULTS };
         const values = api.getInputValues() ?? [];
         const map = new Map<string, unknown>();
         for (const item of values) map.set(String(item.id), item.value);
@@ -89,37 +106,62 @@ export function useFractalIgorStudy(enabled = true): void {
           const v = Number(map.get(id));
           return Number.isFinite(v) ? v : fallback;
         };
-        const bool = (id: string, fallback: boolean) => {
-          const v = map.get(id);
-          if (typeof v === "boolean") return v;
-          if (typeof v === "number") return v !== 0;
-          if (typeof v === "string") {
-            const s = v.trim().toLowerCase();
-            if (s === "true" || s === "1") return true;
-            if (s === "false" || s === "0") return false;
-          }
-          return fallback;
-        };
         const str = (id: string, fallback: string) => {
           const v = map.get(id);
           return typeof v === "string" && v.trim() ? v.trim() : fallback;
         };
+        const modeRaw = Math.floor(
+          num("displayMode", FRACTAL_IGOR_STUDY_DEFAULTS.displayMode),
+        );
+        const displayMode = (
+          modeRaw >= 0 && modeRaw <= 5 ? modeRaw : FRACTAL_IGOR_STUDY_DEFAULTS.displayMode
+        ) as FractalDisplayMode;
+
+        const highStyle = readStylePlot(api, FRACTAL_STYLE_HIGH, {
+          color: FRACTAL_DEFAULTS.highColor,
+          visible: FRACTAL_DEFAULTS.showHighs,
+          transparency: 0,
+          linewidth: 2,
+        });
+        const lowStyle = readStylePlot(api, FRACTAL_STYLE_LOW, {
+          color: FRACTAL_DEFAULTS.lowColor,
+          visible: FRACTAL_DEFAULTS.showLows,
+          transparency: 0,
+          linewidth: 2,
+        });
+        const fontSize = linewidthToFontSize(
+          Math.max(highStyle.linewidth, lowStyle.linewidth),
+          FRACTAL_DEFAULTS.fontSize,
+        );
+
         return {
           periods: Math.max(
             1,
             Math.min(10, Math.floor(num("periods", FRACTAL_IGOR_STUDY_DEFAULTS.periods))),
           ),
-          showHighs: bool("showHighs", FRACTAL_IGOR_STUDY_DEFAULTS.showHighs),
-          showLows: bool("showLows", FRACTAL_IGOR_STUDY_DEFAULTS.showLows),
-          highColor: str("highColor", FRACTAL_IGOR_STUDY_DEFAULTS.highColor),
-          lowColor: str("lowColor", FRACTAL_IGOR_STUDY_DEFAULTS.lowColor),
+          showHighs: highStyle.visible,
+          showLows: lowStyle.visible,
+          displayMode,
+          highLabel: str("highLabel", FRACTAL_IGOR_STUDY_DEFAULTS.highLabel).slice(0, 8),
+          lowLabel: str("lowLabel", FRACTAL_IGOR_STUDY_DEFAULTS.lowLabel).slice(0, 8),
+          highColor: applyTransparency(highStyle.color, highStyle.transparency),
+          lowColor: applyTransparency(lowStyle.color, lowStyle.transparency),
+          fontSize,
+          offsetAtr: Math.max(
+            0,
+            Math.min(5, num("offsetAtr", FRACTAL_IGOR_STUDY_DEFAULTS.offsetAtr)),
+          ),
+          atrLen: Math.max(
+            2,
+            Math.min(100, Math.floor(num("atrLen", FRACTAL_IGOR_STUDY_DEFAULTS.atrLen))),
+          ),
           maxMarkers: Math.max(
             20,
             Math.min(500, Math.floor(num("maxMarkers", FRACTAL_IGOR_STUDY_DEFAULTS.maxMarkers))),
           ),
         };
       } catch {
-        return { ...FRACTAL_IGOR_STUDY_DEFAULTS };
+        return { ...FRACTAL_DEFAULTS };
       }
     };
 
@@ -149,7 +191,7 @@ export function useFractalIgorStudy(enabled = true): void {
         }
 
         const inputs = readOptions(studyId);
-        const key = `${symbol}|${interval}|${inputs.periods}|${inputs.showHighs}|${inputs.showLows}|${inputs.highColor}|${inputs.lowColor}|${inputs.maxMarkers}`;
+        const key = JSON.stringify({ symbol, interval, inputs });
         const active = widget.activeChart();
         if (!active) return;
         const exported = await active.exportData({
