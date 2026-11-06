@@ -159,7 +159,7 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
       id: DEALING_RANGES_STUDY_ID as never,
       name: DEALING_RANGES_STUDY_NAME,
       description: DEALING_RANGES_STUDY_NAME,
-      shortDescription: "ICT DR · HH↔LL+BOS · 0/0.5/1",
+      shortDescription: "ICT DR · HH↔LL+BOS · 0/0.5/1 · v4",
       isCustomIndicator: true,
       is_price_study: true,
       linkedToSeries: true,

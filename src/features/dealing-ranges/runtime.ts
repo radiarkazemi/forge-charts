@@ -5,7 +5,7 @@
  * Bullish: swing LL → later swing HH → BOS above that HH → range LL–HH
  *
  * Paint: 0→0.5 green · 0.5→1 red · 0 / 0.5 / 1 levels (OTE optional).
- * Deploy note: keep this module in the main bundle so hashed asset URLs rotate.
+ * Deploy note: cache-bust build 2026-11-06T15:06 Asia/Tehran — rotate hashed asset URLs.
  */
 
 import { intervalSeconds } from "@/domain";
