@@ -20,6 +20,7 @@ import { createForgeTradingAssistantIndicator } from "@/features/chart/forge-tra
 import { createForgeCertaintyIndicator } from "@/features/chart/forge-certainty-indicator";
 import { createFractalIgorIndicator } from "@/features/chart/fractal-igor-indicator";
 import { createRealSwingsIndicator } from "@/features/chart/real-swings-indicator";
+import { createBosMssIndicator } from "@/features/chart/bos-mss-indicator";
 
 export interface WidgetOptionsInput {
   readonly container: HTMLElement;
@@ -299,6 +300,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
       drawingTools: FAVORITE_DRAWING_TOOLS,
       // Titles must match study `description` / UI name exactly.
       indicators: [
+        "BOS / MSS",
         "Real Swing High/Low",
         "Fractal (igor-T)",
         "Forge Certainty",
@@ -328,6 +330,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
     user_id: secondary ? `local-pane-${input.symbol}` : "local",
     custom_indicators_getter: (PineJS) =>
       Promise.resolve([
+        createBosMssIndicator(PineJS as never) as CustomIndicator,
         createRealSwingsIndicator(PineJS as never) as CustomIndicator,
         createFractalIgorIndicator(PineJS as never) as CustomIndicator,
         createDealingRangesIndicator(PineJS as never) as CustomIndicator,

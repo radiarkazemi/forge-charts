@@ -1,0 +1,62 @@
+//@version=5
+// BOS / MSS — BOS+ BOS- MSS+ MSS- (Forge scaffold; tweak logic later in detectBosMss).
+indicator("BOS / MSS", shorttitle="BOS/MSS", overlay=true, max_lines_count=500, max_labels_count=500)
+
+leftBars = input.int(2, "Swing left bars", minval=1)
+rightBars = input.int(2, "Swing right bars", minval=1)
+breakOnWick = input.bool(false, "Break on wick")
+showBosPlus = input.bool(true, "Show BOS+")
+showBosMinus = input.bool(true, "Show BOS-")
+showMssPlus = input.bool(true, "Show MSS+")
+showMssMinus = input.bool(true, "Show MSS-")
+bosPlusColor = input.color(#26a69a, "BOS+")
+bosMinusColor = input.color(#ef5350, "BOS-")
+mssPlusColor = input.color(#00bcd4, "MSS+")
+mssMinusColor = input.color(#ff9800, "MSS-")
+
+ph = ta.pivothigh(high, leftBars, rightBars)
+pl = ta.pivotlow(low, leftBars, rightBars)
+
+var float lastSH = na
+var int lastSHBar = na
+var float lastSL = na
+var int lastSLBar = na
+var int brokenSHBar = na
+var int brokenSLBar = na
+var int structureDir = 0
+
+if not na(ph)
+    lastSH := ph
+    lastSHBar := bar_index - rightBars
+if not na(pl)
+    lastSL := pl
+    lastSLBar := bar_index - rightBars
+
+useHigh = breakOnWick ? high : close
+useLow = breakOnWick ? low : close
+pre = structureDir
+
+bullBreak = not na(lastSH) and useHigh > lastSH and (na(brokenSHBar) or brokenSHBar != lastSHBar)
+bearBreak = not na(lastSL) and useLow < lastSL and (na(brokenSLBar) or brokenSLBar != lastSLBar)
+
+if bullBreak
+    isMss = pre == -1
+    col = isMss ? mssPlusColor : bosPlusColor
+    txt = isMss ? "MSS+" : "BOS+"
+    show = isMss ? showMssPlus : showBosPlus
+    if show
+        line.new(lastSHBar, lastSH, bar_index, lastSH, color=col, style=isMss ? line.style_dashed : line.style_dotted, width=2)
+        label.new(bar_index, lastSH, txt, style=label.style_label_center, color=col, textcolor=color.white, size=size.small)
+    brokenSHBar := lastSHBar
+    structureDir := 1
+
+if bearBreak
+    isMss = pre == 1
+    col = isMss ? mssMinusColor : bosMinusColor
+    txt = isMss ? "MSS-" : "BOS-"
+    show = isMss ? showMssMinus : showBosMinus
+    if show
+        line.new(lastSLBar, lastSL, bar_index, lastSL, color=col, style=isMss ? line.style_dashed : line.style_dotted, width=2)
+        label.new(bar_index, lastSL, txt, style=label.style_label_center, color=col, textcolor=color.white, size=size.small)
+    brokenSLBar := lastSLBar
+    structureDir := -1
