@@ -190,14 +190,19 @@ location = /assets/forge/forge-app.js {
 location /assets/forge/ {
     root /var/www/forge-web;
     expires 7d;
-    add_header Cache-Control "public, immutable" always;
+    add_header Cache-Control "public, max-age=604800" always;
     add_header X-Content-Type-Options nosniff always;
     try_files $uri @forge_asset_miss;
 }
+# Stale HTML sometimes asks for an old hashed entry (index-XXXX.js). Never let
+# Cloudflare cache that 404 as immutable — send them the stable forge-main.js.
 location @forge_asset_miss {
     default_type text/plain;
     add_header Cache-Control "no-store" always;
     add_header CDN-Cache-Control "no-store" always;
+    if ($uri ~* "^/assets/forge/index-.+\.js$") {
+        return 302 /assets/forge/forge-main.js;
+    }
     return 404;
 }
 EOF
