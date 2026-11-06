@@ -3,6 +3,7 @@ import {
   formingBarFromOhlc,
   formingBarFromSubBars,
   intervalSeconds,
+  isValidBar,
   type Bar,
 } from "@/domain";
 import type { TradingViewDatafeed } from "@/infrastructure/tradingview/datafeed";
@@ -92,7 +93,8 @@ function tickIntervalMs(stepMs: number, speed: BarReplaySpeed): number {
  * ×5 → 200ms, ×10 → 100ms, ×20 → 50ms, ×30 → ~33ms (1 bar per step).
  */
 export function candleStepIntervalMs(speed: BarReplaySpeed): number {
-  return Math.max(16, Math.round(1_000 / Math.max(1, speed)));
+  // Floor at 50ms — faster floods TradingView onTick and drops/corrupts bars.
+  return Math.max(50, Math.round(1_000 / Math.max(1, speed)));
 }
 
 /** Prefer a denser TF for true intra-bar path when available. */
@@ -139,6 +141,8 @@ export class BarReplayController {
   private candleStepChain = false;
   /** Bumped on stop/restart so an in-flight step cannot schedule the next one. */
   private candleStepGen = 0;
+  /** Count closed-candle steps since last series reload (tick mode). */
+  private candleStepsSinceReload = 0;
 
   attach(widget: IChartingLibraryWidget, datafeed: TradingViewDatafeed): void {
     this.widget = widget;
@@ -683,13 +687,19 @@ export class BarReplayController {
   }
 
   private async advanceClosedOne(): Promise<boolean> {
-    const { cursorIndex, bufferLength } = this.state.get();
+    const { cursorIndex, bufferLength, speed } = this.state.get();
     if (cursorIndex < 0 || cursorIndex >= bufferLength - 1) {
       this.pause();
       return false;
     }
     const next = cursorIndex + 1;
-    await this.seekToIndex(next, { pushTick: true, reload: false });
+    // Fast per-tick play: periodically hard-reload from the replay buffer so
+    // TradingView does not lose bars when onTick floods the series.
+    this.candleStepsSinceReload += 1;
+    const reloadEvery = speed >= 20 ? 8 : speed >= 10 ? 12 : 25;
+    const reload = this.candleStepsSinceReload >= reloadEvery;
+    if (reload) this.candleStepsSinceReload = 0;
+    await this.seekToIndex(next, { pushTick: !reload, reload });
     return true;
   }
 
@@ -860,6 +870,7 @@ export class BarReplayController {
       // stay faster than ×5 even when chart updates take tens of ms.
       const gen = ++this.candleStepGen;
       this.candleStepChain = true;
+      this.candleStepsSinceReload = 0;
       const stepOnce = async (): Promise<void> => {
         if (gen !== this.candleStepGen || !this.candleStepChain) return;
         if (this.state.get().phase !== "playing") return;
@@ -971,15 +982,16 @@ function mergeBarsPreferPrimary(primary: readonly Bar[], fill: readonly Bar[]): 
 }
 
 /**
- * Fill short holes so play advances one bar at a time instead of “dodging”
- * across multi-minute gaps. Caps fill length so weekend gaps on higher TFs
- * do not explode memory.
+ * Bridge short holes with a visible OHLC path (never O=H=L=C).
+ * Zero-range placeholders are dropped/invisible in TradingView and look like
+ * missing or corrupted candles — especially under fast per-tick replay.
  */
 function fillShortReplayGaps(bars: readonly Bar[], stepSec: number): Bar[] {
   if (bars.length < 2 || stepSec <= 0) return [...bars];
-  // 30S/10S: fill aggressively — short maxFill left multi-hour holes that looked “cut off”.
-  const maxFill =
-    stepSec <= 10 ? 3_600 : stepSec <= 30 ? 2_400 : stepSec < 60 ? 720 : stepSec <= 300 ? 60 : 12;
+  // Only bridge sub-minute / very short holes. Minute+ TFs keep honest gaps
+  // (session breaks) instead of inventing flat candles.
+  if (stepSec >= 60) return [...bars];
+  const maxFill = stepSec <= 10 ? 3_600 : stepSec <= 30 ? 2_400 : 720;
   const out: Bar[] = [bars[0]!];
   for (let i = 1; i < bars.length; i += 1) {
     const prev = out[out.length - 1]!;
@@ -988,16 +1000,20 @@ function fillShortReplayGaps(bars: readonly Bar[], stepSec: number): Bar[] {
     if (gap > stepSec * 1.5) {
       let t = Number(prev.time) + stepSec;
       let n = 0;
-      // Align synthetic opens to the TF grid so TV does not drop mid-bucket bars.
       const grid = Math.floor(t / stepSec) * stepSec;
       if (grid > Number(prev.time) && grid < Number(cur.time)) t = grid;
+      const span = Number(cur.time) - Number(prev.time);
       while (t < Number(cur.time) - stepSec * 0.25 && n < maxFill) {
+        const frac = Math.min(1, Math.max(0, (t - Number(prev.time)) / span));
+        const px = prev.close + (cur.open - prev.close) * frac;
+        // Tiny wick so the bar is drawable (TV hides true zero-range bars).
+        const pad = Math.max(Math.abs(cur.open - prev.close) * 0.01, Math.abs(px) * 1e-7, 1e-6);
         out.push({
           time: t,
-          open: prev.close,
-          high: prev.close,
-          low: prev.close,
-          close: prev.close,
+          open: px,
+          high: px + pad,
+          low: px - pad,
+          close: px,
           volume: 0,
         });
         t += stepSec;
@@ -1009,18 +1025,23 @@ function fillShortReplayGaps(bars: readonly Bar[], stepSec: number): Bar[] {
   return out;
 }
 
-/** Densify sparse replay series from micro bars, then bridge remaining short holes. */
+/** True when TradingView can paint a body or wick (rejects O=H=L=C placeholders). */
+function isDrawableBar(bar: Bar): boolean {
+  return isValidBar(bar) && (bar.high > bar.low || Math.abs(bar.close - bar.open) > 0);
+}
+
+/** Densify sparse replay series from real micro bars; only then bridge leftovers. */
 function densifyReplayBuffer(buffer: readonly Bar[], micro: readonly Bar[], stepSec: number): Bar[] {
-  let next = [...buffer];
+  let next = buffer.filter(isDrawableBar);
   if (micro.length > 0 && (next.length < 10 || hasReplayHoles(next, stepSec) || stepSec < 60)) {
-    const fromMicro = aggregateBars(micro, stepSec);
+    const fromMicro = aggregateBars(micro, stepSec).filter(isDrawableBar);
     if (fromMicro.length > 0) {
       next = next.length === 0 ? fromMicro : mergeBarsPreferPrimary(next, fromMicro);
     }
   }
-  // Always bridge on sub-minute — sparse 30S feeds look “cut off” mid-session.
-  if (stepSec < 60 || hasReplayHoles(next, stepSec)) {
-    next = fillShortReplayGaps(next, stepSec);
+  // Sub-minute only — minute+ holes are session/data gaps, not “missing ticks”.
+  if (stepSec < 60 && hasReplayHoles(next, stepSec)) {
+    next = fillShortReplayGaps(next, stepSec).filter(isDrawableBar);
   }
   return next;
 }
