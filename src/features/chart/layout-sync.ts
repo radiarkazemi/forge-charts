@@ -123,6 +123,7 @@ class LayoutSyncBus {
   }
 
   setFlags(flags: LayoutSyncFlags): void {
+    const prevSymbol = this.flags.symbol;
     // Always keep drawings ON unless the user explicitly turns them off.
     // Interval sync stays OFF unless the user turns it on (independent TFs).
     this.flags = {
@@ -131,6 +132,16 @@ class LayoutSyncBus {
       interval: flags.interval === true,
       drawings: flags.drawings !== false,
     };
+    // Symbol sync just turned ON — push the active pane’s ticker to every pane
+    // so the header and plots stop disagreeing (e.g. NAS100 header / XAUUSD pane).
+    if (!prevSymbol && this.flags.symbol) {
+      const ticker =
+        this.paneSymbols.get(this.activePane) ||
+        this.panes.get(this.activePane)?.controller.state.get().symbol ||
+        this.paneSymbols.get(0) ||
+        "";
+      if (ticker) this.notifySymbol(this.activePane, ticker);
+    }
   }
 
   getFlags(): LayoutSyncFlags {
@@ -1087,7 +1098,8 @@ class LayoutSyncBus {
 
   /**
    * CL setResolution is async and can finish after our first restore.
-   * Retry with ignore-flag so restore echoes don't re-route to the active pane.
+   * Soft restore (≤2 attempts) — the old 5-shot hammer blanked pane-0 candles
+   * when changing TF on a secondary pane ("mipare data candle").
    */
   private forceRestorePrimaryInterval(interval: Interval): void {
     const primary = this.panes.get(0);
@@ -1100,22 +1112,16 @@ class LayoutSyncBus {
     window.clearTimeout(this.ignorePrimaryIntervalTimer);
     this.ignorePrimaryIntervalTimer = window.setTimeout(() => {
       this.ignoringPrimaryInterval = false;
-    }, 2000);
+    }, 1200);
 
     window.clearTimeout(this.restorePrimaryTimer);
-    const delays = [0, 40, 120, 280, 500];
+    const delays = [0, 180];
     let step = 0;
+    const range = primary.controller.getVisibleRange();
 
     const tick = () => {
       const entry = this.panes.get(0);
       if (!entry?.controller.isReady) return;
-      this.locked = true;
-      try {
-        entry.controller.restoreInterval(interval);
-        this.paneIntervals.set(0, interval);
-      } finally {
-        this.locked = false;
-      }
 
       const current = entry.controller.state.get().interval;
       const widgetRes = (() => {
@@ -1126,8 +1132,24 @@ class LayoutSyncBus {
         }
       })();
       const ok = current === interval && (widgetRes == null || widgetRes === interval);
+      if (ok) {
+        this.paneIntervals.set(0, interval);
+        return;
+      }
+
+      this.locked = true;
+      try {
+        entry.controller.restoreInterval(interval);
+        this.paneIntervals.set(0, interval);
+      } finally {
+        this.locked = false;
+      }
+      if (range) {
+        void entry.controller.setVisibleRange(range.from, range.to);
+      }
+
       step += 1;
-      if (ok || step >= delays.length) return;
+      if (step >= delays.length) return;
       this.restorePrimaryTimer = window.setTimeout(tick, delays[step]!);
     };
 

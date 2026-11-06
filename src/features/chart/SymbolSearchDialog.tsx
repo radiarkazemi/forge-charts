@@ -16,6 +16,7 @@ import type { UiLanguage } from "@/application";
 import type { SymbolInfo } from "@/domain";
 import { useStore } from "@/shared/hooks/useStore";
 import { brokerLogoForExchange } from "./broker-logos";
+import { layoutSyncBus } from "./layout-sync";
 
 interface SymbolSearchDialogProps {
   readonly open: boolean;
@@ -181,7 +182,21 @@ export function SymbolSearchDialog({ open, onClose }: SymbolSearchDialogProps) {
   }, [all, chip, query]);
 
   const pick = (s: SymbolInfo) => {
-    chart.setSymbol(`${s.exchange}:${s.ticker}`);
+    const ticker = `${s.exchange}:${s.ticker}`;
+    // Route through layout sync so the active pane (and Symbol-sync peers) update —
+    // chart.setSymbol alone always hits pane 0 and left the header on NAS100
+    // while a focused XAUUSD pane stayed unchanged.
+    if (layoutSyncBus.getActiveCount() > 1) {
+      layoutSyncBus.setActivePaneSymbol(ticker);
+      const active = layoutSyncBus.getActivePane();
+      settings.setPaneSymbol(active, ticker);
+      if (active === 0 || layoutSyncBus.getFlags().symbol) {
+        settings.rememberChart(ticker, settings.settings.get().lastInterval);
+      }
+    } else {
+      chart.setSymbol(ticker);
+      settings.rememberChart(ticker, settings.settings.get().lastInterval);
+    }
     onClose();
   };
 

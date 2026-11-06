@@ -22,6 +22,84 @@ export interface PaneRectPx {
   readonly height: number;
 }
 
+/** Divider positions in (0,1), sorted — e.g. 3h → `[1/3, 2/3]`. */
+export type PaneSplitEdges = readonly number[];
+
+/** Layouts where the middle divider(s) can be dragged. */
+export const RESIZABLE_LAYOUTS = new Set<ChartLayoutId>(["2h", "2v", "3h", "3v", "3s"]);
+
+export function defaultSplitEdges(layout: ChartLayoutId): number[] {
+  switch (layout) {
+    case "2h":
+    case "2v":
+      return [0.5];
+    case "3h":
+    case "3v":
+    case "3s":
+      return [1 / 3, 2 / 3];
+    default:
+      return [];
+  }
+}
+
+/** Clamp/sort divider edges so every pane stays ≥ `minFrac` wide/tall. */
+export function sanitizeSplitEdges(layout: ChartLayoutId, edges: readonly number[], minFrac = 0.12): number[] {
+  const count = defaultSplitEdges(layout).length;
+  if (count === 0) return [];
+  const raw = edges.slice(0, count).map((e) => (Number.isFinite(e) ? e : 0.5));
+  while (raw.length < count) raw.push(defaultSplitEdges(layout)[raw.length]!);
+  const sorted = [...raw].sort((a, b) => a - b);
+  for (let i = 0; i < sorted.length; i += 1) {
+    const lo = i === 0 ? minFrac : sorted[i - 1]! + minFrac;
+    const hi = i === sorted.length - 1 ? 1 - minFrac : 1 - minFrac * (sorted.length - i);
+    sorted[i] = Math.min(hi, Math.max(lo, sorted[i]!));
+  }
+  // Re-enforce gaps after clamping.
+  for (let i = 1; i < sorted.length; i += 1) {
+    if (sorted[i]! < sorted[i - 1]! + minFrac) sorted[i] = sorted[i - 1]! + minFrac;
+  }
+  for (let i = sorted.length - 2; i >= 0; i -= 1) {
+    if (sorted[i]! > sorted[i + 1]! - minFrac) sorted[i] = sorted[i + 1]! - minFrac;
+  }
+  return sorted;
+}
+
+function slotsFromEdges(layout: ChartLayoutId, edges: readonly number[]): ContentSlot[] | null {
+  if (layout === "2h") {
+    const x = edges[0] ?? 0.5;
+    return [
+      { x: 0, y: 0, w: x, h: 1 },
+      { x, y: 0, w: 1 - x, h: 1 },
+    ];
+  }
+  if (layout === "2v") {
+    const y = edges[0] ?? 0.5;
+    return [
+      { x: 0, y: 0, w: 1, h: y },
+      { x: 0, y, w: 1, h: 1 - y },
+    ];
+  }
+  if (layout === "3h") {
+    const a = edges[0] ?? 1 / 3;
+    const b = edges[1] ?? 2 / 3;
+    return [
+      { x: 0, y: 0, w: a, h: 1 },
+      { x: a, y: 0, w: b - a, h: 1 },
+      { x: b, y: 0, w: 1 - b, h: 1 },
+    ];
+  }
+  if (layout === "3v" || layout === "3s") {
+    const a = edges[0] ?? 1 / 3;
+    const b = edges[1] ?? 2 / 3;
+    return [
+      { x: 0, y: 0, w: 1, h: a },
+      { x: 0, y: a, w: 1, h: b - a },
+      { x: 0, y: b, w: 1, h: 1 - b },
+    ];
+  }
+  return null;
+}
+
 /** Content-area slots matching TradingView multi-chart layouts (fractions 0–1). */
 const SLOTS: Record<ChartLayoutId, readonly ContentSlot[]> = {
   s: [{ x: 0, y: 0, w: 1, h: 1 }],
@@ -71,7 +149,14 @@ const STYLE_ID = "forge-primary-layout-clip";
 /** Extra gap between pane plot edges (beyond the reserved price-axis gutter). */
 const PANE_GAP = 2;
 
-export function contentSlotsFor(layout: ChartLayoutId): readonly ContentSlot[] {
+export function contentSlotsFor(
+  layout: ChartLayoutId,
+  splitEdges?: PaneSplitEdges,
+): readonly ContentSlot[] {
+  if (splitEdges && splitEdges.length > 0 && RESIZABLE_LAYOUTS.has(layout)) {
+    const custom = slotsFromEdges(layout, sanitizeSplitEdges(layout, splitEdges));
+    if (custom) return custom;
+  }
   return SLOTS[layout] ?? SLOTS.s;
 }
 
@@ -125,8 +210,9 @@ export function paneRectInWorkspace(
   paneIndex: number,
   workspace: { width: number; height: number },
   chrome: ChromeInsets = DEFAULT_CHROME,
+  splitEdges?: PaneSplitEdges,
 ): PaneRectPx | null {
-  const slots = contentSlotsFor(layout);
+  const slots = contentSlotsFor(layout, splitEdges);
   const slot = slots[paneIndex];
   if (!slot || workspace.width <= 0 || workspace.height <= 0) return null;
 
@@ -220,6 +306,7 @@ function clearPrimaryPriceAxisPins(doc: Document | null | undefined): void {
 export function applyPrimaryLayoutClip(
   container: HTMLElement,
   layout: ChartLayoutId,
+  splitEdges?: PaneSplitEdges,
 ): ChromeInsets | null {
   const iframe = container.querySelector("iframe");
   const doc = iframe?.contentDocument;
@@ -235,7 +322,7 @@ export function applyPrimaryLayoutClip(
   if (!centerEl || !topEl) return null;
 
   const chrome = readChrome(doc);
-  const slot = contentSlotsFor(layout)[0];
+  const slot = contentSlotsFor(layout, splitEdges)[0];
   if (!slot) return chrome;
 
   const W = doc.documentElement.clientWidth || container.clientWidth;
@@ -530,6 +617,7 @@ export function mountPrimaryLayoutClip(
   container: HTMLElement,
   getLayout: () => ChartLayoutId,
   onChrome: (chrome: ChromeInsets) => void,
+  getSplitEdges?: () => PaneSplitEdges | undefined,
 ): () => void {
   let stopped = false;
   let mo: MutationObserver | null = null;
@@ -558,7 +646,7 @@ export function mountPrimaryLayoutClip(
       return;
     }
 
-    const chrome = applyPrimaryLayoutClip(container, layout);
+    const chrome = applyPrimaryLayoutClip(container, layout, getSplitEdges?.());
     if (chrome) onChrome(chrome);
     const doc = container.querySelector("iframe")?.contentDocument;
     lastCss = doc?.getElementById(STYLE_ID)?.textContent ?? "";

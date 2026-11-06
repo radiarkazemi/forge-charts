@@ -2,7 +2,12 @@ import { intervalSeconds, parseInterval, isMarketSessionOpen, priceAlongOhlcPath
 import type { MarketDataProvider, Unsubscribe } from "@/application";
 import { buildUrl, fetchJson } from "../http/fetch-json";
 import { startPolling } from "./polling";
-import { alignFxDailyBars, fetchCpChartHistory, mongoHistoryPlan } from "./cp-chart-history";
+import {
+  alignFxDailyBars,
+  alignFxSessionDailyTime,
+  fetchCpChartHistory,
+  mongoHistoryPlan,
+} from "./cp-chart-history";
 import { aggregateBars, synthesizeFromMinuteBars } from "./synthesize-seconds";
 
 /**
@@ -260,10 +265,19 @@ function parseUpdatedAt(raw?: string): number {
   return Number.isFinite(ms) ? Math.floor(ms / 1000) : Math.floor(Date.now() / 1000);
 }
 
-function applyTick(current: Bar | null, price: number, tsSec: number, step: number, volumeDelta = 0): Bar {
+function applyTick(
+  current: Bar | null,
+  price: number,
+  tsSec: number,
+  step: number,
+  volumeDelta = 0,
+  /** FX 1D must sit on 22:00 UTC — midnight floor invents a premature daily candle. */
+  fxDaily = false,
+): Bar {
   // Never open a candle in the future (e.g. mongo `bct` = period close was used as ts).
-  const wallBucket = alignTime(Math.floor(Date.now() / 1000), step);
-  let t = alignTime(tsSec, step);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const wallBucket = fxDaily ? alignFxSessionDailyTime(nowSec) : alignTime(nowSec, step);
+  let t = fxDaily ? alignFxSessionDailyTime(tsSec) : alignTime(tsSec, step);
   if (t > wallBucket) t = wallBucket;
   if (!current || current.time < t) {
     return { time: t, open: price, high: price, low: price, close: price, volume: Math.max(0, volumeDelta) };
@@ -629,6 +643,10 @@ export class GermanyMarketProvider implements MarketDataProvider {
     const route = routeFor(symbol);
     if (!route) return () => {};
     const step = intervalSeconds(interval);
+    const { unit, count } = parseInterval(interval);
+    // History already snaps 1D onto 22:00 UTC; live ticks must use the same grid
+    // or `alignTime(..., 86400)` opens a midnight candle that looks "new" on Daily.
+    const fxDaily = unit === "days" && count === 1;
     const disposers: Unsubscribe[] = [];
     let current: Bar | null = null;
     let lastEmittedClose = Number.NaN;
@@ -661,7 +679,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
         if (pendingTicks.length > 50) pendingTicks.shift();
         return;
       }
-      emit(applyTick(current, price, ts, step, volumeDelta));
+      emit(applyTick(current, price, ts, step, volumeDelta, fxDaily));
     };
 
     // Seed forming bar from real OHLC before applying live ticks (avoids flat O=H=L=C).
@@ -674,8 +692,9 @@ export class GermanyMarketProvider implements MarketDataProvider {
         });
         const last = seed[seed.length - 1];
         if (last) {
-          const wallBucket = alignTime(Math.floor(Date.now() / 1000), step);
-          const t = alignTime(last.time, step);
+          const nowSec = Math.floor(Date.now() / 1000);
+          const wallBucket = fxDaily ? alignFxSessionDailyTime(nowSec) : alignTime(nowSec, step);
+          const t = fxDaily ? alignFxSessionDailyTime(last.time) : alignTime(last.time, step);
           const sessionOpen = isMarketSessionOpen(symbol);
           // Weekend / closed session: freeze on the last real bar (no invented
           // wall-clock candles that look like demo data).
@@ -702,7 +721,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
         readyForTicks = true;
         if (isMarketSessionOpen(symbol)) {
           for (const tick of pendingTicks.splice(0)) {
-            emit(applyTick(current, tick.price, tick.tsSec, step, tick.volumeDelta));
+            emit(applyTick(current, tick.price, tick.tsSec, step, tick.volumeDelta, fxDaily));
           }
         } else {
           pendingTicks.length = 0;

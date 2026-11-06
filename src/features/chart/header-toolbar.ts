@@ -212,11 +212,12 @@ export function mountHeaderToolbar(
     });
   }
 
-  // Named layout menu (TradingView: layout name immediately left of Select Layout / profile).
-  const layoutName = handlers.getProfile().displayName || "Radiar";
+  // Named layout menu — title stays "Layout" (never the profile displayName
+  // "Radiar", which looked stuck in the top bar).
+  const profileName = handlers.getProfile().displayName?.trim() || "Radiar";
   if (!handlers.mobile) {
     void widget.createDropdown({
-      title: layoutName,
+      title: "Layout",
       tooltip: "Save and manage chart layouts",
       align: "right",
       items: [
@@ -261,10 +262,8 @@ export function mountHeaderToolbar(
           },
         },
         {
-          title: `Recently used · ${layoutName}`,
-          onSelect: () => {
-            /* current layout */
-          },
+          title: `Account · ${profileName}`,
+          onSelect: () => handlers.onOpenProfile(),
         },
         {
           title: "Open layout…",

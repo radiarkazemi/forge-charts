@@ -107,7 +107,7 @@ function labelForInterval(interval: Interval): string {
   return String(interval);
 }
 
-function syncHeaderChrome(doc: Document, symbol: string, interval: Interval): void {
+export function syncHeaderChrome(doc: Document, symbol: string, interval: Interval): void {
   const bare = symbol.includes(":") ? symbol.slice(symbol.lastIndexOf(":") + 1) : symbol;
   const symBtn = doc.getElementById("header-toolbar-symbol-search");
   if (symBtn) {
@@ -150,10 +150,12 @@ function syncHeaderChrome(doc: Document, symbol: string, interval: Interval): vo
 }
 
 /** CL async restore often repaints header to pane 0 — re-assert active chrome. */
-function syncHeaderChromeRetry(doc: Document, symbol: string, interval: Interval): void {
+export function syncHeaderChromeRetry(doc: Document, symbol: string, interval: Interval): void {
   syncHeaderChrome(doc, symbol, interval);
   window.setTimeout(() => syncHeaderChrome(doc, symbol, interval), 120);
   window.setTimeout(() => syncHeaderChrome(doc, symbol, interval), 400);
+  window.setTimeout(() => syncHeaderChrome(doc, symbol, interval), 900);
+  window.setTimeout(() => syncHeaderChrome(doc, symbol, interval), 1800);
 }
 
 function stop(event: Event): void {
