@@ -26,12 +26,14 @@ pnpm run build
 echo "Ensuring remote dirs on ${USER}@${HOST}"
 "${SSH[@]}" "${USER}@${HOST}" "mkdir -p '${REMOTE_ANIL_ASSETS}' '${REMOTE_ANIL_CHARTS}' '${REMOTE_APP}/assets'"
 
-echo "Uploading /assets/forge hashed bundles"
+# Merge hashed bundles — never wipe the directory. Stale HTML / CF edges may
+# still request the previous index-*.js for a short window; deleting it 404s the app.
+echo "Uploading /assets/forge hashed bundles (keep prior hashes)"
+"${SSH[@]}" "${USER}@${HOST}" "mkdir -p '${REMOTE_ANIL_ASSETS}'"
 tar -C dist/assets -cf - . | "${SSH[@]}" "${USER}@${HOST}" \
-  "rm -rf '${REMOTE_ANIL_ASSETS}' && mkdir -p '${REMOTE_ANIL_ASSETS}' && tar -C '${REMOTE_ANIL_ASSETS}' -xf - && chown -R www-data:www-data '${REMOTE_ANIL_ASSETS}'"
+  "tar -C '${REMOTE_ANIL_ASSETS}' -xf - && chown -R www-data:www-data '${REMOTE_ANIL_ASSETS}'"
 
-echo "Uploading /charts/index.html (+ brand icons / manifest + static docs if present)"
-"${SCP[@]}" dist/index.html "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/index.html"
+echo "Uploading /charts/ static docs (index.html after assets)"
 if [[ -f dist/charts/tv-header.css ]]; then
   "${SCP[@]}" dist/charts/tv-header.css "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/tv-header.css"
 fi
@@ -66,27 +68,35 @@ fi
 "${SSH[@]}" "${USER}@${HOST}" "chown -R www-data:www-data '${REMOTE_ANIL_CHARTS}'"
 
 # Critical: forgechart.ir nginx serves /assets/forge/ + /charts/ from forge-web.
-# Sync immediately after Anil upload so a later SSH timeout cannot leave
-# index.html pointing at a missing hashed bundle (Cloudflare then caches 404).
+# Assets first (keep old hashes), then HTML — never publish HTML before its bundles.
 echo "Syncing Forge web root → ${REMOTE_FORGE_WEB} (critical path)"
+"${SCP[@]}" dist/index.html "${USER}@${HOST}:${REMOTE_ANIL_CHARTS}/index.html"
 "${SSH[@]}" "${USER}@${HOST}" bash -s <<REMOTE
 set -euo pipefail
 ANIL_DIST='/var/www/anil/frontend/dist'
 REMOTE_FORGE_WEB='${REMOTE_FORGE_WEB}'
 mkdir -p "\${REMOTE_FORGE_WEB}/charts" "\${REMOTE_FORGE_WEB}/assets/forge"
 if [[ -d "\${ANIL_DIST}/charts" && -d "\${ANIL_DIST}/assets/forge" ]]; then
-  rsync -a --delete --exclude charting_library "\${ANIL_DIST}/charts/" "\${REMOTE_FORGE_WEB}/charts/"
-  rsync -a --delete "\${ANIL_DIST}/assets/forge/" "\${REMOTE_FORGE_WEB}/assets/forge/"
+  # Keep prior hashed files so mid-flight clients / CF edges do not 404.
+  rsync -a "\${ANIL_DIST}/assets/forge/" "\${REMOTE_FORGE_WEB}/assets/forge/"
+  rsync -a --exclude charting_library --exclude index.html "\${ANIL_DIST}/charts/" "\${REMOTE_FORGE_WEB}/charts/"
   if [[ -d "\${ANIL_DIST}/charts/brand" ]]; then
     rsync -a "\${ANIL_DIST}/charts/brand/" "\${REMOTE_FORGE_WEB}/charts/brand/"
   fi
+  # HTML last — prefer stable forge-app.js entry when present.
+  cp -f "\${ANIL_DIST}/charts/index.html" "\${REMOTE_FORGE_WEB}/charts/index.html"
   chown -R www-data:www-data "\${REMOTE_FORGE_WEB}/charts" "\${REMOTE_FORGE_WEB}/assets/forge"
-  INDEX_JS=\$(grep -oE 'index-[^\"/]+\\.js' "\${REMOTE_FORGE_WEB}/charts/index.html" | head -1 || true)
-  if [[ -n "\${INDEX_JS}" && ! -f "\${REMOTE_FORGE_WEB}/assets/forge/\${INDEX_JS}" ]]; then
-    echo "ERROR: forge-web missing \${INDEX_JS} after sync" >&2
+  ENTRY=\$(grep -oE '/assets/forge/[^\"]+\\.js' "\${REMOTE_FORGE_WEB}/charts/index.html" | head -1 || true)
+  ENTRY_BASE=\$(basename "\${ENTRY:-}")
+  if [[ -n "\${ENTRY_BASE}" && ! -f "\${REMOTE_FORGE_WEB}/assets/forge/\${ENTRY_BASE}" ]]; then
+    echo "ERROR: forge-web missing \${ENTRY_BASE} after sync" >&2
     exit 1
   fi
-  echo "Synced forge-web from Anil dist (\${INDEX_JS:-ok})"
+  if [[ ! -f "\${REMOTE_FORGE_WEB}/assets/forge/forge-main.js" ]]; then
+    echo "ERROR: forge-web missing stable forge-main.js" >&2
+    exit 1
+  fi
+  echo "Synced forge-web from Anil dist (\${ENTRY_BASE:-ok})"
 else
   echo "ERROR: Anil dist missing charts/assets" >&2
   exit 1
@@ -124,7 +134,7 @@ else
 fi
 REMOTE
 
-echo "Ensuring nginx serves /charting_library/ from forge-web charts tree"
+echo "Ensuring nginx serves charting_library + stable forge-app entry (no CF 404 cache)"
 "${SSH[@]}" "${USER}@${HOST}" bash -s <<'REMOTE'
 set -euo pipefail
 SNIP=/etc/nginx/snippets/forge-charting-library.conf
@@ -147,19 +157,129 @@ location = /charting_library/charting_library.js {
     try_files /charting_library/charting_library.js =404;
 }
 EOF
+
+# Stable SPA entry + never let Cloudflare cache a missing hashed bundle.
+ASSET_SNIP=/etc/nginx/snippets/forge-assets.conf
+cat > "$ASSET_SNIP" <<'EOF'
+# Stable entries — overwritten each deploy; must not be immutable-cached.
+# forge-app.js kept as alias for any mid-flight HTML; forge-main.js is current.
+location = /assets/forge/forge-main.js {
+    root /var/www/forge-web;
+    default_type application/javascript;
+    expires -1;
+    etag off;
+    if_modified_since off;
+    add_header Cache-Control "no-store, no-cache, must-revalidate, max-age=0" always;
+    add_header CDN-Cache-Control "no-store" always;
+    add_header Pragma "no-cache" always;
+    add_header X-Content-Type-Options nosniff always;
+    try_files /assets/forge/forge-main.js =404;
+}
+location = /assets/forge/forge-app.js {
+    root /var/www/forge-web;
+    default_type application/javascript;
+    expires -1;
+    etag off;
+    if_modified_since off;
+    add_header Cache-Control "no-store, no-cache, must-revalidate, max-age=0" always;
+    add_header CDN-Cache-Control "no-store" always;
+    add_header Pragma "no-cache" always;
+    add_header X-Content-Type-Options nosniff always;
+    try_files /assets/forge/forge-main.js =404;
+}
+location /assets/forge/ {
+    root /var/www/forge-web;
+    expires 7d;
+    add_header Cache-Control "public, immutable" always;
+    add_header X-Content-Type-Options nosniff always;
+    try_files $uri @forge_asset_miss;
+}
+location @forge_asset_miss {
+    default_type text/plain;
+    add_header Cache-Control "no-store" always;
+    add_header CDN-Cache-Control "no-store" always;
+    return 404;
+}
+EOF
+
 for conf in /etc/nginx/sites-enabled/forgechart /etc/nginx/sites-enabled/forge-landing-8088; do
-  if [[ -f "$conf" ]] && ! grep -q 'forge-charting-library.conf' "$conf"; then
-    python3 - <<PY
+  [[ -f "$conf" ]] || continue
+  python3 - "$conf" <<'PY'
 from pathlib import Path
-p = Path("$conf")
+import re
+import sys
+p = Path(sys.argv[1])
 text = p.read_text()
-needle = "include /etc/nginx/snippets/cp-fetcher-api.conf;"
-inc = "include /etc/nginx/snippets/forge-charting-library.conf;\n\n    "
-if "forge-charting-library.conf" not in text:
-    p.write_text(text.replace(needle, inc + needle))
-    print(f"patched {p}")
+changed = False
+
+# Per server-block: ensure forge-assets.conf is included (HTTP + HTTPS).
+lines = text.splitlines(keepends=True)
+out = []
+i = 0
+inc_line = "    include /etc/nginx/snippets/forge-assets.conf;\n"
+while i < len(lines):
+    if re.match(r"server\s*\{", lines[i].strip()) or lines[i].strip() == "server {":
+        block = [lines[i]]
+        depth = lines[i].count("{") - lines[i].count("}")
+        i += 1
+        while i < len(lines) and depth > 0:
+            block.append(lines[i])
+            depth += lines[i].count("{") - lines[i].count("}")
+            i += 1
+        blk = "".join(block)
+        needs = ("forge-web" in blk or "forgechart.ir" in blk or "8088" in blk) and (
+            "forge-assets.conf" not in blk
+        )
+        if needs:
+            for anchor in (
+                "include /etc/nginx/snippets/forge-charts-nocache.conf;\n",
+                "include /etc/nginx/snippets/forge-charting-library.conf;\n",
+                "include /etc/nginx/snippets/cp-fetcher-api.conf;\n",
+            ):
+                if anchor in blk:
+                    blk = blk.replace(anchor, anchor + inc_line, 1)
+                    changed = True
+                    print(f"patched server block in {p}")
+                    break
+        out.append(blk)
+        continue
+    out.append(lines[i])
+    i += 1
+text = "".join(out)
+
+for snip in ("forge-charting-library.conf",):
+    inc = f"include /etc/nginx/snippets/{snip};"
+    if inc not in text:
+        needle = "include /etc/nginx/snippets/cp-fetcher-api.conf;"
+        if needle in text:
+            text = text.replace(needle, inc + "\n\n    " + needle, 1)
+            changed = True
+            print(f"patched {p} + {snip}")
+
+def comment_block(match: re.Match[str]) -> str:
+    lines = match.group(0).splitlines(keepends=True)
+    out = []
+    for line in lines:
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            out.append(line)
+        else:
+            out.append(re.sub(r"^(\s*)", r"\1# ", line, count=1))
+    return "".join(out)
+
+new_text, n = re.subn(
+    r"(?m)^[ \t]*location /assets/forge/ \{.*?^[ \t]*\}[ \t]*\n?",
+    comment_block,
+    text,
+    flags=re.S,
+)
+if n:
+    text = new_text
+    changed = True
+    print(f"commented {n} inline /assets/forge/ in {p}")
+if changed:
+    p.write_text(text)
 PY
-  fi
 done
 nginx -t && systemctl reload nginx
 REMOTE
