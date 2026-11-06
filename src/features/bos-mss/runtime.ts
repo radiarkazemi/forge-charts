@@ -1,15 +1,16 @@
 /**
  * BOS+ / BOS− / MSS+ / MSS− structure marker.
  *
+ * Visual style (TV / ICT reference):
+ * - Solid horizontal line from swing pivot → break bar
+ * - Label (e.g. BOS+) centered on the line in the same color
+ *
  * Default ICT-style logic (easy to swap later in `detectBosMss`):
  * - Track confirmed swing high / swing low (left/right bars).
  * - Break above last swing high → bullish event:
  *     prior structure bearish → MSS+  else BOS+
  * - Break below last swing low → bearish event:
  *     prior structure bullish → MSS−  else BOS−
- *
- * Customize later: change break source, swing definition, or MSS rules
- * inside `detectBosMss` without touching paint/UI.
  */
 
 import type { EntityId, IChartWidgetApi } from "@/infrastructure/tradingview";
@@ -66,13 +67,14 @@ export const BOS_MSS_DEFAULTS: BosMssInputs = {
   bosMinusLabel: "BOS-",
   mssPlusLabel: "MSS+",
   mssMinusLabel: "MSS-",
-  bosPlusColor: "#26a69a",
-  bosMinusColor: "#ef5350",
-  mssPlusColor: "#00bcd4",
-  mssMinusColor: "#ff9800",
-  lineWidth: 2,
-  bosLineStyle: 1,
-  mssLineStyle: 2,
+  // Screenshot reference: solid blue BOS+ line + matching text
+  bosPlusColor: "#2962FF",
+  bosMinusColor: "#E53935",
+  mssPlusColor: "#00BCD4",
+  mssMinusColor: "#FF9800",
+  lineWidth: 1,
+  bosLineStyle: 0,
+  mssLineStyle: 0,
   fontSize: 12,
   maxEvents: 120,
 };
@@ -86,26 +88,19 @@ export interface BosMssEvent {
   readonly price: number;
 }
 
-export type BosMssDrawCmd =
-  | {
-      readonly kind: "line";
-      readonly t1: number;
-      readonly p1: number;
-      readonly t2: number;
-      readonly p2: number;
-      readonly color: string;
-      readonly width: number;
-      readonly style: number;
-    }
-  | {
-      readonly kind: "label";
-      readonly t1: number;
-      readonly p1: number;
-      readonly text: string;
-      readonly color: string;
-      readonly fill: string;
-      readonly fontSize: number;
-    };
+/** One trend-line shape with optional centered label (screenshot style). */
+export interface BosMssDrawCmd {
+  readonly kind: "segment";
+  readonly t1: number;
+  readonly p1: number;
+  readonly t2: number;
+  readonly p2: number;
+  readonly color: string;
+  readonly width: number;
+  readonly style: number;
+  readonly text?: string;
+  readonly fontSize: number;
+}
 
 function pivotHigh(
   bars: readonly BosMssBar[],
@@ -251,33 +246,23 @@ export function bosMssDrawCmds(
 
   for (const ev of events) {
     if (!kindEnabled(ev.kind, inputs)) continue;
+    if (!inputs.showLines && !inputs.showLabels) continue;
     const color = kindColor(ev.kind, inputs);
-    if (inputs.showLines) {
-      cmds.push({
-        kind: "line",
-        t1: ev.t1,
-        p1: ev.price,
-        t2: ev.t2,
-        p2: ev.price,
-        color,
-        width,
-        style: Math.max(0, Math.min(2, Math.floor(kindLineStyle(ev.kind, inputs)))),
-      });
-    }
-    if (inputs.showLabels) {
-      cmds.push({
-        kind: "label",
-        t1: ev.t2,
-        p1: ev.price,
-        text: kindLabel(ev.kind, inputs),
-        color: "#ffffff",
-        fill: color,
-        fontSize,
-      });
-    }
+    cmds.push({
+      kind: "segment",
+      t1: ev.t1,
+      p1: ev.price,
+      t2: ev.t2,
+      p2: ev.price,
+      color,
+      width: inputs.showLines ? width : 0,
+      style: Math.max(0, Math.min(2, Math.floor(kindLineStyle(ev.kind, inputs)))),
+      text: inputs.showLabels ? kindLabel(ev.kind, inputs) : undefined,
+      fontSize,
+    });
   }
 
-  const cap = Math.max(10, Math.min(400, Math.floor(inputs.maxEvents))) * 2;
+  const cap = Math.max(10, Math.min(400, Math.floor(inputs.maxEvents)));
   return cmds.length > cap ? cmds.slice(-cap) : cmds;
 }
 
@@ -311,48 +296,35 @@ export async function paintBosMss(
   for (let i = 0; i < cmds.length; i += 1) {
     const cmd = cmds[i]!;
     try {
-      if (cmd.kind === "line") {
-        const id = await chart.createMultipointShape(
-          [
-            { time: cmd.t1 as never, price: cmd.p1 },
-            { time: cmd.t2 as never, price: cmd.p2 },
-          ],
-          {
-            ...common,
-            shape: "trend_line",
-            overrides: {
-              linecolor: cmd.color,
-              linewidth: cmd.width,
-              linestyle: LINE_STYLES[cmd.style] ?? 0,
-              showLabel: false,
-              showPrice: false,
-              extendLeft: false,
-              extendRight: false,
-            },
-          },
-        );
-        if (id) ids.push(id);
-      } else if (cmd.kind === "label") {
-        const id = await chart.createShape(
+      const label = (cmd.text ?? "").trim();
+      const id = await chart.createMultipointShape(
+        [
           { time: cmd.t1 as never, price: cmd.p1 },
-          {
-            ...common,
-            shape: "text",
-            text: ` ${cmd.text} `,
-            overrides: {
-              color: cmd.color,
-              fontsize: cmd.fontSize,
-              bold: true,
-              fillBackground: true,
-              backgroundColor: cmd.fill,
-              drawBorder: false,
-              horzLabelsAlign: "center",
-              vertLabelsAlign: "middle",
-            },
+          { time: cmd.t2 as never, price: cmd.p2 },
+        ],
+        {
+          ...common,
+          shape: "trend_line",
+          text: label,
+          overrides: {
+            linecolor: cmd.color,
+            linewidth: Math.max(1, cmd.width || 1),
+            linestyle: LINE_STYLES[cmd.style] ?? 0,
+            // Screenshot: label centered on the line, same color, no badge
+            showLabel: label.length > 0,
+            text: label,
+            textcolor: cmd.color,
+            fontsize: cmd.fontSize,
+            bold: true,
+            horzLabelsAlign: "center",
+            vertLabelsAlign: "middle",
+            showPrice: false,
+            extendLeft: false,
+            extendRight: false,
           },
-        );
-        if (id) ids.push(id);
-      }
+        },
+      );
+      if (id) ids.push(id);
     } catch {
       /* skip */
     }

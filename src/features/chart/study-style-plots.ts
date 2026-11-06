@@ -22,6 +22,8 @@ export interface StudyStylePlotValues {
   readonly visible: boolean;
   readonly transparency: number;
   readonly linewidth: number;
+  /** 0 solid · 1 dotted · 2 dashed */
+  readonly linestyle: number;
 }
 
 const DEFAULT_STYLE = {
@@ -107,6 +109,7 @@ export function readStylePlot(
         transparency?: number;
         visible?: boolean;
         linewidth?: number;
+        linestyle?: number;
       }
     | undefined;
   if (!cand || typeof cand !== "object") return { ...fallback };
@@ -125,8 +128,12 @@ export function readStylePlot(
     typeof cand.linewidth === "number" && Number.isFinite(cand.linewidth)
       ? Math.max(1, Math.min(8, Math.round(cand.linewidth)))
       : fallback.linewidth;
+  const linestyle =
+    typeof cand.linestyle === "number" && Number.isFinite(cand.linestyle)
+      ? Math.max(0, Math.min(2, Math.round(cand.linestyle)))
+      : fallback.linestyle;
 
-  return { color, visible, transparency, linewidth };
+  return { color, visible, transparency, linewidth, linestyle };
 }
 
 /** Apply Style-tab transparency (0–100) onto a #RRGGBB / rgba color. */

@@ -1,6 +1,8 @@
 /**
  * Watches Indicators “Fractal (igor-T)” and paints swing high/low H/L markers.
  * Colors / visibility / size come from the Style tab (getStyleValues).
+ *
+ * Refresh guard: paint-then-swap + mute study events while painting.
  */
 
 import { useEffect, useRef } from "react";
@@ -30,17 +32,18 @@ import { studyIsVisible } from "./study-paint-gate";
 
 const MAX_BARS = 3_000;
 const STUDY_DEBOUNCE_MS = 450;
-const PRESENCE_POLL_MS = 6_000;
-const LIVE_REFRESH_MS = 15_000;
+const PRESENCE_POLL_MS = 8_000;
+const LIVE_REFRESH_MS = 20_000;
+const PAINT_MUTE_MS = 1_500;
 
 function fingerprint(cmds: readonly FractalDrawCmd[]): string {
   if (cmds.length === 0) return "empty";
   const head = cmds.slice(0, 4);
   const tail = cmds.length > 4 ? cmds.slice(-4) : [];
   const part = (c: FractalDrawCmd) => {
-    if (c.kind === "arrow") return `a:${c.dir}:${c.t1}:${c.p1}`;
-    if (c.kind === "dot") return `d:${c.t1}:${c.p1}`;
-    return `l:${c.t1}:${c.p1}:${c.text}`;
+    if (c.kind === "arrow") return `a:${c.dir}:${c.t1}:${c.p1}:${c.color}`;
+    if (c.kind === "dot") return `d:${c.t1}:${c.p1}:${c.color}`;
+    return `l:${c.t1}:${c.p1}:${c.text}:${c.color}`;
   };
   return `${cmds.length}|${[...head, ...tail].map(part).join(";")}`;
 }
@@ -56,6 +59,7 @@ export function useFractalIgorStudy(enabled = true): void {
   const lastFpRef = useRef("");
   const genRef = useRef(0);
   const pendingRef = useRef(false);
+  const muteUntilRef = useRef(0);
 
   useEffect(() => {
     if (!enabled || !ready) return;
@@ -65,9 +69,16 @@ export function useFractalIgorStudy(enabled = true): void {
     let cancelled = false;
     let studyTimer: number | undefined;
 
+    const mutePaintEvents = () => {
+      muteUntilRef.current = Date.now() + PAINT_MUTE_MS;
+    };
+    const isMuted = () => Date.now() < muteUntilRef.current;
+
     const clearDrawings = () => {
       const ids = entityIdsRef.current;
       entityIdsRef.current = [];
+      if (ids.length === 0) return;
+      mutePaintEvents();
       for (const id of ids) {
         try {
           chart.removeEntity(id);
@@ -122,12 +133,14 @@ export function useFractalIgorStudy(enabled = true): void {
           visible: FRACTAL_DEFAULTS.showHighs,
           transparency: 0,
           linewidth: 2,
+          linestyle: 0,
         });
         const lowStyle = readStylePlot(api, FRACTAL_STYLE_LOW, {
           color: FRACTAL_DEFAULTS.lowColor,
           visible: FRACTAL_DEFAULTS.showLows,
           transparency: 0,
           linewidth: 2,
+          linestyle: 0,
         });
         const fontSize = linewidthToFontSize(
           Math.max(highStyle.linewidth, lowStyle.linewidth),
@@ -165,7 +178,7 @@ export function useFractalIgorStudy(enabled = true): void {
       }
     };
 
-    const repaint = async (force = false) => {
+    const repaint = async (_force = false) => {
       if (cancelled) return;
       if (busyRef.current) {
         pendingRef.current = true;
@@ -205,12 +218,12 @@ export function useFractalIgorStudy(enabled = true): void {
         if (bars.length < inputs.periods * 2 + 1) return;
         const cmds = computeFractal(bars, inputs);
         const fp = fingerprint(cmds);
-        if (!force && key === lastKeyRef.current && fp === lastFpRef.current) return;
+        if (key === lastKeyRef.current && fp === lastFpRef.current) return;
 
-        clearDrawings();
-        if (cancelled || gen !== genRef.current) return;
+        mutePaintEvents();
         const ids = await paintFractal(active, cmds, { ownerStudyId: studyId });
         if (cancelled || gen !== genRef.current) {
+          mutePaintEvents();
           for (const id of ids) {
             try {
               chart.removeEntity(id);
@@ -220,9 +233,18 @@ export function useFractalIgorStudy(enabled = true): void {
           }
           return;
         }
+        const prev = entityIdsRef.current;
         entityIdsRef.current = ids;
         lastKeyRef.current = key;
         lastFpRef.current = fp;
+        mutePaintEvents();
+        for (const id of prev) {
+          try {
+            chart.removeEntity(id);
+          } catch {
+            /* ignore */
+          }
+        }
       } catch (err) {
         console.warn("[fractal-igor] paint failed", err);
         lastKeyRef.current = "";
@@ -232,7 +254,7 @@ export function useFractalIgorStudy(enabled = true): void {
           pendingRef.current = false;
           window.setTimeout(() => {
             void repaint(false);
-          }, 120);
+          }, 200);
         }
       }
     };
@@ -240,11 +262,12 @@ export function useFractalIgorStudy(enabled = true): void {
     const scheduleRepaint = () => {
       window.clearTimeout(studyTimer);
       studyTimer = window.setTimeout(() => {
-        void repaint(true);
+        void repaint(false);
       }, STUDY_DEBOUNCE_MS);
     };
 
     const onStudyEvent = (...args: unknown[]) => {
+      if (isMuted()) return;
       const eventType = String(args[1] ?? args[0] ?? "");
       if (/remove/i.test(eventType)) {
         window.clearTimeout(studyTimer);
@@ -260,6 +283,7 @@ export function useFractalIgorStudy(enabled = true): void {
     };
 
     const onStudyProperties = (...args: unknown[]) => {
+      if (isMuted()) return;
       const id = String(args[0] ?? "");
       if (!id) return;
       if (findStudyIds().some((s) => String(s) === id)) scheduleRepaint();
@@ -291,9 +315,9 @@ export function useFractalIgorStudy(enabled = true): void {
     }, PRESENCE_POLL_MS);
 
     const livePoll = window.setInterval(() => {
-      if (cancelled || busyRef.current) return;
+      if (cancelled || busyRef.current || isMuted()) return;
       if (findStudyIds().length === 0) return;
-      void repaint(true);
+      void repaint(false);
     }, LIVE_REFRESH_MS);
 
     const onDataLoaded = () => {
