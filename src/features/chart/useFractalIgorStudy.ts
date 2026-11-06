@@ -117,6 +117,17 @@ export function useFractalIgorStudy(enabled = true): void {
           const v = Number(map.get(id));
           return Number.isFinite(v) ? v : fallback;
         };
+        const bool = (id: string, fallback: boolean) => {
+          const v = map.get(id);
+          if (typeof v === "boolean") return v;
+          if (typeof v === "number") return v !== 0;
+          if (typeof v === "string") {
+            const s = v.trim().toLowerCase();
+            if (s === "true" || s === "1") return true;
+            if (s === "false" || s === "0") return false;
+          }
+          return fallback;
+        };
         const str = (id: string, fallback: string) => {
           const v = map.get(id);
           return typeof v === "string" && v.trim() ? v.trim() : fallback;
@@ -150,8 +161,10 @@ export function useFractalIgorStudy(enabled = true): void {
         return {
           periods: Math.max(
             1,
-            Math.min(10, Math.floor(num("periods", FRACTAL_IGOR_STUDY_DEFAULTS.periods))),
+            Math.min(50, Math.floor(num("periods", FRACTAL_IGOR_STUDY_DEFAULTS.periods))),
           ),
+          smartScales: bool("smartScales", FRACTAL_IGOR_STUDY_DEFAULTS.smartScales),
+          scalesText: str("scalesText", FRACTAL_IGOR_STUDY_DEFAULTS.scalesText),
           showHighs: highStyle.visible,
           showLows: lowStyle.visible,
           displayMode,

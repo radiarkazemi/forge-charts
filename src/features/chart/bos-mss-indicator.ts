@@ -20,6 +20,8 @@ export const BOS_MSS_STUDY_DEFAULTS = {
   leftBars: BOS_MSS_DEFAULTS.leftBars,
   rightBars: BOS_MSS_DEFAULTS.rightBars,
   breakOnWick: BOS_MSS_DEFAULTS.breakOnWick,
+  smartScales: BOS_MSS_DEFAULTS.smartScales,
+  scalesText: BOS_MSS_DEFAULTS.scalesText,
   showLines: BOS_MSS_DEFAULTS.showLines,
   showLabels: BOS_MSS_DEFAULTS.showLabels,
   bosPlusLabel: BOS_MSS_DEFAULTS.bosPlusLabel,
@@ -116,6 +118,18 @@ export function createBosMssIndicator(PineJS: {
           name: "Break on wick (off = close)",
           defval: BOS_MSS_STUDY_DEFAULTS.breakOnWick,
           type: "bool",
+        },
+        {
+          id: "smartScales",
+          name: "Smart scales (minor→major at once)",
+          defval: BOS_MSS_STUDY_DEFAULTS.smartScales,
+          type: "bool",
+        },
+        {
+          id: "scalesText",
+          name: "Scales (bars) e.g. 2,5,10,20,30",
+          defval: BOS_MSS_STUDY_DEFAULTS.scalesText,
+          type: "text",
         },
         {
           id: "showLines",

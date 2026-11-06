@@ -165,6 +165,8 @@ export function useRealSwingsStudy(enabled = true): void {
             1,
             Math.min(50, Math.floor(num("rightBars", REAL_SWINGS_STUDY_DEFAULTS.rightBars))),
           ),
+          smartScales: bool("smartScales", REAL_SWINGS_STUDY_DEFAULTS.smartScales),
+          scalesText: str("scalesText", REAL_SWINGS_STUDY_DEFAULTS.scalesText),
           alternateOnly: bool("alternateOnly", REAL_SWINGS_STUDY_DEFAULTS.alternateOnly),
           minSwingAtr: Math.max(
             0,

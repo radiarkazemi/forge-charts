@@ -18,6 +18,8 @@ export const REAL_SWING_STYLE_LOW = "plot_swing_low";
 export const REAL_SWINGS_STUDY_DEFAULTS = {
   leftBars: REAL_SWING_DEFAULTS.leftBars,
   rightBars: REAL_SWING_DEFAULTS.rightBars,
+  smartScales: REAL_SWING_DEFAULTS.smartScales,
+  scalesText: REAL_SWING_DEFAULTS.scalesText,
   alternateOnly: REAL_SWING_DEFAULTS.alternateOnly,
   minSwingAtr: REAL_SWING_DEFAULTS.minSwingAtr,
   atrLen: REAL_SWING_DEFAULTS.atrLen,
@@ -89,6 +91,18 @@ export function createRealSwingsIndicator(PineJS: {
           type: "integer",
           min: 1,
           max: 50,
+        },
+        {
+          id: "smartScales",
+          name: "Smart scales (minor→major at once)",
+          defval: REAL_SWINGS_STUDY_DEFAULTS.smartScales,
+          type: "bool",
+        },
+        {
+          id: "scalesText",
+          name: "Scales (bars) e.g. 2,5,10,20,30",
+          defval: REAL_SWINGS_STUDY_DEFAULTS.scalesText,
+          type: "text",
         },
         {
           id: "alternateOnly",

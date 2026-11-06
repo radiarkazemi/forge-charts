@@ -4,6 +4,11 @@
  * Bearish: swing HH → later swing LL → BOS below that LL → range HH–LL
  * Bullish: swing LL → later swing HH → BOS above that HH → range LL–HH
  *
+ * Intended dealing-range narrative (refine when PDF arrives):
+ * After a rejected High, price drives into a major swing Low → dealing range
+ * between that H and L; when price revisits ~50% (EQ) expect continuation
+ * lower (mirror for uptrend: rejected Low → major High → 50% revisit long).
+ *
  * Paint: 0→0.5 green · 0.5→1 red · 0 / 0.5 / 1 levels (OTE optional).
  * Deploy note: cache-bust build 2026-11-06T15:06 Asia/Tehran — rotate hashed asset URLs.
  */

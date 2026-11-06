@@ -44,7 +44,7 @@ function fingerprint(cmds: readonly BosMssDrawCmd[]): string {
   const head = cmds.slice(0, 4);
   const tail = cmds.length > 4 ? cmds.slice(-4) : [];
   const part = (c: BosMssDrawCmd) =>
-    `sg:${c.t1}:${c.t2}:${c.p1}:${c.text ?? ""}:${c.color}:${c.width}:${c.style}`;
+    `sg:${c.t1}:${c.t2}:${c.p1}:${c.text ?? ""}:${c.color}:${c.width}:${c.style}:${c.scale}`;
   return `${cmds.length}|${[...head, ...tail].map(part).join(";")}`;
 }
 
@@ -191,6 +191,8 @@ export function useBosMssStudy(enabled = true): void {
             Math.min(50, Math.floor(num("rightBars", BOS_MSS_STUDY_DEFAULTS.rightBars))),
           ),
           breakOnWick: bool("breakOnWick", BOS_MSS_STUDY_DEFAULTS.breakOnWick),
+          smartScales: bool("smartScales", BOS_MSS_STUDY_DEFAULTS.smartScales),
+          scalesText: str("scalesText", BOS_MSS_STUDY_DEFAULTS.scalesText),
           showBosPlus: bosPlus.visible,
           showBosMinus: bosMinus.visible,
           showMssPlus: mssPlus.visible,

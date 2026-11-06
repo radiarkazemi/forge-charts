@@ -8,6 +8,12 @@
  */
 
 import type { EntityId, IChartWidgetApi } from "@/infrastructure/tradingview";
+import {
+  DEFAULT_STRUCTURE_SCALES,
+  resolveStructureScales,
+  scaleFontSize,
+  scaleStrength,
+} from "@/features/chart/structure-scales";
 
 /** Minimal OHLC bar (matches chart export / OrcaBar). */
 export interface FractalBar {
@@ -31,6 +37,10 @@ export type FractalDisplayMode = 0 | 1 | 2 | 3 | 4 | 5;
 
 export interface FractalInputs {
   readonly periods: number;
+  /** Run all scale tiers at once (minor → major). */
+  readonly smartScales: boolean;
+  /** Comma list of fractal periods, e.g. "2,5,10,20,30". */
+  readonly scalesText: string;
   readonly showHighs: boolean;
   readonly showLows: boolean;
   readonly displayMode: FractalDisplayMode;
@@ -46,6 +56,8 @@ export interface FractalInputs {
 
 export const FRACTAL_DEFAULTS: FractalInputs = {
   periods: 2,
+  smartScales: true,
+  scalesText: DEFAULT_STRUCTURE_SCALES.join(","),
   showHighs: true,
   showLows: true,
   displayMode: 0,
@@ -66,6 +78,8 @@ export interface FractalMarker {
   readonly index: number;
   readonly time: number;
   readonly price: number;
+  /** Pivot width (periods). Larger = more major. */
+  readonly scale: number;
 }
 
 export type FractalDrawCmd =
@@ -114,12 +128,12 @@ function atrAt(bars: readonly FractalBar[], i: number, len: number): number {
   return count > 0 ? sum / count : Math.max(1e-8, bars[i]!.high - bars[i]!.low);
 }
 
-/** Strict Williams fractal (TV / Igor-T / Chart Champions). */
-export function detectFractals(
+/** Strict Williams fractal at one period width. */
+export function detectFractalsAtScale(
   bars: readonly FractalBar[],
   periods: number,
 ): FractalMarker[] {
-  const n = Math.max(1, Math.min(10, Math.floor(periods)));
+  const n = Math.max(1, Math.min(50, Math.floor(periods)));
   const out: FractalMarker[] = [];
   if (bars.length < n * 2 + 1) return out;
 
@@ -134,10 +148,38 @@ export function detectFractals(
       if (!(mid.low < left.low && mid.low < right.low)) isLow = false;
       if (!isHigh && !isLow) break;
     }
-    if (isHigh) out.push({ kind: "high", index: i, time: mid.time, price: mid.high });
-    if (isLow) out.push({ kind: "low", index: i, time: mid.time, price: mid.low });
+    if (isHigh) out.push({ kind: "high", index: i, time: mid.time, price: mid.high, scale: n });
+    if (isLow) out.push({ kind: "low", index: i, time: mid.time, price: mid.low, scale: n });
   }
   return out;
+}
+
+/**
+ * Multi-scale fractals — merge by bar+kind, keep largest scale (major wins).
+ * Shows micro + major H/L together (smart complete picture).
+ */
+export function detectFractals(
+  bars: readonly FractalBar[],
+  periodsOrInputs: number | FractalInputs,
+): FractalMarker[] {
+  if (typeof periodsOrInputs === "number") {
+    return detectFractalsAtScale(bars, periodsOrInputs);
+  }
+  const inputs = periodsOrInputs;
+  const scales = resolveStructureScales({
+    smartScales: inputs.smartScales,
+    scalesText: inputs.scalesText,
+    single: inputs.periods,
+  });
+  const byKey = new Map<string, FractalMarker>();
+  for (const scale of scales) {
+    for (const m of detectFractalsAtScale(bars, scale)) {
+      const key = `${m.kind}|${m.time}`;
+      const prev = byKey.get(key);
+      if (!prev || m.scale > prev.scale) byKey.set(key, m);
+    }
+  }
+  return [...byKey.values()].sort((a, b) => a.index - b.index);
 }
 
 function offsetPrice(
@@ -159,7 +201,12 @@ export function fractalDrawCmds(
   const cmds: FractalDrawCmd[] = [];
   const highText = (inputs.highLabel || "H").slice(0, 8);
   const lowText = (inputs.lowLabel || "L").slice(0, 8);
-  const fontSize = Math.max(8, Math.min(28, Math.floor(inputs.fontSize)));
+  const baseFont = Math.max(8, Math.min(28, Math.floor(inputs.fontSize)));
+  const scales = resolveStructureScales({
+    smartScales: inputs.smartScales,
+    scalesText: inputs.scalesText,
+    single: inputs.periods,
+  });
 
   for (const m of markers) {
     if (m.kind === "high" && !inputs.showHighs) continue;
@@ -169,6 +216,7 @@ export function fractalDrawCmds(
     const color = m.kind === "high" ? inputs.highColor : inputs.lowColor;
     const label = m.kind === "high" ? highText : lowText;
     const dir: 1 | -1 = m.kind === "high" ? -1 : 1;
+    const fontSize = scaleFontSize(baseFont, scaleStrength(m.scale ?? inputs.periods, scales));
 
     if (mode === 1 || mode === 2) {
       cmds.push({ kind: "arrow", dir, t1: m.time, p1: price, color });
@@ -209,7 +257,7 @@ export function computeFractal(
   bars: readonly FractalBar[],
   inputs: FractalInputs,
 ): FractalDrawCmd[] {
-  return fractalDrawCmds(bars, detectFractals(bars, inputs.periods), inputs);
+  return fractalDrawCmds(bars, detectFractals(bars, inputs), inputs);
 }
 
 export async function paintFractal(

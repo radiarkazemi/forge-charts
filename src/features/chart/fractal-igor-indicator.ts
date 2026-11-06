@@ -17,6 +17,8 @@ export const FRACTAL_STYLE_LOW = "plot_swing_low";
 
 export const FRACTAL_IGOR_STUDY_DEFAULTS = {
   periods: FRACTAL_DEFAULTS.periods,
+  smartScales: FRACTAL_DEFAULTS.smartScales,
+  scalesText: FRACTAL_DEFAULTS.scalesText,
   displayMode: FRACTAL_DEFAULTS.displayMode,
   highLabel: FRACTAL_DEFAULTS.highLabel,
   lowLabel: FRACTAL_DEFAULTS.lowLabel,
@@ -77,7 +79,19 @@ export function createFractalIgorIndicator(PineJS: {
           defval: FRACTAL_IGOR_STUDY_DEFAULTS.periods,
           type: "integer",
           min: 1,
-          max: 10,
+          max: 50,
+        },
+        {
+          id: "smartScales",
+          name: "Smart scales (minor→major at once)",
+          defval: FRACTAL_IGOR_STUDY_DEFAULTS.smartScales,
+          type: "bool",
+        },
+        {
+          id: "scalesText",
+          name: "Scales (bars) e.g. 2,5,10,20,30",
+          defval: FRACTAL_IGOR_STUDY_DEFAULTS.scalesText,
+          type: "text",
         },
         {
           id: "displayMode",

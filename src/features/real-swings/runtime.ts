@@ -7,6 +7,12 @@
  */
 
 import type { EntityId, IChartWidgetApi } from "@/infrastructure/tradingview";
+import {
+  DEFAULT_STRUCTURE_SCALES,
+  resolveStructureScales,
+  scaleFontSize,
+  scaleStrength,
+} from "@/features/chart/structure-scales";
 
 export interface SwingBar {
   readonly time: number;
@@ -30,6 +36,10 @@ export type SwingDisplayMode = 0 | 1 | 2 | 3 | 4 | 5;
 export interface RealSwingInputs {
   readonly leftBars: number;
   readonly rightBars: number;
+  /** Run all scale tiers at once (minor → major). */
+  readonly smartScales: boolean;
+  /** Comma list of pivot widths, e.g. "2,5,10,20,30". */
+  readonly scalesText: string;
   readonly alternateOnly: boolean;
   readonly minSwingAtr: number;
   readonly atrLen: number;
@@ -48,6 +58,8 @@ export interface RealSwingInputs {
 export const REAL_SWING_DEFAULTS: RealSwingInputs = {
   leftBars: 2,
   rightBars: 2,
+  smartScales: true,
+  scalesText: DEFAULT_STRUCTURE_SCALES.join(","),
   alternateOnly: true,
   minSwingAtr: 0,
   atrLen: 14,
@@ -70,6 +82,8 @@ export interface SwingPivot {
   readonly index: number;
   readonly time: number;
   readonly price: number;
+  /** Pivot width (bars). Larger = more major. */
+  readonly scale: number;
 }
 
 export type SwingDrawCmd =
@@ -118,14 +132,16 @@ function atrAt(bars: readonly SwingBar[], i: number, len: number): number {
   return count > 0 ? sum / count : Math.max(1e-8, bars[i]!.high - bars[i]!.low);
 }
 
-/** Raw confirmed pivots (no zigzag / ATR filter). */
+/** Raw confirmed pivots at one left/right width (no zigzag / ATR filter). */
 export function detectRawSwings(
   bars: readonly SwingBar[],
   leftBars: number,
   rightBars: number,
+  scale?: number,
 ): SwingPivot[] {
   const left = Math.max(1, Math.min(50, Math.floor(leftBars)));
   const right = Math.max(1, Math.min(50, Math.floor(rightBars)));
+  const sc = scale ?? Math.max(left, right);
   const out: SwingPivot[] = [];
   if (bars.length < left + right + 1) return out;
 
@@ -148,8 +164,8 @@ export function detectRawSwings(
       }
     }
     // Prefer a single kind if both fire (rare equal extremes) — keep high.
-    if (isHigh) out.push({ kind: "high", index: i, time: mid.time, price: mid.high });
-    else if (isLow) out.push({ kind: "low", index: i, time: mid.time, price: mid.low });
+    if (isHigh) out.push({ kind: "high", index: i, time: mid.time, price: mid.high, scale: sc });
+    else if (isLow) out.push({ kind: "low", index: i, time: mid.time, price: mid.low, scale: sc });
   }
   return out;
 }
@@ -197,9 +213,24 @@ export function detectRealSwings(
   bars: readonly SwingBar[],
   inputs: RealSwingInputs,
 ): SwingPivot[] {
-  let pivots = detectRawSwings(bars, inputs.leftBars, inputs.rightBars);
-  if (inputs.alternateOnly) pivots = alternateSwings(pivots);
-  pivots = filterByMinSwing(bars, pivots, inputs.minSwingAtr, inputs.atrLen);
+  const scales = resolveStructureScales({
+    smartScales: inputs.smartScales,
+    scalesText: inputs.scalesText,
+    single: Math.max(inputs.leftBars, inputs.rightBars),
+  });
+  // Per-scale structure, then overlay — same bar keeps the largest scale.
+  const byKey = new Map<string, SwingPivot>();
+  for (const scale of scales) {
+    let tier = detectRawSwings(bars, scale, scale, scale);
+    if (inputs.alternateOnly) tier = alternateSwings(tier);
+    tier = filterByMinSwing(bars, tier, inputs.minSwingAtr, inputs.atrLen);
+    for (const p of tier) {
+      const key = `${p.kind}|${p.time}`;
+      const prev = byKey.get(key);
+      if (!prev || p.scale > prev.scale) byKey.set(key, p);
+    }
+  }
+  const pivots = [...byKey.values()].sort((a, b) => a.index - b.index);
   return pivots.filter((p) => (p.kind === "high" ? inputs.showHighs : inputs.showLows));
 }
 
@@ -222,13 +253,22 @@ export function realSwingDrawCmds(
   const cmds: SwingDrawCmd[] = [];
   const highText = (inputs.highLabel || "H").slice(0, 8);
   const lowText = (inputs.lowLabel || "L").slice(0, 8);
-  const fontSize = Math.max(8, Math.min(28, Math.floor(inputs.fontSize)));
+  const baseFont = Math.max(8, Math.min(28, Math.floor(inputs.fontSize)));
+  const scales = resolveStructureScales({
+    smartScales: inputs.smartScales,
+    scalesText: inputs.scalesText,
+    single: Math.max(inputs.leftBars, inputs.rightBars),
+  });
 
   for (const p of pivots) {
     const price = offsetPrice(bars, p, inputs);
     const color = p.kind === "high" ? inputs.highColor : inputs.lowColor;
     const label = p.kind === "high" ? highText : lowText;
     const dir: 1 | -1 = p.kind === "high" ? -1 : 1;
+    const fontSize = scaleFontSize(
+      baseFont,
+      scaleStrength(p.scale ?? Math.max(inputs.leftBars, inputs.rightBars), scales),
+    );
 
     if (mode === 1 || mode === 2) {
       cmds.push({ kind: "arrow", dir, t1: p.time, p1: price, color });
