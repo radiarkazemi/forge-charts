@@ -17,21 +17,20 @@ interface BarReplayToolbarProps {
   readonly forceVisible?: boolean;
 }
 
-/** On-bar form play — TF duration ÷ speed (×1–×5). */
+/** Candles (checkbox OFF) — TF duration ÷ speed. */
 const FORM_SPEED_OPTIONS: readonly { value: BarReplaySpeed; label: string }[] = [
-  { value: 1, label: "1x" },
+  { value: 5, label: "5x" },
+  { value: 10, label: "10x" },
+  { value: 15, label: "15x" },
+  { value: 20, label: "20x" },
+];
+
+/** Bar (checkbox ON / 1 bar) — ×N ≈ N closed bars / second. */
+const CANDLE_SPEED_OPTIONS: readonly { value: BarReplaySpeed; label: string }[] = [
   { value: 2, label: "2x" },
   { value: 3, label: "3x" },
   { value: 4, label: "4x" },
   { value: 5, label: "5x" },
-];
-
-/** Per-tick (candle-by-candle) — ×N ≈ N closed candles / second. */
-const CANDLE_SPEED_OPTIONS: readonly { value: BarReplaySpeed; label: string }[] = [
-  { value: 5, label: "5x" },
-  { value: 10, label: "10x" },
-  { value: 20, label: "20x" },
-  { value: 30, label: "30x" },
 ];
 
 const MENU_PAPER = {
@@ -55,7 +54,7 @@ const iconBtn = {
 
 /**
  * TradingView Bar Replay navbar — full-width bottom strip, controls right-aligned:
- * [Select bar ▾] | ▶  ▶|  1x  5m | ▶||  ✕
+ * [Select bar ▾] | ▶  ▶|  ☑ 5x  5m | ▶||  ✕
  */
 export function BarReplayToolbar({ controller, forceVisible = false }: BarReplayToolbarProps) {
   const snap = useStore(controller.state);
@@ -194,7 +193,7 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
             onClick={() => {
               controller.setCandleByCandle(!candleByCandle);
             }}
-            title="Per-tick play: one closed candle per step; speed ×5–×30"
+            title="1-bar play: one closed bar per step; speed ×2–×5"
           >
             <ListItemIcon sx={{ minWidth: 34 }}>
               <Checkbox
@@ -214,8 +213,8 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
               primary="Candle by candle"
               secondary={
                 candleByCandle
-                  ? "Per tick · ×5 / ×10 / ×20 / ×30"
-                  : "On bar · form ×1–×5"
+                  ? "Bar · ×2 / ×3 / ×4 / ×5"
+                  : "Candles · ×5 / ×10 / ×15 / ×20"
               }
               slotProps={{
                 primary: { sx: { fontSize: 13, fontWeight: 500 } },
@@ -265,8 +264,8 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
           }}
           title={
             candleByCandle
-              ? "Per-tick ON — one closed bar per step (×5–×30)"
-              : "On-bar — each candle forms over TF duration (×1–×5)"
+              ? "Bar ON — one closed bar per step (×2–×5)"
+              : "Candles — each candle forms over TF duration (×5–×20)"
           }
           aria-label="Candle by candle play"
           aria-pressed={candleByCandle}
@@ -311,8 +310,8 @@ export function BarReplayToolbar({ controller, forceVisible = false }: BarReplay
           }}
           title={
             candleByCandle
-              ? "Per-tick speed (×5 / ×10 / ×20 / ×30)"
-              : "On-bar speed (×1 / ×2 / ×3 / ×4 / ×5)"
+              ? "Bar speed (×2 / ×3 / ×4 / ×5)"
+              : "Candle speed (×5 / ×10 / ×15 / ×20)"
           }
           aria-label="Replay speed"
           aria-haspopup="menu"

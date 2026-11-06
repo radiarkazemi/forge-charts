@@ -10,16 +10,16 @@ import type { TradingViewDatafeed } from "@/infrastructure/tradingview/datafeed"
 import type { EntityId, IChartingLibraryWidget } from "@/infrastructure/tradingview";
 
 /**
- * On-bar (form) speeds: ×1–×5.
- * Per-tick (candle-by-candle) speeds: ×5 / ×10 / ×20 / ×30.
+ * Bar (checkbox / 1-bar step): ×2 / ×3 / ×4 / ×5.
+ * Candles (unchecked / form): ×5 / ×10 / ×15 / ×20.
  */
-export type BarReplaySpeed = 1 | 2 | 3 | 4 | 5 | 10 | 20 | 30;
+export type BarReplaySpeed = 2 | 3 | 4 | 5 | 10 | 15 | 20;
 
-/** Speeds shown when candle-by-candle (per-tick) play is on. */
-export const CANDLE_BY_CANDLE_SPEEDS: readonly BarReplaySpeed[] = [5, 10, 20, 30];
+/** Speeds when checkbox is ON — one closed bar per step. */
+export const CANDLE_BY_CANDLE_SPEEDS: readonly BarReplaySpeed[] = [2, 3, 4, 5];
 
-/** Speeds shown for on-bar / realtime-form play (up to ×5). */
-export const FORM_PLAY_SPEEDS: readonly BarReplaySpeed[] = [1, 2, 3, 4, 5];
+/** Speeds when checkbox is OFF — each candle forms over TF duration ÷ speed. */
+export const FORM_PLAY_SPEEDS: readonly BarReplaySpeed[] = [5, 10, 15, 20];
 
 export type BarReplayPhase = "idle" | "selecting" | "ready" | "playing";
 
@@ -28,9 +28,9 @@ export interface BarReplayState {
   readonly phase: BarReplayPhase;
   readonly speed: BarReplaySpeed;
   /**
-   * When true, Play advances one fully-closed candle per tick
-   * (×N ≈ N closed candles / second). When false, each candle forms over
-   * real TF duration ÷ speed (on-bar ×1–×5).
+   * When true, Play advances one fully-closed bar per tick
+   * (×N ≈ N closed bars / second). When false, each candle forms over
+   * real TF duration ÷ speed (candles ×5–×20).
    */
   readonly candleByCandle: boolean;
   readonly resolution: string;
@@ -45,7 +45,7 @@ export interface BarReplayState {
 const INITIAL: BarReplayState = {
   active: false,
   phase: "idle",
-  speed: 1,
+  speed: 5,
   candleByCandle: false,
   resolution: "15",
   cursorIndex: -1,
@@ -89,8 +89,8 @@ function tickIntervalMs(stepMs: number, speed: BarReplaySpeed): number {
 }
 
 /**
- * Target wall ms between closed-candle steps in per-tick play.
- * ×5 → 200ms, ×10 → 100ms, ×20 → 50ms, ×30 → ~33ms (1 bar per step).
+ * Target wall ms between closed-bar steps when the checkbox is ON.
+ * ×2 → 500ms, ×3 → ~333ms, ×4 → 250ms, ×5 → 200ms (1 bar per step).
  */
 export function candleStepIntervalMs(speed: BarReplaySpeed): number {
   // Floor at 50ms — faster floods TradingView onTick and drops/corrupts bars.
@@ -134,9 +134,9 @@ export class BarReplayController {
   private formingSubs: Bar[] = [];
   /** Prevent overlapping candle-by-candle advances while an async step is in flight. */
   private candleStepBusy = false;
-  /** Remember last speed per mode so toggling tick/on-bar keeps each menu’s choice. */
-  private lastFormSpeed: BarReplaySpeed = 1;
-  private lastTickSpeed: BarReplaySpeed = 5;
+  /** Remember last speed per mode so toggling bar/candles keeps each menu’s choice. */
+  private lastFormSpeed: BarReplaySpeed = 5;
+  private lastTickSpeed: BarReplaySpeed = 2;
   /** Candle-by-candle uses chained timeouts (not interval) so ×N isn’t lost to busy-skips. */
   private candleStepChain = false;
   /** Bumped on stop/restart so an in-flight step cannot schedule the next one. */
@@ -788,7 +788,7 @@ export class BarReplayController {
         await this.commitFormingBar();
         return;
       }
-      // One bar only — ×5/×10/×20/×30 are delay multipliers, not bars-per-tick.
+      // One bar only — ×2–×5 are delay multipliers, not bars-per-tick.
       const advanced = await this.advanceClosedOne();
       if (!advanced) return;
       if (this.state.get().cursorIndex >= this.state.get().bufferLength - 1) {
@@ -859,14 +859,14 @@ export class BarReplayController {
   private clampSpeedForMode(candleMode: boolean, speed: number): BarReplaySpeed {
     const allowed = candleMode ? CANDLE_BY_CANDLE_SPEEDS : FORM_PLAY_SPEEDS;
     if ((allowed as readonly number[]).includes(speed)) return speed as BarReplaySpeed;
-    return candleMode ? 5 : 1;
+    return candleMode ? 2 : 5;
   }
 
   private startPlayTimer(): void {
     this.stopPlayTimer();
     const { speed, candleByCandle, resolution } = this.state.get();
     if (candleByCandle) {
-      // Chained timeouts: wait (interval − step cost) after each bar so ×10/×30
+      // Chained timeouts: wait (interval − step cost) after each bar so ×2–×5
       // stay faster than ×5 even when chart updates take tens of ms.
       const gen = ++this.candleStepGen;
       this.candleStepChain = true;
