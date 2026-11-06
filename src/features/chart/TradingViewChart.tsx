@@ -18,6 +18,7 @@ import { useStructureIntelligenceStudy } from "./useStructureIntelligenceStudy";
 import { useReplayMentorStudy } from "./useReplayMentorStudy";
 import { useForgeTradingAssistantStudy } from "./useForgeTradingAssistantStudy";
 import { useForgeCertaintyStudy } from "./useForgeCertaintyStudy";
+import { useFractalIgorStudy } from "./useFractalIgorStudy";
 import { SessionsDashboard } from "@/features/sessions/SessionsDashboard";
 import { useTradingViewWidget } from "./useTradingViewWidget";
 import { RADIAR_LAYOUT_NAME } from "@/infrastructure/tradingview";
@@ -256,6 +257,7 @@ export function TradingViewChart({
   useReplayMentorStudy(true);
   useForgeTradingAssistantStudy(true);
   useForgeCertaintyStudy(true);
+  useFractalIgorStudy(true);
 
   return (
     <Box

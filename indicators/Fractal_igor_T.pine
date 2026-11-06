@@ -1,0 +1,19 @@
+//@version=5
+// Fractal (igor-T) — Chart Champions swing markers for Forge.
+// Green ↓ = swing high · Red ↑ = swing low (confirmed after right-side bars close).
+indicator("Fractal (igor-T)", shorttitle="Fractal", overlay=true, max_labels_count=500)
+
+periods = input.int(2, "Periods (bars each side)", minval=1, maxval=10)
+showHighs = input.bool(true, "Show swing highs (green)")
+showLows = input.bool(true, "Show swing lows (red)")
+highColor = input.color(color.new(#26a69a, 0), "High arrow color")
+lowColor = input.color(color.new(#ef5350, 0), "Low arrow color")
+
+isHigh = true
+isLow = true
+for j = 1 to periods
+    isHigh := isHigh and high[periods] > high[periods - j] and high[periods] > high[periods + j]
+    isLow := isLow and low[periods] < low[periods - j] and low[periods] < low[periods + j]
+
+plotshape(showHighs and isHigh, title="Swing High", style=shape.triangledown, location=location.abovebar, offset=-periods, color=highColor, size=size.tiny)
+plotshape(showLows and isLow, title="Swing Low", style=shape.triangleup, location=location.belowbar, offset=-periods, color=lowColor, size=size.tiny)
