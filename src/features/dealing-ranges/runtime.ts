@@ -1,6 +1,10 @@
 /**
- * Multi-timeframe Dealing Ranges — Orca-confirmed C1/C2 ranges painted with
- * ICT halves: 0→0.5 discount (green), 0.5→1 premium (red), midline at EQ.
+ * Multi-timeframe Dealing Ranges — ICT HH↔LL + BOS confirmation.
+ *
+ * Bearish: swing HH → later swing LL → BOS below that LL → range HH–LL
+ * Bullish: swing LL → later swing HH → BOS above that HH → range LL–HH
+ *
+ * Paint: 0→0.5 green · 0.5→1 red · 0 / 0.5 / 1 levels (OTE optional).
  */
 
 import { intervalSeconds } from "@/domain";
@@ -11,13 +15,10 @@ import {
   type HtfBar,
   type HtfPreset,
 } from "@/features/htf-candles/runtime";
-import {
-  computeOrcaAnalysis,
-  dealingRangesInputs,
-  type ConfirmedDealingRange,
-  type DealingRangesOptions as BaseDrOptions,
-  type DrawCmd,
-  type OrcaBar,
+import type {
+  ConfirmedDealingRange,
+  DrawCmd,
+  OrcaBar,
 } from "@/features/pine/orca-runtime";
 
 export type DrHtfPreset = HtfPreset;
@@ -49,7 +50,20 @@ export interface DealingRangesStyle {
   readonly extendToLast: boolean;
 }
 
-export interface MultiTfDealingRangesOptions extends BaseDrOptions, DealingRangesStyle {
+export interface MultiTfDealingRangesOptions extends DealingRangesStyle {
+  readonly maxRanges: number;
+  readonly lookbackDays: number;
+  readonly fromDate: string;
+  readonly toDate: string;
+  readonly pivotLeft: number;
+  readonly pivotRight: number;
+  readonly extendBars: number;
+  readonly breakOnWick: boolean;
+  /**
+   * Drop HH↔LL legs smaller than this % of mid-price
+   * (filters micro noise so majors match hand-drawn DRs).
+   */
+  readonly minRangePct: number;
   /** Draw ranges on the chart’s own timeframe. */
   readonly showChartTf: boolean;
   readonly slots: readonly DrHtfSlot[];
@@ -66,22 +80,22 @@ export const DEFAULT_DR_HTF_SLOTS: readonly DrHtfSlot[] = [
 ];
 
 export const MULTI_TF_DR_DEFAULTS: MultiTfDealingRangesOptions = {
-  /** One clean range — avoids overlapping muddy fills. */
-  maxRanges: 1,
+  maxRanges: 2,
   lookbackDays: 90,
   fromDate: "",
   toDate: "",
-  /** Only 0 / 0.5 / 1 by default (OTE optional). */
   showFibs: false,
-  pivotLeft: 1,
-  pivotRight: 1,
+  /** Wider pivots = swings closer to hand-drawn majors. */
+  pivotLeft: 3,
+  pivotRight: 3,
   extendBars: 12,
   breakOnWick: false,
+  /** ~0.25% of mid — kills micro 5m noise on gold/FX. */
+  minRangePct: 0.25,
   showChartTf: true,
   slots: DEFAULT_DR_HTF_SLOTS,
   dailyOpenMode: "midnight",
   timezoneOffset: 0,
-  /** TradingView-style green / red halves. */
   discountColor: "#089981",
   premiumColor: "#F23645",
   midColor: "#D1D4DC",
@@ -89,7 +103,6 @@ export const MULTI_TF_DR_DEFAULTS: MultiTfDealingRangesOptions = {
   showMid: true,
   showZeroOne: true,
   zeroOneColor: "#9598A1",
-  /** Level tags on 0 / 0.5 / 1 only — no Premium/Discount pills. */
   showLabels: true,
   fib618Color: "#A5D6A7",
   fib786Color: "#4DD0E1",
@@ -145,6 +158,239 @@ function chartTfLabel(interval: string): string {
   return raw || "Chart";
 }
 
+function pivotHigh(bars: readonly OrcaBar[], i: number, left: number, right: number): number | null {
+  const pivotIdx = i - right;
+  if (pivotIdx < left || i >= bars.length) return null;
+  const h = bars[pivotIdx]!.high;
+  for (let j = pivotIdx - left; j <= pivotIdx + right; j += 1) {
+    if (j === pivotIdx) continue;
+    if (bars[j]!.high >= h) return null;
+  }
+  return h;
+}
+
+function pivotLow(bars: readonly OrcaBar[], i: number, left: number, right: number): number | null {
+  const pivotIdx = i - right;
+  if (pivotIdx < left || i >= bars.length) return null;
+  const l = bars[pivotIdx]!.low;
+  for (let j = pivotIdx - left; j <= pivotIdx + right; j += 1) {
+    if (j === pivotIdx) continue;
+    if (bars[j]!.low <= l) return null;
+  }
+  return l;
+}
+
+function rangeMeetsMinPct(topP: number, botP: number, minRangePct: number): boolean {
+  const rng = topP - botP;
+  if (!(rng > 0)) return false;
+  if (!(minRangePct > 0)) return true;
+  const mid = (topP + botP) / 2;
+  if (!(mid > 0)) return false;
+  return (rng / mid) * 100 >= minRangePct;
+}
+
+function parseDateStartSec(iso: string): number | null {
+  const t = iso.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
+  const ms = Date.parse(`${t}T00:00:00Z`);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+}
+
+function parseDateEndSec(iso: string): number | null {
+  const t = iso.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
+  const ms = Date.parse(`${t}T23:59:59Z`);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+}
+
+interface PendingLeg {
+  /** +1 = bullish (LL→HH); -1 = bearish (HH→LL). */
+  side: 1 | -1;
+  firstPrice: number;
+  firstBar: number;
+  secondPrice: number;
+  secondBar: number;
+}
+
+/**
+ * ICT dealing ranges confirmed by BOS after the second extreme.
+ * Returns chronological ConfirmedDealingRange (oldest → newest).
+ */
+export function computeIctConfirmedRanges(
+  bars: readonly OrcaBar[],
+  opts: Pick<
+    MultiTfDealingRangesOptions,
+    | "pivotLeft"
+    | "pivotRight"
+    | "breakOnWick"
+    | "minRangePct"
+    | "maxRanges"
+    | "fromDate"
+    | "toDate"
+    | "lookbackDays"
+  >,
+  nowSec = Math.floor(Date.now() / 1000),
+): ConfirmedDealingRange[] {
+  const left = Math.max(1, Math.floor(opts.pivotLeft));
+  const right = Math.max(1, Math.floor(opts.pivotRight));
+  if (bars.length < left + right + 5) return [];
+
+  const toSec = parseDateEndSec(opts.toDate) ?? nowSec;
+  const fromSec =
+    parseDateStartSec(opts.fromDate) ??
+    toSec - Math.max(1, opts.lookbackDays) * 86_400;
+  const minPct = Math.max(0, opts.minRangePct);
+
+  let anchorHigh: number | null = null;
+  let anchorHighBar: number | null = null;
+  let anchorLow: number | null = null;
+  let anchorLowBar: number | null = null;
+  let pending: PendingLeg | null = null;
+  const completed: ConfirmedDealingRange[] = [];
+
+  const confirmPending = (bosBar: number) => {
+    if (!pending) return;
+    if (bosBar <= pending.secondBar) return;
+    const topP = Math.max(pending.firstPrice, pending.secondPrice);
+    const botP = Math.min(pending.firstPrice, pending.secondPrice);
+    if (!rangeMeetsMinPct(topP, botP, minPct)) {
+      pending = null;
+      return;
+    }
+    const mid = (topP + botP) / 2;
+    const rng = topP - botP;
+    const earlierBar = Math.min(pending.firstBar, pending.secondBar);
+    const laterExtreme = Math.max(pending.firstBar, pending.secondBar);
+    const t0 = bars[earlierBar]!.time;
+    const t1 = bars[bosBar]!.time;
+    // Absolute ICT OTE (always measured from premium / high).
+    completed.push({
+      bullish: pending.side === 1,
+      name: pending.side === 1 ? "Bullish DR" : "Bearish DR",
+      top: topP,
+      bot: botP,
+      mid,
+      ote618: topP - rng * 0.618,
+      ote786: topP - rng * 0.786,
+      t0,
+      t1,
+      confirmBar: bosBar,
+    });
+    // Seed next leg from the second extreme (continuation structure).
+    if (pending.side === -1) {
+      anchorLow = pending.secondPrice;
+      anchorLowBar = pending.secondBar;
+      anchorHigh = null;
+      anchorHighBar = null;
+    } else {
+      anchorHigh = pending.secondPrice;
+      anchorHighBar = pending.secondBar;
+      anchorLow = null;
+      anchorLowBar = null;
+    }
+    pending = null;
+    void laterExtreme;
+  };
+
+  for (let i = 0; i < bars.length; i += 1) {
+    const bar = bars[i]!;
+    const ph = pivotHigh(bars, i, left, right);
+    const pl = pivotLow(bars, i, left, right);
+
+    if (ph != null) {
+      const shBar = i - right;
+      // While waiting for BOS on a bullish pending leg, raise the HH if price prints a higher one.
+      if (
+        pending != null &&
+        pending.side === 1 &&
+        shBar > pending.firstBar &&
+        ph > pending.secondPrice
+      ) {
+        pending.secondPrice = ph;
+        pending.secondBar = shBar;
+      } else if (pending == null) {
+        if (anchorHigh == null || ph >= anchorHigh) {
+          anchorHigh = ph;
+          anchorHighBar = shBar;
+        }
+        // Bullish candidate: LL → later HH.
+        if (
+          anchorLow != null &&
+          anchorLowBar != null &&
+          shBar > anchorLowBar &&
+          ph > anchorLow &&
+          rangeMeetsMinPct(ph, anchorLow, minPct)
+        ) {
+          pending = {
+            side: 1,
+            firstPrice: anchorLow,
+            firstBar: anchorLowBar,
+            secondPrice: ph,
+            secondBar: shBar,
+          };
+          anchorLow = null;
+          anchorLowBar = null;
+          anchorHigh = null;
+          anchorHighBar = null;
+        }
+      }
+    }
+
+    if (pl != null) {
+      const slBar = i - right;
+      if (
+        pending != null &&
+        pending.side === -1 &&
+        slBar > pending.firstBar &&
+        pl < pending.secondPrice
+      ) {
+        pending.secondPrice = pl;
+        pending.secondBar = slBar;
+      } else if (pending == null) {
+        if (anchorLow == null || pl <= anchorLow) {
+          anchorLow = pl;
+          anchorLowBar = slBar;
+        }
+        // Bearish candidate: HH → later LL.
+        if (
+          anchorHigh != null &&
+          anchorHighBar != null &&
+          slBar > anchorHighBar &&
+          pl < anchorHigh &&
+          rangeMeetsMinPct(anchorHigh, pl, minPct)
+        ) {
+          pending = {
+            side: -1,
+            firstPrice: anchorHigh,
+            firstBar: anchorHighBar,
+            secondPrice: pl,
+            secondBar: slBar,
+          };
+          anchorHigh = null;
+          anchorHighBar = null;
+          anchorLow = null;
+          anchorLowBar = null;
+        }
+      }
+    }
+
+    const useHigh = opts.breakOnWick ? bar.high : bar.close;
+    const useLow = opts.breakOnWick ? bar.low : bar.close;
+
+    if (pending && i > pending.secondBar) {
+      if (pending.side === -1 && useLow < pending.secondPrice) {
+        confirmPending(i);
+      } else if (pending.side === 1 && useHigh > pending.secondPrice) {
+        confirmPending(i);
+      }
+    }
+  }
+
+  const filtered = completed.filter((r) => r.t1 >= fromSec && r.t1 <= toSec);
+  const maxN = Math.max(1, Math.min(20, Math.floor(opts.maxRanges)));
+  return filtered.slice(-maxN);
+}
+
 /**
  * Paint one confirmed DR — professional ICT box:
  *   • 0 → 0.5 (bot → mid) = green
@@ -169,7 +415,6 @@ export function dealingRangeHalfCmds(
   const level = (n: string) => (style.showLabels ? (tf ? `${tf} ${n}` : n) : undefined);
   const cmds: DrawCmd[] = [];
 
-  // Two clean halves — no borders (borders stack into muddy bands).
   cmds.push({
     kind: "rect",
     t1: t0,
@@ -195,7 +440,6 @@ export function dealingRangeHalfCmds(
     style: "solid",
   });
 
-  // 1.0 (top)
   if (style.showZeroOne) {
     cmds.push({
       kind: "line",
@@ -210,7 +454,6 @@ export function dealingRangeHalfCmds(
     });
   }
 
-  // 0.5 (EQ) — always the focal line
   if (style.showMid) {
     cmds.push({
       kind: "line",
@@ -225,7 +468,6 @@ export function dealingRangeHalfCmds(
     });
   }
 
-  // 0 (bottom)
   if (style.showZeroOne) {
     cmds.push({
       kind: "line",
@@ -240,7 +482,6 @@ export function dealingRangeHalfCmds(
     });
   }
 
-  // Optional OTE — off by default; never the primary view.
   if (style.showFibs) {
     cmds.push({
       kind: "line",
@@ -269,32 +510,8 @@ export function dealingRangeHalfCmds(
   return cmds;
 }
 
-function baseOptsFrom(opts: MultiTfDealingRangesOptions): BaseDrOptions {
-  return {
-    maxRanges: opts.maxRanges,
-    lookbackDays: opts.lookbackDays,
-    fromDate: opts.fromDate,
-    toDate: opts.toDate,
-    showFibs: opts.showFibs,
-    pivotLeft: opts.pivotLeft,
-    pivotRight: opts.pivotRight,
-    extendBars: opts.extendBars,
-    breakOnWick: opts.breakOnWick,
-  };
-}
-
-function rangesForBars(
-  bars: readonly OrcaBar[],
-  opts: MultiTfDealingRangesOptions,
-): ConfirmedDealingRange[] {
-  if (bars.length < 20) return [];
-  const analysis = computeOrcaAnalysis(bars, dealingRangesInputs(baseOptsFrom(opts)));
-  const maxN = Math.max(1, Math.min(20, Math.floor(opts.maxRanges)));
-  return analysis.ranges.slice(-maxN);
-}
-
 /**
- * Detect Orca DRs on the chart TF and enabled higher TFs; paint ICT halves.
+ * Detect ICT DRs on the chart TF and enabled higher TFs; paint green/red halves.
  */
 export function computeMultiTfDealingRanges(
   chartBars: readonly OrcaBar[],
@@ -308,14 +525,13 @@ export function computeMultiTfDealingRanges(
 
   const pushRanges = (ranges: readonly ConfirmedDealingRange[], tfLabel: string) => {
     for (const dr of ranges) {
-      // Prefer stretching to the live edge; otherwise keep detector confirm end.
       const end = opts.extendToLast ? lastT : Math.max(dr.t1, dr.t0 + 1);
       cmds.push(...dealingRangeHalfCmds(dr, opts, { tEnd: end, tfLabel }));
     }
   };
 
   if (opts.showChartTf) {
-    pushRanges(rangesForBars(chartBars, opts), chartTfLabel(chartInterval));
+    pushRanges(computeIctConfirmedRanges(chartBars, opts), chartTfLabel(chartInterval));
   }
 
   const asHtf: HtfBar[] = chartBars.map((b) => ({
@@ -333,7 +549,6 @@ export function computeMultiTfDealingRanges(
   for (const slot of opts.slots) {
     if (!slot.enable) continue;
     const sec = htfSeconds(slot.htf);
-    // Only higher TFs — equal/lower would duplicate or invent bars.
     if (sec <= chartSec) continue;
     if (seen.has(sec)) continue;
     seen.add(sec);
@@ -353,13 +568,12 @@ export function computeMultiTfDealingRanges(
       close: b.close,
       volume: b.volume,
     }));
-    pushRanges(rangesForBars(orcaBars, opts), htfLabel(slot.htf));
+    pushRanges(computeIctConfirmedRanges(orcaBars, opts), htfLabel(slot.htf));
   }
 
   return cmds;
 }
 
-/** @deprecated Prefer computeMultiTfDealingRanges — kept for call-site clarity. */
 export function computeStyledDealingRanges(
   bars: readonly OrcaBar[],
   chartInterval: string,

@@ -16,8 +16,8 @@ import {
 import type { DailyOpenMode } from "@/features/htf-candles/runtime";
 
 export const DEALING_RANGES_STUDY_NAME = "Dealing Ranges";
-/** Bumped to -3 — clean 0/0.5/1 only, TV green/red halves, no OTE clutter. */
-export const DEALING_RANGES_STUDY_ID = "DealingRanges@tv-basicstudies-3";
+/** Bumped to -4 — ICT HH↔LL+BOS detector (correct majors). */
+export const DEALING_RANGES_STUDY_ID = "DealingRanges@tv-basicstudies-4";
 
 const HTF_OPTIONS: DrHtfPreset[] = ["5", "15", "30", "60", "240", "1D", "1W", "1M"];
 const DAILY_OPEN_OPTIONS: DailyOpenMode[] = ["midnight", "830", "930", "exchange"];
@@ -71,6 +71,7 @@ export const DEALING_RANGES_DEFAULTS = {
   pivotRight: MULTI_TF_DR_DEFAULTS.pivotRight,
   extendBars: MULTI_TF_DR_DEFAULTS.extendBars,
   breakOnWick: MULTI_TF_DR_DEFAULTS.breakOnWick,
+  minRangePct: MULTI_TF_DR_DEFAULTS.minRangePct,
   discountColor: MULTI_TF_DR_DEFAULTS.discountColor,
   premiumColor: MULTI_TF_DR_DEFAULTS.premiumColor,
   midColor: MULTI_TF_DR_DEFAULTS.midColor,
@@ -134,6 +135,7 @@ export function dealingRangesOptionsFromMap(map: Map<string, unknown>): MultiTfD
     pivotRight: Math.max(1, Math.min(10, Math.floor(num("pivotRight", d.pivotRight)))),
     extendBars: Math.max(1, Math.min(100, Math.floor(num("extendBars", d.extendBars)))),
     breakOnWick: bool("breakOnWick", d.breakOnWick),
+    minRangePct: Math.max(0, Math.min(5, num("minRangePct", d.minRangePct))),
     discountColor: str("discountColor", d.discountColor),
     premiumColor: str("premiumColor", d.premiumColor),
     midColor: str("midColor", d.midColor),
@@ -157,7 +159,7 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
       id: DEALING_RANGES_STUDY_ID as never,
       name: DEALING_RANGES_STUDY_NAME,
       description: DEALING_RANGES_STUDY_NAME,
-      shortDescription: "DR · 0 / 0.5 / 1 · green–red",
+      shortDescription: "ICT DR · HH↔LL+BOS · 0/0.5/1",
       isCustomIndicator: true,
       is_price_study: true,
       linkedToSeries: true,
@@ -287,9 +289,17 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
         },
         {
           id: "breakOnWick",
-          name: "Break on wick",
+          name: "BOS on wick (off = close)",
           defval: DEALING_RANGES_DEFAULTS.breakOnWick,
           type: "bool",
+        },
+        {
+          id: "minRangePct",
+          name: "Min range size (% of mid) — filter micro legs",
+          defval: DEALING_RANGES_DEFAULTS.minRangePct,
+          type: "float",
+          min: 0,
+          max: 5,
         },
         {
           id: "discountColor",
