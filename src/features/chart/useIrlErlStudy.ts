@@ -19,6 +19,8 @@ import {
   type IrlErlInputs,
 } from "@/features/irl-erl/runtime";
 import {
+  EQL_STYLE,
+  EQH_STYLE,
   ERL_STYLE_MINUS,
   ERL_STYLE_PLUS,
   IRL_ERL_STUDY_DEFAULTS,
@@ -146,6 +148,20 @@ export function useIrlErlStudy(enabled = true): void {
           linewidth: IRL_ERL_DEFAULTS.lineWidth,
           linestyle: IRL_ERL_DEFAULTS.irlLineStyle,
         });
+        const eqh = readStylePlot(api, EQH_STYLE, {
+          color: IRL_ERL_DEFAULTS.eqhColor,
+          visible: IRL_ERL_DEFAULTS.showEqh,
+          transparency: 0,
+          linewidth: IRL_ERL_DEFAULTS.lineWidth,
+          linestyle: IRL_ERL_DEFAULTS.irlLineStyle,
+        });
+        const eql = readStylePlot(api, EQL_STYLE, {
+          color: IRL_ERL_DEFAULTS.eqlColor,
+          visible: IRL_ERL_DEFAULTS.showEql,
+          transparency: 0,
+          linewidth: IRL_ERL_DEFAULTS.lineWidth,
+          linestyle: IRL_ERL_DEFAULTS.irlLineStyle,
+        });
         const erlPlus = readStylePlot(api, ERL_STYLE_PLUS, {
           color: IRL_ERL_DEFAULTS.erlPlusColor,
           visible: IRL_ERL_DEFAULTS.showErlPlus,
@@ -166,7 +182,14 @@ export function useIrlErlStudy(enabled = true): void {
           Math.min(
             4,
             Math.round(
-              Math.max(irlPlus.linewidth, irlMinus.linewidth, erlPlus.linewidth, erlMinus.linewidth),
+              Math.max(
+                irlPlus.linewidth,
+                irlMinus.linewidth,
+                eqh.linewidth,
+                eql.linewidth,
+                erlPlus.linewidth,
+                erlMinus.linewidth,
+              ),
             ),
           ),
         );
@@ -194,12 +217,13 @@ export function useIrlErlStudy(enabled = true): void {
           minRangePct: Math.max(0, Math.min(5, num("minRangePct", IRL_ERL_STUDY_DEFAULTS.minRangePct))),
           maxRanges: Math.max(
             1,
-            Math.min(20, Math.floor(num("maxRanges", IRL_ERL_STUDY_DEFAULTS.maxRanges))),
+            Math.min(6, Math.floor(num("maxRanges", IRL_ERL_STUDY_DEFAULTS.maxRanges))),
           ),
           lookbackDays: Math.max(
             1,
             Math.min(3650, Math.floor(num("lookbackDays", IRL_ERL_STUDY_DEFAULTS.lookbackDays))),
           ),
+          hideNested: bool("hideNested", IRL_ERL_STUDY_DEFAULTS.hideNested),
           eqTolerancePct: Math.max(
             0,
             Math.min(1, num("eqTolerancePct", IRL_ERL_STUDY_DEFAULTS.eqTolerancePct)),
@@ -208,8 +232,14 @@ export function useIrlErlStudy(enabled = true): void {
             "includeSingleSwings",
             IRL_ERL_STUDY_DEFAULTS.includeSingleSwings,
           ),
+          edgeMarginPct: Math.max(
+            0,
+            Math.min(40, num("edgeMarginPct", IRL_ERL_STUDY_DEFAULTS.edgeMarginPct)),
+          ),
           showIrlPlus: irlPlus.visible,
           showIrlMinus: irlMinus.visible,
+          showEqh: eqh.visible,
+          showEql: eql.visible,
           showErlPlus: erlPlus.visible,
           showErlMinus: erlMinus.visible,
           showLines: bool("showLines", IRL_ERL_STUDY_DEFAULTS.showLines),
@@ -217,19 +247,23 @@ export function useIrlErlStudy(enabled = true): void {
           extendToLast: bool("extendToLast", IRL_ERL_STUDY_DEFAULTS.extendToLast),
           irlPlusLabel: str("irlPlusLabel", IRL_ERL_STUDY_DEFAULTS.irlPlusLabel).slice(0, 12),
           irlMinusLabel: str("irlMinusLabel", IRL_ERL_STUDY_DEFAULTS.irlMinusLabel).slice(0, 12),
+          eqhLabel: str("eqhLabel", IRL_ERL_STUDY_DEFAULTS.eqhLabel).slice(0, 12),
+          eqlLabel: str("eqlLabel", IRL_ERL_STUDY_DEFAULTS.eqlLabel).slice(0, 12),
           erlPlusLabel: str("erlPlusLabel", IRL_ERL_STUDY_DEFAULTS.erlPlusLabel).slice(0, 12),
           erlMinusLabel: str("erlMinusLabel", IRL_ERL_STUDY_DEFAULTS.erlMinusLabel).slice(0, 12),
           irlPlusColor: applyTransparency(irlPlus.color, irlPlus.transparency),
           irlMinusColor: applyTransparency(irlMinus.color, irlMinus.transparency),
+          eqhColor: applyTransparency(eqh.color, eqh.transparency),
+          eqlColor: applyTransparency(eql.color, eql.transparency),
           erlPlusColor: applyTransparency(erlPlus.color, erlPlus.transparency),
           erlMinusColor: applyTransparency(erlMinus.color, erlMinus.transparency),
           lineWidth,
-          irlLineStyle: irlPlus.linestyle ?? irlLineStyleInput,
+          irlLineStyle: eqh.linestyle ?? irlPlus.linestyle ?? irlLineStyleInput,
           erlLineStyle: erlPlus.linestyle ?? erlLineStyleInput,
           fontSize,
           maxEvents: Math.max(
-            10,
-            Math.min(400, Math.floor(num("maxEvents", IRL_ERL_STUDY_DEFAULTS.maxEvents))),
+            4,
+            Math.min(80, Math.floor(num("maxEvents", IRL_ERL_STUDY_DEFAULTS.maxEvents))),
           ),
         };
       } catch {

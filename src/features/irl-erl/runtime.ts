@@ -1,14 +1,9 @@
 /**
- * IRL / ERL — Internal & External Range Liquidity (ICT).
+ * IRL / ERL — Internal & External Range Liquidity (Trading Handbook pt.3).
  *
- * Built on the same dealing-range legs as Dealing Ranges:
- *   rejected High → major Low (bearish DR) or Low → High (bullish DR).
- *
- * ERL — liquidity resting *outside* the range (stops beyond the extremes):
- *   ERL+ at range high (buy-side) · ERL− at range low (sell-side).
- *
- * IRL — liquidity resting *inside* the range (EQH / EQL clusters):
- *   IRL+ equal highs · IRL− equal lows, strictly between top and bot.
+ * ERL = outer edges of the chosen dealing range (H / L).
+ * IRL = levels inside that range; EQH/EQL = equal highs/lows (lesson 3.3).
+ * Nested micro-ranges are dropped so only the main DR drives ERL.
  */
 
 import type { EntityId, IChartWidgetApi } from "@/infrastructure/tradingview";
@@ -16,7 +11,7 @@ import {
   computeIctConfirmedRanges,
   MULTI_TF_DR_DEFAULTS,
 } from "@/features/dealing-ranges/runtime";
-import type { OrcaBar } from "@/features/pine/orca-runtime";
+import type { ConfirmedDealingRange, OrcaBar } from "@/features/pine/orca-runtime";
 import {
   DEFAULT_STRUCTURE_SCALES,
   resolveStructureScales,
@@ -25,7 +20,7 @@ import {
   scaleStrength,
 } from "@/features/chart/structure-scales";
 
-export type IrlErlKind = "IRL+" | "IRL-" | "ERL+" | "ERL-";
+export type IrlErlKind = "IRL+" | "IRL-" | "EQH" | "EQL" | "ERL+" | "ERL-";
 
 export interface IrlErlInputs {
   readonly leftBars: number;
@@ -35,12 +30,18 @@ export interface IrlErlInputs {
   readonly minRangePct: number;
   readonly maxRanges: number;
   readonly lookbackDays: number;
-  /** Max absolute % of mid-price for two pivots to count as equal. */
+  /** Drop DRs nested inside a larger one (keep the main / bigger range). */
+  readonly hideNested: boolean;
+  /** Max % of mid for two pivots to count as equal (EQH/EQL). */
   readonly eqTolerancePct: number;
   /** Also mark lone internal swings (not only EQH/EQL). */
   readonly includeSingleSwings: boolean;
+  /** Ignore internal pivots within this fraction of range height from ERL edges. */
+  readonly edgeMarginPct: number;
   readonly showIrlPlus: boolean;
   readonly showIrlMinus: boolean;
+  readonly showEqh: boolean;
+  readonly showEql: boolean;
   readonly showErlPlus: boolean;
   readonly showErlMinus: boolean;
   readonly showLines: boolean;
@@ -48,10 +49,14 @@ export interface IrlErlInputs {
   readonly extendToLast: boolean;
   readonly irlPlusLabel: string;
   readonly irlMinusLabel: string;
+  readonly eqhLabel: string;
+  readonly eqlLabel: string;
   readonly erlPlusLabel: string;
   readonly erlMinusLabel: string;
   readonly irlPlusColor: string;
   readonly irlMinusColor: string;
+  readonly eqhColor: string;
+  readonly eqlColor: string;
   readonly erlPlusColor: string;
   readonly erlMinusColor: string;
   readonly lineWidth: number;
@@ -67,12 +72,22 @@ export const IRL_ERL_DEFAULTS: IrlErlInputs = {
   smartScales: true,
   scalesText: DEFAULT_STRUCTURE_SCALES.join(","),
   minRangePct: MULTI_TF_DR_DEFAULTS.minRangePct,
-  maxRanges: 6,
+  /**
+   * Handbook: one active dealing range → one ERL+/ERL- pair.
+   * Raise only if you want historical prior ranges as well.
+   */
+  maxRanges: 1,
   lookbackDays: 90,
-  eqTolerancePct: 0.05,
-  includeSingleSwings: false,
+  hideNested: true,
+  /** ~0.2% of mid — real EQH/EQL on FX/gold; 0.05 was too tight → no IRL. */
+  eqTolerancePct: 0.2,
+  includeSingleSwings: true,
+  /** Soft band near ERL edges; 8% was wiping most internal swings. */
+  edgeMarginPct: 2,
   showIrlPlus: true,
   showIrlMinus: true,
+  showEqh: true,
+  showEql: true,
   showErlPlus: true,
   showErlMinus: true,
   showLines: true,
@@ -80,17 +95,21 @@ export const IRL_ERL_DEFAULTS: IrlErlInputs = {
   extendToLast: true,
   irlPlusLabel: "IRL+",
   irlMinusLabel: "IRL-",
+  eqhLabel: "EQH",
+  eqlLabel: "EQL",
   erlPlusLabel: "ERL+",
   erlMinusLabel: "ERL-",
   irlPlusColor: "#26A69A",
   irlMinusColor: "#AB47BC",
+  eqhColor: "#00897B",
+  eqlColor: "#8E24AA",
   erlPlusColor: "#42A5F5",
   erlMinusColor: "#EF5350",
   lineWidth: 1,
   irlLineStyle: 2,
   erlLineStyle: 0,
   fontSize: 12,
-  maxEvents: 160,
+  maxEvents: 40,
 };
 
 export interface IrlErlLevel {
@@ -189,15 +208,75 @@ function nearlyEqual(a: number, b: number, mid: number, tolPct: number): boolean
   return (Math.abs(a - b) / mid) * 100 <= Math.max(0, tolPct);
 }
 
+/**
+ * Prefer larger outer ranges.
+ * Drop fully nested micro-ranges and near-nested ones whose height is
+ * < 60% of an outer that already contains their mid (handbook: micro
+ * edges are IRL of the main DR, not another ERL).
+ */
+function filterNestedRanges(
+  ranges: readonly ConfirmedDealingRange[],
+  hideNested: boolean,
+  tEnd?: number,
+): ConfirmedDealingRange[] {
+  if (!hideNested || ranges.length <= 1) return [...ranges];
+  const scored = ranges
+    .map((r) => {
+      const height = Math.max(0, r.top - r.bot);
+      const end = Math.max(r.t1, tEnd ?? r.t1, r.t0 + 1);
+      return { r, height, area: height * Math.max(1, end - r.t0) };
+    })
+    .sort((a, b) => b.area - a.area || b.height - a.height);
+
+  const kept: Array<{ r: ConfirmedDealingRange; height: number }> = [];
+  for (const cand of scored) {
+    const nested = kept.some((outer) => {
+      const outerH = outer.height;
+      if (!(outerH > 0)) return false;
+      const outerEnd = Math.max(outer.r.t1, tEnd ?? outer.r.t1, outer.r.t0 + 1);
+      const timeOverlap =
+        cand.r.t0 >= outer.r.t0 - 1 && cand.r.t0 <= outerEnd + 1;
+      if (!timeOverlap) return false;
+      const fullContain =
+        cand.r.top <= outer.r.top + outerH * 0.001 &&
+        cand.r.bot >= outer.r.bot - outerH * 0.001;
+      if (fullContain && cand.height < outerH * 0.98) return true;
+      const mid = (cand.r.top + cand.r.bot) / 2;
+      const midInside = mid <= outer.r.top && mid >= outer.r.bot;
+      return midInside && cand.height < outerH * 0.6;
+    });
+    if (!nested) kept.push({ r: cand.r, height: cand.height });
+  }
+  return kept.map((k) => k.r).sort((a, b) => a.t1 - b.t1);
+}
+
+/** Handbook “active” DR: largest that still contains last close (else latest major). */
+function pickActiveRanges(
+  ranges: readonly ConfirmedDealingRange[],
+  lastClose: number,
+  maxN: number,
+): ConfirmedDealingRange[] {
+  if (ranges.length === 0) return [];
+  const byHeight = (xs: readonly ConfirmedDealingRange[]) =>
+    [...xs].sort(
+      (a, b) => b.top - b.bot - (a.top - a.bot) || b.t1 - a.t1,
+    );
+  const containing = ranges.filter(
+    (r) => lastClose <= r.top && lastClose >= r.bot,
+  );
+  const pool = containing.length > 0 ? containing : ranges;
+  return byHeight(pool).slice(0, Math.max(1, Math.min(4, maxN)));
+}
+
 function findEqualClusters(
   pivots: readonly Pivot[],
   side: "high" | "low",
   mid: number,
   tolPct: number,
-): Array<{ price: number; t1: number; firstIndex: number }> {
+): Array<{ price: number; t1: number }> {
   const filtered = pivots.filter((p) => p.kind === side);
   const used = new Set<number>();
-  const clusters: Array<{ price: number; t1: number; firstIndex: number }> = [];
+  const clusters: Array<{ price: number; t1: number }> = [];
   for (let i = 0; i < filtered.length; i += 1) {
     if (used.has(i)) continue;
     const a = filtered[i]!;
@@ -217,7 +296,7 @@ function findEqualClusters(
         ? Math.max(...members.map((m) => m.price))
         : Math.min(...members.map((m) => m.price));
     const first = members.reduce((best, m) => (m.index < best.index ? m : best), members[0]!);
-    clusters.push({ price, t1: first.time, firstIndex: first.index });
+    clusters.push({ price, t1: first.time });
   }
   return clusters;
 }
@@ -229,9 +308,43 @@ function barIndexAtOrAfter(bars: readonly OrcaBar[], t: number): number {
   return bars.length - 1;
 }
 
+/** Merge levels at the same kind + nearly-same price into one segment. */
+function dedupeLevels(
+  levels: readonly IrlErlLevel[],
+  midHint: number,
+  tolPct: number,
+): IrlErlLevel[] {
+  const out: IrlErlLevel[] = [];
+  for (const lv of levels) {
+    const mid = midHint > 0 ? midHint : lv.price;
+    const hit = out.findIndex(
+      (x) => x.kind === lv.kind && nearlyEqual(x.price, lv.price, mid, Math.max(tolPct, 0.05)),
+    );
+    if (hit < 0) {
+      out.push(lv);
+      continue;
+    }
+    const prev = out[hit]!;
+    out[hit] = {
+      kind: prev.kind,
+      t1: Math.min(prev.t1, lv.t1),
+      t2: Math.max(prev.t2, lv.t2),
+      price:
+        lv.kind === "ERL+" || lv.kind === "IRL+" || lv.kind === "EQH"
+          ? Math.max(prev.price, lv.price)
+          : Math.min(prev.price, lv.price),
+      scale: Math.max(prev.scale, lv.scale),
+    };
+  }
+  return out.sort((a, b) => a.t1 - b.t1 || a.price - b.price);
+}
+
 /**
- * Detect IRL / ERL levels from chart bars.
- * ERL from dealing-range extremes; IRL from EQH/EQL (and optional singles) inside each DR.
+ * Detect IRL / ERL from chart bars (Trading Handbook pt.3).
+ *
+ * Active dealing range → ERL at outer H/L.
+ * Internal pivots BETWEEN the two extremes (and while price stays in-box)
+ * → EQH/EQL + IRL+/IRL-.
  */
 export function detectIrlErl(
   bars: readonly OrcaBar[],
@@ -239,12 +352,15 @@ export function detectIrlErl(
 ): IrlErlLevel[] {
   if (bars.length < 20) return [];
   const lastTime = bars[bars.length - 1]!.time;
-  const ranges = computeIctConfirmedRanges(bars, {
+  const lastClose = bars[bars.length - 1]!.close;
+
+  // Pull extra candidates then nest-filter + pick the active main range(s).
+  const raw = computeIctConfirmedRanges(bars, {
     pivotLeft: inputs.leftBars,
     pivotRight: inputs.rightBars,
     breakOnWick: false,
     minRangePct: inputs.minRangePct,
-    maxRanges: inputs.maxRanges,
+    maxRanges: Math.max(inputs.maxRanges * 4, 12),
     fromDate: "",
     toDate: "",
     lookbackDays: inputs.lookbackDays,
@@ -252,6 +368,18 @@ export function detectIrlErl(
     smartScales: inputs.smartScales,
     scalesText: inputs.scalesText,
   });
+  if (raw.length === 0) return [];
+
+  const nestFiltered = filterNestedRanges(
+    raw,
+    inputs.hideNested !== false,
+    lastTime,
+  );
+  const ranges = pickActiveRanges(
+    nestFiltered,
+    lastClose,
+    Math.max(1, Math.min(4, inputs.maxRanges)),
+  );
   if (ranges.length === 0) return [];
 
   const scales = resolveStructureScales({
@@ -259,25 +387,37 @@ export function detectIrlErl(
     scalesText: inputs.scalesText,
     single: Math.max(inputs.leftBars, inputs.rightBars),
   });
-  // Internal pivots: prefer a slightly tighter scale so EQH/EQL form inside majors.
-  const irlScale = Math.max(2, Math.min(...scales, Math.max(inputs.leftBars, inputs.rightBars)));
+  // Tighter pivot for internal liquidity than the DR legs.
+  const irlScale = Math.max(
+    2,
+    Math.min(
+      Math.min(...scales),
+      Math.max(2, Math.floor(Math.max(inputs.leftBars, inputs.rightBars) / 2)),
+    ),
+  );
   const pivots = collectPivots(bars, irlScale, irlScale);
 
   const levels: IrlErlLevel[] = [];
-  const tEndDefault = lastTime;
+  let midHint = 0;
 
   for (const dr of ranges) {
-    const tEnd = inputs.extendToLast ? Math.max(tEndDefault, dr.t1) : dr.t1;
+    const tEnd = inputs.extendToLast ? Math.max(lastTime, dr.t1) : dr.t1;
     const mid = dr.mid > 0 ? dr.mid : (dr.top + dr.bot) / 2;
+    midHint = mid;
+    const height = Math.max(0, dr.top - dr.bot);
+    const margin =
+      height * (Math.max(0, Math.min(40, inputs.edgeMarginPct)) / 100);
     const startIdx = barIndexAtOrAfter(bars, dr.t0);
-    const endIdx = barIndexAtOrAfter(bars, tEnd);
-    const inside = pivots.filter(
-      (p) =>
-        p.index >= startIdx &&
-        p.index <= endIdx &&
-        p.price < dr.top &&
-        p.price > dr.bot,
-    );
+    const secondIdx = barIndexAtOrAfter(bars, dr.t1);
+
+    // Extend the internal window while price still interacts with the box.
+    let endIdx = secondIdx;
+    for (let i = secondIdx; i < bars.length; i += 1) {
+      const b = bars[i]!;
+      if (b.low <= dr.top && b.high >= dr.bot) endIdx = i;
+      else if (!inputs.extendToLast) break;
+    }
+    if (inputs.extendToLast) endIdx = Math.max(endIdx, bars.length - 1);
 
     if (inputs.showErlPlus) {
       levels.push({
@@ -285,7 +425,7 @@ export function detectIrlErl(
         t1: dr.t0,
         t2: tEnd,
         price: dr.top,
-        scale: irlScale,
+        scale: Math.max(...scales),
       });
     }
     if (inputs.showErlMinus) {
@@ -294,83 +434,122 @@ export function detectIrlErl(
         t1: dr.t0,
         t2: tEnd,
         price: dr.bot,
-        scale: irlScale,
+        scale: Math.max(...scales),
       });
     }
 
-    if (inputs.showIrlPlus || inputs.showIrlMinus) {
-      const eqHighs = findEqualClusters(inside, "high", mid, inputs.eqTolerancePct);
-      const eqLows = findEqualClusters(inside, "low", mid, inputs.eqTolerancePct);
+    const wantInternal =
+      inputs.showEqh ||
+      inputs.showEql ||
+      inputs.showIrlPlus ||
+      inputs.showIrlMinus;
+    if (!wantInternal || !(height > 0)) continue;
 
+    // Handbook: internal swings form BETWEEN the two extremes (t0…t1),
+    // not only after confirmation. Also keep post-confirm pullbacks in-box.
+    const inside = pivots.filter((p) => {
+      if (p.index <= startIdx || p.index >= endIdx) return false;
+      if (p.price > dr.top - margin || p.price < dr.bot + margin) return false;
+      // Drop the DR legs themselves (those are ERL).
+      if (nearlyEqual(p.price, dr.top, mid, inputs.eqTolerancePct)) return false;
+      if (nearlyEqual(p.price, dr.bot, mid, inputs.eqTolerancePct)) return false;
+      return true;
+    });
+
+    const eqHighs = findEqualClusters(
+      inside,
+      "high",
+      mid,
+      inputs.eqTolerancePct,
+    );
+    const eqLows = findEqualClusters(
+      inside,
+      "low",
+      mid,
+      inputs.eqTolerancePct,
+    );
+    const eqHighSet = eqHighs.map((c) => c.price);
+    const eqLowSet = eqLows.map((c) => c.price);
+
+    // Handbook lesson 3.3 — equal highs/lows are first-class internal liquidity.
+    if (inputs.showEqh) {
+      for (const c of eqHighs) {
+        levels.push({
+          kind: "EQH",
+          t1: c.t1,
+          t2: tEnd,
+          price: c.price,
+          scale: irlScale,
+        });
+      }
+    }
+    if (inputs.showEql) {
+      for (const c of eqLows) {
+        levels.push({
+          kind: "EQL",
+          t1: c.t1,
+          t2: tEnd,
+          price: c.price,
+          scale: irlScale,
+        });
+      }
+    }
+
+    if (inputs.includeSingleSwings) {
+      // Strongest remaining internal swings (not already EQH/EQL).
+      const highs = inside
+        .filter((p) => p.kind === "high")
+        .filter(
+          (p) =>
+            !eqHighSet.some((px) =>
+              nearlyEqual(px, p.price, mid, inputs.eqTolerancePct),
+            ),
+        )
+        .sort((a, b) => b.price - a.price)
+        .slice(0, 3);
+      const lows = inside
+        .filter((p) => p.kind === "low")
+        .filter(
+          (p) =>
+            !eqLowSet.some((px) =>
+              nearlyEqual(px, p.price, mid, inputs.eqTolerancePct),
+            ),
+        )
+        .sort((a, b) => a.price - b.price)
+        .slice(0, 3);
       if (inputs.showIrlPlus) {
-        for (const c of eqHighs) {
+        for (const p of highs) {
           levels.push({
             kind: "IRL+",
-            t1: c.t1,
+            t1: p.time,
             t2: tEnd,
-            price: c.price,
+            price: p.price,
             scale: irlScale,
           });
         }
       }
       if (inputs.showIrlMinus) {
-        for (const c of eqLows) {
+        for (const p of lows) {
           levels.push({
             kind: "IRL-",
-            t1: c.t1,
+            t1: p.time,
             t2: tEnd,
-            price: c.price,
+            price: p.price,
             scale: irlScale,
           });
-        }
-      }
-
-      if (inputs.includeSingleSwings) {
-        const eqHighPrices = new Set(eqHighs.map((c) => c.price));
-        const eqLowPrices = new Set(eqLows.map((c) => c.price));
-        for (const p of inside) {
-          if (p.kind === "high" && inputs.showIrlPlus) {
-            if ([...eqHighPrices].some((px) => nearlyEqual(px, p.price, mid, inputs.eqTolerancePct))) {
-              continue;
-            }
-            levels.push({
-              kind: "IRL+",
-              t1: p.time,
-              t2: tEnd,
-              price: p.price,
-              scale: irlScale,
-            });
-          }
-          if (p.kind === "low" && inputs.showIrlMinus) {
-            if ([...eqLowPrices].some((px) => nearlyEqual(px, p.price, mid, inputs.eqTolerancePct))) {
-              continue;
-            }
-            levels.push({
-              kind: "IRL-",
-              t1: p.time,
-              t2: tEnd,
-              price: p.price,
-              scale: irlScale,
-            });
-          }
         }
       }
     }
   }
 
-  // Dedupe near-identical levels (same kind + coarse price + start).
-  const byKey = new Map<string, IrlErlLevel>();
-  for (const lv of levels) {
-    const key = `${lv.kind}|${Math.round(lv.price * 1e5) / 1e5}|${lv.t1}`;
-    const prev = byKey.get(key);
-    if (!prev || lv.t2 > prev.t2) byKey.set(key, lv);
-  }
-  return [...byKey.values()].sort((a, b) => a.t1 - b.t1 || a.price - b.price);
+  return dedupeLevels(levels, midHint, inputs.eqTolerancePct);
 }
 
 function kindEnabled(kind: IrlErlKind, inputs: IrlErlInputs): boolean {
   if (kind === "IRL+") return inputs.showIrlPlus;
   if (kind === "IRL-") return inputs.showIrlMinus;
+  if (kind === "EQH") return inputs.showEqh;
+  if (kind === "EQL") return inputs.showEql;
   if (kind === "ERL+") return inputs.showErlPlus;
   return inputs.showErlMinus;
 }
@@ -378,6 +557,8 @@ function kindEnabled(kind: IrlErlKind, inputs: IrlErlInputs): boolean {
 function kindColor(kind: IrlErlKind, inputs: IrlErlInputs): string {
   if (kind === "IRL+") return inputs.irlPlusColor;
   if (kind === "IRL-") return inputs.irlMinusColor;
+  if (kind === "EQH") return inputs.eqhColor;
+  if (kind === "EQL") return inputs.eqlColor;
   if (kind === "ERL+") return inputs.erlPlusColor;
   return inputs.erlMinusColor;
 }
@@ -385,12 +566,15 @@ function kindColor(kind: IrlErlKind, inputs: IrlErlInputs): string {
 function kindLabel(kind: IrlErlKind, inputs: IrlErlInputs): string {
   if (kind === "IRL+") return inputs.irlPlusLabel || "IRL+";
   if (kind === "IRL-") return inputs.irlMinusLabel || "IRL-";
+  if (kind === "EQH") return inputs.eqhLabel || "EQH";
+  if (kind === "EQL") return inputs.eqlLabel || "EQL";
   if (kind === "ERL+") return inputs.erlPlusLabel || "ERL+";
   return inputs.erlMinusLabel || "ERL-";
 }
 
 function kindLineStyle(kind: IrlErlKind, inputs: IrlErlInputs): number {
-  return kind.startsWith("IRL") ? inputs.irlLineStyle : inputs.erlLineStyle;
+  if (kind.startsWith("ERL")) return inputs.erlLineStyle;
+  return inputs.irlLineStyle;
 }
 
 export function irlErlDrawCmds(
@@ -426,7 +610,7 @@ export function irlErlDrawCmds(
     });
   }
 
-  const cap = Math.max(10, Math.min(500, Math.floor(inputs.maxEvents)));
+  const cap = Math.max(4, Math.min(80, Math.floor(inputs.maxEvents)));
   return cmds.length > cap ? cmds.slice(-cap) : cmds;
 }
 
@@ -476,7 +660,8 @@ export async function paintIrlErl(
             textcolor: cmd.color,
             fontsize: cmd.fontSize,
             bold: true,
-            horzLabelsAlign: "center",
+            // One label at the right end — avoids “ERL+ ERL+ ERL+” along the line.
+            horzLabelsAlign: "right",
             vertLabelsAlign: "middle",
             showPrice: false,
             extendLeft: false,
