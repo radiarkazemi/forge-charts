@@ -785,10 +785,19 @@ export class ChartController {
   /** Open Charting Library’s native insert-indicator dialog. */
   openNativeIndicators(): void {
     try {
-      this.activeChart()?.executeActionById("insertIndicator");
+      // Bypass Forge intercept for this open (see indicators-intercept.ts).
+      void import("./indicators-intercept").then((m) => m.allowNativeIndicatorsOnce());
     } catch {
-      /* chart not ready */
+      /* ignore */
     }
+    // Small delay so the allow flag is set before the patched action runs.
+    window.setTimeout(() => {
+      try {
+        this.activeChart()?.executeActionById("insertIndicator");
+      } catch {
+        /* chart not ready */
+      }
+    }, 30);
   }
 
   /**

@@ -246,7 +246,7 @@ export function IndicatorsDialog({ open, onClose }: IndicatorsDialogProps) {
       } catch {
         /* ignore */
       }
-    }, 80);
+    }, 100);
   };
 
   const bg = dark ? "#1e222d" : "#ffffff";
@@ -267,6 +267,7 @@ export function IndicatorsDialog({ open, onClose }: IndicatorsDialogProps) {
       fullWidth
       maxWidth="md"
       dir={rtl ? "rtl" : "ltr"}
+      sx={{ zIndex: 20000 }}
       slotProps={{
         paper: {
           sx: {
@@ -281,6 +282,7 @@ export function IndicatorsDialog({ open, onClose }: IndicatorsDialogProps) {
             maxWidth: "860px",
             display: "flex",
             flexDirection: "column",
+            zIndex: 20001,
           },
         },
       }}
