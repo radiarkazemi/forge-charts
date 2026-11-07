@@ -47,6 +47,10 @@ export interface DealingRangesStyle {
   readonly premiumColor: string;
   readonly midColor: string;
   readonly midWidth: number;
+  /** Style-tab visibility for the red premium half. */
+  readonly showPremium: boolean;
+  /** Style-tab visibility for the green discount half. */
+  readonly showDiscount: boolean;
   readonly showMid: boolean;
   readonly showZeroOne: boolean;
   readonly zeroOneColor: string;
@@ -128,6 +132,8 @@ export const MULTI_TF_DR_DEFAULTS: MultiTfDealingRangesOptions = {
   premiumColor: "#F23645",
   midColor: "#D1D4DC",
   midWidth: 1,
+  showPremium: true,
+  showDiscount: true,
   showMid: true,
   showZeroOne: true,
   zeroOneColor: "#9598A1",
@@ -568,30 +574,34 @@ export function dealingRangeHalfCmds(
   const level = (n: string) => (style.showLabels ? (tf ? `${tf} ${n}` : n) : undefined);
   const cmds: DrawCmd[] = [];
 
-  cmds.push({
-    kind: "rect",
-    t1: t0,
-    p1: dr.top,
-    t2,
-    p2: dr.mid,
-    color: premium,
-    fill: premium,
-    fillAlpha: alpha,
-    borderWidth: 0,
-    style: "solid",
-  });
-  cmds.push({
-    kind: "rect",
-    t1: t0,
-    p1: dr.mid,
-    t2,
-    p2: dr.bot,
-    color: discount,
-    fill: discount,
-    fillAlpha: alpha,
-    borderWidth: 0,
-    style: "solid",
-  });
+  if (style.showPremium !== false) {
+    cmds.push({
+      kind: "rect",
+      t1: t0,
+      p1: dr.top,
+      t2,
+      p2: dr.mid,
+      color: premium,
+      fill: premium,
+      fillAlpha: alpha,
+      borderWidth: 0,
+      style: "solid",
+    });
+  }
+  if (style.showDiscount !== false) {
+    cmds.push({
+      kind: "rect",
+      t1: t0,
+      p1: dr.mid,
+      t2,
+      p2: dr.bot,
+      color: discount,
+      fill: discount,
+      fillAlpha: alpha,
+      borderWidth: 0,
+      style: "solid",
+    });
+  }
 
   if (style.showZeroOne) {
     cmds.push({

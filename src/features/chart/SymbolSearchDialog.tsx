@@ -287,10 +287,12 @@ export function SymbolSearchDialog({ open, onClose }: SymbolSearchDialogProps) {
           px: 2,
           pb: 0.5,
           display: "flex",
+          flexWrap: "wrap",
           gap: 0.75,
-          overflowX: "auto",
-          scrollbarWidth: "none",
-          "&::-webkit-scrollbar": { display: "none" },
+          rowGap: 0.75,
+          // Keep category chips clear of the count row below.
+          position: "relative",
+          zIndex: 1,
         }}
       >
         {chips.map((id) => {
@@ -321,7 +323,17 @@ export function SymbolSearchDialog({ open, onClose }: SymbolSearchDialogProps) {
         })}
       </Box>
 
-      <Typography sx={{ px: 2, py: 0.75, color: muted, fontSize: 12 }}>
+      <Typography
+        sx={{
+          px: 2,
+          pt: 0.85,
+          pb: 0.65,
+          color: muted,
+          fontSize: 12,
+          flexShrink: 0,
+          lineHeight: 1.3,
+        }}
+      >
         {COUNT[language](filtered.length)}
       </Typography>
 
@@ -363,24 +375,48 @@ export function SymbolSearchDialog({ open, onClose }: SymbolSearchDialogProps) {
               >
                 {av.text}
               </Avatar>
-              <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Box sx={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
                 <Typography sx={{ color: titleBlue, fontWeight: 700, fontSize: 14.5 }} noWrap>
                   {title}
                 </Typography>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, mt: 0.2, minWidth: 0 }}>
-                  <Typography sx={{ color: muted, fontSize: 12 }} noWrap>
+                <Box
+                  sx={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 0.85,
+                    mt: 0.25,
+                    minWidth: 0,
+                    width: "100%",
+                  }}
+                >
+                  <Typography
+                    sx={{
+                      color: muted,
+                      fontSize: 12,
+                      flex: "1 1 auto",
+                      minWidth: 0,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
                     {sub}
                   </Typography>
                   <Box
                     component="span"
                     sx={{
-                      flexShrink: 0,
+                      flex: "0 0 auto",
                       border: `1px solid ${border}`,
                       borderRadius: "4px",
-                      px: 0.6,
-                      py: 0.05,
+                      px: 0.7,
+                      py: 0.1,
                       fontSize: 10.5,
                       color: muted,
+                      lineHeight: 1.35,
+                      whiteSpace: "nowrap",
+                      maxWidth: "46%",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
                     }}
                   >
                     {categoryLabel(language, s)}

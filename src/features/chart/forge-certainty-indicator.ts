@@ -1,13 +1,22 @@
 /**
  * Charting Library custom study: “Forge Certainty”.
  * Inert plot — strict SI+DR signals painted by `useForgeCertaintyStudy`.
+ * Colors / visibility live in the Style tab (native palette).
  */
 
 import type { CustomIndicator } from "@/infrastructure/tradingview";
 import { CERTAINTY_DEFAULTS } from "@/features/certainty/runtime";
+import { buildStylePlots, stylePlotNaNs } from "./study-style-plots";
 
 export const CERTAINTY_STUDY_NAME = "Forge Certainty";
-export const CERTAINTY_STUDY_ID = "ForgeCertainty@tv-basicstudies-1";
+/** Bumped to -2 — Style-tab color palettes (no hex Inputs). */
+export const CERTAINTY_STUDY_ID = "ForgeCertainty@tv-basicstudies-2";
+
+export const CERT_STYLE_BULL = "plot_bull";
+export const CERT_STYLE_BEAR = "plot_bear";
+export const CERT_STYLE_ACCENT = "plot_accent";
+export const CERT_STYLE_TP = "plot_tp";
+export const CERT_STYLE_SL = "plot_sl";
 
 export const CERTAINTY_STUDY_DEFAULTS = {
   biasMode: CERTAINTY_DEFAULTS.biasMode,
@@ -29,13 +38,57 @@ export const CERTAINTY_STUDY_DEFAULTS = {
   showHistory: CERTAINTY_DEFAULTS.showHistory,
   showScore: CERTAINTY_DEFAULTS.showScore,
   historyLimit: CERTAINTY_DEFAULTS.historyLimit,
-  bullColor: CERTAINTY_DEFAULTS.bullColor,
-  bearColor: CERTAINTY_DEFAULTS.bearColor,
-  accentColor: CERTAINTY_DEFAULTS.accentColor,
-  longBoxColor: CERTAINTY_DEFAULTS.longBoxColor,
-  shortBoxColor: CERTAINTY_DEFAULTS.shortBoxColor,
-  boxOpacity: CERTAINTY_DEFAULTS.boxOpacity,
 } as const;
+
+const STYLE_SPECS = [
+  {
+    id: CERT_STYLE_BULL,
+    title: "Bull",
+    color: CERTAINTY_DEFAULTS.bullColor,
+    visible: true,
+    transparency: 0,
+    linewidth: 2,
+    legendHidden: false,
+  },
+  {
+    id: CERT_STYLE_BEAR,
+    title: "Bear",
+    color: CERTAINTY_DEFAULTS.bearColor,
+    visible: true,
+    transparency: 0,
+    linewidth: 2,
+    legendHidden: false,
+  },
+  {
+    id: CERT_STYLE_ACCENT,
+    title: "Awaiting accent",
+    color: CERTAINTY_DEFAULTS.accentColor,
+    visible: true,
+    transparency: 0,
+    linewidth: 1,
+    legendHidden: false,
+  },
+  {
+    id: CERT_STYLE_TP,
+    title: "Target box",
+    color: CERTAINTY_DEFAULTS.longBoxColor,
+    visible: true,
+    transparency: 100 - CERTAINTY_DEFAULTS.boxOpacity,
+    linewidth: 1,
+    legendHidden: false,
+  },
+  {
+    id: CERT_STYLE_SL,
+    title: "Stop box",
+    color: CERTAINTY_DEFAULTS.shortBoxColor,
+    visible: true,
+    transparency: 100 - CERTAINTY_DEFAULTS.boxOpacity,
+    linewidth: 1,
+    legendHidden: false,
+  },
+] as const;
+
+const { plots, stylesMeta, stylesDefaults } = buildStylePlots(STYLE_SPECS);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function createForgeCertaintyIndicator(PineJS: {
@@ -53,24 +106,12 @@ export function createForgeCertaintyIndicator(PineJS: {
       is_price_study: true,
       linkedToSeries: true,
       format: { type: "inherit" },
-      plots: [{ id: "plot_hidden", type: "line" }],
+      plots,
       defaults: {
-        styles: {
-          plot_hidden: {
-            linestyle: 0,
-            linewidth: 1,
-            plottype: 0,
-            trackPrice: false,
-            transparency: 100,
-            visible: false,
-            color: "#000000",
-          },
-        },
+        styles: stylesDefaults,
         inputs: { ...CERTAINTY_STUDY_DEFAULTS },
       },
-      styles: {
-        plot_hidden: { title: "Hidden", histogramBase: 0 },
-      },
+      styles: stylesMeta,
       inputs: [ // CL input types are string literals at runtime; cast metainfo below.
         {
           id: "biasMode",
@@ -200,44 +241,6 @@ export function createForgeCertaintyIndicator(PineJS: {
           min: 2,
           max: 24,
         },
-        {
-          id: "bullColor",
-          name: "Bull color",
-          defval: CERTAINTY_STUDY_DEFAULTS.bullColor,
-          type: "text",
-        },
-        {
-          id: "bearColor",
-          name: "Bear color",
-          defval: CERTAINTY_STUDY_DEFAULTS.bearColor,
-          type: "text",
-        },
-        {
-          id: "accentColor",
-          name: "Awaiting accent",
-          defval: CERTAINTY_STUDY_DEFAULTS.accentColor,
-          type: "text",
-        },
-        {
-          id: "longBoxColor",
-          name: "Target box color",
-          defval: CERTAINTY_STUDY_DEFAULTS.longBoxColor,
-          type: "text",
-        },
-        {
-          id: "shortBoxColor",
-          name: "Stop box color",
-          defval: CERTAINTY_STUDY_DEFAULTS.shortBoxColor,
-          type: "text",
-        },
-        {
-          id: "boxOpacity",
-          name: "Box opacity %",
-          defval: CERTAINTY_STUDY_DEFAULTS.boxOpacity,
-          type: "integer",
-          min: 8,
-          max: 50,
-        },
       ],
     } as never,
     constructor: function (this: {
@@ -252,7 +255,8 @@ export function createForgeCertaintyIndicator(PineJS: {
           (PineJS.Std as { na?: (v: number) => boolean }).na?.(raw) ?? !Number.isFinite(raw);
         const v = !na && Number.isFinite(raw) ? raw : (this._lastClose ?? raw);
         if (Number.isFinite(v) && v !== 0) this._lastClose = v;
-        return [Number.isFinite(this._lastClose) ? this._lastClose! : 1];
+        const out = Number.isFinite(this._lastClose) ? this._lastClose! : 1;
+        return [out, ...stylePlotNaNs(STYLE_SPECS.length)];
       };
     } as never,
   };

@@ -9,10 +9,11 @@ import { useStore } from "@/shared/hooks/useStore";
 import type { EntityId } from "@/infrastructure/tradingview";
 
 import { computeStructureIntelligence, paintStructureIntelligence, structureIntelligenceDrawCmds, type SiInputs, SI_DEFAULTS } from "@/features/structure-intelligence/runtime";
-import { SI_STUDY_DEFAULTS } from "./structure-intelligence-indicator";
+import { SI_STUDY_DEFAULTS, SI_STYLE_BEAR, SI_STYLE_BULL } from "./structure-intelligence-indicator";
+import { applyTransparency, readStylePlot } from "./study-style-plots";
 import { studyIsVisible, markChartPaintBusy } from "./study-paint-gate";
 
-import { exportChartBarsCached, STUDY_DEBOUNCE_MS, STUDY_MAX_BARS, STUDY_PRESENCE_POLL_MS, STUDY_PAINT_MUTE_MS } from "./chart-export-cache"; "./chart-export-cache";
+import { exportChartBarsCached, STUDY_DEBOUNCE_MS, STUDY_MAX_BARS, STUDY_PRESENCE_POLL_MS, STUDY_PAINT_MUTE_MS } from "./chart-export-cache";
 
 const MAX_BARS = STUDY_MAX_BARS;
 // STUDY_DEBOUNCE_MS from chart-export-cache
@@ -124,8 +125,26 @@ export function useStructureIntelligenceStudy(enabled = true): void {
             24,
             Math.max(1, Math.floor(num("historyLimit", SI_STUDY_DEFAULTS.historyLimit))),
           ),
-          bullColor: SI_DEFAULTS.bullColor,
-          bearColor: SI_DEFAULTS.bearColor,
+          ...(() => {
+            const bull = readStylePlot(api, SI_STYLE_BULL, {
+              color: SI_DEFAULTS.bullColor,
+              visible: true,
+              transparency: 0,
+              linewidth: 2,
+              linestyle: 0,
+            });
+            const bear = readStylePlot(api, SI_STYLE_BEAR, {
+              color: SI_DEFAULTS.bearColor,
+              visible: true,
+              transparency: 0,
+              linewidth: 2,
+              linestyle: 0,
+            });
+            return {
+              bullColor: applyTransparency(bull.color, bull.transparency),
+              bearColor: applyTransparency(bear.color, bear.transparency),
+            };
+          })(),
         };
       } catch {
         return {};

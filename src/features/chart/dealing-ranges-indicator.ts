@@ -2,6 +2,8 @@
  * Charting Library custom study: “Dealing Ranges”.
  * Multi-TF Orca DRs painted by `useDealingRangesStudy` with ICT halves
  * (0→0.5 green discount · 0.5→1 red premium · midline at EQ).
+ *
+ * Colors / visibility / linewidth live in the Style tab (native palette).
  */
 
 import type { CustomIndicator } from "@/infrastructure/tradingview";
@@ -14,10 +16,18 @@ import {
   type MultiTfDealingRangesOptions,
 } from "@/features/dealing-ranges/runtime";
 import type { DailyOpenMode } from "@/features/htf-candles/runtime";
+import { buildStylePlots, stylePlotNaNs } from "./study-style-plots";
 
 export const DEALING_RANGES_STUDY_NAME = "Dealing Ranges";
-/** Bumped to -6 — hide nested DRs (keep larger / main range). */
-export const DEALING_RANGES_STUDY_ID = "DealingRanges@tv-basicstudies-6";
+/** Bumped to -7 — Style-tab color palettes (no hex Inputs). */
+export const DEALING_RANGES_STUDY_ID = "DealingRanges@tv-basicstudies-7";
+
+export const DR_STYLE_PREMIUM = "plot_premium";
+export const DR_STYLE_DISCOUNT = "plot_discount";
+export const DR_STYLE_MID = "plot_mid";
+export const DR_STYLE_EDGES = "plot_edges";
+export const DR_STYLE_FIB618 = "plot_fib618";
+export const DR_STYLE_FIB786 = "plot_fib786";
 
 const HTF_OPTIONS: DrHtfPreset[] = ["5", "15", "30", "60", "240", "1D", "1W", "1M"];
 const DAILY_OPEN_OPTIONS: DailyOpenMode[] = ["midnight", "830", "930", "exchange"];
@@ -52,7 +62,7 @@ for (let i = 0; i < DR_HTF_SLOT_COUNT; i += 1) {
   });
 }
 
-/** Default study inputs (order matches metainfo.inputs). */
+/** Default study inputs (order matches metainfo.inputs). Colors live in Style. */
 export const DEALING_RANGES_DEFAULTS = {
   maxRanges: MULTI_TF_DR_DEFAULTS.maxRanges,
   lookbackDays: MULTI_TF_DR_DEFAULTS.lookbackDays,
@@ -62,9 +72,6 @@ export const DEALING_RANGES_DEFAULTS = {
   ...slotInputDefaults,
   dailyOpenMode: MULTI_TF_DR_DEFAULTS.dailyOpenMode,
   timezoneOffset: MULTI_TF_DR_DEFAULTS.timezoneOffset,
-  showFibs: MULTI_TF_DR_DEFAULTS.showFibs,
-  showMid: MULTI_TF_DR_DEFAULTS.showMid,
-  showZeroOne: MULTI_TF_DR_DEFAULTS.showZeroOne,
   showLabels: MULTI_TF_DR_DEFAULTS.showLabels,
   extendToLast: MULTI_TF_DR_DEFAULTS.extendToLast,
   pivotLeft: MULTI_TF_DR_DEFAULTS.pivotLeft,
@@ -76,15 +83,67 @@ export const DEALING_RANGES_DEFAULTS = {
   scalesText: MULTI_TF_DR_DEFAULTS.scalesText,
   minRangePct: MULTI_TF_DR_DEFAULTS.minRangePct,
   hideNested: MULTI_TF_DR_DEFAULTS.hideNested,
-  discountColor: MULTI_TF_DR_DEFAULTS.discountColor,
-  premiumColor: MULTI_TF_DR_DEFAULTS.premiumColor,
-  midColor: MULTI_TF_DR_DEFAULTS.midColor,
-  midWidth: MULTI_TF_DR_DEFAULTS.midWidth,
-  zeroOneColor: MULTI_TF_DR_DEFAULTS.zeroOneColor,
-  fib618Color: MULTI_TF_DR_DEFAULTS.fib618Color,
-  fib786Color: MULTI_TF_DR_DEFAULTS.fib786Color,
-  fillOpacity: MULTI_TF_DR_DEFAULTS.fillOpacity,
 } as const;
+
+const STYLE_SPECS = [
+  {
+    id: DR_STYLE_PREMIUM,
+    title: "Premium 0.5→1",
+    color: MULTI_TF_DR_DEFAULTS.premiumColor,
+    visible: true,
+    // High transparency → light fill (alpha ≈ (100 - t) / 100).
+    transparency: 100 - MULTI_TF_DR_DEFAULTS.fillOpacity,
+    linewidth: 1,
+    legendHidden: false,
+  },
+  {
+    id: DR_STYLE_DISCOUNT,
+    title: "Discount 0→0.5",
+    color: MULTI_TF_DR_DEFAULTS.discountColor,
+    visible: true,
+    transparency: 100 - MULTI_TF_DR_DEFAULTS.fillOpacity,
+    linewidth: 1,
+    legendHidden: false,
+  },
+  {
+    id: DR_STYLE_MID,
+    title: "EQ 0.5",
+    color: MULTI_TF_DR_DEFAULTS.midColor,
+    visible: MULTI_TF_DR_DEFAULTS.showMid,
+    transparency: 0,
+    linewidth: MULTI_TF_DR_DEFAULTS.midWidth,
+    legendHidden: false,
+  },
+  {
+    id: DR_STYLE_EDGES,
+    title: "0 / 1.0 edges",
+    color: MULTI_TF_DR_DEFAULTS.zeroOneColor,
+    visible: MULTI_TF_DR_DEFAULTS.showZeroOne,
+    transparency: 0,
+    linewidth: 1,
+    legendHidden: false,
+  },
+  {
+    id: DR_STYLE_FIB618,
+    title: "0.618 OTE",
+    color: MULTI_TF_DR_DEFAULTS.fib618Color,
+    visible: MULTI_TF_DR_DEFAULTS.showFibs,
+    transparency: 0,
+    linewidth: 1,
+    legendHidden: false,
+  },
+  {
+    id: DR_STYLE_FIB786,
+    title: "0.786 OTE",
+    color: MULTI_TF_DR_DEFAULTS.fib786Color,
+    visible: MULTI_TF_DR_DEFAULTS.showFibs,
+    transparency: 0,
+    linewidth: 1,
+    legendHidden: false,
+  },
+] as const;
+
+const { plots, stylesMeta, stylesDefaults } = buildStylePlots(STYLE_SPECS);
 
 /** Read HTF 1–4 slots from study input map. */
 export function readDrHtfSlotsFromMap(map: Map<string, unknown>): DrHtfSlot[] {
@@ -121,6 +180,9 @@ export function dealingRangesOptionsFromMap(map: Map<string, unknown>): MultiTfD
     DAILY_OPEN_OPTIONS.includes(modeRaw as DailyOpenMode) ? modeRaw : d.dailyOpenMode
   ) as DailyOpenMode;
 
+  // Style defaults (overridden by Style-tab plots in the study hook).
+  const style = MULTI_TF_DR_DEFAULTS;
+
   return {
     maxRanges: Math.max(1, Math.min(20, Math.floor(num("maxRanges", d.maxRanges)))),
     lookbackDays: Math.max(1, Math.min(3650, Math.floor(num("lookbackDays", d.lookbackDays)))),
@@ -130,9 +192,11 @@ export function dealingRangesOptionsFromMap(map: Map<string, unknown>): MultiTfD
     slots: readDrHtfSlotsFromMap(map),
     dailyOpenMode,
     timezoneOffset: Math.max(-12, Math.min(14, Math.floor(num("timezoneOffset", d.timezoneOffset)))),
-    showFibs: bool("showFibs", d.showFibs),
-    showMid: bool("showMid", d.showMid),
-    showZeroOne: bool("showZeroOne", d.showZeroOne),
+    showFibs: style.showFibs,
+    showMid: style.showMid,
+    showZeroOne: style.showZeroOne,
+    showPremium: style.showPremium,
+    showDiscount: style.showDiscount,
     showLabels: bool("showLabels", d.showLabels),
     extendToLast: bool("extendToLast", d.extendToLast),
     pivotLeft: Math.max(1, Math.min(50, Math.floor(num("pivotLeft", d.pivotLeft)))),
@@ -149,18 +213,15 @@ export function dealingRangesOptionsFromMap(map: Map<string, unknown>): MultiTfD
       (d as { scalesText?: string }).scalesText ?? "2,5,10,20,30",
     ),
     minRangePct: Math.max(0, Math.min(5, num("minRangePct", d.minRangePct))),
-    hideNested: bool(
-      "hideNested",
-      (d as { hideNested?: boolean }).hideNested ?? true,
-    ),
-    discountColor: str("discountColor", d.discountColor),
-    premiumColor: str("premiumColor", d.premiumColor),
-    midColor: str("midColor", d.midColor),
-    midWidth: Math.max(1, Math.min(4, Math.floor(num("midWidth", d.midWidth)))),
-    zeroOneColor: str("zeroOneColor", d.zeroOneColor),
-    fib618Color: str("fib618Color", d.fib618Color),
-    fib786Color: str("fib786Color", d.fib786Color),
-    fillOpacity: Math.max(4, Math.min(40, Math.floor(num("fillOpacity", d.fillOpacity)))),
+    hideNested: bool("hideNested", (d as { hideNested?: boolean }).hideNested ?? true),
+    discountColor: style.discountColor,
+    premiumColor: style.premiumColor,
+    midColor: style.midColor,
+    midWidth: style.midWidth,
+    zeroOneColor: style.zeroOneColor,
+    fib618Color: style.fib618Color,
+    fib786Color: style.fib786Color,
+    fillOpacity: style.fillOpacity,
   };
 }
 
@@ -176,29 +237,17 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
       id: DEALING_RANGES_STUDY_ID as never,
       name: DEALING_RANGES_STUDY_NAME,
       description: DEALING_RANGES_STUDY_NAME,
-      shortDescription: "ICT DR · HH↔LL+BOS · 0/0.5/1 · v4",
+      shortDescription: "ICT DR · HH↔LL · 0/0.5/1 · Style",
       isCustomIndicator: true,
       is_price_study: true,
       linkedToSeries: true,
       format: { type: "inherit" },
-      plots: [{ id: "plot_hidden", type: "line" }],
+      plots,
       defaults: {
-        styles: {
-          plot_hidden: {
-            linestyle: 0,
-            linewidth: 1,
-            plottype: 0,
-            trackPrice: false,
-            transparency: 100,
-            visible: false,
-            color: "#000000",
-          },
-        },
+        styles: stylesDefaults,
         inputs: { ...DEALING_RANGES_DEFAULTS },
       },
-      styles: {
-        plot_hidden: { title: "Hidden", histogramBase: 0 },
-      },
+      styles: stylesMeta,
       inputs: [
         {
           id: "maxRanges",
@@ -251,24 +300,6 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
           max: 14,
         },
         {
-          id: "showMid",
-          name: "Show middle (0.5 / EQ)",
-          defval: DEALING_RANGES_DEFAULTS.showMid,
-          type: "bool",
-        },
-        {
-          id: "showZeroOne",
-          name: "Show 0 / 1.0 edges",
-          defval: DEALING_RANGES_DEFAULTS.showZeroOne,
-          type: "bool",
-        },
-        {
-          id: "showFibs",
-          name: "Show 0.618 / 0.786 OTE (off = 0 / 0.5 / 1 only)",
-          defval: DEALING_RANGES_DEFAULTS.showFibs,
-          type: "bool",
-        },
-        {
           id: "showLabels",
           name: "Show level tags (0 / 0.5 / 1)",
           defval: DEALING_RANGES_DEFAULTS.showLabels,
@@ -309,6 +340,12 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
           type: "text",
         },
         {
+          id: "hideNested",
+          name: "Hide nested ranges (keep larger / main)",
+          defval: DEALING_RANGES_DEFAULTS.hideNested,
+          type: "bool",
+        },
+        {
           id: "extendBars",
           name: "Detector extend (HTF bars)",
           defval: DEALING_RANGES_DEFAULTS.extendBars,
@@ -336,64 +373,6 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
           min: 0,
           max: 5,
         },
-        {
-          id: "hideNested",
-          name: "Hide nested ranges (keep larger / main)",
-          defval: DEALING_RANGES_DEFAULTS.hideNested,
-          type: "bool",
-        },
-        {
-          id: "discountColor",
-          name: "Style · 0–0.5 green (#hex)",
-          defval: DEALING_RANGES_DEFAULTS.discountColor,
-          type: "text",
-        },
-        {
-          id: "premiumColor",
-          name: "Style · 0.5–1 red (#hex)",
-          defval: DEALING_RANGES_DEFAULTS.premiumColor,
-          type: "text",
-        },
-        {
-          id: "midColor",
-          name: "Style · 0.5 middle line (#hex)",
-          defval: DEALING_RANGES_DEFAULTS.midColor,
-          type: "text",
-        },
-        {
-          id: "midWidth",
-          name: "Style · Middle line width",
-          defval: DEALING_RANGES_DEFAULTS.midWidth,
-          type: "integer",
-          min: 1,
-          max: 4,
-        },
-        {
-          id: "zeroOneColor",
-          name: "Style · 0 / 1.0 edges (#hex)",
-          defval: DEALING_RANGES_DEFAULTS.zeroOneColor,
-          type: "text",
-        },
-        {
-          id: "fib618Color",
-          name: "Style · 0.618 (#hex)",
-          defval: DEALING_RANGES_DEFAULTS.fib618Color,
-          type: "text",
-        },
-        {
-          id: "fib786Color",
-          name: "Style · 0.786 (#hex)",
-          defval: DEALING_RANGES_DEFAULTS.fib786Color,
-          type: "text",
-        },
-        {
-          id: "fillOpacity",
-          name: "Style · Half fill opacity % (lower = lighter)",
-          defval: DEALING_RANGES_DEFAULTS.fillOpacity,
-          type: "integer",
-          min: 4,
-          max: 40,
-        },
       ],
     } as never,
     constructor: function (this: {
@@ -411,7 +390,7 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
         const v = !na && Number.isFinite(raw) ? raw : (this._lastClose ?? raw);
         if (Number.isFinite(v) && v !== 0) this._lastClose = v;
         const out = Number.isFinite(this._lastClose) ? this._lastClose! : 1;
-        return [out];
+        return [out, ...stylePlotNaNs(STYLE_SPECS.length)];
       };
     } as never,
   };

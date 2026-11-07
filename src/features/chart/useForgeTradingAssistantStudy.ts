@@ -8,11 +8,18 @@ import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
 import type { EntityId } from "@/infrastructure/tradingview";
 
-import { computeTradingAssistant, paintTradingAssistant, tradingAssistantDrawCmds, type FtaInputs } from "@/features/trading-assistant/runtime";
-import { FTA_STUDY_DEFAULTS } from "./forge-trading-assistant-indicator";
+import { computeTradingAssistant, FTA_DEFAULTS, paintTradingAssistant, tradingAssistantDrawCmds, type FtaInputs } from "@/features/trading-assistant/runtime";
+import {
+  FTA_STUDY_DEFAULTS,
+  FTA_STYLE_BEAR,
+  FTA_STYLE_BULL,
+  FTA_STYLE_SL,
+  FTA_STYLE_TP,
+} from "./forge-trading-assistant-indicator";
+import { applyTransparency, readStylePlot } from "./study-style-plots";
 import { studyIsVisible, markChartPaintBusy } from "./study-paint-gate";
 
-import { exportChartBarsCached, STUDY_DEBOUNCE_MS, STUDY_LIVE_REFRESH_MS, STUDY_MAX_BARS, STUDY_PRESENCE_POLL_MS, STUDY_PAINT_MUTE_MS } from "./chart-export-cache"; "./chart-export-cache";
+import { exportChartBarsCached, STUDY_DEBOUNCE_MS, STUDY_LIVE_REFRESH_MS, STUDY_MAX_BARS, STUDY_PRESENCE_POLL_MS, STUDY_PAINT_MUTE_MS } from "./chart-export-cache";
 
 /** Keep light — Orca DR + paint shapes on large histories freezes the chart. */
 const MAX_BARS = STUDY_MAX_BARS;
@@ -138,17 +145,51 @@ export function useForgeTradingAssistantStudy(enabled = true): void {
           ),
           showZones: bool("showZones", FTA_STUDY_DEFAULTS.showZones),
           showDealingRange: bool("showDealingRange", FTA_STUDY_DEFAULTS.showDealingRange),
-          showTradeBox: bool("showTradeBox", FTA_STUDY_DEFAULTS.showTradeBox),
           showStructure: bool("showStructure", FTA_STUDY_DEFAULTS.showStructure),
           showHistory: bool("showHistory", FTA_STUDY_DEFAULTS.showHistory),
-          bullColor: String(map.get("bullColor") ?? FTA_STUDY_DEFAULTS.bullColor),
-          bearColor: String(map.get("bearColor") ?? FTA_STUDY_DEFAULTS.bearColor),
-          longBoxColor: String(map.get("longBoxColor") ?? FTA_STUDY_DEFAULTS.longBoxColor),
-          shortBoxColor: String(map.get("shortBoxColor") ?? FTA_STUDY_DEFAULTS.shortBoxColor),
-          boxOpacity: Math.min(
-            40,
-            Math.max(4, Math.floor(num("boxOpacity", FTA_STUDY_DEFAULTS.boxOpacity))),
-          ),
+          ...(() => {
+            const bull = readStylePlot(api, FTA_STYLE_BULL, {
+              color: FTA_DEFAULTS.bullColor,
+              visible: true,
+              transparency: 0,
+              linewidth: 2,
+              linestyle: 0,
+            });
+            const bear = readStylePlot(api, FTA_STYLE_BEAR, {
+              color: FTA_DEFAULTS.bearColor,
+              visible: true,
+              transparency: 0,
+              linewidth: 2,
+              linestyle: 0,
+            });
+            const tp = readStylePlot(api, FTA_STYLE_TP, {
+              color: FTA_DEFAULTS.longBoxColor,
+              visible: true,
+              transparency: 100 - FTA_DEFAULTS.boxOpacity,
+              linewidth: 1,
+              linestyle: 0,
+            });
+            const sl = readStylePlot(api, FTA_STYLE_SL, {
+              color: FTA_DEFAULTS.shortBoxColor,
+              visible: true,
+              transparency: 100 - FTA_DEFAULTS.boxOpacity,
+              linewidth: 1,
+              linestyle: 0,
+            });
+            const fillFromTransparency = (t: number) =>
+              Math.max(4, Math.min(40, Math.round(100 - Math.max(0, Math.min(100, t)))));
+            const boxOpacity = Math.round(
+              (fillFromTransparency(tp.transparency) + fillFromTransparency(sl.transparency)) / 2,
+            );
+            return {
+              bullColor: applyTransparency(bull.color, bull.transparency),
+              bearColor: applyTransparency(bear.color, bear.transparency),
+              longBoxColor: applyTransparency(tp.color, 0),
+              shortBoxColor: applyTransparency(sl.color, 0),
+              boxOpacity,
+              showTradeBox: bool("showTradeBox", FTA_STUDY_DEFAULTS.showTradeBox) && (tp.visible || sl.visible),
+            };
+          })(),
         };
       } catch {
         return {};

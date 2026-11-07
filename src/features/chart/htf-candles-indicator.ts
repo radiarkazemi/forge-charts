@@ -1,6 +1,7 @@
 /**
  * Charting Library custom study: “ICT HTF Candles”.
  * Fadi-style: up to 6 HTF candle groups beside price. Paint via `useHtfCandlesStudy`.
+ * Colors / transparency live in the Style tab (native palette).
  */
 
 import type { CustomIndicator } from "@/infrastructure/tradingview";
@@ -12,9 +13,17 @@ import {
   type HtfPreset,
   type HtfSlot,
 } from "@/features/htf-candles/runtime";
+import { buildStylePlots, stylePlotNaNs } from "./study-style-plots";
 
 export const HTF_CANDLES_STUDY_NAME = "ICT HTF Candles";
-export const HTF_CANDLES_STUDY_ID = "IctHtfCandles@tv-basicstudies-1";
+/** Bumped to -2 — Style-tab color palettes (no hex Inputs). */
+export const HTF_CANDLES_STUDY_ID = "IctHtfCandles@tv-basicstudies-2";
+
+export const HTF_STYLE_BULL = "plot_bull_body";
+export const HTF_STYLE_BEAR = "plot_bear_body";
+export const HTF_STYLE_BORDER = "plot_border";
+export const HTF_STYLE_BULL_WICK = "plot_bull_wick";
+export const HTF_STYLE_BEAR_WICK = "plot_bear_wick";
 
 const HTF_OPTIONS: HtfPreset[] = ["5", "15", "30", "60", "240", "1D", "1W", "1M"];
 const DAILY_OPEN_OPTIONS: DailyOpenMode[] = ["midnight", "830", "930", "exchange"];
@@ -74,13 +83,57 @@ export const HTF_CANDLES_STUDY_DEFAULTS = {
   showHtfName: HTF_CANDLES_DEFAULTS.showHtfName,
   dailyOpenMode: HTF_CANDLES_DEFAULTS.dailyOpenMode,
   timezoneOffset: HTF_CANDLES_DEFAULTS.timezoneOffset,
-  bodyTransparency: HTF_CANDLES_DEFAULTS.bodyTransparency,
-  bullBody: HTF_CANDLES_DEFAULTS.bullBody,
-  bearBody: HTF_CANDLES_DEFAULTS.bearBody,
-  border: HTF_CANDLES_DEFAULTS.border,
-  bullWick: HTF_CANDLES_DEFAULTS.bullWick,
-  bearWick: HTF_CANDLES_DEFAULTS.bearWick,
 } as const;
+
+const STYLE_SPECS = [
+  {
+    id: HTF_STYLE_BULL,
+    title: "Bull body",
+    color: HTF_CANDLES_DEFAULTS.bullBody,
+    visible: true,
+    transparency: HTF_CANDLES_DEFAULTS.bodyTransparency,
+    linewidth: 1,
+    legendHidden: false,
+  },
+  {
+    id: HTF_STYLE_BEAR,
+    title: "Bear body",
+    color: HTF_CANDLES_DEFAULTS.bearBody,
+    visible: true,
+    transparency: HTF_CANDLES_DEFAULTS.bodyTransparency,
+    linewidth: 1,
+    legendHidden: false,
+  },
+  {
+    id: HTF_STYLE_BORDER,
+    title: "Border",
+    color: HTF_CANDLES_DEFAULTS.border,
+    visible: true,
+    transparency: 0,
+    linewidth: 1,
+    legendHidden: false,
+  },
+  {
+    id: HTF_STYLE_BULL_WICK,
+    title: "Bull wick",
+    color: HTF_CANDLES_DEFAULTS.bullWick,
+    visible: true,
+    transparency: 0,
+    linewidth: 1,
+    legendHidden: false,
+  },
+  {
+    id: HTF_STYLE_BEAR_WICK,
+    title: "Bear wick",
+    color: HTF_CANDLES_DEFAULTS.bearWick,
+    visible: true,
+    transparency: 0,
+    linewidth: 1,
+    legendHidden: false,
+  },
+] as const;
+
+const { plots, stylesMeta, stylesDefaults } = buildStylePlots(STYLE_SPECS);
 
 /** Read HTF 1–6 slots from study input map (Fadi layout). */
 export function readHtfSlotsFromMap(map: Map<string, unknown>): HtfSlot[] {
@@ -119,25 +172,12 @@ export function createHtfCandlesIndicator(PineJS: {
       is_price_study: true,
       linkedToSeries: true,
       format: { type: "inherit" },
-      plots: [{ id: "plot_hidden", type: "line" }],
+      plots,
       defaults: {
-        styles: {
-          plot_hidden: {
-            linestyle: 0,
-            linewidth: 1,
-            plottype: 0,
-            trackPrice: false,
-            transparency: 100,
-            visible: false,
-            color: "#000000",
-            display: 0,
-          },
-        },
+        styles: stylesDefaults,
         inputs: { ...HTF_CANDLES_STUDY_DEFAULTS },
       },
-      styles: {
-        plot_hidden: { title: "Hidden", histogramBase: 0, isHidden: true },
-      },
+      styles: stylesMeta,
       inputs: [
         ...slotInputs,
         {
@@ -237,44 +277,6 @@ export function createHtfCandlesIndicator(PineJS: {
           defval: HTF_CANDLES_STUDY_DEFAULTS.showTrace,
           type: "bool",
         },
-        {
-          id: "bodyTransparency",
-          name: "Style · Body transparency",
-          defval: HTF_CANDLES_STUDY_DEFAULTS.bodyTransparency,
-          type: "integer",
-          min: 0,
-          max: 100,
-        },
-        {
-          id: "bullBody",
-          name: "Style · Bull body (#hex)",
-          defval: HTF_CANDLES_STUDY_DEFAULTS.bullBody,
-          type: "text",
-        },
-        {
-          id: "bearBody",
-          name: "Style · Bear body (#hex)",
-          defval: HTF_CANDLES_STUDY_DEFAULTS.bearBody,
-          type: "text",
-        },
-        {
-          id: "border",
-          name: "Style · Border (#hex)",
-          defval: HTF_CANDLES_STUDY_DEFAULTS.border,
-          type: "text",
-        },
-        {
-          id: "bullWick",
-          name: "Style · Bull wick (#hex)",
-          defval: HTF_CANDLES_STUDY_DEFAULTS.bullWick,
-          type: "text",
-        },
-        {
-          id: "bearWick",
-          name: "Style · Bear wick (#hex)",
-          defval: HTF_CANDLES_STUDY_DEFAULTS.bearWick,
-          type: "text",
-        },
       ],
     } as never,
     constructor: function (this: {
@@ -288,7 +290,8 @@ export function createHtfCandlesIndicator(PineJS: {
         const na = PineJS.Std.na?.(raw) ?? !Number.isFinite(raw);
         const v = !na && Number.isFinite(raw) ? raw : (this._lastClose ?? raw);
         if (Number.isFinite(v) && v !== 0) this._lastClose = v;
-        return Number.isFinite(this._lastClose) ? this._lastClose! : 1;
+        const out = Number.isFinite(this._lastClose) ? this._lastClose! : 1;
+        return [out, ...stylePlotNaNs(STYLE_SPECS.length)];
       };
     } as never,
   };

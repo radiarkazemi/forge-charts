@@ -2,13 +2,19 @@
  * Charting Library custom study: “Forge Structure Intelligence”.
  * Plots are inert — boxes/lines painted by `useStructureIntelligenceStudy`
  * using the TypeScript port of Forge_Structure_Intelligence_v1.pine.
+ * Colors live in the Style tab (native palette).
  */
 
 import type { CustomIndicator } from "@/infrastructure/tradingview";
 import { SI_DEFAULTS } from "@/features/structure-intelligence/runtime";
+import { buildStylePlots, stylePlotNaNs } from "./study-style-plots";
 
 export const SI_STUDY_NAME = "Forge Structure Intelligence";
-export const SI_STUDY_ID = "ForgeStructureIntelligence@tv-basicstudies-1";
+/** Bumped to -2 — Style-tab color palettes. */
+export const SI_STUDY_ID = "ForgeStructureIntelligence@tv-basicstudies-2";
+
+export const SI_STYLE_BULL = "plot_bull";
+export const SI_STYLE_BEAR = "plot_bear";
 
 export const SI_STUDY_DEFAULTS = {
   minorLen: SI_DEFAULTS.minorLen,
@@ -31,6 +37,29 @@ export const SI_STUDY_DEFAULTS = {
   historyLimit: SI_DEFAULTS.historyLimit,
 } as const;
 
+const STYLE_SPECS = [
+  {
+    id: SI_STYLE_BULL,
+    title: "Bull",
+    color: SI_DEFAULTS.bullColor,
+    visible: true,
+    transparency: 0,
+    linewidth: 2,
+    legendHidden: false,
+  },
+  {
+    id: SI_STYLE_BEAR,
+    title: "Bear",
+    color: SI_DEFAULTS.bearColor,
+    visible: true,
+    transparency: 0,
+    linewidth: 2,
+    legendHidden: false,
+  },
+] as const;
+
+const { plots, stylesMeta, stylesDefaults } = buildStylePlots(STYLE_SPECS);
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function createStructureIntelligenceIndicator(PineJS: {
   Std: { close: (ctx: any) => number };
@@ -47,24 +76,12 @@ export function createStructureIntelligenceIndicator(PineJS: {
       is_price_study: true,
       linkedToSeries: true,
       format: { type: "inherit" },
-      plots: [{ id: "plot_hidden", type: "line" }],
+      plots,
       defaults: {
-        styles: {
-          plot_hidden: {
-            linestyle: 0,
-            linewidth: 1,
-            plottype: 0,
-            trackPrice: false,
-            transparency: 100,
-            visible: false,
-            color: "#000000",
-          },
-        },
+        styles: stylesDefaults,
         inputs: { ...SI_STUDY_DEFAULTS },
       },
-      styles: {
-        plot_hidden: { title: "Hidden", histogramBase: 0 },
-      },
+      styles: stylesMeta,
       inputs: [
         { id: "minorLen", name: "Minor swing confirmation bars", defval: SI_STUDY_DEFAULTS.minorLen, type: "integer", min: 1, max: 15 },
         { id: "majorLen", name: "Major swing confirmation bars", defval: SI_STUDY_DEFAULTS.majorLen, type: "integer", min: 3, max: 40 },
@@ -112,7 +129,8 @@ export function createStructureIntelligenceIndicator(PineJS: {
           (PineJS.Std as { na?: (v: number) => boolean }).na?.(raw) ?? !Number.isFinite(raw);
         const v = !na && Number.isFinite(raw) ? raw : (this._lastClose ?? raw);
         if (Number.isFinite(v) && v !== 0) this._lastClose = v;
-        return [Number.isFinite(this._lastClose) ? this._lastClose! : 1];
+        const out = Number.isFinite(this._lastClose) ? this._lastClose! : 1;
+        return [out, ...stylePlotNaNs(STYLE_SPECS.length)];
       };
     } as never,
   };
