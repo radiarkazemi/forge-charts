@@ -25,6 +25,7 @@ import { REPLAY_MENTOR_STUDY_ID } from "@/features/chart/replay-mentor-indicator
 import { SESSIONS_STUDY_ID } from "@/features/chart/sessions-indicator";
 import { SI_STUDY_ID } from "@/features/chart/structure-intelligence-indicator";
 import { WATERMARK_STUDY_ID } from "@/features/chart/watermark-indicator";
+import { allowNativeIndicatorsOnce } from "@/features/chart/indicators-intercept";
 
 export interface ChartState {
   readonly symbol: string;
@@ -784,13 +785,8 @@ export class ChartController {
 
   /** Open Charting Library’s native insert-indicator dialog. */
   openNativeIndicators(): void {
-    try {
-      // Bypass Forge intercept for this open (see indicators-intercept.ts).
-      void import("./indicators-intercept").then((m) => m.allowNativeIndicatorsOnce());
-    } catch {
-      /* ignore */
-    }
-    // Small delay so the allow flag is set before the patched action runs.
+    // Bypass Forge intercept for this open (see indicators-intercept.ts).
+    allowNativeIndicatorsOnce();
     window.setTimeout(() => {
       try {
         this.activeChart()?.executeActionById("insertIndicator");

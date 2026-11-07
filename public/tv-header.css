@@ -157,6 +157,18 @@ body.forge-indicators-picker-open [data-dialog-name*="indicator"] {
 }
 
 /*
+ * Always suppress the compact CL “Indicators / SCRIPT NAME” dialog unless
+ * the user explicitly asked for Full library (forge-allow-native-indicators).
+ */
+body:not(.forge-allow-native-indicators) [data-name="indicators-dialog"],
+body:not(.forge-allow-native-indicators) [data-dialog-name="Indicators"],
+body:not(.forge-allow-native-indicators) [data-dialog-name="Indicators & Strategies"] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/*
  * Indicators dialog — TV-like list rows:
  * title truncates; author / usage meta stay on the right without covering labels.
  */
