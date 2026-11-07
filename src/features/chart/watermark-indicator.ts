@@ -206,11 +206,11 @@ export function createWatermarkIndicator(PineJS: {
         },
         {
           id: "offsetY",
-          name: "Offset Y (px)",
+          name: "Offset Y (px · below toolbar when top)",
           defval: WATERMARK_STUDY_DEFAULTS.offsetY,
           type: "integer",
           min: 0,
-          max: 200,
+          max: 240,
         },
       ] as never,
     } as never,

@@ -21,6 +21,12 @@ function useWatermark(): WatermarkOverlayState | null {
   );
 }
 
+/**
+ * CL header row (Indicators / Alert / Bar Replay) sits inside the same
+ * container — push "top" watermarks below it so title isn't behind buttons.
+ */
+const TOP_TOOLBAR_CLEARANCE_PX = 56;
+
 function anchorStyle(
   vert: WatermarkVAlign,
   horz: WatermarkHAlign,
@@ -38,7 +44,8 @@ function anchorStyle(
   };
 
   if (vert === "top") {
-    style.top = Math.max(0, offsetY);
+    // Clearance always applied; Offset Y nudges further down into the pane.
+    style.top = TOP_TOOLBAR_CLEARANCE_PX + Math.max(0, offsetY);
     style.bottom = "auto";
   } else if (vert === "bottom") {
     style.bottom = Math.max(0, offsetY + 36);

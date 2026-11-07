@@ -49,6 +49,7 @@ export const WATERMARK_DEFAULTS: WatermarkInputs = {
   letterSpacing: 0.06,
   lineGap: 6,
   offsetX: 0,
+  /** Extra px below the toolbar clearance when Vertical = top. */
   offsetY: 12,
   /** Defaults suit dark chart themes; Style tab can switch for light. */
   titleColor: "#D1D4DC",
