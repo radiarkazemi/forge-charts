@@ -23,6 +23,8 @@ import { createRealSwingsIndicator } from "@/features/chart/real-swings-indicato
 import { createBosMssIndicator } from "@/features/chart/bos-mss-indicator";
 import { createIrlErlIndicator } from "@/features/chart/irl-erl-indicator";
 import { createWatermarkIndicator } from "@/features/chart/watermark-indicator";
+import type { ISettingsAdapter } from "./types";
+import { DEFAULT_FAVORITE_INDICATORS } from "@/features/profile-sync";
 
 export interface WidgetOptionsInput {
   readonly container: HTMLElement;
@@ -42,6 +44,11 @@ export interface WidgetOptionsInput {
    * above the grid). Left toolbar can still be enabled on the primary pane.
    */
   readonly hideHeader?: boolean;
+  /**
+   * Persists CL favorites / user settings into ScopedStorage (and cloud sync).
+   * Takes precedence over localStorage favorites.
+   */
+  readonly settingsAdapter?: ISettingsAdapter;
 }
 
 const ENABLED_FEATURES: ChartingLibraryFeatureset[] = [
@@ -301,20 +308,9 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
       chartTypes: ["Candles", "Heiken Ashi", "Line", "Area", "Bars"],
       drawingTools: FAVORITE_DRAWING_TOOLS,
       // Titles must match study `description` / UI name exactly.
-      indicators: [
-        "BOS / MSS",
-        "IRL / ERL",
-        "Real Swing High/Low",
-        "Fractal (igor-T)",
-        "Forge Certainty",
-        "Forge Trading Assistant",
-        "Forge Replay Mentor",
-        "Forge Structure Intelligence",
-        "Dealing Ranges",
-        "ICT HTF Candles",
-        "Forge Sessions",
-      ],
+      indicators: [...DEFAULT_FAVORITE_INDICATORS],
     },
+    ...(input.settingsAdapter ? { settings_adapter: input.settingsAdapter } : {}),
     time_frames: TIME_FRAMES,
     loading_screen: { backgroundColor: tokens.background, foregroundColor: tokens.accent },
     overrides: chartOverrides(input.theme),

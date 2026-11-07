@@ -74,6 +74,11 @@ function buildProxy(env: Record<string, string>): Record<string, ProxyOptions> {
       rewrite: (path) => path.replace(/^\/api\/yahoo/, ""),
       headers: { "User-Agent": "Mozilla/5.0 ForgeCharts" },
     },
+    // Cross-device Radiar profile (favorites, candle styles, layouts)
+    "/api/forge-profile": {
+      target: vpsOrigin,
+      changeOrigin: true,
+    },
     // Iran gold history/quote + tick WS (market_ticks.py on VPS :8015)
     "/iran-gold": {
       target: vpsOrigin,

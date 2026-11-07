@@ -61,7 +61,8 @@ function ProfileDialogBody({ onClose }: { readonly onClose: () => void }) {
         {mode === "list" ? (
           <Stack spacing={1.5}>
             <Typography variant="body2" color="text.secondary">
-              Each person can keep their own name and avatar on this device.
+              Name and avatar for this account. Chart layout, starred indicators,
+              and candle styles sync across your computers when you sign in.
             </Typography>
             <List dense disablePadding>
               {snap.profiles.map((p) => (

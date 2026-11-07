@@ -9,11 +9,19 @@ import Tabs from "@mui/material/Tabs";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { ForgeMark } from "@/brand/ForgeMark";
+import {
+  deriveAccountKey,
+  deriveSyncKey,
+  type ProfileSyncCredentials,
+} from "@/features/profile-sync";
 import type { AuthService, AuthSession } from "./auth-service";
 
 interface AuthGateProps {
   readonly auth: AuthService;
-  readonly onAuthenticated: (session: AuthSession) => void;
+  readonly onAuthenticated: (
+    session: AuthSession,
+    syncCreds: ProfileSyncCredentials,
+  ) => void;
 }
 
 type Mode = "login" | "signup";
@@ -33,18 +41,22 @@ export function AuthGate({ auth, onAuthenticated }: AuthGateProps) {
     setError(null);
     setBusy(true);
     try {
+      let session: AuthSession;
       if (mode === "signup") {
         if (password !== confirm) throw new Error("Passwords do not match.");
-        const session = await auth.signUp({
+        session = await auth.signUp({
           username,
           password,
           displayName: displayName || undefined,
         });
-        onAuthenticated(session);
-        return;
+      } else {
+        session = await auth.login(username, password);
       }
-      const session = await auth.login(username, password);
-      onAuthenticated(session);
+      const syncCreds: ProfileSyncCredentials = {
+        accountKey: await deriveAccountKey(session.username),
+        syncKey: await deriveSyncKey(session.username, password),
+      };
+      onAuthenticated(session, syncCreds);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -84,7 +96,8 @@ export function AuthGate({ auth, onAuthenticated }: AuthGateProps) {
               Forge Charts
             </Typography>
             <Typography variant="body2" sx={{ color: "#787b86", mt: 0.75 }}>
-              Sign in with your email to open your charts. Other people need their own account.
+              Sign in so your Radiar layout, starred indicators, and candle styles
+              stay the same on every computer.
             </Typography>
           </Box>
 

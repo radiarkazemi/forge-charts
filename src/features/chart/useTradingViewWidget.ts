@@ -8,6 +8,7 @@ import {
   type IBasicDataFeed,
   type IChartingLibraryWidget,
   type IExternalSaveLoadAdapter,
+  type ISettingsAdapter,
   type WidgetConstructor,
 } from "@/infrastructure/tradingview";
 import type { ChartController } from "./chart-controller";
@@ -29,6 +30,9 @@ export interface TradingViewWidgetDeps {
   readonly datafeed: IBasicDataFeed;
   readonly saveLoadAdapter: IExternalSaveLoadAdapter;
   readonly storage: KeyValueStorage;
+  readonly settingsAdapter?: ISettingsAdapter;
+  /** Push chart/favorites changes to the cloud Radiar profile. */
+  readonly notifyProfileDirty?: () => void;
   readonly libraryPath: string;
   readonly initialSymbol: string;
   readonly initialInterval: Interval;
@@ -121,7 +125,16 @@ function readAutosave(storage: KeyValueStorage): object | undefined {
  * auto-save, TradingView-style header controls, and teardown.
  */
 export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | null>, deps: TradingViewWidgetDeps): void {
-  const { controller, datafeed, saveLoadAdapter, storage, libraryPath, theme } = deps;
+  const {
+    controller,
+    datafeed,
+    saveLoadAdapter,
+    storage,
+    settingsAdapter,
+    notifyProfileDirty,
+    libraryPath,
+    theme,
+  } = deps;
   const isPrimary = deps.isPrimary !== false;
   const hideHeader = Boolean(deps.hideHeader);
   const paneIndex = deps.paneIndex ?? 0;
@@ -202,6 +215,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
           isMobile,
           secondaryPane: !isPrimary,
           hideHeader,
+          settingsAdapter,
         }),
       );
 
@@ -286,6 +300,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
                 } catch {
                   /* ignore */
                 }
+                notifyProfileDirty?.();
               });
             } catch {
               /* ignore */
@@ -414,7 +429,19 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
     };
     // Keep the widget alive across layout / symbol changes (TradingView in-place).
     // Symbol updates go through chart.setSymbol via TradingViewChart effect.
-  }, [containerRef, controller, datafeed, libraryPath, saveLoadAdapter, storage, isPrimary, paneIndex, hideHeader]);
+  }, [
+    containerRef,
+    controller,
+    datafeed,
+    libraryPath,
+    saveLoadAdapter,
+    storage,
+    settingsAdapter,
+    notifyProfileDirty,
+    isPrimary,
+    paneIndex,
+    hideHeader,
+  ]);
 
   useEffect(() => {
     void (async () => {

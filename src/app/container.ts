@@ -28,6 +28,11 @@ import {
 import { ChartController } from "@/features/chart/chart-controller";
 import { BarReplayController } from "@/features/chart/bar-replay/bar-replay-controller";
 import { DemoSpaceController, DemoTradingService } from "@/features/demo-trading";
+import {
+  createProfileSyncPusher,
+  createSettingsAdapter,
+} from "@/features/profile-sync";
+import type { ISettingsAdapter } from "@/infrastructure/tradingview";
 import { readConfig, type AppConfig } from "./config";
 
 /** Everything the UI layer may depend on, wired once at startup. */
@@ -46,6 +51,10 @@ export interface Services {
   readonly demoSpace: DemoSpaceController;
   readonly datafeed: TradingViewDatafeed;
   readonly saveLoadAdapter: IExternalSaveLoadAdapter;
+  /** CL favorites / user settings (synced across devices). */
+  readonly settingsAdapter: ISettingsAdapter;
+  /** Notify after local chart/settings mutations so cloud sync can push. */
+  readonly notifyProfileDirty: () => void;
   /** Tear down timers and subscriptions (tests / HMR). */
   dispose(): void;
 }
@@ -93,6 +102,10 @@ export function createServices(
   const saveLoadAdapter = new LocalSaveLoadAdapter(storage);
 
   const disposers: Array<() => void> = [];
+  const profilePusher = createProfileSyncPusher(storage);
+  disposers.push(() => profilePusher.dispose());
+  const notifyProfileDirty = () => profilePusher.notifyLocalChange();
+  const settingsAdapter = createSettingsAdapter(storage, notifyProfileDirty);
 
   // Quotes feed alert evaluation.
   disposers.push(quotes.quotes.subscribe(() => alerts.evaluate(quotes.quotes.get())));
@@ -122,6 +135,8 @@ export function createServices(
       if (ready) settings.rememberChart(symbol, interval);
     }),
   );
+  // Settings / watchlist / layout changes also belong in the cloud profile.
+  disposers.push(settings.settings.subscribe(() => notifyProfileDirty()));
 
   return {
     config,
@@ -138,6 +153,8 @@ export function createServices(
     demoSpace,
     datafeed,
     saveLoadAdapter,
+    settingsAdapter,
+    notifyProfileDirty,
     dispose: () => {
       quotes.stop();
       datafeed.dispose();

@@ -6,6 +6,13 @@ import { AppShell } from "@/features/layout/AppShell";
 import { LocalStorageAdapter, ScopedStorage } from "@/infrastructure";
 import { createAppTheme } from "@/shared/theme/create-app-theme";
 import { activeProfile } from "@/application";
+import {
+  clearSyncCredentials,
+  readSyncCredentials,
+  storeSyncCredentials,
+  syncProfileOnLogin,
+  type ProfileSyncCredentials,
+} from "@/features/profile-sync";
 import { AppThemeProvider } from "./AppThemeProvider";
 import { createServices, type Services } from "./container";
 import { ServicesProvider } from "./ServicesProvider";
@@ -45,20 +52,42 @@ export function App() {
   const auth = useMemo(() => new AuthService(rawStorage), [rawStorage]);
   const [session, setSession] = useState<AuthSession | null>(() => auth.getSession());
   const servicesRef = useRef<Services | null>(null);
-
   const [services, setServices] = useState<Services | null>(() => {
     const existing = auth.getSession();
     if (!existing) return null;
     const built = buildSessionServices(existing);
     servicesRef.current = built;
+    // Resume cloud sync if this tab still has sessionStorage credentials.
+    const creds = readSyncCredentials();
+    if (creds) {
+      void syncProfileOnLogin(built.storage, creds).then((result) => {
+        if (!result.appliedRemote) return;
+        // Remote won — rebuild services so chart mounts with synced autosave.
+        servicesRef.current?.dispose();
+        const rebuilt = buildSessionServices(existing);
+        servicesRef.current = rebuilt;
+        setServices(rebuilt);
+      });
+    }
     return built;
   });
 
   const gateTheme = useMemo(() => createAppTheme("dark"), []);
 
-  const enter = useCallback((next: AuthSession) => {
+  const enter = useCallback(async (next: AuthSession, syncCreds: ProfileSyncCredentials) => {
+    storeSyncCredentials(syncCreds);
     servicesRef.current?.dispose();
-    const built = buildSessionServices(next);
+    // Build once into scoped storage, pull remote if newer, rebuild if applied.
+    let built = buildSessionServices(next);
+    try {
+      const result = await syncProfileOnLogin(built.storage, syncCreds);
+      if (result.appliedRemote) {
+        built.dispose();
+        built = buildSessionServices(next);
+      }
+    } catch {
+      /* offline — local chart still works */
+    }
     servicesRef.current = built;
     setServices(built);
     setSession(next);
@@ -66,6 +95,7 @@ export function App() {
 
   const signOut = useCallback(() => {
     auth.logout();
+    clearSyncCredentials();
     servicesRef.current?.dispose();
     servicesRef.current = null;
     setServices(null);
@@ -76,7 +106,12 @@ export function App() {
     return (
       <ThemeProvider theme={gateTheme}>
         <CssBaseline />
-        <AuthGate auth={auth} onAuthenticated={enter} />
+        <AuthGate
+          auth={auth}
+          onAuthenticated={(s, creds) => {
+            void enter(s, creds);
+          }}
+        />
       </ThemeProvider>
     );
   }

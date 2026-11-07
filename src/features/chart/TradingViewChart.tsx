@@ -51,7 +51,19 @@ export function TradingViewChart({
   hideHeader = false,
   transparentShell = false,
 }: TradingViewChartProps) {
-  const { chart, barReplay, datafeed, saveLoadAdapter, storage, settings, alerts, quotes, config } =
+  const {
+    chart,
+    barReplay,
+    datafeed,
+    saveLoadAdapter,
+    storage,
+    settings,
+    settingsAdapter,
+    notifyProfileDirty,
+    alerts,
+    quotes,
+    config,
+  } =
     useServices();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const headerApiRef = useRef<HeaderToolbarApi | null>(null);
@@ -196,6 +208,8 @@ export function TradingViewChart({
     datafeed,
     saveLoadAdapter,
     storage,
+    settingsAdapter,
+    notifyProfileDirty,
     libraryPath: config.tvLibraryPath,
     initialSymbol: symbolForPane,
     initialInterval: settings.settings.get().lastInterval,
@@ -223,6 +237,7 @@ export function TradingViewChart({
           });
           storage.set("forge.tv.autosave.v3", state);
           storage.set("forge.tv.autosave.v3.bak", state);
+          notifyProfileDirty();
         });
       } catch {
         /* ignore */

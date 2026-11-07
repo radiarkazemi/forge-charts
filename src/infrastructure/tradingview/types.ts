@@ -23,6 +23,8 @@ export type {
   IChartWidgetApi,
   IDropdownApi,
   IExternalSaveLoadAdapter,
+  ISettingsAdapter,
+  InitialSettingsMap,
   IOrderLineAdapter,
   IPositionLineAdapter,
   LayoutType,
