@@ -19,6 +19,7 @@ import { resolvePineStudy } from "@/features/pine/pine-runner";
 import { FTA_STUDY_ID } from "@/features/chart/forge-trading-assistant-indicator";
 import { DEALING_RANGES_STUDY_ID } from "@/features/chart/dealing-ranges-indicator";
 import { IRL_ERL_STUDY_ID } from "@/features/chart/irl-erl-indicator";
+import { WATERMARK_STUDY_ID } from "@/features/chart/watermark-indicator";
 
 export interface ChartState {
   readonly symbol: string;
@@ -692,6 +693,8 @@ export class ChartController {
         ? DEALING_RANGES_STUDY_ID
         : /irl\s*\/\s*erl|irl\s*·\s*erl/i.test(displayName)
           ? IRL_ERL_STUDY_ID
+          : /^watermark$/i.test(displayName) || /forge\s*watermark/i.test(displayName)
+            ? WATERMARK_STUDY_ID
           : /forge\s*structure\s*intelligence|forge\s*si/i.test(displayName)
             ? "ForgeStructureIntelligence@tv-basicstudies-1"
             : /forge\s*sessions|sessions\s*\[luxalgo\]/i.test(displayName)
@@ -730,6 +733,8 @@ export class ChartController {
           ? DEALING_RANGES_STUDY_ID
           : /irl\s*\/\s*erl|irl\s*·\s*erl/i.test(name)
             ? IRL_ERL_STUDY_ID
+            : /^watermark$/i.test(name) || /forge\s*watermark/i.test(name)
+              ? WATERMARK_STUDY_ID
             : /forge\s*structure\s*intelligence|forge\s*si/i.test(name)
               ? "ForgeStructureIntelligence@tv-basicstudies-1"
               : /forge\s*sessions|sessions\s*\[luxalgo\]/i.test(name)

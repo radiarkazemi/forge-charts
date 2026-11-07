@@ -23,6 +23,8 @@ import { useRealSwingsStudy } from "./useRealSwingsStudy";
 import { useBosMssStudy } from "./useBosMssStudy";
 import { useIrlErlStudy } from "./useIrlErlStudy";
 import { SessionsDashboard } from "@/features/sessions/SessionsDashboard";
+import { WatermarkOverlay } from "@/features/watermark/WatermarkOverlay";
+import { useWatermarkStudy } from "./useWatermarkStudy";
 import { useTradingViewWidget } from "./useTradingViewWidget";
 import { RADIAR_LAYOUT_NAME } from "@/infrastructure/tradingview";
 
@@ -264,6 +266,7 @@ export function TradingViewChart({
   useRealSwingsStudy(true);
   useBosMssStudy(true);
   useIrlErlStudy(true);
+  useWatermarkStudy(true);
 
   return (
     <Box
@@ -286,6 +289,7 @@ export function TradingViewChart({
       {/* Main candle countdown = TV native price-scale countdown (showCountdown).
           Do NOT mount blue overlay / HTF remain strip — they duplicate & bleed into OHLC. */}
       <SessionsDashboard />
+      <WatermarkOverlay />
 
       {!ready && !error ? (
         <Box

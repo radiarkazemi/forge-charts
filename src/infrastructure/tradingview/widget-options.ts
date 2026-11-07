@@ -22,6 +22,7 @@ import { createFractalIgorIndicator } from "@/features/chart/fractal-igor-indica
 import { createRealSwingsIndicator } from "@/features/chart/real-swings-indicator";
 import { createBosMssIndicator } from "@/features/chart/bos-mss-indicator";
 import { createIrlErlIndicator } from "@/features/chart/irl-erl-indicator";
+import { createWatermarkIndicator } from "@/features/chart/watermark-indicator";
 
 export interface WidgetOptionsInput {
   readonly container: HTMLElement;
@@ -343,6 +344,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
         createReplayMentorIndicator(PineJS as never) as CustomIndicator,
         createForgeTradingAssistantIndicator(PineJS as never) as CustomIndicator,
         createForgeCertaintyIndicator(PineJS as never) as CustomIndicator,
+        createWatermarkIndicator(PineJS as never) as CustomIndicator,
       ]),
   };
 }
