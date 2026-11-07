@@ -41,6 +41,8 @@ function openForge(): void {
   lastForgeOpenAt = now;
   try {
     document.body.classList.add("forge-indicators-picker-open");
+    const iframe = document.querySelector("iframe") as HTMLIFrameElement | null;
+    iframe?.contentDocument?.body?.classList.add("forge-indicators-picker-open");
   } catch {
     /* ignore */
   }
@@ -108,14 +110,47 @@ function looksLikeNativeIndicatorsDialog(root: Element): boolean {
   return false;
 }
 
+function hideElement(el: HTMLElement): void {
+  el.style.setProperty("display", "none", "important");
+  el.style.setProperty("visibility", "hidden", "important");
+  el.style.setProperty("opacity", "0", "important");
+  el.style.setProperty("pointer-events", "none", "important");
+  el.style.setProperty("width", "0", "important");
+  el.style.setProperty("height", "0", "important");
+  el.style.setProperty("overflow", "hidden", "important");
+  el.setAttribute("aria-hidden", "true");
+  el.setAttribute("data-forge-suppressed", "1");
+}
+
 function hideNativeDialog(doc: Document, node: Element): void {
   try {
-    const el = node as HTMLElement;
-    el.style.setProperty("display", "none", "important");
-    el.style.setProperty("visibility", "hidden", "important");
-    el.style.setProperty("pointer-events", "none", "important");
-    el.setAttribute("aria-hidden", "true");
-    el.setAttribute("data-forge-suppressed", "1");
+    // Hide the matched node and climb to the outer CL dialog chrome so we
+    // never leave an empty white shell on the chart.
+    let cur: HTMLElement | null = node as HTMLElement;
+    for (let i = 0; i < 6 && cur; i += 1) {
+      hideElement(cur);
+      const cls = cur.className?.toString?.() ?? "";
+      const role = cur.getAttribute("role") || "";
+      const dataName = cur.getAttribute("data-name") || "";
+      if (
+        role === "dialog" ||
+        /tv-dialog|dialog-overlay|modal/i.test(cls) ||
+        /dialog/i.test(dataName)
+      ) {
+        break;
+      }
+      cur = cur.parentElement;
+    }
+    // Also hide common overlay siblings behind the dialog.
+    const overlays = doc.querySelectorAll<HTMLElement>(
+      '[class*="overlay"], [class*="backdrop"], [class*="dimmer"], [data-name*="overlay"]',
+    );
+    for (const o of overlays) {
+      if (o.getAttribute("data-forge-suppressed") === "1") continue;
+      // Only kill overlays that appeared with the indicators dialog (large full-screen).
+      const r = o.getBoundingClientRect();
+      if (r.width > 200 && r.height > 200) hideElement(o);
+    }
   } catch {
     /* ignore */
   }
@@ -124,11 +159,6 @@ function hideNativeDialog(doc: Document, node: Element): void {
       'button[aria-label="Close"], button[title="Close"], [data-name="close"], [class*="close"]',
     );
     closeBtn?.click();
-  } catch {
-    /* ignore */
-  }
-  try {
-    doc.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
   } catch {
     /* ignore */
   }

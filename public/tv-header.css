@@ -159,13 +159,22 @@ body.forge-indicators-picker-open [data-dialog-name*="indicator"] {
 /*
  * Always suppress the compact CL “Indicators / SCRIPT NAME” dialog unless
  * the user explicitly asked for Full library (forge-allow-native-indicators).
+ * Also hide outer .tv-dialog shells so we never leave a blank white box.
  */
 body:not(.forge-allow-native-indicators) [data-name="indicators-dialog"],
 body:not(.forge-allow-native-indicators) [data-dialog-name="Indicators"],
-body:not(.forge-allow-native-indicators) [data-dialog-name="Indicators & Strategies"] {
+body:not(.forge-allow-native-indicators) [data-dialog-name="Indicators & Strategies"],
+body:not(.forge-allow-native-indicators) [class*="tv-dialog"]:has([data-name="indicators-dialog"]),
+body:not(.forge-allow-native-indicators) [class*="tv-dialog"]:has([data-dialog-name="Indicators"]),
+body:not(.forge-allow-native-indicators) [role="dialog"]:has([data-name="indicators-dialog"]),
+body:not(.forge-allow-native-indicators) [data-forge-suppressed="1"] {
   display: none !important;
   visibility: hidden !important;
+  opacity: 0 !important;
   pointer-events: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  overflow: hidden !important;
 }
 
 /*

@@ -170,7 +170,8 @@ function Highlight({ text, query, color }: { text: string; query: string; color:
 
 export function IndicatorsDialog({ open, onClose }: IndicatorsDialogProps) {
   const { chart, settings } = useServices();
-  const language = useStore(settings.settings, (s) => s.language);
+  const languageRaw = useStore(settings.settings, (s) => s.language);
+  const language: UiLanguage = languageRaw === "fa" ? "fa" : "en";
   const dark = useStore(settings.settings, (s) => s.theme) === "dark";
   const rtl = language === "fa";
   const [query, setQuery] = useState("");
@@ -267,12 +268,15 @@ export function IndicatorsDialog({ open, onClose }: IndicatorsDialogProps) {
       fullWidth
       maxWidth="md"
       dir={rtl ? "rtl" : "ltr"}
-      sx={{ zIndex: 20000 }}
+      sx={{
+        zIndex: 20000,
+        "& .MuiBackdrop-root": { bgcolor: "rgba(0,0,0,0.45)" },
+      }}
       slotProps={{
         paper: {
           sx: {
-            bgcolor: bg,
-            color: fg,
+            bgcolor: `${bg} !important`,
+            color: `${fg} !important`,
             borderRadius: "8px",
             border: `1px solid ${border}`,
             overflow: "hidden",
@@ -283,6 +287,7 @@ export function IndicatorsDialog({ open, onClose }: IndicatorsDialogProps) {
             display: "flex",
             flexDirection: "column",
             zIndex: 20001,
+            boxShadow: "0 12px 40px rgba(0,0,0,0.35)",
           },
         },
       }}
@@ -297,9 +302,11 @@ export function IndicatorsDialog({ open, onClose }: IndicatorsDialogProps) {
           gap: 1,
           borderBottom: `1px solid ${border}`,
           flexShrink: 0,
+          bgcolor: bg,
+          color: fg,
         }}
       >
-        <Typography sx={{ flex: 1, fontWeight: 700, fontSize: 16 }}>
+        <Typography sx={{ flex: 1, fontWeight: 700, fontSize: 16, color: `${fg} !important` }}>
           {TITLE[language]}
         </Typography>
         <IconButton size="small" onClick={onClose} sx={{ color: muted }} aria-label="Close">
