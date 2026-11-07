@@ -350,12 +350,25 @@ export function mountHeaderToolbar(
 
   // Place profile immediately before Symbol Search (Faraz: avatar → search pill).
   // Intercept Symbol Search so Forge Faraz-style picker opens instead of the TV dialog.
+  // Intercept Indicators so Forge TV-style indicators list opens instead of native CL.
   let symInterceptBound: HTMLElement | null = null;
+  let indInterceptBound: HTMLElement | null = null;
   const openForgeSymbolSearch = (e: Event) => {
     e.preventDefault();
     e.stopPropagation();
     if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
     window.dispatchEvent(new CustomEvent("forge:open-symbol-search"));
+  };
+  const openForgeIndicators = (e: Event) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+    window.dispatchEvent(new CustomEvent("forge:open-indicators"));
+  };
+  const isIndicatorsHeaderBtn = (btn: HTMLElement): boolean => {
+    if (btn.getAttribute("data-name") === "open-indicators-dialog") return true;
+    const title = (btn.getAttribute("title") || btn.getAttribute("aria-label") || "").trim();
+    return title === "Indicators & Strategies" || title === "Indicators";
   };
   const placeProfileNearSearch = () => {
     try {
@@ -370,6 +383,19 @@ export function mountHeaderToolbar(
         sym.addEventListener("pointerdown", openForgeSymbolSearch, true);
         symInterceptBound = sym;
       }
+      const indCandidates = Array.from(
+        doc.querySelectorAll<HTMLElement>(
+          'button[data-name="open-indicators-dialog"], button[title="Indicators"], button[title="Indicators & Strategies"], button[aria-label="Indicators"], button[aria-label="Indicators & Strategies"]',
+        ),
+      );
+      const ind = indCandidates.find(isIndicatorsHeaderBtn) ?? null;
+      if (ind && ind !== indInterceptBound) {
+        indInterceptBound?.removeEventListener("click", openForgeIndicators, true);
+        indInterceptBound?.removeEventListener("pointerdown", openForgeIndicators, true);
+        ind.addEventListener("click", openForgeIndicators, true);
+        ind.addEventListener("pointerdown", openForgeIndicators, true);
+        indInterceptBound = ind;
+      }
       if (!sym || !profileBtn.isConnected) return;
       const parent = sym.parentElement;
       if (parent && profileBtn.parentElement) {
@@ -382,6 +408,7 @@ export function mountHeaderToolbar(
   placeProfileNearSearch();
   window.setTimeout(placeProfileNearSearch, 400);
   window.setTimeout(placeProfileNearSearch, 1_200);
+  window.setTimeout(placeProfileNearSearch, 2_400);
 
   return {
     updateProfile: (next) => {

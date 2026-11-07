@@ -147,6 +147,15 @@ body.forge-symbol-picker-open [data-dialog-name="Symbol Search"] {
   pointer-events: none !important;
 }
 
+/* Hide native Indicators dialog when Forge Indicators picker is open */
+body.forge-indicators-picker-open [data-name="indicators-dialog"],
+body.forge-indicators-picker-open [data-dialog-name*="Indicator"],
+body.forge-indicators-picker-open [data-dialog-name*="indicator"] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
 /*
  * Indicators dialog — TV-like list rows:
  * title truncates; author / usage meta stay on the right without covering labels.
