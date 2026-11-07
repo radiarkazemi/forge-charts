@@ -39,7 +39,12 @@ Glossary (p.53–54):
 
 Important (p.25): the **same price** can be ERL vs a small range and IRL vs a larger range — always fix the reference dealing range + timeframe.
 
-Forge: **IRL / ERL** study
+Forge: **IRL / ERL** study (`IrlErlLiquidity@tv-basicstudies-4`)
 
-- Draws **ERL+ / ERL−** only on the main dealing-range high / low (nested micro-ranges dropped by default).
-- Draws **EQH / EQL** for equal internal pivots, and **IRL+ / IRL−** for other significant internal swings away from the edges.
+- Picks **one active dealing range** by default (largest that still contains last close).
+- Draws **ERL+ / ERL−** only on that range’s outer high / low.
+- Internal pivots are searched **between the two extremes** (and while price stays in-box) — not only after confirmation.
+- Draws **EQH / EQL** for equal internal pivots (lesson 3.3), and **IRL+ / IRL−** for the strongest remaining internal swings.
+- Nested micro-ranges are dropped so their edges are not mis-labeled as ERL.
+
+Forge: **Dealing Ranges** also hides nested boxes by default (`hideNested`).

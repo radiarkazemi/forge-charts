@@ -16,8 +16,8 @@ import {
 import type { DailyOpenMode } from "@/features/htf-candles/runtime";
 
 export const DEALING_RANGES_STUDY_NAME = "Dealing Ranges";
-/** Bumped to -5 — rejected H→major L (confirm on swing pair, smart scales). */
-export const DEALING_RANGES_STUDY_ID = "DealingRanges@tv-basicstudies-5";
+/** Bumped to -6 — hide nested DRs (keep larger / main range). */
+export const DEALING_RANGES_STUDY_ID = "DealingRanges@tv-basicstudies-6";
 
 const HTF_OPTIONS: DrHtfPreset[] = ["5", "15", "30", "60", "240", "1D", "1W", "1M"];
 const DAILY_OPEN_OPTIONS: DailyOpenMode[] = ["midnight", "830", "930", "exchange"];
@@ -75,6 +75,7 @@ export const DEALING_RANGES_DEFAULTS = {
   smartScales: MULTI_TF_DR_DEFAULTS.smartScales,
   scalesText: MULTI_TF_DR_DEFAULTS.scalesText,
   minRangePct: MULTI_TF_DR_DEFAULTS.minRangePct,
+  hideNested: MULTI_TF_DR_DEFAULTS.hideNested,
   discountColor: MULTI_TF_DR_DEFAULTS.discountColor,
   premiumColor: MULTI_TF_DR_DEFAULTS.premiumColor,
   midColor: MULTI_TF_DR_DEFAULTS.midColor,
@@ -148,6 +149,10 @@ export function dealingRangesOptionsFromMap(map: Map<string, unknown>): MultiTfD
       (d as { scalesText?: string }).scalesText ?? "2,5,10,20,30",
     ),
     minRangePct: Math.max(0, Math.min(5, num("minRangePct", d.minRangePct))),
+    hideNested: bool(
+      "hideNested",
+      (d as { hideNested?: boolean }).hideNested ?? true,
+    ),
     discountColor: str("discountColor", d.discountColor),
     premiumColor: str("premiumColor", d.premiumColor),
     midColor: str("midColor", d.midColor),
@@ -330,6 +335,12 @@ export function createDealingRangesIndicator(PineJS: { Std: { close: (ctx: any) 
           type: "float",
           min: 0,
           max: 5,
+        },
+        {
+          id: "hideNested",
+          name: "Hide nested ranges (keep larger / main)",
+          defval: DEALING_RANGES_DEFAULTS.hideNested,
+          type: "bool",
         },
         {
           id: "discountColor",

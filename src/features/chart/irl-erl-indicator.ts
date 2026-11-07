@@ -9,8 +9,8 @@ import { IRL_ERL_DEFAULTS } from "@/features/irl-erl/runtime";
 import { buildStylePlots, stylePlotNaNs } from "./study-style-plots";
 
 export const IRL_ERL_STUDY_NAME = "IRL / ERL";
-/** Bumped to -3 — handbook EQH/EQL + main-range ERL. */
-export const IRL_ERL_STUDY_ID = "IrlErlLiquidity@tv-basicstudies-3";
+/** Bumped to -4 — active-DR ERL + IRL between extremes (handbook pt.3). */
+export const IRL_ERL_STUDY_ID = "IrlErlLiquidity@tv-basicstudies-4";
 
 export const IRL_STYLE_PLUS = "plot_irl_plus";
 export const IRL_STYLE_MINUS = "plot_irl_minus";
@@ -115,7 +115,7 @@ export function createIrlErlIndicator(PineJS: {
       id: IRL_ERL_STUDY_ID as never,
       name: IRL_ERL_STUDY_NAME,
       description: IRL_ERL_STUDY_NAME,
-      shortDescription: "ERL · EQH/EQL · IRL · v3",
+      shortDescription: "ERL · EQH/EQL · IRL · v4",
       isCustomIndicator: true,
       is_price_study: true,
       linkedToSeries: true,
@@ -165,11 +165,11 @@ export function createIrlErlIndicator(PineJS: {
         },
         {
           id: "maxRanges",
-          name: "Max main ranges (ERL pairs)",
+          name: "Active dealing ranges (1 = handbook)",
           defval: IRL_ERL_STUDY_DEFAULTS.maxRanges,
           type: "integer",
           min: 1,
-          max: 6,
+          max: 4,
         },
         {
           id: "lookbackDays",

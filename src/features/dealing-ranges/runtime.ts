@@ -82,6 +82,11 @@ export interface MultiTfDealingRangesOptions extends DealingRangesStyle {
    * (filters micro noise so majors match hand-drawn DRs).
    */
   readonly minRangePct: number;
+  /**
+   * When true (default), drop DRs that sit fully inside a larger DR so only
+   * the main (bigger) range remains — stops nested boxes-in-boxes.
+   */
+  readonly hideNested: boolean;
   /** Draw ranges on the chart’s own timeframe. */
   readonly showChartTf: boolean;
   readonly slots: readonly DrHtfSlot[];
@@ -113,6 +118,8 @@ export const MULTI_TF_DR_DEFAULTS: MultiTfDealingRangesOptions = {
   scalesText: DEFAULT_STRUCTURE_SCALES.join(","),
   /** ~0.15% of mid — keep real legs, drop pure noise. */
   minRangePct: 0.15,
+  /** Prefer the larger dealing range; hide boxes nested inside it. */
+  hideNested: true,
   showChartTf: true,
   slots: DEFAULT_DR_HTF_SLOTS,
   dailyOpenMode: "midnight",
@@ -432,6 +439,46 @@ export function computeIctConfirmedRangesAtScale(
 }
 
 /**
+ * Drop ranges that sit fully inside a larger one (price + time).
+ * Keeps the main / bigger DR — handbook: one chosen reference range.
+ */
+export function filterNestedDealingRanges(
+  ranges: readonly ConfirmedDealingRange[],
+  hideNested: boolean,
+  tEnd?: number,
+): ConfirmedDealingRange[] {
+  if (!hideNested || ranges.length <= 1) return [...ranges];
+
+  const scored = ranges
+    .map((r) => {
+      const height = Math.max(0, r.top - r.bot);
+      const end = Math.max(r.t1, tEnd ?? r.t1, r.t0 + 1);
+      const width = Math.max(1, end - r.t0);
+      return { r, height, width, area: height * width };
+    })
+    .sort((a, b) => b.area - a.area || b.height - a.height || a.r.t0 - b.r.t0);
+
+  const kept: ConfirmedDealingRange[] = [];
+  for (const cand of scored) {
+    const nested = kept.some((outer) => {
+      const outerEnd = Math.max(outer.t1, tEnd ?? outer.t1, outer.t0 + 1);
+      const outerH = Math.max(0, outer.top - outer.bot);
+      const innerH = cand.height;
+      if (!(outerH > 0) || !(innerH > 0)) return false;
+      if (innerH >= outerH * 0.98) return false;
+      if (cand.r.bot < outer.bot - outerH * 0.001) return false;
+      if (cand.r.top > outer.top + outerH * 0.001) return false;
+      if (cand.r.t0 < outer.t0 - 1) return false;
+      if (cand.r.t0 > outerEnd + 1) return false;
+      return true;
+    });
+    if (!nested) kept.push(cand.r);
+  }
+
+  return kept.sort((a, b) => a.t1 - b.t1 || a.t0 - b.t0);
+}
+
+/**
  * ICT dealing ranges — multi-scale minor→major, confirm on H↔L (default).
  */
 export function computeIctConfirmedRanges(
@@ -449,7 +496,7 @@ export function computeIctConfirmedRanges(
     | "requireBosConfirm"
     | "smartScales"
     | "scalesText"
-  >,
+  > & { readonly hideNested?: boolean },
   nowSec = Math.floor(Date.now() / 1000),
 ): ConfirmedDealingRange[] {
   const toSec = parseDateEndSec(opts.toDate) ?? nowSec;
@@ -487,13 +534,14 @@ export function computeIctConfirmedRanges(
     }
   }
 
-  const completed = [...byKey.values()]
+  let completed = [...byKey.values()]
     .map(({ scale: _s, ...dr }) => dr)
     .filter((r) => r.t1 >= fromSec && r.t1 <= toSec)
     .sort((a, b) => a.t1 - b.t1);
 
   const maxN = Math.max(1, Math.min(20, Math.floor(opts.maxRanges)));
-  return completed.slice(-maxN);
+  completed = completed.slice(-maxN);
+  return filterNestedDealingRanges(completed, opts.hideNested !== false, toSec);
 }
 
 /**
