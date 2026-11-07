@@ -8,16 +8,18 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOST="${VPS_HOST:-[REDACTED].116}"
 USER="${VPS_USER:-root}"
+# Iran VPS often blocks :22 from abroad; :2222 is the reliable path.
+PORT="${VPS_SSH_PORT:-2222}"
 REMOTE_APP="${REMOTE_APP:-/var/www/forge-charts}"
 REMOTE_ANIL_CHARTS="${REMOTE_ANIL_CHARTS:-/var/www/anil/frontend/dist/charts}"
 REMOTE_ANIL_ASSETS="${REMOTE_ANIL_ASSETS:-/var/www/anil/frontend/dist/assets/forge}"
 REMOTE_FORGE_WEB="${REMOTE_FORGE_WEB:-/var/www/forge-web}"
 
-SSH=(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o ServerAliveInterval=10)
-SCP=(scp -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30)
+SSH=(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o ServerAliveInterval=10 -p "$PORT")
+SCP=(scp -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -P "$PORT")
 if [[ -n "${SSHPASS:-}" ]]; then
-  SSH=(sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o ServerAliveInterval=10)
-  SCP=(sshpass -e scp -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30)
+  SSH=(sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o ServerAliveInterval=10 -p "$PORT")
+  SCP=(sshpass -e scp -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -P "$PORT")
 fi
 
 cd "$ROOT"
