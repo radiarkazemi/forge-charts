@@ -9,7 +9,7 @@ import { useEffect, useRef } from "react";
 import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
 import type { EntityId } from "@/infrastructure/tradingview";
-import { barsFromChartExport } from "@/features/pine/orca-runtime";
+
 import {
   computeRealSwings,
   paintRealSwings,
@@ -28,13 +28,21 @@ import {
   linewidthToFontSize,
   readStylePlot,
 } from "./study-style-plots";
-import { studyIsVisible } from "./study-paint-gate";
+import { studyIsVisible, markChartPaintBusy } from "./study-paint-gate";
+import {
+  exportChartBarsCached,
+  STUDY_DEBOUNCE_MS,
+  STUDY_LIVE_REFRESH_MS,
+  STUDY_MAX_BARS,
+  STUDY_PAINT_MUTE_MS,
+  STUDY_PRESENCE_POLL_MS,
+} from "./chart-export-cache";
 
-const MAX_BARS = 3_000;
-const STUDY_DEBOUNCE_MS = 450;
-const PRESENCE_POLL_MS = 8_000;
-const LIVE_REFRESH_MS = 20_000;
-const PAINT_MUTE_MS = 1_500;
+const MAX_BARS = STUDY_MAX_BARS;
+// STUDY_DEBOUNCE_MS from chart-export-cache
+const PRESENCE_POLL_MS = STUDY_PRESENCE_POLL_MS;
+const LIVE_REFRESH_MS = STUDY_LIVE_REFRESH_MS;
+const PAINT_MUTE_MS = STUDY_PAINT_MUTE_MS;
 
 function fingerprint(cmds: readonly SwingDrawCmd[]): string {
   if (cmds.length === 0) return "empty";
@@ -71,6 +79,7 @@ export function useRealSwingsStudy(enabled = true): void {
 
     const mutePaintEvents = () => {
       muteUntilRef.current = Date.now() + PAINT_MUTE_MS;
+      markChartPaintBusy(PAINT_MUTE_MS);
     };
     const isMuted = () => Date.now() < muteUntilRef.current;
 
@@ -227,14 +236,8 @@ export function useRealSwingsStudy(enabled = true): void {
         const key = JSON.stringify({ symbol, interval, inputs });
         const active = widget.activeChart();
         if (!active) return;
-        const exported = await active.exportData({
-          includeTime: true,
-          includeSeries: true,
-          includedStudies: [],
-        });
+        let bars = await exportChartBarsCached(active, MAX_BARS);
         if (cancelled || gen !== genRef.current) return;
-        let bars = barsFromChartExport(exported);
-        if (bars.length > MAX_BARS) bars = bars.slice(bars.length - MAX_BARS);
         if (bars.length < inputs.leftBars + inputs.rightBars + 1) return;
 
         const cmds = computeRealSwings(bars, inputs);

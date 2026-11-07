@@ -944,10 +944,14 @@ export async function paintOrcaOnChart(
     } catch {
       /* skip bad draw */
     }
-    // Yield so CL can paint candles / handle clicks between shapes.
-    if (i > 0 && i % 3 === 0) {
+    // Yield often so candles / clicks stay responsive during large paints.
+    if (i > 0 && i % 2 === 0) {
       await new Promise<void>((r) => {
-        window.setTimeout(r, 0);
+        if (typeof window.requestIdleCallback === "function") {
+          window.requestIdleCallback(() => r(), { timeout: 24 });
+        } else {
+          window.setTimeout(r, i % 10 === 0 ? 8 : 0);
+        }
       });
     }
   }

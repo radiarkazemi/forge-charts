@@ -198,7 +198,8 @@ export function createProfileSyncPusher(storage: KeyValueStorage): {
     notifyLocalChange() {
       if (disposed) return;
       window.clearTimeout(timer);
-      timer = window.setTimeout(flush, 2_500);
+      // Longer debounce — avoids sync storms while indicators / replay paint.
+      timer = window.setTimeout(flush, 6_000);
     },
     dispose() {
       disposed = true;

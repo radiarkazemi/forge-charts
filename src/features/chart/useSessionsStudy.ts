@@ -6,35 +6,18 @@ import { useEffect, useRef } from "react";
 import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
 import type { EntityId } from "@/infrastructure/tradingview";
-import { barsFromChartExport } from "@/features/pine/orca-runtime";
-import {
-  clColor,
-  computeSessions,
-  mergeSessionDefs,
-  paintSessionsOnChart,
-  publishSessionsDashboard,
-  SESSION_COLOR_PALETTE,
-  SESSIONS_DEFAULTS,
-  type SessionsOptions,
-} from "@/features/sessions/runtime";
-import {
-  readSessionSlotsFromMap,
-  stylePlotIdForIndex,
-  SESSIONS_STUDY_DEFAULTS,
-  SESSIONS_MAX_COUNT,
-} from "./sessions-indicator";
-import {
-  chartAllowedByMaxMinutes,
-  liveChartResolution,
-  studyIsVisible,
-} from "./study-paint-gate";
+import { clColor, computeSessions, mergeSessionDefs, paintSessionsOnChart, publishSessionsDashboard, SESSION_COLOR_PALETTE, SESSIONS_DEFAULTS, type SessionsOptions } from "@/features/sessions/runtime";
+import { readSessionSlotsFromMap, stylePlotIdForIndex, SESSIONS_STUDY_DEFAULTS, SESSIONS_MAX_COUNT } from "./sessions-indicator";
+import { chartAllowedByMaxMinutes, liveChartResolution, studyIsVisible, markChartPaintBusy } from "./study-paint-gate";
 
-const MAX_BARS = 4_000;
-const STUDY_DEBOUNCE_MS = 450;
+import { exportChartBarsCached, STUDY_DEBOUNCE_MS, STUDY_LIVE_REFRESH_MS, STUDY_MAX_BARS, STUDY_PRESENCE_POLL_MS, STUDY_PAINT_MUTE_MS } from "./chart-export-cache"; "./chart-export-cache";
+
+const MAX_BARS = STUDY_MAX_BARS;
+// STUDY_DEBOUNCE_MS from chart-export-cache
 /** Presence / cleanup when study removed. */
-const PRESENCE_POLL_MS = 6_000;
+const PRESENCE_POLL_MS = STUDY_PRESENCE_POLL_MS;
 /** Soft refresh so forming session boxes track live bars — keep light for chart FPS. */
-const LIVE_REFRESH_MS = 5_000;
+const LIVE_REFRESH_MS = STUDY_LIVE_REFRESH_MS;
 
 function fingerprintCmds(
   cmds: readonly { kind: string; t1: number; p1: number; color?: string; fill?: string }[],
@@ -357,14 +340,10 @@ export function useSessionsStudy(enabled = true): void {
         const api = widget.activeChart();
         if (!api) return;
 
-        const exported = await api.exportData({
-          includeTime: true,
-          includeSeries: true,
-          includedStudies: [],
-        });
+        const rawBars = await exportChartBarsCached(api, MAX_BARS);
         if (cancelled || myGen !== genRef.current) return;
 
-        let bars = barsFromChartExport(exported).map((b) => ({
+        const bars = rawBars.map((b) => ({
           time: b.time,
           open: b.open,
           high: b.high,
@@ -372,7 +351,6 @@ export function useSessionsStudy(enabled = true): void {
           close: b.close,
           volume: b.volume ?? 0,
         }));
-        if (bars.length > MAX_BARS) bars = bars.slice(bars.length - MAX_BARS);
         if (bars.length < 5) {
           console.warn("[forge-sessions] not enough bars", bars.length);
           if (entityIdsRef.current.length === 0) lastKeyRef.current = "";
@@ -391,6 +369,7 @@ export function useSessionsStudy(enabled = true): void {
         }
         if (cancelled || myGen !== genRef.current) return;
 
+        markChartPaintBusy(STUDY_PAINT_MUTE_MS);
         const ids =
           cmds.length === 0
             ? ([] as EntityId[])

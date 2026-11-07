@@ -24,6 +24,7 @@ import {
   mountSymbolSearchExchangeReset,
   purgeStickySymbolSearchFilters,
 } from "./symbol-search-defaults";
+import { isChartPaintBusy } from "./study-paint-gate";
 
 export interface TradingViewWidgetDeps {
   readonly controller: ChartController;
@@ -286,8 +287,21 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         unmountSymbolSearchReset?.();
         unmountSymbolSearchReset = mountSymbolSearchExchangeReset(container);
         if (isPrimary) {
-          const persistChart = () => {
+          // Full widget.save() is expensive. Never run it on every study/drawing
+          // event (indicator add / shape paint storms) — coalesce instead.
+          let persistTimer: number | undefined;
+          let persistQueued = false;
+          const AUTOSAVE_IDLE_MS = 4_000;
+
+          const runPersist = () => {
             try {
+              // Wait out active shape paints so we don't save mid-storm.
+              if (isChartPaintBusy()) {
+                persistQueued = true;
+                window.clearTimeout(persistTimer);
+                persistTimer = window.setTimeout(flushPersist, 600);
+                return;
+              }
               widget?.save((state) => {
                 if (!state || typeof state !== "object") return;
                 // Refuse to persist a hollow layout (no panes / charts) — protects
@@ -306,29 +320,51 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
               /* ignore */
             }
           };
-          widget.subscribe("onAutoSaveNeeded", persistChart);
-          // Studies / drawings / properties — don't wait for the debounce alone.
+
+          const flushPersist = () => {
+            persistTimer = undefined;
+            if (!persistQueued) return;
+            persistQueued = false;
+            runPersist();
+          };
+
+          const schedulePersist = () => {
+            persistQueued = true;
+            if (persistTimer != null) return;
+            persistTimer = window.setTimeout(flushPersist, AUTOSAVE_IDLE_MS);
+          };
+
+          const persistNow = () => {
+            persistQueued = false;
+            window.clearTimeout(persistTimer);
+            persistTimer = undefined;
+            runPersist();
+          };
+
+          widget.subscribe("onAutoSaveNeeded", schedulePersist);
+          // Coalesce — do NOT save synchronously on every study/drawing tick.
           try {
-            widget.subscribe("study_event", persistChart as never);
-            widget.subscribe("drawing_event", persistChart as never);
-            widget.subscribe("study_properties_changed", persistChart as never);
+            widget.subscribe("study_event", schedulePersist as never);
+            widget.subscribe("drawing_event", schedulePersist as never);
+            widget.subscribe("study_properties_changed", schedulePersist as never);
           } catch {
             /* older CL builds */
           }
-          const onLeave = () => persistChart();
+          const onLeave = () => persistNow();
           const onVisibility = () => {
-            if (document.visibilityState === "hidden") persistChart();
+            if (document.visibilityState === "hidden") persistNow();
           };
           window.addEventListener("pagehide", onLeave);
           window.addEventListener("beforeunload", onLeave);
           document.addEventListener("visibilitychange", onVisibility);
           (widget as unknown as { __forgePersistLeave?: () => void }).__forgePersistLeave = () => {
+            window.clearTimeout(persistTimer);
             window.removeEventListener("pagehide", onLeave);
             window.removeEventListener("beforeunload", onLeave);
             document.removeEventListener("visibilitychange", onVisibility);
           };
-          // Immediate snapshot after ready so a fast refresh still has a baseline.
-          window.setTimeout(persistChart, 400);
+          // Baseline snapshot after ready (still deferred so first paint stays smooth).
+          window.setTimeout(schedulePersist, 1_200);
         }
         try {
           widget

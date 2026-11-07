@@ -10,19 +10,16 @@ import { useEffect, useRef } from "react";
 import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
 import type { EntityId } from "@/infrastructure/tradingview";
-import { barsFromChartExport } from "@/features/pine/orca-runtime";
-import {
-  computeReplayMentor,
-  paintReplayMentor,
-  type MentorInputs,
-  MENTOR_DEFAULTS,
-} from "@/features/replay-mentor/runtime";
-import { REPLAY_MENTOR_DEFAULTS } from "./replay-mentor-indicator";
-import { studyIsVisible } from "./study-paint-gate";
 
-const MAX_BARS = 2_000;
-const STUDY_DEBOUNCE_MS = 450;
-const PRESENCE_POLL_MS = 6_000;
+import { computeReplayMentor, paintReplayMentor, type MentorInputs, MENTOR_DEFAULTS } from "@/features/replay-mentor/runtime";
+import { REPLAY_MENTOR_DEFAULTS } from "./replay-mentor-indicator";
+import { studyIsVisible, markChartPaintBusy } from "./study-paint-gate";
+
+import { exportChartBarsCached, STUDY_DEBOUNCE_MS, STUDY_MAX_BARS, STUDY_PRESENCE_POLL_MS, STUDY_PAINT_MUTE_MS } from "./chart-export-cache"; "./chart-export-cache";
+
+const MAX_BARS = STUDY_MAX_BARS;
+// STUDY_DEBOUNCE_MS from chart-export-cache
+const PRESENCE_POLL_MS = STUDY_PRESENCE_POLL_MS;
 
 function fingerprint(
   cmds: readonly { kind: string; t1: number; p1: number; t2?: number; p2?: number; text?: string }[],
@@ -173,20 +170,13 @@ export function useReplayMentorStudy(enabled = true): void {
       try {
         const api = widget.activeChart();
         if (!api) return;
-        const exported = await api.exportData({
-          includeTime: true,
-          includeSeries: true,
-          includedStudies: [],
-        });
+        let bars = await exportChartBarsCached(api, MAX_BARS);
         if (cancelled || myGen !== genRef.current) return;
-
-        let bars = barsFromChartExport(exported);
         // Drop the live forming candle so ICT only reacts to closes.
         const live = barReplay.state.get();
         if (live.phase === "playing" && live.formProgress > 0 && bars.length > 0) {
           bars = bars.slice(0, -1);
         }
-        if (bars.length > MAX_BARS) bars = bars.slice(bars.length - MAX_BARS);
         if (bars.length < 30) return;
 
         const cmds = computeReplayMentor(bars, opts);
@@ -198,6 +188,7 @@ export function useReplayMentorStudy(enabled = true): void {
         }
         if (cancelled || myGen !== genRef.current) return;
 
+        markChartPaintBusy(STUDY_PAINT_MUTE_MS);
         const ids =
           cmds.length === 0
             ? ([] as EntityId[])

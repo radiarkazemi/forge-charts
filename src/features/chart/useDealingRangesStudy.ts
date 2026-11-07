@@ -10,32 +10,22 @@ import { useEffect, useRef } from "react";
 import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
 import type { EntityId } from "@/infrastructure/tradingview";
-import {
-  barsFromChartExport,
-  paintOrcaOnChart,
-  type DrawCmd,
-} from "@/features/pine/orca-runtime";
-import {
-  computeMultiTfDealingRanges,
-  MULTI_TF_DR_DEFAULTS,
-  type MultiTfDealingRangesOptions,
-} from "@/features/dealing-ranges/runtime";
-import {
-  DEALING_RANGES_DEFAULTS,
-  dealingRangesOptionsFromMap,
-} from "./dealing-ranges-indicator";
-import { studyIsVisible } from "./study-paint-gate";
+import { paintOrcaOnChart, type DrawCmd } from "@/features/pine/orca-runtime";
+import { computeMultiTfDealingRanges, MULTI_TF_DR_DEFAULTS, type MultiTfDealingRangesOptions } from "@/features/dealing-ranges/runtime";
+import { DEALING_RANGES_DEFAULTS, dealingRangesOptionsFromMap } from "./dealing-ranges-indicator";
+import { studyIsVisible, markChartPaintBusy } from "./study-paint-gate";
+import { exportChartBarsCached, STUDY_DEBOUNCE_MS, STUDY_MAX_BARS, STUDY_PAINT_MUTE_MS, STUDY_PRESENCE_POLL_MS } from "./chart-export-cache";
 
 /** Cap bars fed into Orca so 1m/seconds charts stay responsive. */
-const MAX_BARS = 2_500;
+const MAX_BARS = STUDY_MAX_BARS;
 /** Debounce study add/remove/input changes before expensive export+paint. */
-const STUDY_DEBOUNCE_MS = 550;
+// STUDY_DEBOUNCE_MS from chart-export-cache
 /** Cheap presence check only (no export) while a study is active. */
-const PRESENCE_POLL_MS = 8_000;
+const PRESENCE_POLL_MS = STUDY_PRESENCE_POLL_MS;
 /** Multi-TF + multi-scale halves need more shapes than the default Orca cap. */
 const MAX_PAINT_CMDS = 220;
 /** Ignore study_event feedback while shapes are created/removed. */
-const PAINT_MUTE_MS = 1_500;
+const PAINT_MUTE_MS = STUDY_PAINT_MUTE_MS;
 
 function fingerprintCmds(cmds: readonly DrawCmd[]): string {
   if (cmds.length === 0) return "empty";
@@ -73,6 +63,7 @@ export function useDealingRangesStudy(enabled = true): void {
 
     const mutePaintEvents = () => {
       muteUntilRef.current = Date.now() + PAINT_MUTE_MS;
+      markChartPaintBusy(PAINT_MUTE_MS);
     };
     const isMuted = () => Date.now() < muteUntilRef.current;
 
@@ -160,17 +151,8 @@ export function useDealingRangesStudy(enabled = true): void {
         const api = widget.activeChart();
         if (!api) return;
 
-        const exported = await api.exportData({
-          includeTime: true,
-          includeSeries: true,
-          includedStudies: [],
-        });
+        let bars = await exportChartBarsCached(api, MAX_BARS);
         if (cancelled || myGen !== genRef.current) return;
-
-        let bars = barsFromChartExport(exported);
-        if (bars.length > MAX_BARS) {
-          bars = bars.slice(bars.length - MAX_BARS);
-        }
         if (bars.length < 20) {
           if (entityIdsRef.current.length === 0) {
             lastKeyRef.current = "";

@@ -7,20 +7,16 @@ import { useEffect, useRef } from "react";
 import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
 import type { EntityId } from "@/infrastructure/tradingview";
-import { barsFromChartExport } from "@/features/pine/orca-runtime";
-import {
-  computeStructureIntelligence,
-  paintStructureIntelligence,
-  structureIntelligenceDrawCmds,
-  type SiInputs,
-  SI_DEFAULTS,
-} from "@/features/structure-intelligence/runtime";
-import { SI_STUDY_DEFAULTS } from "./structure-intelligence-indicator";
-import { studyIsVisible } from "./study-paint-gate";
 
-const MAX_BARS = 2_500;
-const STUDY_DEBOUNCE_MS = 550;
-const PRESENCE_POLL_MS = 6_000;
+import { computeStructureIntelligence, paintStructureIntelligence, structureIntelligenceDrawCmds, type SiInputs, SI_DEFAULTS } from "@/features/structure-intelligence/runtime";
+import { SI_STUDY_DEFAULTS } from "./structure-intelligence-indicator";
+import { studyIsVisible, markChartPaintBusy } from "./study-paint-gate";
+
+import { exportChartBarsCached, STUDY_DEBOUNCE_MS, STUDY_MAX_BARS, STUDY_PRESENCE_POLL_MS, STUDY_PAINT_MUTE_MS } from "./chart-export-cache"; "./chart-export-cache";
+
+const MAX_BARS = STUDY_MAX_BARS;
+// STUDY_DEBOUNCE_MS from chart-export-cache
+const PRESENCE_POLL_MS = STUDY_PRESENCE_POLL_MS;
 
 function fingerprint(cmds: readonly { kind: string; t1: number; p1: number }[]): string {
   if (cmds.length === 0) return "empty";
@@ -168,14 +164,8 @@ export function useStructureIntelligenceStudy(enabled = true): void {
       try {
         const api = widget.activeChart();
         if (!api) return;
-        const exported = await api.exportData({
-          includeTime: true,
-          includeSeries: true,
-          includedStudies: [],
-        });
+        let bars = await exportChartBarsCached(api, MAX_BARS);
         if (cancelled || myGen !== genRef.current) return;
-        let bars = barsFromChartExport(exported);
-        if (bars.length > MAX_BARS) bars = bars.slice(bars.length - MAX_BARS);
         if (bars.length < 40) {
           if (entityIdsRef.current.length === 0) lastKeyRef.current = "";
           return;
@@ -185,6 +175,7 @@ export function useStructureIntelligenceStudy(enabled = true): void {
         const fp = fingerprint(cmds);
         if (!force && fp === lastFpRef.current && lastKeyRef.current === key) return;
         if (cancelled || myGen !== genRef.current) return;
+        markChartPaintBusy(STUDY_PAINT_MUTE_MS);
         const ids =
           cmds.length === 0
             ? ([] as EntityId[])

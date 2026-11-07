@@ -7,22 +7,19 @@ import { useEffect, useRef } from "react";
 import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
 import type { EntityId } from "@/infrastructure/tradingview";
-import { barsFromChartExport } from "@/features/pine/orca-runtime";
-import {
-  computeTradingAssistant,
-  paintTradingAssistant,
-  tradingAssistantDrawCmds,
-  type FtaInputs,
-} from "@/features/trading-assistant/runtime";
+
+import { computeTradingAssistant, paintTradingAssistant, tradingAssistantDrawCmds, type FtaInputs } from "@/features/trading-assistant/runtime";
 import { FTA_STUDY_DEFAULTS } from "./forge-trading-assistant-indicator";
-import { studyIsVisible } from "./study-paint-gate";
+import { studyIsVisible, markChartPaintBusy } from "./study-paint-gate";
+
+import { exportChartBarsCached, STUDY_DEBOUNCE_MS, STUDY_LIVE_REFRESH_MS, STUDY_MAX_BARS, STUDY_PRESENCE_POLL_MS, STUDY_PAINT_MUTE_MS } from "./chart-export-cache"; "./chart-export-cache";
 
 /** Keep light — Orca DR + paint shapes on large histories freezes the chart. */
-const MAX_BARS = 1_200;
-const STUDY_DEBOUNCE_MS = 700;
-const PRESENCE_POLL_MS = 8_000;
+const MAX_BARS = STUDY_MAX_BARS;
+// STUDY_DEBOUNCE_MS from chart-export-cache
+const PRESENCE_POLL_MS = STUDY_PRESENCE_POLL_MS;
 /** Refresh BUY/SELL as new bars form (fingerprint skips no-op paints). */
-const LIVE_REFRESH_MS = 12_000;
+const LIVE_REFRESH_MS = STUDY_LIVE_REFRESH_MS;
 
 function fingerprint(
   cmds: readonly { kind: string; t1: number; p1: number; t2?: number; p2?: number; text?: string }[],
@@ -190,14 +187,8 @@ export function useForgeTradingAssistantStudy(enabled = true): void {
       try {
         const api = widget.activeChart();
         if (!api) return;
-        const exported = await api.exportData({
-          includeTime: true,
-          includeSeries: true,
-          includedStudies: [],
-        });
+        let bars = await exportChartBarsCached(api, MAX_BARS);
         if (cancelled || myGen !== genRef.current) return;
-        let bars = barsFromChartExport(exported);
-        if (bars.length > MAX_BARS) bars = bars.slice(bars.length - MAX_BARS);
         if (bars.length < 40) {
           if (entityIdsRef.current.length === 0) lastKeyRef.current = "";
           return;
@@ -219,6 +210,7 @@ export function useForgeTradingAssistantStudy(enabled = true): void {
           return;
         }
         if (cancelled || myGen !== genRef.current) return;
+        markChartPaintBusy(STUDY_PAINT_MUTE_MS);
         const ids =
           cmds.length === 0
             ? ([] as EntityId[])

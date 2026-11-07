@@ -502,10 +502,10 @@ export class BarReplayController {
     const symbol = chart.symbol();
 
     const stepSec = resolutionToSec(resolution);
-    // Seconds / sub-minute need a deep buffer — short pages look like 2–3 candles
-    // then a jump when play advances across sparse holes.
-    const parentNeed = stepSec < 60 ? 20_000 : 8_000;
-    const microNeed = stepSec < 60 ? 50_000 : 20_000;
+    // Cap buffer depth so entering replay stays responsive; still enough for
+    // multi-day history without freezing the chart on export/fetch.
+    const parentNeed = stepSec < 60 ? 12_000 : 5_000;
+    const microNeed = stepSec < 60 ? 28_000 : 12_000;
 
     // Chart export first — keeps candles the user already sees (including those
     // before the click). A fresh provider page often starts after the selection

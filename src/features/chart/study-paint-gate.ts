@@ -54,3 +54,18 @@ export function studyIsVisible(api: { isVisible?: () => boolean } | null | undef
     return true;
   }
 }
+
+/**
+ * Global “chart is painting shapes” window — autosave / profile sync should
+ * wait so createShape storms do not also trigger full widget.save().
+ */
+let paintBusyUntilMs = 0;
+
+export function markChartPaintBusy(ms = 2_000): void {
+  const until = Date.now() + Math.max(250, ms);
+  if (until > paintBusyUntilMs) paintBusyUntilMs = until;
+}
+
+export function isChartPaintBusy(): boolean {
+  return Date.now() < paintBusyUntilMs;
+}
