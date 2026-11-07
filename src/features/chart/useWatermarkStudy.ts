@@ -229,21 +229,22 @@ export function useWatermarkStudy(enabled = true): void {
 
     publish();
 
-    const unSubStudy = chart.onStudyEvent((id, eventType) => {
+    const onStudyEvent = (id: string, eventType: string) => {
       if (/remove/i.test(eventType) && findStudyIds().length === 0) {
         publishWatermarkOverlay(null);
         return;
       }
       if (findStudyIds().some((s) => String(s) === String(id))) schedule();
       else if (/add|create/i.test(eventType)) schedule();
-    });
+    };
+    const unSubStudy = chart.onStudyEvent(onStudyEvent);
 
-    let unSubProps: (() => void) | undefined;
+    const onStudyProperties = () => {
+      if (findStudyIds().length === 0) return;
+      schedule();
+    };
     try {
-      unSubProps = widget.subscribe("study_properties_changed", () => {
-        if (findStudyIds().length === 0) return;
-        schedule();
-      });
+      widget.subscribe("study_properties_changed", onStudyProperties as never);
     } catch {
       /* older CL builds */
     }
@@ -267,7 +268,7 @@ export function useWatermarkStudy(enabled = true): void {
         /* ignore */
       }
       try {
-        unSubProps?.();
+        widget.unsubscribe("study_properties_changed", onStudyProperties as never);
       } catch {
         /* ignore */
       }
