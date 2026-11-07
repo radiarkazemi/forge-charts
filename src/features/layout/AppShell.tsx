@@ -100,8 +100,11 @@ export function AppShell({ onSignOut }: AppShellProps) {
     return () => window.removeEventListener("forge:open-symbol-search", onOpen);
   }, []);
 
+  // Indicators UI is painted inside the chart iframe overlay (see
+  // indicators-intercept.ts). Keep the React dialog closed to avoid a second
+  // empty/white shell in the parent page.
   useEffect(() => {
-    const onOpen = () => setIndicatorsOpen(true);
+    const onOpen = () => setIndicatorsOpen(false);
     window.addEventListener("forge:open-indicators", onOpen);
     return () => window.removeEventListener("forge:open-indicators", onOpen);
   }, []);

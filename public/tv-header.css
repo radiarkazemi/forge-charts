@@ -147,64 +147,7 @@ body.forge-symbol-picker-open [data-dialog-name="Symbol Search"] {
   pointer-events: none !important;
 }
 
-/* Hide native Indicators dialog when Forge Indicators picker is open */
-body.forge-indicators-picker-open [data-name="indicators-dialog"],
-body.forge-indicators-picker-open [data-dialog-name*="Indicator"],
-body.forge-indicators-picker-open [data-dialog-name*="indicator"] {
-  display: none !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
-}
-
-/*
- * Always suppress the compact CL “Indicators / SCRIPT NAME” dialog unless
- * the user explicitly asked for Full library (forge-allow-native-indicators).
- * Also hide outer .tv-dialog shells so we never leave a blank white box.
- */
-body:not(.forge-allow-native-indicators) [data-name="indicators-dialog"],
-body:not(.forge-allow-native-indicators) [data-dialog-name="Indicators"],
-body:not(.forge-allow-native-indicators) [data-dialog-name="Indicators & Strategies"],
-body:not(.forge-allow-native-indicators) [class*="tv-dialog"]:has([data-name="indicators-dialog"]),
-body:not(.forge-allow-native-indicators) [class*="tv-dialog"]:has([data-dialog-name="Indicators"]),
-body:not(.forge-allow-native-indicators) [role="dialog"]:has([data-name="indicators-dialog"]),
-body:not(.forge-allow-native-indicators) [data-forge-suppressed="1"] {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-  width: 0 !important;
-  height: 0 !important;
-  overflow: hidden !important;
-}
-
-/*
- * Indicators dialog — TV-like list rows:
- * title truncates; author / usage meta stay on the right without covering labels.
- */
-[data-name="indicators-dialog"] [class*="content"] [class*="container"],
-[data-dialog-name*="Indicator"] [class*="list"] {
-  min-width: 0 !important;
-}
-
-[data-name="indicators-dialog"] [class*="itemTitle"],
-[data-name="indicators-dialog"] [class*="title"],
-[data-dialog-name*="Indicator"] [class*="itemTitle"],
-[data-dialog-name*="Indicator"] [class*="title"] {
-  min-width: 0 !important;
-  max-width: 100% !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
-}
-
-[data-name="indicators-dialog"] [class*="author"],
-[data-name="indicators-dialog"] [class*="fansCount"],
-[data-name="indicators-dialog"] [class*="favorite"],
-[data-dialog-name*="Indicator"] [class*="author"],
-[data-dialog-name*="Indicator"] [class*="fansCount"] {
-  flex-shrink: 0 !important;
-  margin-inline-start: 8px !important;
-}
+/* Forge Indicators overlay lives in the iframe (#forge-indicators-overlay). */
 
 @media (max-width: 900px) {
   .tv-header {
