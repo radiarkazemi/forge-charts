@@ -147,6 +147,8 @@ body.forge-symbol-picker-open [data-dialog-name="Symbol Search"] {
   pointer-events: none !important;
 }
 
+/* Forge Indicators overlay lives in the iframe (#forge-indicators-overlay). */
+
 @media (max-width: 900px) {
   .tv-header {
     min-height: 38px !important;

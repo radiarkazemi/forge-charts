@@ -24,6 +24,7 @@ import {
   mountSymbolSearchExchangeReset,
   purgeStickySymbolSearchFilters,
 } from "./symbol-search-defaults";
+import { mountIndicatorsIntercept } from "./indicators-intercept";
 import { isChartPaintBusy } from "./study-paint-gate";
 
 export interface TradingViewWidgetDeps {
@@ -188,6 +189,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
     let unmountDealingRange: (() => void) | null = null;
     let unmountPositionIcons: (() => void) | null = null;
     let unmountSymbolSearchReset: (() => void) | null = null;
+    let unmountIndicatorsIntercept: (() => void) | null = null;
     let unmountForgeLogo: (() => void) | null = null;
     const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches;
     const autosaveKey = isPrimary ? AUTOSAVE_KEY : `${AUTOSAVE_KEY}.pane.${paneIndex}`;
@@ -247,6 +249,9 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         // Bottom-left Forge mark inside the chart pane (TV / Faraz logo slot).
         unmountForgeLogo?.();
         unmountForgeLogo = mountForgeChartLogo(widget);
+        // Always route Indicators button / insertIndicator → Forge TV-style dialog.
+        unmountIndicatorsIntercept?.();
+        unmountIndicatorsIntercept = mountIndicatorsIntercept(widget);
         // Volume is disabled by featureset; also strip any leftover Volume from
         // layouts that migrated from older autosave keys once.
         try {
@@ -440,6 +445,8 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
       unmountDealingRange?.();
       unmountPositionIcons?.();
       unmountSymbolSearchReset?.();
+      unmountIndicatorsIntercept?.();
+      unmountIndicatorsIntercept = null;
       unmountForgeLogo?.();
       unmountForgeLogo = null;
       try {

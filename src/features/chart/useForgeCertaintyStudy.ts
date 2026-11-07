@@ -8,11 +8,19 @@ import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
 import type { EntityId } from "@/infrastructure/tradingview";
 
-import { computeCertainty, paintCertainty, certaintyDrawCmds, type CertaintyInputs } from "@/features/certainty/runtime";
-import { CERTAINTY_STUDY_DEFAULTS } from "./forge-certainty-indicator";
+import { CERTAINTY_DEFAULTS, computeCertainty, paintCertainty, certaintyDrawCmds, type CertaintyInputs } from "@/features/certainty/runtime";
+import {
+  CERTAINTY_STUDY_DEFAULTS,
+  CERT_STYLE_ACCENT,
+  CERT_STYLE_BEAR,
+  CERT_STYLE_BULL,
+  CERT_STYLE_SL,
+  CERT_STYLE_TP,
+} from "./forge-certainty-indicator";
+import { applyTransparency, readStylePlot } from "./study-style-plots";
 import { studyIsVisible, markChartPaintBusy } from "./study-paint-gate";
 
-import { exportChartBarsCached, STUDY_DEBOUNCE_MS, STUDY_LIVE_REFRESH_MS, STUDY_MAX_BARS, STUDY_PRESENCE_POLL_MS, STUDY_PAINT_MUTE_MS } from "./chart-export-cache"; "./chart-export-cache";
+import { exportChartBarsCached, STUDY_DEBOUNCE_MS, STUDY_LIVE_REFRESH_MS, STUDY_MAX_BARS, STUDY_PRESENCE_POLL_MS, STUDY_PAINT_MUTE_MS } from "./chart-export-cache";
 
 const MAX_BARS = STUDY_MAX_BARS;
 // STUDY_DEBOUNCE_MS from chart-export-cache
@@ -134,23 +142,67 @@ export function useForgeCertaintyStudy(enabled = true): void {
           ),
           showDealingRange: bool("showDealingRange", CERTAINTY_STUDY_DEFAULTS.showDealingRange),
           showZones: bool("showZones", CERTAINTY_STUDY_DEFAULTS.showZones),
-          showTradeBox: bool("showTradeBox", CERTAINTY_STUDY_DEFAULTS.showTradeBox),
-          showAwaiting: bool("showAwaiting", CERTAINTY_STUDY_DEFAULTS.showAwaiting),
           showHistory: bool("showHistory", CERTAINTY_STUDY_DEFAULTS.showHistory),
           showScore: bool("showScore", CERTAINTY_STUDY_DEFAULTS.showScore),
           historyLimit: Math.min(
             24,
             Math.max(2, Math.floor(num("historyLimit", CERTAINTY_STUDY_DEFAULTS.historyLimit))),
           ),
-          bullColor: String(map.get("bullColor") ?? CERTAINTY_STUDY_DEFAULTS.bullColor),
-          bearColor: String(map.get("bearColor") ?? CERTAINTY_STUDY_DEFAULTS.bearColor),
-          accentColor: String(map.get("accentColor") ?? CERTAINTY_STUDY_DEFAULTS.accentColor),
-          longBoxColor: String(map.get("longBoxColor") ?? CERTAINTY_STUDY_DEFAULTS.longBoxColor),
-          shortBoxColor: String(map.get("shortBoxColor") ?? CERTAINTY_STUDY_DEFAULTS.shortBoxColor),
-          boxOpacity: Math.min(
-            50,
-            Math.max(8, Math.floor(num("boxOpacity", CERTAINTY_STUDY_DEFAULTS.boxOpacity))),
-          ),
+          ...(() => {
+            const bull = readStylePlot(api, CERT_STYLE_BULL, {
+              color: CERTAINTY_DEFAULTS.bullColor,
+              visible: true,
+              transparency: 0,
+              linewidth: 2,
+              linestyle: 0,
+            });
+            const bear = readStylePlot(api, CERT_STYLE_BEAR, {
+              color: CERTAINTY_DEFAULTS.bearColor,
+              visible: true,
+              transparency: 0,
+              linewidth: 2,
+              linestyle: 0,
+            });
+            const accent = readStylePlot(api, CERT_STYLE_ACCENT, {
+              color: CERTAINTY_DEFAULTS.accentColor,
+              visible: true,
+              transparency: 0,
+              linewidth: 1,
+              linestyle: 0,
+            });
+            const tp = readStylePlot(api, CERT_STYLE_TP, {
+              color: CERTAINTY_DEFAULTS.longBoxColor,
+              visible: true,
+              transparency: 100 - CERTAINTY_DEFAULTS.boxOpacity,
+              linewidth: 1,
+              linestyle: 0,
+            });
+            const sl = readStylePlot(api, CERT_STYLE_SL, {
+              color: CERTAINTY_DEFAULTS.shortBoxColor,
+              visible: true,
+              transparency: 100 - CERTAINTY_DEFAULTS.boxOpacity,
+              linewidth: 1,
+              linestyle: 0,
+            });
+            const fillFromTransparency = (t: number) =>
+              Math.max(8, Math.min(50, Math.round(100 - Math.max(0, Math.min(100, t)))));
+            const boxOpacity = Math.round(
+              (fillFromTransparency(tp.transparency) + fillFromTransparency(sl.transparency)) / 2,
+            );
+            return {
+              bullColor: applyTransparency(bull.color, bull.transparency),
+              bearColor: applyTransparency(bear.color, bear.transparency),
+              accentColor: applyTransparency(accent.color, accent.transparency),
+              longBoxColor: applyTransparency(tp.color, 0),
+              shortBoxColor: applyTransparency(sl.color, 0),
+              boxOpacity,
+              showTradeBox:
+                bool("showTradeBox", CERTAINTY_STUDY_DEFAULTS.showTradeBox) &&
+                (tp.visible || sl.visible),
+              showAwaiting:
+                bool("showAwaiting", CERTAINTY_STUDY_DEFAULTS.showAwaiting) && accent.visible,
+            };
+          })(),
         };
       } catch {
         return {};

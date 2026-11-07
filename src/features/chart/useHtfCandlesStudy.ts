@@ -7,10 +7,20 @@ import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
 import type { EntityId } from "@/infrastructure/tradingview";
 import { computeHtfCandles, HTF_CANDLES_DEFAULTS, paintHtfCandlesOnChart, type DailyOpenMode, type HtfCandlesOptions } from "@/features/htf-candles/runtime";
-import { HTF_CANDLES_STUDY_DEFAULTS, HTF_CANDLES_STUDY_NAME, readHtfSlotsFromMap } from "./htf-candles-indicator";
+import {
+  HTF_CANDLES_STUDY_DEFAULTS,
+  HTF_CANDLES_STUDY_NAME,
+  HTF_STYLE_BEAR,
+  HTF_STYLE_BEAR_WICK,
+  HTF_STYLE_BORDER,
+  HTF_STYLE_BULL,
+  HTF_STYLE_BULL_WICK,
+  readHtfSlotsFromMap,
+} from "./htf-candles-indicator";
+import { applyTransparency, readStylePlot } from "./study-style-plots";
 import { studyIsVisible, markChartPaintBusy } from "./study-paint-gate";
 
-import { exportChartBarsCached, STUDY_DEBOUNCE_MS, STUDY_LIVE_REFRESH_MS, STUDY_MAX_BARS, STUDY_PRESENCE_POLL_MS, STUDY_PAINT_MUTE_MS } from "./chart-export-cache"; "./chart-export-cache";
+import { exportChartBarsCached, STUDY_DEBOUNCE_MS, STUDY_LIVE_REFRESH_MS, STUDY_MAX_BARS, STUDY_PRESENCE_POLL_MS, STUDY_PAINT_MUTE_MS } from "./chart-export-cache";
 
 const MAX_BARS = STUDY_MAX_BARS;
 // STUDY_DEBOUNCE_MS from chart-export-cache
@@ -50,14 +60,6 @@ function intervalToSeconds(interval: string): number {
   }
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n * 60 : 60;
-}
-
-function parseHex(v: unknown, fallback: string): string {
-  if (typeof v !== "string") return fallback;
-  const t = v.trim();
-  if (/^#[0-9a-fA-F]{6}$/.test(t)) return t;
-  if (/^[0-9a-fA-F]{6}$/.test(t)) return `#${t}`;
-  return fallback;
 }
 
 export function useHtfCandlesStudy(enabled = true): void {
@@ -156,11 +158,6 @@ export function useHtfCandlesStudy(enabled = true): void {
             1,
             Math.min(20, Math.floor(num("widthBars", HTF_CANDLES_DEFAULTS.widthBars))),
           ),
-          bullBody: parseHex(map.get("bullBody"), HTF_CANDLES_DEFAULTS.bullBody),
-          bearBody: parseHex(map.get("bearBody"), HTF_CANDLES_DEFAULTS.bearBody),
-          border: parseHex(map.get("border"), HTF_CANDLES_DEFAULTS.border),
-          bullWick: parseHex(map.get("bullWick"), HTF_CANDLES_DEFAULTS.bullWick),
-          bearWick: parseHex(map.get("bearWick"), HTF_CANDLES_DEFAULTS.bearWick),
           showFvg: bool("showFvg", HTF_CANDLES_DEFAULTS.showFvg),
           showVi: bool("showVi", HTF_CANDLES_DEFAULTS.showVi),
           showTrace: bool("showTrace", HTF_CANDLES_DEFAULTS.showTrace),
@@ -174,10 +171,54 @@ export function useHtfCandlesStudy(enabled = true): void {
             -12,
             Math.min(14, Math.floor(num("timezoneOffset", HTF_CANDLES_DEFAULTS.timezoneOffset))),
           ),
-          bodyTransparency: Math.max(
-            0,
-            Math.min(100, Math.floor(num("bodyTransparency", HTF_CANDLES_DEFAULTS.bodyTransparency))),
-          ),
+          ...(() => {
+            const bull = readStylePlot(api, HTF_STYLE_BULL, {
+              color: HTF_CANDLES_DEFAULTS.bullBody,
+              visible: true,
+              transparency: HTF_CANDLES_DEFAULTS.bodyTransparency,
+              linewidth: 1,
+              linestyle: 0,
+            });
+            const bear = readStylePlot(api, HTF_STYLE_BEAR, {
+              color: HTF_CANDLES_DEFAULTS.bearBody,
+              visible: true,
+              transparency: HTF_CANDLES_DEFAULTS.bodyTransparency,
+              linewidth: 1,
+              linestyle: 0,
+            });
+            const border = readStylePlot(api, HTF_STYLE_BORDER, {
+              color: HTF_CANDLES_DEFAULTS.border,
+              visible: true,
+              transparency: 0,
+              linewidth: 1,
+              linestyle: 0,
+            });
+            const bullWick = readStylePlot(api, HTF_STYLE_BULL_WICK, {
+              color: HTF_CANDLES_DEFAULTS.bullWick,
+              visible: true,
+              transparency: 0,
+              linewidth: 1,
+              linestyle: 0,
+            });
+            const bearWick = readStylePlot(api, HTF_STYLE_BEAR_WICK, {
+              color: HTF_CANDLES_DEFAULTS.bearWick,
+              visible: true,
+              transparency: 0,
+              linewidth: 1,
+              linestyle: 0,
+            });
+            const bodyTransparency = Math.round(
+              (bull.transparency + bear.transparency) / 2,
+            );
+            return {
+              bullBody: applyTransparency(bull.color, 0),
+              bearBody: applyTransparency(bear.color, 0),
+              border: applyTransparency(border.color, border.transparency),
+              bullWick: applyTransparency(bullWick.color, bullWick.transparency),
+              bearWick: applyTransparency(bearWick.color, bearWick.transparency),
+              bodyTransparency: Math.max(0, Math.min(100, bodyTransparency)),
+            };
+          })(),
         };
       } catch (err) {
         console.warn("[forge-htf-candles] readOptions failed", err);

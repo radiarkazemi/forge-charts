@@ -17,9 +17,15 @@ import {
 } from "@/features/pine/orca-runtime";
 import { resolvePineStudy } from "@/features/pine/pine-runner";
 import { FTA_STUDY_ID } from "@/features/chart/forge-trading-assistant-indicator";
+import { CERTAINTY_STUDY_ID } from "@/features/chart/forge-certainty-indicator";
 import { DEALING_RANGES_STUDY_ID } from "@/features/chart/dealing-ranges-indicator";
+import { HTF_CANDLES_STUDY_ID } from "@/features/chart/htf-candles-indicator";
 import { IRL_ERL_STUDY_ID } from "@/features/chart/irl-erl-indicator";
+import { REPLAY_MENTOR_STUDY_ID } from "@/features/chart/replay-mentor-indicator";
+import { SESSIONS_STUDY_ID } from "@/features/chart/sessions-indicator";
+import { SI_STUDY_ID } from "@/features/chart/structure-intelligence-indicator";
 import { WATERMARK_STUDY_ID } from "@/features/chart/watermark-indicator";
+import { allowNativeIndicatorsOnce } from "@/features/chart/indicators-intercept";
 
 export interface ChartState {
   readonly symbol: string;
@@ -696,17 +702,17 @@ export class ChartController {
           : /^watermark$/i.test(displayName) || /forge\s*watermark/i.test(displayName)
             ? WATERMARK_STUDY_ID
           : /forge\s*structure\s*intelligence|forge\s*si/i.test(displayName)
-            ? "ForgeStructureIntelligence@tv-basicstudies-1"
+            ? SI_STUDY_ID
             : /forge\s*sessions|sessions\s*\[luxalgo\]/i.test(displayName)
-              ? "ForgeSessions@tv-basicstudies-1"
+              ? SESSIONS_STUDY_ID
               : /forge\s*trading\s*assistant|forge\s*ta\b/i.test(displayName)
                 ? FTA_STUDY_ID
                 : /forge\s*certainty/i.test(displayName)
-                  ? "ForgeCertainty@tv-basicstudies-1"
+                  ? CERTAINTY_STUDY_ID
                   : /forge\s*replay\s*mentor|replay\s*mentor/i.test(displayName)
-                    ? "ForgeReplayMentor@tv-basicstudies-1"
+                    ? REPLAY_MENTOR_STUDY_ID
                     : /ict\s*htf\s*candles/i.test(displayName)
-                      ? "IctHtfCandles@tv-basicstudies-1"
+                      ? HTF_CANDLES_STUDY_ID
                       : displayName;
       const study = chart.getStudyById(entityId);
       const inputs: Record<string, unknown> = {};
@@ -736,17 +742,17 @@ export class ChartController {
             : /^watermark$/i.test(name) || /forge\s*watermark/i.test(name)
               ? WATERMARK_STUDY_ID
             : /forge\s*structure\s*intelligence|forge\s*si/i.test(name)
-              ? "ForgeStructureIntelligence@tv-basicstudies-1"
+              ? SI_STUDY_ID
               : /forge\s*sessions|sessions\s*\[luxalgo\]/i.test(name)
-                ? "ForgeSessions@tv-basicstudies-1"
+                ? SESSIONS_STUDY_ID
                 : /forge\s*trading\s*assistant|forge\s*ta\b/i.test(name)
                   ? FTA_STUDY_ID
                   : /forge\s*certainty/i.test(name)
-                    ? "ForgeCertainty@tv-basicstudies-1"
+                    ? CERTAINTY_STUDY_ID
                     : /forge\s*replay\s*mentor|replay\s*mentor/i.test(name)
-                      ? "ForgeReplayMentor@tv-basicstudies-1"
+                      ? REPLAY_MENTOR_STUDY_ID
                       : /ict\s*htf\s*candles/i.test(name)
-                        ? "IctHtfCandles@tv-basicstudies-1"
+                        ? HTF_CANDLES_STUDY_ID
                         : null;
     void chart
       .createStudy(name, false, false, inputs as never)
@@ -766,13 +772,53 @@ export class ChartController {
     }
   }
 
-  /** Open the Indicators dialog on this chart. */
+  /** Open the Forge Indicators dialog (TV-style list). */
   openIndicators(): void {
     try {
-      this.activeChart()?.executeActionById("insertIndicator");
+      window.dispatchEvent(new CustomEvent("forge:open-indicators"));
+      return;
     } catch {
-      /* chart not ready */
+      /* fall through */
     }
+    this.openNativeIndicators();
+  }
+
+  /** Open Charting Library’s native insert-indicator dialog. */
+  openNativeIndicators(): void {
+    // Bypass Forge intercept for this open (see indicators-intercept.ts).
+    allowNativeIndicatorsOnce();
+    window.setTimeout(() => {
+      try {
+        this.activeChart()?.executeActionById("insertIndicator");
+      } catch {
+        /* chart not ready */
+      }
+    }, 30);
+  }
+
+  /**
+   * Add a study by metainfo id (custom) or built-in name.
+   * Tries studyId first, then optional display-name fallback.
+   */
+  async addIndicator(studyId: string, displayName?: string): Promise<boolean> {
+    const chart = this.activeChart();
+    if (!chart) return false;
+    const tryCreate = async (name: string) => {
+      try {
+        const id = await chart.createStudy(name, false, false);
+        return id != null;
+      } catch {
+        return false;
+      }
+    };
+    if (await tryCreate(studyId)) return true;
+    if (displayName && displayName !== studyId && (await tryCreate(displayName))) return true;
+    // Custom studies sometimes accept the bare prefix before @.
+    if (studyId.includes("@")) {
+      const bare = studyId.split("@")[0]!;
+      if (await tryCreate(bare)) return true;
+    }
+    return false;
   }
 
   /** Open symbol search dialog. */

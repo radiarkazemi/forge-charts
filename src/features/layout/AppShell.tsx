@@ -6,6 +6,7 @@ import { useServices } from "@/app/use-services";
 import { AlertToaster } from "@/features/alerts/AlertToaster";
 import { CreateAlertDialog } from "@/features/alerts/CreateAlertDialog";
 import { ChartWorkspace } from "@/features/chart/ChartWorkspace";
+import { IndicatorsDialog } from "@/features/chart/IndicatorsDialog";
 import { SymbolSearchDialog } from "@/features/chart/SymbolSearchDialog";
 import { ProfileDialog } from "@/features/profile/ProfileDialog";
 import { ProfileMenu } from "@/features/profile/ProfileMenu";
@@ -45,6 +46,7 @@ export function AppShell({ onSignOut }: AppShellProps) {
   const [alertDialogOpen, setAlertDialogOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [symbolSearchOpen, setSymbolSearchOpen] = useState(false);
+  const [indicatorsOpen, setIndicatorsOpen] = useState(false);
   const [profileMenuPos, setProfileMenuPos] = useState<ProfileAnchorRect | null>(null);
 
   useEffect(() => {
@@ -96,6 +98,15 @@ export function AppShell({ onSignOut }: AppShellProps) {
     const onOpen = () => setSymbolSearchOpen(true);
     window.addEventListener("forge:open-symbol-search", onOpen);
     return () => window.removeEventListener("forge:open-symbol-search", onOpen);
+  }, []);
+
+  // Indicators UI is painted inside the chart iframe overlay (see
+  // indicators-intercept.ts). Keep the React dialog closed to avoid a second
+  // empty/white shell in the parent page.
+  useEffect(() => {
+    const onOpen = () => setIndicatorsOpen(false);
+    window.addEventListener("forge:open-indicators", onOpen);
+    return () => window.removeEventListener("forge:open-indicators", onOpen);
   }, []);
 
   const openAlertDialog = () => setAlertDialogOpen(true);
@@ -196,6 +207,7 @@ export function AppShell({ onSignOut }: AppShellProps) {
       <CreateAlertDialog open={alertDialogOpen} onClose={() => setAlertDialogOpen(false)} />
       <ProfileDialog open={profileOpen} onClose={() => setProfileOpen(false)} />
       <SymbolSearchDialog open={symbolSearchOpen} onClose={() => setSymbolSearchOpen(false)} />
+      <IndicatorsDialog open={indicatorsOpen} onClose={() => setIndicatorsOpen(false)} />
       <ProfileMenu
         anchorPosition={
           profileMenuPos

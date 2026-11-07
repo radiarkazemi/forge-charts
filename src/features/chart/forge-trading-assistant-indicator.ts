@@ -2,14 +2,21 @@
  * Charting Library custom study: “Forge Trading Assistant”.
  * Plots are inert — Buy/Sell + Entry/SL/TP painted by
  * `useForgeTradingAssistantStudy` (clean Texas Manual Buy/Sell stop-entry).
+ * Colors / visibility live in the Style tab (native palette).
  */
 
 import type { CustomIndicator } from "@/infrastructure/tradingview";
 import { FTA_DEFAULTS } from "@/features/trading-assistant/runtime";
+import { buildStylePlots, stylePlotNaNs } from "./study-style-plots";
 
 export const FTA_STUDY_NAME = "Forge Trading Assistant";
-/** Bumped to -3 so saved studies pick up clean Texas defaults (no DR/OB noise). */
-export const FTA_STUDY_ID = "ForgeTradingAssistant@tv-basicstudies-3";
+/** Bumped to -4 — Style-tab color palettes (no hex Inputs). */
+export const FTA_STUDY_ID = "ForgeTradingAssistant@tv-basicstudies-4";
+
+export const FTA_STYLE_BULL = "plot_bull";
+export const FTA_STYLE_BEAR = "plot_bear";
+export const FTA_STYLE_TP = "plot_tp";
+export const FTA_STYLE_SL = "plot_sl";
 
 export const FTA_STUDY_DEFAULTS = {
   biasMode: FTA_DEFAULTS.biasMode,
@@ -34,12 +41,48 @@ export const FTA_STUDY_DEFAULTS = {
   showTradeBox: FTA_DEFAULTS.showTradeBox,
   showStructure: FTA_DEFAULTS.showStructure,
   showHistory: FTA_DEFAULTS.showHistory,
-  bullColor: FTA_DEFAULTS.bullColor,
-  bearColor: FTA_DEFAULTS.bearColor,
-  longBoxColor: FTA_DEFAULTS.longBoxColor,
-  shortBoxColor: FTA_DEFAULTS.shortBoxColor,
-  boxOpacity: FTA_DEFAULTS.boxOpacity,
 } as const;
+
+const STYLE_SPECS = [
+  {
+    id: FTA_STYLE_BULL,
+    title: "Long pill",
+    color: FTA_DEFAULTS.bullColor,
+    visible: true,
+    transparency: 0,
+    linewidth: 2,
+    legendHidden: false,
+  },
+  {
+    id: FTA_STYLE_BEAR,
+    title: "Short pill",
+    color: FTA_DEFAULTS.bearColor,
+    visible: true,
+    transparency: 0,
+    linewidth: 2,
+    legendHidden: false,
+  },
+  {
+    id: FTA_STYLE_TP,
+    title: "Target (TP) zone",
+    color: FTA_DEFAULTS.longBoxColor,
+    visible: true,
+    transparency: 100 - FTA_DEFAULTS.boxOpacity,
+    linewidth: 1,
+    legendHidden: false,
+  },
+  {
+    id: FTA_STYLE_SL,
+    title: "Stop (SL) zone",
+    color: FTA_DEFAULTS.shortBoxColor,
+    visible: true,
+    transparency: 100 - FTA_DEFAULTS.boxOpacity,
+    linewidth: 1,
+    legendHidden: false,
+  },
+] as const;
+
+const { plots, stylesMeta, stylesDefaults } = buildStylePlots(STYLE_SPECS);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function createForgeTradingAssistantIndicator(PineJS: {
@@ -57,24 +100,12 @@ export function createForgeTradingAssistantIndicator(PineJS: {
       is_price_study: true,
       linkedToSeries: true,
       format: { type: "inherit" },
-      plots: [{ id: "plot_hidden", type: "line" }],
+      plots,
       defaults: {
-        styles: {
-          plot_hidden: {
-            linestyle: 0,
-            linewidth: 1,
-            plottype: 0,
-            trackPrice: false,
-            transparency: 100,
-            visible: false,
-            color: "#000000",
-          },
-        },
+        styles: stylesDefaults,
         inputs: { ...FTA_STUDY_DEFAULTS },
       },
-      styles: {
-        plot_hidden: { title: "Hidden", histogramBase: 0 },
-      },
+      styles: stylesMeta,
       inputs: [
         {
           id: "biasMode",
@@ -228,38 +259,6 @@ export function createForgeTradingAssistantIndicator(PineJS: {
           defval: FTA_STUDY_DEFAULTS.showHistory,
           type: "bool",
         },
-        {
-          id: "bullColor",
-          name: "Style · Long pill (#hex)",
-          defval: FTA_STUDY_DEFAULTS.bullColor,
-          type: "text",
-        },
-        {
-          id: "bearColor",
-          name: "Style · Short pill (#hex)",
-          defval: FTA_STUDY_DEFAULTS.bearColor,
-          type: "text",
-        },
-        {
-          id: "longBoxColor",
-          name: "Style · Target (TP) zone (#hex)",
-          defval: FTA_STUDY_DEFAULTS.longBoxColor,
-          type: "text",
-        },
-        {
-          id: "shortBoxColor",
-          name: "Style · Stop (SL) zone (#hex)",
-          defval: FTA_STUDY_DEFAULTS.shortBoxColor,
-          type: "text",
-        },
-        {
-          id: "boxOpacity",
-          name: "Style · Position opacity % (lower = lighter)",
-          defval: FTA_STUDY_DEFAULTS.boxOpacity,
-          type: "integer",
-          min: 4,
-          max: 40,
-        },
       ],
     } as never,
     constructor: function (this: {
@@ -274,7 +273,8 @@ export function createForgeTradingAssistantIndicator(PineJS: {
           (PineJS.Std as { na?: (v: number) => boolean }).na?.(raw) ?? !Number.isFinite(raw);
         const v = !na && Number.isFinite(raw) ? raw : (this._lastClose ?? raw);
         if (Number.isFinite(v) && v !== 0) this._lastClose = v;
-        return [Number.isFinite(this._lastClose) ? this._lastClose! : 1];
+        const out = Number.isFinite(this._lastClose) ? this._lastClose! : 1;
+        return [out, ...stylePlotNaNs(STYLE_SPECS.length)];
       };
     } as never,
   };

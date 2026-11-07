@@ -10,7 +10,7 @@ import { clColor, computeSessions, mergeSessionDefs, paintSessionsOnChart, publi
 import { readSessionSlotsFromMap, stylePlotIdForIndex, SESSIONS_STUDY_DEFAULTS, SESSIONS_MAX_COUNT } from "./sessions-indicator";
 import { chartAllowedByMaxMinutes, liveChartResolution, studyIsVisible, markChartPaintBusy } from "./study-paint-gate";
 
-import { exportChartBarsCached, STUDY_DEBOUNCE_MS, STUDY_LIVE_REFRESH_MS, STUDY_MAX_BARS, STUDY_PRESENCE_POLL_MS, STUDY_PAINT_MUTE_MS } from "./chart-export-cache"; "./chart-export-cache";
+import { exportChartBarsCached, STUDY_DEBOUNCE_MS, STUDY_LIVE_REFRESH_MS, STUDY_MAX_BARS, STUDY_PRESENCE_POLL_MS, STUDY_PAINT_MUTE_MS } from "./chart-export-cache";
 
 const MAX_BARS = STUDY_MAX_BARS;
 // STUDY_DEBOUNCE_MS from chart-export-cache
