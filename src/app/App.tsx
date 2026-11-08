@@ -1,7 +1,14 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import CssBaseline from "@mui/material/CssBaseline";
 import { ThemeProvider } from "@mui/material/styles";
-import { AuthGate, AuthService, migrateLegacyDataIfNeeded, type AuthSession } from "@/features/auth";
+import {
+  AuthGate,
+  AuthService,
+  migrateLegacyDataIfNeeded,
+  SafetyAuthorizationPage,
+  type AuthSession,
+} from "@/features/auth";
+import type { SafetyAuthorizationProfile } from "@/features/auth/safety-profile";
 import { AppShell } from "@/features/layout/AppShell";
 import { LocalStorageAdapter, ScopedStorage } from "@/infrastructure";
 import { createAppTheme } from "@/shared/theme/create-app-theme";
@@ -43,18 +50,34 @@ function buildSessionServices(session: AuthSession): Services {
   } catch {
     /* ignore */
   }
+  // Mirror safety profile into scoped storage for profile sync payloads.
+  try {
+    const safety = auth.getSafetyProfile(session.userId);
+    if (safety) scoped.set("forge.auth.safetyProfile.v1", safety);
+  } catch {
+    /* ignore */
+  }
   return services;
 }
 
-/** Gate the chart behind login/signup. Each account gets isolated ScopedStorage. */
+/** Gate the chart behind login/signup + safety authorization. */
 export function App() {
   const rawStorage = useMemo(() => new LocalStorageAdapter(), []);
   const auth = useMemo(() => new AuthService(rawStorage), [rawStorage]);
-  const [session, setSession] = useState<AuthSession | null>(() => auth.getSession());
+  const [session, setSession] = useState<AuthSession | null>(() => {
+    const existing = auth.getSession();
+    if (!existing) return null;
+    // Incomplete safety — keep session object but force safety gate below.
+    return existing;
+  });
+  const [needsSafetyBoot, setNeedsSafetyBoot] = useState(() => {
+    const existing = auth.getSession();
+    return Boolean(existing && auth.needsSafety(existing.userId));
+  });
   const servicesRef = useRef<Services | null>(null);
   const [services, setServices] = useState<Services | null>(() => {
     const existing = auth.getSession();
-    if (!existing) return null;
+    if (!existing || auth.needsSafety(existing.userId)) return null;
     const built = buildSessionServices(existing);
     servicesRef.current = built;
     // Resume cloud sync if this tab still has sessionStorage credentials.
@@ -71,7 +94,6 @@ export function App() {
     }
     return built;
   });
-
   const gateTheme = useMemo(() => createAppTheme("dark"), []);
 
   const enter = useCallback(async (next: AuthSession, syncCreds: ProfileSyncCredentials) => {
@@ -90,8 +112,34 @@ export function App() {
     }
     servicesRef.current = built;
     setServices(built);
+    setNeedsSafetyBoot(false);
     setSession(next);
   }, []);
+
+  const completeBootSafety = useCallback(
+    async (profile: SafetyAuthorizationProfile) => {
+      const current = auth.getSession();
+      if (!current) {
+        setNeedsSafetyBoot(false);
+        setSession(null);
+        return;
+      }
+      const next = auth.saveSafetyProfile(current.userId, profile);
+      const creds = readSyncCredentials();
+      if (creds) {
+        await enter(next, creds);
+        return;
+      }
+      // No password in memory on cold resume — open charts locally; sync resumes on next login.
+      servicesRef.current?.dispose();
+      const built = buildSessionServices(next);
+      servicesRef.current = built;
+      setServices(built);
+      setNeedsSafetyBoot(false);
+      setSession(next);
+    },
+    [auth, enter],
+  );
 
   const signOut = useCallback(() => {
     auth.logout();
@@ -99,8 +147,26 @@ export function App() {
     servicesRef.current?.dispose();
     servicesRef.current = null;
     setServices(null);
+    setNeedsSafetyBoot(false);
     setSession(null);
   }, [auth]);
+
+  if (needsSafetyBoot && session) {
+    return (
+      <ThemeProvider theme={gateTheme}>
+        <CssBaseline />
+        <SafetyAuthorizationPage
+          username={session.username}
+          displayName={session.displayName}
+          initial={auth.getSafetyProfile(session.userId)}
+          onComplete={completeBootSafety}
+          onBack={() => {
+            signOut();
+          }}
+        />
+      </ThemeProvider>
+    );
+  }
 
   if (!session || !services) {
     return (
@@ -108,8 +174,8 @@ export function App() {
         <CssBaseline />
         <AuthGate
           auth={auth}
-          onAuthenticated={(s, creds) => {
-            void enter(s, creds);
+          onAuthenticated={async (s, creds) => {
+            await enter(s, creds);
           }}
         />
       </ThemeProvider>

@@ -14,55 +14,127 @@ import {
   deriveSyncKey,
   type ProfileSyncCredentials,
 } from "@/features/profile-sync";
-import type { AuthService, AuthSession } from "./auth-service";
+import type { AuthService, AuthSession, PendingSignup } from "./auth-service";
+import { SafetyAuthorizationPage } from "./SafetyAuthorizationPage";
+import type { SafetyAuthorizationProfile } from "./safety-profile";
 
 interface AuthGateProps {
   readonly auth: AuthService;
+  /** Must resolve only after chart services are ready — keeps the form busy. */
   readonly onAuthenticated: (
     session: AuthSession,
     syncCreds: ProfileSyncCredentials,
-  ) => void;
+  ) => void | Promise<void>;
 }
 
 type Mode = "login" | "signup";
+type Phase = "credentials" | "safety";
 
-/** Full-screen gate — chart never mounts until a valid session exists. */
+/** Full-screen gate — chart never mounts until a valid session + safety profile exist. */
 export function AuthGate({ auth, onAuthenticated }: AuthGateProps) {
   const [mode, setMode] = useState<Mode>("login");
+  const [phase, setPhase] = useState<Phase>("credentials");
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pendingSignup, setPendingSignup] = useState<PendingSignup | null>(null);
+  const [pendingLogin, setPendingLogin] = useState<{
+    session: AuthSession;
+    password: string;
+  } | null>(null);
 
-  const submit = async (e: FormEvent) => {
+  const finishAuth = async (session: AuthSession, plainPassword: string) => {
+    const syncCreds: ProfileSyncCredentials = {
+      accountKey: await deriveAccountKey(session.username),
+      syncKey: await deriveSyncKey(session.username, plainPassword),
+    };
+    await onAuthenticated(session, syncCreds);
+  };
+
+  const submitCredentials = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      let session: AuthSession;
       if (mode === "signup") {
         if (password !== confirm) throw new Error("Passwords do not match.");
-        session = await auth.signUp({
+        const pending = await auth.beginSignUp({
           username,
           password,
           displayName: displayName || undefined,
         });
-      } else {
-        session = await auth.login(username, password);
+        setPendingSignup(pending);
+        setPendingLogin(null);
+        setPhase("safety");
+        setBusy(false);
+        return;
       }
-      const syncCreds: ProfileSyncCredentials = {
-        accountKey: await deriveAccountKey(session.username),
-        syncKey: await deriveSyncKey(session.username, password),
-      };
-      onAuthenticated(session, syncCreds);
+
+      const session = await auth.login(username, password);
+      if (auth.needsSafety(session.userId)) {
+        setPendingLogin({ session, password });
+        setPendingSignup(null);
+        setPhase("safety");
+        setBusy(false);
+        return;
+      }
+      await finishAuth(session, password);
+      // stay busy — App unmounts this gate when session is ready
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
-    } finally {
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
       setBusy(false);
     }
   };
+
+  const completeSafety = async (profile: SafetyAuthorizationProfile) => {
+    setError(null);
+    setBusy(true);
+    try {
+      if (pendingSignup) {
+        const session = await auth.completeSignup(pendingSignup, profile);
+        await finishAuth(session, pendingSignup.password);
+        return;
+      }
+      if (pendingLogin) {
+        const session = auth.saveSafetyProfile(pendingLogin.session.userId, profile);
+        await finishAuth(session, pendingLogin.password);
+        return;
+      }
+      throw new Error("Signup expired. Please start again.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+      setBusy(false);
+      throw err instanceof Error ? err : new Error("Something went wrong.");
+    }
+  };
+
+  if (phase === "safety") {
+    const name = pendingSignup?.username || pendingLogin?.session.username || username;
+    const label = pendingSignup?.displayName || pendingLogin?.session.displayName || displayName;
+    return (
+      <SafetyAuthorizationPage
+        username={name}
+        displayName={label}
+        initial={
+          pendingLogin ? auth.getSafetyProfile(pendingLogin.session.userId) ?? undefined : undefined
+        }
+        onComplete={completeSafety}
+        onBack={
+          pendingSignup
+            ? undefined
+            : () => {
+                setPhase("credentials");
+                setPendingLogin(null);
+                setError(null);
+                auth.logout();
+              }
+        }
+      />
+    );
+  }
 
   return (
     <Box
@@ -78,7 +150,7 @@ export function AuthGate({ auth, onAuthenticated }: AuthGateProps) {
     >
       <Box
         component="form"
-        onSubmit={(e) => void submit(e)}
+        onSubmit={(e) => void submitCredentials(e)}
         sx={{
           width: "100%",
           maxWidth: 400,
@@ -126,7 +198,7 @@ export function AuthGate({ auth, onAuthenticated }: AuthGateProps) {
                 label="Display name"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                autoComplete="name"
+                autoComplete="nickname"
                 fullWidth
                 size="small"
               />
@@ -141,7 +213,8 @@ export function AuthGate({ auth, onAuthenticated }: AuthGateProps) {
               fullWidth
               size="small"
               placeholder="you@email.com"
-              slotProps={{ htmlInput: { minLength: 3, maxLength: 64 } }}
+              helperText={mode === "signup" ? "Use a real email — needed for account recovery" : undefined}
+              slotProps={{ htmlInput: { minLength: 5, maxLength: 64 } }}
             />
             <TextField
               label="Password"
@@ -191,14 +264,15 @@ export function AuthGate({ auth, onAuthenticated }: AuthGateProps) {
               ) : mode === "login" ? (
                 "Log in"
               ) : (
-                "Create account"
+                "Continue"
               )}
             </Button>
           </Stack>
 
           <Typography variant="caption" sx={{ color: "#787b86", textAlign: "center" }}>
-            Passwords stay on this device. Other people need their own account — they cannot open
-            yours without your password.
+            {mode === "signup"
+              ? "Next: safety & authorization details (name, phone, ID). Passwords stay on this device."
+              : "Passwords stay on this device. Other people need their own account — they cannot open yours without your password."}
           </Typography>
         </Stack>
       </Box>
