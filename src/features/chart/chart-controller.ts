@@ -26,7 +26,10 @@ import { SESSIONS_STUDY_ID } from "@/features/chart/sessions-indicator";
 import { SI_STUDY_ID } from "@/features/chart/structure-intelligence-indicator";
 import { WATERMARK_STUDY_ID } from "@/features/chart/watermark-indicator";
 import { allowNativeIndicatorsOnce } from "@/features/chart/indicators-intercept";
-import { shouldSkipDrawingOneShot } from "@/features/chart/drawing-oneshot-guard";
+import {
+  isTextMenuDrawingTool,
+  shouldSkipDrawingOneShot,
+} from "@/features/chart/drawing-oneshot-guard";
 
 export interface ChartState {
   readonly symbol: string;
@@ -85,6 +88,8 @@ export class ChartController {
   private readonly drawingHandlers = new Set<(entityId: EntityId, eventType: string) => void>();
   private oneShotDrawingHandler: ((entityId: EntityId, eventType: string) => void) | null = null;
   private drawingBridge: ((entityId: EntityId, eventType: string) => void) | null = null;
+  /** Last non-cursor tool armed via selectLineTool — survives paint cursor echoes. */
+  private lastArmedTool: string | null = null;
   private readonly mouseDownHandlers = new Set<(params: MouseEventParams) => void>();
   private mouseDownBridge: ((params: MouseEventParams) => void) | null = null;
   private readonly studyHandlers = new Set<(entityId: EntityId, eventType: string) => void>();
@@ -177,10 +182,12 @@ export class ChartController {
             chart,
             entityId: id,
             selectedTool: this.selectedLineTool(),
+            armedTool: this.lastArmedTool,
           })
         ) {
           return;
         }
+        this.lastArmedTool = "cursor";
         void this.exitDrawingTool();
         window.setTimeout(() => void this.exitDrawingTool(), 50);
         window.setTimeout(() => void this.exitDrawingTool(), 180);
@@ -628,11 +635,11 @@ export class ChartController {
       const key = tool.trim().toLowerCase();
       const isCursor =
         key === "cursor" || key === "arrow_cursor" || key === "eraser" || key === "dot";
-      // Text menu needs the editor to stay alive — do not hammer stay-in-draw OFF
-      // while arming Text/Note/Callout (that cancels the in-place text input).
-      const isTextMenu = /^(text|anchored_text|note|anchored_note|callout|comment|price_label|price_note|signpost|balloon|emoji|sticker|icon|flag|linetooltext|linetoolnote|linetoolcallout)/.test(
-        key.replace(/[\s-]+/g, ""),
-      );
+      // Text / Anchored Text need the editor alive — do not hammer stay-in-draw OFF.
+      const isTextMenu = isTextMenuDrawingTool(tool);
+      if (!isCursor) {
+        this.lastArmedTool = tool;
+      }
       if (isCursor) {
         this.ensureStayInDrawingModeOff();
       }

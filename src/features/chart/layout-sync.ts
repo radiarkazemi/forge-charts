@@ -9,7 +9,13 @@ import {
   readShapeSnapshotRetry,
   type ShapeSnapshot,
 } from "./drawing-sync";
-import { isForgeOverlayDrawing, shouldSkipDrawingOneShot } from "./drawing-oneshot-guard";
+import {
+  isForgeOverlayDrawing,
+  isTextMenuDrawingTool,
+  shouldSkipDrawingOneShot,
+} from "./drawing-oneshot-guard";
+import { isOpenEndedDrawingTool } from "./open-ended-draw-tools";
+import { isChartPaintBusy } from "./study-paint-gate";
 
 export interface LayoutSyncFlags {
   readonly symbol: boolean;
@@ -100,6 +106,12 @@ class LayoutSyncBus {
   private oneShotLockUntil = 0;
   /** Last user drawing tool that completed oneshot — echoes of THIS tool are dropped. */
   private lastOneShotTool: string | null = null;
+  /**
+   * Last tool the user explicitly armed from the toolbar.
+   * Survives oneshot lock (unlike sharedTool) so Text stays protected while
+   * Sessions overlays paint and briefly flip selectedLineTool to cursor.
+   */
+  private armedTool: string | null = null;
 
   private clearToolReapplyTimers(): void {
     for (const id of this.toolReapplyTimers) window.clearTimeout(id);
@@ -126,6 +138,7 @@ class LayoutSyncBus {
     }
     this.clearToolReapplyTimers();
     this.sharedTool = "cursor";
+    // Keep armedTool so Text/Path guards still see the user’s intent.
   }
 
   setFlags(flags: LayoutSyncFlags): void {
@@ -438,8 +451,21 @@ class LayoutSyncBus {
     }
     this.clearToolReapplyTimers();
     this.sharedTool = tool;
+    // Only arm on a real drawing pick. Cursor echoes from Sessions paint /
+    // oneshot must not wipe Text — that left armedTool=cursor and forced Cross
+    // onto every pane, cancelling the in-chart text editor mid-click.
+    if (!isCursor && tool) {
+      this.armedTool = tool;
+    }
     // Cursor / eraser: mirror to all panes so every layer returns to Cross.
     if (isCursor || !tool) {
+      if (
+        isChartPaintBusy() ||
+        isOpenEndedDrawingTool(this.armedTool) ||
+        isTextMenuDrawingTool(this.armedTool)
+      ) {
+        return;
+      }
       void this.applyToolToAllPanes(tool ?? "cursor");
       return;
     }
@@ -874,8 +900,22 @@ class LayoutSyncBus {
     // left the toolbar stuck on rectangle/trend. Skip mirrors / in-flight sync copies.
     // Path / Text / Note and Forge overlay paints must never oneshot-reset.
     const pane = this.panes.get(paneIndex);
-    const activeTool = pane?.controller.selectedLineTool() ?? this.sharedTool;
+    const activeTool =
+      pane?.controller.selectedLineTool() ?? this.sharedTool ?? this.armedTool;
     const guardChart = pane?.controller.getWidget()?.activeChart() ?? null;
+
+    // Text / Anchored Text BEFORE any Cross reset or multipane sync — create
+    // opens the in-chart editor; touching tools here cancels it.
+    // (Path stays open-ended for oneshot skip only; it still syncs on create.)
+    if (
+      eventType === "create" &&
+      (isTextMenuDrawingTool(activeTool) ||
+        isTextMenuDrawingTool(this.armedTool) ||
+        isTextMenuDrawingTool(this.sharedTool))
+    ) {
+      return;
+    }
+
     const skipOneShot =
       eventType === "create" &&
       shouldSkipDrawingOneShot({
@@ -883,6 +923,7 @@ class LayoutSyncBus {
         entityId,
         selectedTool: activeTool,
         sharedTool: this.sharedTool,
+        armedTool: this.armedTool,
       });
     const shouldResetTool =
       eventType === "create" &&
@@ -894,6 +935,7 @@ class LayoutSyncBus {
     // on rectangle/trend after the shape is finished.
     if (shouldResetTool) {
       this.beginOneShotLock(900, activeTool);
+      this.armedTool = "cursor";
       // Kick Cross ASAP; full reset still runs at the end of this handler.
       void this.resetToolsToCursor();
     }

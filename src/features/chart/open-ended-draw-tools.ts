@@ -48,6 +48,7 @@ const DEFER_ONE_SHOT = new Set([
 ]);
 
 function normalizeToolKey(tool: string): string {
+  // Keep underscores so Set keys like "anchored_text" match CL ids.
   return tool.trim().toLowerCase().replace(/[\s-]+/g, "");
 }
 

@@ -5,6 +5,7 @@
  */
 
 import type { EntityId, IChartWidgetApi } from "@/infrastructure/tradingview";
+import { isChartPaintBusy } from "./study-paint-gate";
 import { isOpenEndedDrawingTool } from "./open-ended-draw-tools";
 import { normalizeShapeName } from "./drawing-sync";
 
@@ -46,7 +47,17 @@ export function resolveCreatedDrawingTool(
   try {
     const all = chart.getAllShapes?.() ?? [];
     const info = all.find((s) => String(s.id) === String(entityId));
-    const fromName = normalizeShapeName(info?.name);
+    // Raw CL names often look like "LineToolText" / "LineToolAnchoredText".
+    const rawName = info?.name != null ? String(info.name) : "";
+    if (/text|note|callout|comment|signpost|balloon|price_label|pricelabel/i.test(rawName)) {
+      const normalized = normalizeShapeName(rawName);
+      if (normalized) return normalized;
+      if (/anchored/i.test(rawName)) return "anchored_text";
+      if (/note/i.test(rawName)) return "note";
+      if (/callout/i.test(rawName)) return "callout";
+      return "text";
+    }
+    const fromName = normalizeShapeName(rawName);
     if (fromName) return fromName;
     const api = chart.getShapeById(entityId as EntityId);
     const props = (api.getProperties?.() ?? {}) as Record<string, unknown>;
@@ -61,9 +72,19 @@ export function resolveCreatedDrawingTool(
   }
 }
 
+/** Text & Notes flyout (and stickers) — create opens an editor; Cross kills it. */
+export function isTextMenuDrawingTool(tool: string | null | undefined): boolean {
+  if (!tool) return false;
+  const key = tool.trim().toLowerCase().replace(/[\s_-]+/g, "");
+  return /^(text|anchoredtext|note|anchorednote|callout|comment|pricelabel|pricenote|signpost|balloon|emoji|sticker|icon|flag|linetooltext|linetoolanchoredtext|linetoolnote|linetoolanchorednote|linetoolcallout|linetoolcomment|linetoolpricelabel|linetoolpricenote|linetoolsignpost|linetoolballoon|linetoolemoji|linetoolsticker|linetoolicon|linetoolflag)$/.test(
+    key,
+  );
+}
+
 /**
  * Skip Cross reset when:
- * - the active tool is still open-ended (Path / Text / …), or
+ * - studies are mid-paint (createShape storm),
+ * - the active/armed tool is still open-ended (Path / Text / …),
  * - the created entity is a text-menu / multipoint shape, or
  * - the entity is a Forge indicator overlay.
  */
@@ -72,11 +93,27 @@ export function shouldSkipDrawingOneShot(args: {
   readonly entityId: EntityId | string;
   readonly selectedTool: string | null | undefined;
   readonly sharedTool?: string | null;
+  readonly armedTool?: string | null;
 }): boolean {
-  const { chart, entityId, selectedTool, sharedTool } = args;
+  const { chart, entityId, selectedTool, sharedTool, armedTool } = args;
+  // Sessions / HTF / DR paints mark this window — never oneshot during it.
+  if (isChartPaintBusy()) return true;
   if (isForgeOverlayDrawing(chart, entityId)) return true;
-  if (isOpenEndedDrawingTool(selectedTool) || isOpenEndedDrawingTool(sharedTool)) return true;
-  const created = resolveCreatedDrawingTool(chart, entityId, selectedTool ?? sharedTool);
-  if (isOpenEndedDrawingTool(created)) return true;
+  if (
+    isOpenEndedDrawingTool(selectedTool) ||
+    isOpenEndedDrawingTool(sharedTool) ||
+    isOpenEndedDrawingTool(armedTool) ||
+    isTextMenuDrawingTool(selectedTool) ||
+    isTextMenuDrawingTool(sharedTool) ||
+    isTextMenuDrawingTool(armedTool)
+  ) {
+    return true;
+  }
+  const created = resolveCreatedDrawingTool(
+    chart,
+    entityId,
+    selectedTool ?? sharedTool ?? armedTool,
+  );
+  if (isOpenEndedDrawingTool(created) || isTextMenuDrawingTool(created)) return true;
   return false;
 }
