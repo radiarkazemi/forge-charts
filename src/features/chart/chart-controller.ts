@@ -26,6 +26,7 @@ import { SESSIONS_STUDY_ID } from "@/features/chart/sessions-indicator";
 import { SI_STUDY_ID } from "@/features/chart/structure-intelligence-indicator";
 import { WATERMARK_STUDY_ID } from "@/features/chart/watermark-indicator";
 import { allowNativeIndicatorsOnce } from "@/features/chart/indicators-intercept";
+import { isOpenEndedDrawingTool } from "@/features/chart/open-ended-draw-tools";
 
 export interface ChartState {
   readonly symbol: string;
@@ -164,9 +165,12 @@ export class ChartController {
     window.setTimeout(() => this.ensureStayInDrawingModeOff(), 800);
     // Belt-and-suspenders: any finished shape on this pane returns to Cross even
     // if layout-sync missed the create event (multipane races).
+    // Skip Path / Polyline / Brush — "create" fires on the first click while
+    // the tool is still collecting points (otherwise the stroke cuts off).
     if (!this.oneShotDrawingHandler) {
       this.oneShotDrawingHandler = (_id, eventType) => {
         if (eventType !== "create") return;
+        if (isOpenEndedDrawingTool(this.selectedLineTool())) return;
         void this.exitDrawingTool();
         window.setTimeout(() => void this.exitDrawingTool(), 50);
         window.setTimeout(() => void this.exitDrawingTool(), 180);

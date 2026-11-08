@@ -255,7 +255,7 @@ export function useStructureIntelligenceStudy(enabled = true): void {
           return;
         }
       }
-      if (/^(create|remove|price_scale|properties)/i.test(eventType)) scheduleRepaint();
+      if (/^(create|remove|price_scale|properties|visibility|toggle|hide|show)/i.test(eventType)) scheduleRepaint();
     };
 
     const onStudyProperties = (...args: unknown[]) => {
@@ -285,7 +285,21 @@ export function useStructureIntelligenceStudy(enabled = true): void {
         }
         return;
       }
-      if (lastKeyRef.current === "") void repaint(false);
+      try {
+        const api = widget.activeChart()?.getStudyById(ids[0]!);
+        if (!studyIsVisible(api)) {
+          if (entityIdsRef.current.length > 0 || (lastKeyRef.current && !String(lastKeyRef.current).startsWith("hidden:"))) {
+            genRef.current += 1;
+            clearDrawings();
+            lastKeyRef.current = "hidden:presence";
+            lastFpRef.current = "";
+          }
+          return;
+        }
+      } catch {
+        /* ignore */
+      }
+      if (lastKeyRef.current === "" || String(lastKeyRef.current).startsWith("hidden:")) void repaint(false);
     }, PRESENCE_POLL_MS);
 
     try {

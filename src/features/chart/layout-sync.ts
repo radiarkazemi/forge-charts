@@ -9,6 +9,7 @@ import {
   readShapeSnapshotRetry,
   type ShapeSnapshot,
 } from "./drawing-sync";
+import { isOpenEndedDrawingTool } from "./open-ended-draw-tools";
 
 export interface LayoutSyncFlags {
   readonly symbol: boolean;
@@ -856,8 +857,14 @@ class LayoutSyncBus {
     // Do NOT gate on applyingTool — exitDrawingTool / multipane apply often
     // sets it true during create, which previously skipped the Cross reset and
     // left the toolbar stuck on rectangle/trend. Skip mirrors / in-flight sync copies.
+    // Path / Polyline / Brush fire "create" on the first click while still open —
+    // resetting to Cross there cuts the stroke mid-draw.
+    const activeTool =
+      this.panes.get(paneIndex)?.controller.selectedLineTool() ?? this.sharedTool;
+    const openEnded = isOpenEndedDrawingTool(activeTool);
     const shouldResetTool =
       eventType === "create" &&
+      !openEnded &&
       !this.mirrorIds.has(idKey) &&
       !this.syncingDrawings;
 

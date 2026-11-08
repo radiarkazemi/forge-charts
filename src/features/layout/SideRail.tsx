@@ -12,10 +12,12 @@ import {
   ChatsRailIcon,
   HelpRailIcon,
   HotlistsRailIcon,
+  IdeasRailIcon,
   NewsRailIcon,
   NotificationsRailIcon,
   ObjectTreeRailIcon,
   PineRailIcon,
+  ScreenerRailIcon,
   WatchlistRailIcon,
 } from "./rail-icons";
 import { railWidth } from "./mobile-chrome";
@@ -46,16 +48,24 @@ interface RailItem {
   readonly mobile?: boolean;
 }
 
+/**
+ * TradingView right widget bar order:
+ * top — Watchlist, Alerts, Object tree / Data window
+ * mid — Hotlists, Screener, Ideas, Calendar, News, Notifications, Chats, Products (+ Pine)
+ * bottom — Help
+ */
 const ITEMS: readonly RailItem[] = [
   { id: "watchlist", label: "Watchlist, details, and news", icon: WatchlistRailIcon, group: "top", mobile: true },
   { id: "alerts", label: "Alerts", icon: AlertsRailIcon, group: "top", mobile: true },
   { label: "Object tree and data window", icon: ObjectTreeRailIcon, action: "objectTree", group: "top", mobile: true },
-  { id: "data", label: "Chats", icon: ChatsRailIcon, group: "top" },
   { label: "Hotlists", icon: HotlistsRailIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },
-  { label: "Pine", icon: PineRailIcon, action: "pine", group: "mid", mobile: true },
-  { label: "Calendars", icon: CalendarRailIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },
-  { label: "News", icon: NewsRailIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },
+  { label: "Screener", icon: ScreenerRailIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },
+  { label: "Ideas", icon: IdeasRailIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },
+  { label: "Calendar", icon: CalendarRailIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },
+  { label: "News flow", icon: NewsRailIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },
   { label: "Notifications", icon: NotificationsRailIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },
+  { label: "Chats", icon: ChatsRailIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },
+  { label: "Pine Editor", icon: PineRailIcon, action: "pine", group: "mid", mobile: true },
   { label: "Products", icon: AppsRailIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },
   {
     label: "Help Center",
@@ -86,7 +96,7 @@ export function SideRail({ active, onToggle, onOpenObjectTree, onOpenPine, compa
     };
     return (
       <Tooltip
-        key={item.label}
+        key={`${item.group}-${item.label}`}
         title={item.label}
         placement="left"
         disableHoverListener={compact}

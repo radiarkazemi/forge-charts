@@ -125,7 +125,11 @@ const NO_HEADER_DISABLED: ChartingLibraryFeatureset[] = [
   ...HEADER_FEATURES,
 ];
 
-/** Top-bar favorites — include 5S so seconds are one click away. */
+/**
+ * Top-bar favorites — include 5S so seconds are one click away.
+ * Keep unique: CL stores `"1"` (1 minute) and `"1M"` (1 month). A corrupted
+ * localStorage list that duplicated `"1"` rendered as two "1m" buttons.
+ */
 const FAVORITE_INTERVALS = [
   "5S",
   "1",
@@ -139,6 +143,72 @@ const FAVORITE_INTERVALS = [
   "1M",
   "3M",
 ] as ResolutionString[];
+
+/** Bump to re-seed TV `chart.favoriteIntervals` when the default strip changes. */
+export const INTERVAL_FAVORITES_SEED = "forge.intervalFavorites.v3";
+
+/** Clear stale / duplicate interval favorites so Widget `favorites.intervals` apply. */
+export function seedFavoriteIntervals(
+  intervals: readonly ResolutionString[] = FAVORITE_INTERVALS,
+): void {
+  if (typeof window === "undefined" || typeof localStorage === "undefined") return;
+  try {
+    const unique = [...new Set(intervals.map((x) => String(x)))];
+    const payload = JSON.stringify(unique);
+    const firstSeed = localStorage.getItem(INTERVAL_FAVORITES_SEED) !== "1";
+    const keys = new Set<string>(["chart.favoriteIntervals", "favoriteIntervals"]);
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key && /favoriteIntervals/i.test(key)) keys.add(key);
+    }
+    const writeNormalized = (raw: string | null): string => {
+      if (firstSeed || !raw) return payload;
+      try {
+        const parsed = JSON.parse(raw) as unknown;
+        if (!Array.isArray(parsed)) return payload;
+        const asStr = parsed.map((x) => String(x));
+        const deduped = [...new Set(asStr)];
+        // Always strip duplicate "1" / "1m" entries; keep user order otherwise.
+        if (deduped.length !== asStr.length) return JSON.stringify(deduped);
+        return raw;
+      } catch {
+        return payload;
+      }
+    };
+    for (const key of keys) {
+      try {
+        const next = writeNormalized(localStorage.getItem(key));
+        if (localStorage.getItem(key) !== next) localStorage.setItem(key, next);
+      } catch {
+        /* ignore quota / private mode */
+      }
+    }
+    // Also scrub nested user settings bags used by settings_adapter / profile sync.
+    for (const bagKey of ["forge.tv.userSettings.v1", "forge.userSettings"]) {
+      try {
+        const settingsRaw = localStorage.getItem(bagKey);
+        if (!settingsRaw) continue;
+        const map = JSON.parse(settingsRaw) as Record<string, string>;
+        if (!map || typeof map !== "object") continue;
+        let changed = false;
+        for (const k of Object.keys(map)) {
+          if (!/favoriteIntervals/i.test(k)) continue;
+          const next = writeNormalized(map[k] ?? null);
+          if (map[k] !== next) {
+            map[k] = next;
+            changed = true;
+          }
+        }
+        if (changed) localStorage.setItem(bagKey, JSON.stringify(map));
+      } catch {
+        /* ignore */
+      }
+    }
+    localStorage.setItem(INTERVAL_FAVORITES_SEED, "1");
+  } catch {
+    /* ignore */
+  }
+}
 
 /**
  * Stars in the left drawing toolbar flyouts — match tradingview.com Supercharts

@@ -251,9 +251,19 @@ export function useWatermarkStudy(enabled = true): void {
 
     const presence = window.setInterval(() => {
       if (cancelled) return;
-      if (findStudyIds().length === 0) {
+      const ids = findStudyIds();
+      if (ids.length === 0) {
         publishWatermarkOverlay(null);
         return;
+      }
+      try {
+        const api = widget.activeChart()?.getStudyById(ids[0]!);
+        if (!studyIsVisible(api)) {
+          publishWatermarkOverlay(null);
+          return;
+        }
+      } catch {
+        /* ignore */
       }
       schedule();
     }, PRESENCE_POLL_MS);

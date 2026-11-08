@@ -770,6 +770,13 @@ export async function paintOrcaOnChart(
 
   for (let i = 0; i < limited.length; i += 1) {
     const cmd = limited[i]!;
+    // Bad prices expand the Y scale mid-session — skip rather than autoscale jump.
+    if (!Number.isFinite(cmd.p1) || (cmd.p2 != null && !Number.isFinite(cmd.p2))) {
+      continue;
+    }
+    if (!Number.isFinite(cmd.t1) || (cmd.t2 != null && !Number.isFinite(cmd.t2))) {
+      continue;
+    }
     const stroke = clColor(cmd.color);
     const common = {
       disableSelection: true,

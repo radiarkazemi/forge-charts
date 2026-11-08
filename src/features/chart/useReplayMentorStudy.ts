@@ -245,7 +245,7 @@ export function useReplayMentorStudy(enabled = true): void {
           return;
         }
       }
-      if (/^(create|remove|price_scale|properties)/i.test(eventType)) {
+      if (/^(create|remove|price_scale|properties|visibility|toggle|hide|show)/i.test(eventType)) {
         scheduleRepaint("study");
       }
     };
@@ -310,7 +310,23 @@ export function useReplayMentorStudy(enabled = true): void {
         if (entityIdsRef.current.length > 0) clearDrawings();
         return;
       }
-      if (entityIdsRef.current.length === 0 && lastFpRef.current === "") {
+      try {
+        const api = widget.activeChart()?.getStudyById(ids[0]!);
+        if (!studyIsVisible(api)) {
+          if (entityIdsRef.current.length > 0 || !String(lastFpRef.current).startsWith("hidden:")) {
+            clearDrawings();
+            lastFpRef.current = "hidden:presence";
+            lastClosedCursorRef.current = -1;
+          }
+          return;
+        }
+      } catch {
+        /* ignore */
+      }
+      if (
+        (entityIdsRef.current.length === 0 && lastFpRef.current === "") ||
+        String(lastFpRef.current).startsWith("hidden:")
+      ) {
         void repaint("kickoff");
       }
     }, PRESENCE_POLL_MS);

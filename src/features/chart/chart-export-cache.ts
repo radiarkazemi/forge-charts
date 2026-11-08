@@ -9,13 +9,13 @@ import type { IChartWidgetApi } from "@/infrastructure/tradingview";
 import { barsFromChartExport, type OrcaBar } from "@/features/pine/orca-runtime";
 
 /** Soft cap for structure painters — enough history, far less main-thread work. */
-export const STUDY_MAX_BARS = 1_800;
-export const STUDY_DEBOUNCE_MS = 750;
-export const STUDY_PRESENCE_POLL_MS = 12_000;
-export const STUDY_LIVE_REFRESH_MS = 45_000;
-export const STUDY_PAINT_MUTE_MS = 2_000;
+export const STUDY_MAX_BARS = 1_400;
+export const STUDY_DEBOUNCE_MS = 900;
+export const STUDY_PRESENCE_POLL_MS = 4_000;
+export const STUDY_LIVE_REFRESH_MS = 60_000;
+export const STUDY_PAINT_MUTE_MS = 2_500;
 
-const EXPORT_TTL_MS = 900;
+const EXPORT_TTL_MS = 1_400;
 
 let inflight: Promise<OrcaBar[]> | null = null;
 let cached: { readonly bars: readonly OrcaBar[]; readonly at: number } | null = null;

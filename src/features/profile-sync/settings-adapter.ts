@@ -52,11 +52,59 @@ export function seedFavoriteIndicators(storage: KeyValueStorage): void {
   writeMap(storage, map);
 }
 
+/** Deduplicate / normalize favorite intervals (fixes double "1m" in the TF strip). */
+const DEFAULT_FAVORITE_INTERVALS = [
+  "5S",
+  "1",
+  "5",
+  "15",
+  "30",
+  "60",
+  "240",
+  "1D",
+  "1W",
+  "1M",
+  "3M",
+];
+
+export function seedFavoriteIntervals(storage: KeyValueStorage): void {
+  const map = readMap(storage);
+  const payload = JSON.stringify(DEFAULT_FAVORITE_INTERVALS);
+  let changed = false;
+  for (const key of ["chart.favoriteIntervals", "favoriteIntervals"]) {
+    const existing = map[key];
+    if (!existing || existing === "[]" || existing === "null") {
+      map[key] = payload;
+      changed = true;
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(existing) as unknown;
+      if (!Array.isArray(parsed)) {
+        map[key] = payload;
+        changed = true;
+        continue;
+      }
+      const asStr = parsed.map((x) => String(x));
+      const deduped = [...new Set(asStr)];
+      if (deduped.length !== asStr.length) {
+        map[key] = JSON.stringify(deduped);
+        changed = true;
+      }
+    } catch {
+      map[key] = payload;
+      changed = true;
+    }
+  }
+  if (changed) writeMap(storage, map);
+}
+
 export function createSettingsAdapter(
   storage: KeyValueStorage,
   onChange?: () => void,
 ): ISettingsAdapter {
   seedFavoriteIndicators(storage);
+  seedFavoriteIntervals(storage);
   const initial = readMap(storage);
 
   return {

@@ -5,6 +5,7 @@ import {
   buildWidgetOptions,
   loadChartingLibrary,
   seedDrawingFavorites,
+  seedFavoriteIntervals,
   type IBasicDataFeed,
   type IChartingLibraryWidget,
   type IExternalSaveLoadAdapter,
@@ -203,8 +204,9 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
       } catch {
         /* previous instance may already be torn down */
       }
-      // Force TV-matching drawing stars before the iframe reads localStorage.
+      // Force TV-matching drawing stars + interval strip before the iframe reads localStorage.
       seedDrawingFavorites();
+      seedFavoriteIntervals();
       widget = new Widget(
         buildWidgetOptions({
           container,

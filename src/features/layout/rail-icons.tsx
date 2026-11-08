@@ -52,12 +52,34 @@ export function ChatsRailIcon(props: SvgIconProps) {
   );
 }
 
+/** Four-pointed sparkle — TradingView Hotlists. */
 export function HotlistsRailIcon(props: SvgIconProps) {
+  return (
+    <SvgIcon {...props} viewBox="0 0 28 28" inheritViewBox>
+      <path
+        {...stroke}
+        d="M14 5.5 15.6 12.4 22.5 14 15.6 15.6 14 22.5 12.4 15.6 5.5 14 12.4 12.4z"
+      />
+    </SvgIcon>
+  );
+}
+
+/** Crosshair / radar — TradingView Screener / Economic calendar target. */
+export function ScreenerRailIcon(props: SvgIconProps) {
   return (
     <SvgIcon {...props} viewBox="0 0 28 28" inheritViewBox>
       <circle {...stroke} cx="14" cy="14" r="7.25" />
       <circle cx="14" cy="14" r="1.5" fill="currentColor" />
       <path {...stroke} d="M14 6.25v2M14 19.75v2M6.25 14h2M19.75 14h2" />
+    </SvgIcon>
+  );
+}
+
+/** Mountain peaks — TradingView Ideas. */
+export function IdeasRailIcon(props: SvgIconProps) {
+  return (
+    <SvgIcon {...props} viewBox="0 0 28 28" inheritViewBox>
+      <path {...stroke} d="M4.5 20.5 11 11l3.5 4.5L18 9.5l5.5 11" />
     </SvgIcon>
   );
 }

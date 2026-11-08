@@ -56,6 +56,21 @@ export function studyIsVisible(api: { isVisible?: () => boolean } | null | undef
 }
 
 /**
+ * Presence-poll helper for shape-painting studies.
+ * Eye / Visibility hide does not remove createShape overlays unless we clear them.
+ */
+export function studyPresenceAction(
+  studyApi: { isVisible?: () => boolean } | null | undefined,
+  lastKey: string,
+): "clear-absent" | "clear-hidden" | "paint" | "idle" {
+  if (!studyIsVisible(studyApi)) {
+    return lastKey.startsWith("hidden:") ? "idle" : "clear-hidden";
+  }
+  if (!lastKey || lastKey.startsWith("hidden:")) return "paint";
+  return "idle";
+}
+
+/**
  * Global “chart is painting shapes” window — autosave / profile sync should
  * wait so createShape storms do not also trigger full widget.save().
  */

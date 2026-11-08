@@ -7,6 +7,7 @@ export {
   DEFAULT_FAVORITE_INDICATORS,
   createSettingsAdapter,
   seedFavoriteIndicators,
+  seedFavoriteIntervals,
   readUserSettings,
   writeUserSettings,
 } from "./settings-adapter";
