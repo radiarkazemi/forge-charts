@@ -13,12 +13,16 @@ import { buildUrl, fetchJson, HttpError } from "../http/fetch-json";
 import { startPolling } from "./polling";
 import { aggregateBars, synthesizeFromMinuteBars, SYNTH_SECONDS_INTERVALS } from "./synthesize-seconds";
 import { isTvBrokerSymbol, marketTicksChannelFor, tradingViewSymbolFor } from "./tv-broker-symbols";
+import { fetchCpChartHistory, mongoHistoryPlan } from "./cp-chart-history";
 
 const HISTORY_BASE = "/tv-history";
 /** Live quotes stay snappy; replay/deep history may page on the VPS. */
 const REQUEST_TIMEOUT_MS = 25_000;
 const DEEP_HISTORY_TIMEOUT_MS = 95_000;
 const LIVE_POLL_MS = 2_000;
+/** Brief retries when market_ticks is mid-restart (deploy / OOM) — avoids blank FX charts. */
+const TV_HISTORY_RETRIES = 2;
+const TV_HISTORY_RETRY_MS = 450;
 
 const NATIVE_INTERVALS: readonly Interval[] = [
   ...SYNTH_SECONDS_INTERVALS,
@@ -146,6 +150,24 @@ export class TradingViewBrokerProvider implements MarketDataProvider {
     return NATIVE_INTERVALS;
   }
 
+  /**
+   * VPS Mongo (`/crypto-chart/history`) — same store gold uses. When
+   * `/tv-history` 502s (market_ticks restart during deploy), FX majors still
+   * paint instead of a blank “No data” chart.
+   */
+  private async fetchMongoFallback(
+    symbol: SymbolInfo,
+    interval: Interval,
+    range: BarRange,
+  ): Promise<Bar[]> {
+    if (!mongoHistoryPlan(interval)) return [];
+    try {
+      return await fetchCpChartHistory(symbol.ticker, interval, range);
+    } catch {
+      return [];
+    }
+  }
+
   async fetchBars(symbol: SymbolInfo, interval: Interval, range: BarRange): Promise<Bar[]> {
     const tvSymbol = tradingViewSymbolFor(symbol);
     if (!tvSymbol) return [];
@@ -181,25 +203,53 @@ export class TradingViewBrokerProvider implements MarketDataProvider {
       ...(range.to > 0 ? { before: range.to } : {}),
     });
 
-    try {
-      const json = await fetchJson<TvHistoryResponse>(url, {
-        timeoutMs: deep ? DEEP_HISTORY_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
-      });
-      let bars = (json.bars ?? []).map(parseBar).filter((b): b is Bar => b !== null);
-      if (group > 1) {
-        bars = aggregateBars(bars, intervalSeconds(interval));
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt <= TV_HISTORY_RETRIES; attempt += 1) {
+      try {
+        const json = await fetchJson<TvHistoryResponse>(url, {
+          timeoutMs: deep ? DEEP_HISTORY_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
+        });
+        let bars = (json.bars ?? []).map(parseBar).filter((b): b is Bar => b !== null);
+        if (group > 1) {
+          bars = aggregateBars(bars, intervalSeconds(interval));
+        }
+        const before = range.to > 0 ? range.to : Number.POSITIVE_INFINITY;
+        const filtered = bars.filter((b) => b.time < before).sort((a, b) => a.time - b.time);
+        if (filtered.length) {
+          return filtered.slice(-Math.max(range.countBack, 1));
+        }
+        // Empty TV page — try Mongo before yielding to Yahoo (Yahoo often geo-blocked).
+        break;
+      } catch (error) {
+        lastError = error;
+        if (error instanceof HttpError && error.status >= 400 && error.status < 500) {
+          break;
+        }
+        const retriable =
+          error instanceof HttpError && error.status >= 500
+            ? true
+            : error instanceof DOMException && error.name === "AbortError"
+              ? true
+              : error instanceof Error && /abort|network|fetch/i.test(error.message);
+        if (retriable && attempt < TV_HISTORY_RETRIES) {
+          await new Promise((r) => window.setTimeout(r, TV_HISTORY_RETRY_MS * (attempt + 1)));
+          continue;
+        }
+        if (error instanceof HttpError && error.status >= 500) break;
+        if (!(error instanceof HttpError)) {
+          // Unknown — still try Mongo, then rethrow if that is empty.
+          break;
+        }
+        break;
       }
-      const before = range.to > 0 ? range.to : Number.POSITIVE_INFINITY;
-      const filtered = bars.filter((b) => b.time < before).sort((a, b) => a.time - b.time);
-      // Empty → fall through to Yahoo/other providers (replay must not blank the chart).
-      if (!filtered.length) return [];
-      return filtered.slice(-Math.max(range.countBack, 1));
-    } catch (error) {
-      if (error instanceof HttpError && error.status >= 400 && error.status < 500) return [];
-      // 502 / timeout: let the chain try Yahoo rather than wiping the chart.
-      if (error instanceof HttpError && error.status >= 500) return [];
-      throw error;
     }
+
+    const mongo = await this.fetchMongoFallback(symbol, interval, range);
+    if (mongo.length) return mongo;
+
+    // Empty → fall through to Yahoo/other providers (replay must not blank the chart).
+    if (lastError && !(lastError instanceof HttpError)) throw lastError;
+    return [];
   }
 
   subscribeBars(symbol: SymbolInfo, interval: Interval, onBar: (bar: Bar) => void): Unsubscribe {

@@ -82,10 +82,27 @@ function ohlcPlan(interval: Interval): { request: string; aggregateStep: number 
 type Route = {
   apiSymbol: string;
   exchange: "BINANCE" | "FOREXCOM" | "FXPRO" | "FXCM";
-  kind: "crypto" | "metal";
+  /** metal/crypto use Germany `/ohlc/`; forex is Mongo-only (`/crypto-chart`). */
+  kind: "crypto" | "metal" | "forex";
   /** Binance stream symbol for tick proxy (e.g. PAXGUSDT for XAUUSD). */
   tickSymbol?: string;
 };
+
+/** FX majors mirrored in VPS Mongo — keep charts alive when `/tv-history` 502s. */
+const MONGO_FX_TICKERS = new Set([
+  "EURUSD",
+  "GBPUSD",
+  "USDJPY",
+  "AUDUSD",
+  "USDCHF",
+  "USDCAD",
+  "NZDUSD",
+  "EURGBP",
+  "EURJPY",
+  "GBPJPY",
+  "USOIL",
+  "XAGUSD",
+]);
 
 function metalBrokerTag(ex: string): "FOREXCOM" | "FXPRO" | "FXCM" {
   const u = ex.toUpperCase();
@@ -209,6 +226,15 @@ function routeFor(symbol: SymbolInfo): Route | null {
         apiSymbol: "XAUUSD",
         exchange: metalBrokerTag(ex),
         kind: "metal",
+      };
+    }
+    // FX majors / oil / silver live in Mongo alongside gold. Prefer that path so
+    // a market_ticks restart (which takes `/tv-history` down) does not blank the chart.
+    if (MONGO_FX_TICKERS.has(t)) {
+      return {
+        apiSymbol: t,
+        exchange: metalBrokerTag(ex),
+        kind: "forex",
       };
     }
   }
@@ -603,11 +629,15 @@ export class GermanyMarketProvider implements MarketDataProvider {
         }
       }
       if (!bars.length) {
-        await this.assertHealthy();
-        bars = await this.fetchOhlcBars(route, interval, germanyLimit);
+        // Forex routes are Mongo-only — Germany `/ohlc/` 502s for EURUSD etc.
+        // Leave empty so TradingViewBroker / Yahoo can answer.
+        if (route.kind !== "forex") {
+          await this.assertHealthy();
+          bars = await this.fetchOhlcBars(route, interval, germanyLimit);
+        }
       } else if (
-        bars.length < Math.min(range.countBack, 50) ||
-        hasMidSessionHoles(bars, step)
+        route.kind !== "forex" &&
+        (bars.length < Math.min(range.countBack, 50) || hasMidSessionHoles(bars, step))
       ) {
         // Mongo thin OR missing mid-session minutes (live socket outage) —
         // splice Germany OHLC so the chart matches TradingView’s continuous candles.
@@ -622,6 +652,8 @@ export class GermanyMarketProvider implements MarketDataProvider {
     }
 
     if (!bars.length) {
+      // Forex: soft-miss so the provider chain can try `/tv-history` / Yahoo.
+      if (route.kind === "forex") return [];
       throw new Error(`germany-market: empty history for ${route.apiSymbol} @ ${interval}`);
     }
 
@@ -797,7 +829,11 @@ export class GermanyMarketProvider implements MarketDataProvider {
 
     // VPS market-ticks (TradingView quote feed primary; Germany/Mongo fallback).
     const channel =
-      route.kind === "metal" ? `forex:xauusd:${route.exchange}` : `crypto:${route.apiSymbol.toLowerCase()}`;
+      route.kind === "metal"
+        ? `forex:xauusd:${route.exchange}`
+        : route.kind === "forex"
+          ? `forex:${route.apiSymbol.toLowerCase()}:${route.exchange}`
+          : `crypto:${route.apiSymbol.toLowerCase()}`;
     disposers.push(
       openMarketTicksSocket(channel, (price, ts, vol) => {
         onTick(price, ts, vol ?? 0);
@@ -953,7 +989,8 @@ export class GermanyMarketProvider implements MarketDataProvider {
       const route = routeFor(s);
       if (!route) continue;
       if (route.kind === "metal") xauTickers.push(s.ticker);
-      else cryptoWanted.set(route.apiSymbol.toLowerCase(), s.ticker);
+      else if (route.kind === "crypto") cryptoWanted.set(route.apiSymbol.toLowerCase(), s.ticker);
+      // forex quotes: leave to tv_broker / Yahoo — Germany `/crypto/prices` is Binance-only.
     }
 
     if (cryptoWanted.size) {
