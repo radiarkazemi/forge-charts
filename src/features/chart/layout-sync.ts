@@ -480,6 +480,14 @@ class LayoutSyncBus {
     this.activePane = pane;
     this.drawTargetPane = pane;
     this.emitActive();
+    // Text / Anchored Text / Path: CL already armed the tool on the primary
+    // toolbar click. Re-selectLineTool (and delayed reapply) cancels the
+    // in-chart text editor / multipoint stroke on the placing click.
+    const fragile = isTextMenuDrawingTool(drawingTool) || isOpenEndedDrawingTool(drawingTool);
+    if (fragile) {
+      void this.applyToolToSecondaryPanes(drawingTool);
+      return;
+    }
     void this.applyToolToAllPanes(drawingTool);
     // Secondaries often need a resize before selectLineTool sticks.
     this.scheduleToolReapply(() => this.reflowVisible(), 80);
@@ -505,6 +513,14 @@ class LayoutSyncBus {
     // Do not re-arm a shape while one-shot lock is holding Cross.
     if (this.isOneShotLocked()) return;
     const tool = this.sharedTool;
+    // Never re-select Text/Path on mouse_down — that same click is the place
+    // gesture; selectLineTool mid-click aborts the editor / stroke.
+    if (
+      tool &&
+      (isTextMenuDrawingTool(tool) || isOpenEndedDrawingTool(tool))
+    ) {
+      return;
+    }
     // Re-apply the shared drawing tool onto whichever pane the user just focused.
     if (tool && !this.isCursorTool(tool) && tool !== "eraser") {
       void this.applyToolToPane(paneIndex, tool);
@@ -559,6 +575,15 @@ class LayoutSyncBus {
   private async applyToolToPane(paneIndex: number, tool: string): Promise<void> {
     const entry = this.panes.get(paneIndex);
     if (!entry?.controller.isReady) return;
+    // No-op if already armed — avoids cancelling Text/Path mid-gesture.
+    const current = entry.controller.selectedLineTool();
+    if (
+      current &&
+      current.toLowerCase() === tool.toLowerCase() &&
+      (isTextMenuDrawingTool(tool) || isOpenEndedDrawingTool(tool))
+    ) {
+      return;
+    }
     this.applyingTool = true;
     try {
       await entry.controller.selectLineTool(tool);
@@ -573,6 +598,23 @@ class LayoutSyncBus {
     try {
       for (const { index, controller } of this.panes.values()) {
         if (index >= this.activeCount || !controller.isReady) continue;
+        try {
+          await controller.selectLineTool(tool);
+        } catch {
+          /* pane may still be mounting */
+        }
+      }
+    } finally {
+      this.applyingTool = false;
+    }
+  }
+
+  /** Arm secondaries only — primary already has the toolbar selection. */
+  private async applyToolToSecondaryPanes(tool: string): Promise<void> {
+    this.applyingTool = true;
+    try {
+      for (const { index, controller } of this.panes.values()) {
+        if (index === 0 || index >= this.activeCount || !controller.isReady) continue;
         try {
           await controller.selectLineTool(tool);
         } catch {

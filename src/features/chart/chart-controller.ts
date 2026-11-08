@@ -30,6 +30,7 @@ import {
   isTextMenuDrawingTool,
   shouldSkipDrawingOneShot,
 } from "@/features/chart/drawing-oneshot-guard";
+import { isOpenEndedDrawingTool } from "@/features/chart/open-ended-draw-tools";
 
 export interface ChartState {
   readonly symbol: string;
@@ -639,6 +640,15 @@ export class ChartController {
       const isTextMenu = isTextMenuDrawingTool(tool);
       if (!isCursor) {
         this.lastArmedTool = tool;
+      }
+      // Re-selecting Text/Path while already armed cancels the in-chart editor.
+      const already = this.selectedLineTool();
+      if (
+        already &&
+        already.toLowerCase() === key &&
+        (isTextMenu || isOpenEndedDrawingTool(tool))
+      ) {
+        return;
       }
       if (isCursor) {
         this.ensureStayInDrawingModeOff();
