@@ -51,8 +51,9 @@ function buildSessionServices(session: AuthSession): Services {
     /* ignore */
   }
   // Mirror safety profile into scoped storage for profile sync payloads.
+  // Safety PII already lives under forge.u.<userId>.* — never copy other accounts here.
   try {
-    const safety = auth.getSafetyProfile(session.userId);
+    const safety = auth.getSafetyProfile();
     if (safety) scoped.set("forge.auth.safetyProfile.v1", safety);
   } catch {
     /* ignore */
@@ -158,7 +159,7 @@ export function App() {
         <SafetyAuthorizationPage
           username={session.username}
           displayName={session.displayName}
-          initial={auth.getSafetyProfile(session.userId)}
+          initial={auth.getSafetyProfile() ?? undefined}
           onComplete={completeBootSafety}
           onBack={() => {
             signOut();

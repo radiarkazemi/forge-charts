@@ -15,6 +15,8 @@ export const PROFILE_BLOB_KEYS = [
   "forge.tv.chartTemplates",
   "forge.tv.lineTools",
   USER_SETTINGS_KEY,
+  // Own-account safety PII only — scoped storage + syncKey gate keep it private.
+  "forge.auth.safetyProfile.v1",
 ] as const;
 
 export type ProfileBlobKey = (typeof PROFILE_BLOB_KEYS)[number];

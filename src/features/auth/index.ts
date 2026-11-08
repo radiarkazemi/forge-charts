@@ -12,5 +12,11 @@ export {
   validateSafetyDraft,
   type SafetyAuthorizationProfile,
 } from "./safety-profile";
+export {
+  safetyProfileStorageKey,
+  sanitizeUserId,
+  userScopePrefix,
+  type PublicAccountView,
+} from "./user-isolation";
 export { migrateLegacyDataIfNeeded } from "./migrate-legacy";
 export { hashPassword, verifyPassword } from "./password";

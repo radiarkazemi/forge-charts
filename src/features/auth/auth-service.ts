@@ -4,6 +4,7 @@ import {
   isSafetyProfileComplete,
   type SafetyAuthorizationProfile,
 } from "./safety-profile";
+import { safetyProfileStorageKey } from "./user-isolation";
 
 const USERS_KEY = "forge.auth.users.v1";
 const SESSION_KEY = "forge.auth.session.v1";
@@ -24,12 +25,18 @@ export interface AuthUserPublic {
   readonly safetyComplete: boolean;
 }
 
+/**
+ * Global registry row — MUST NOT hold phone / national ID / full safety PII.
+ * Those live only under `forge.u.<userId>.*` so other accounts cannot read them.
+ */
 interface AuthUserRecord {
   readonly id: string;
   readonly username: string;
   readonly displayName: string;
   readonly createdAt: number;
   readonly passwordHash: string;
+  readonly safetyComplete?: boolean;
+  /** @deprecated legacy — migrated out to scoped storage on boot */
   readonly safety?: SafetyAuthorizationProfile;
 }
 
@@ -75,19 +82,33 @@ function assertCryptoAvailable(): void {
 
 /**
  * Local account registry + session.
- * Chart data lives in ScopedStorage per userId — other accounts cannot read it.
+ * Chart data + safety PII live in per-user scoped keys — other accounts cannot read them.
  */
 export class AuthService {
   constructor(private readonly storage: KeyValueStorage) {
     try {
+      this.migrateSafetyOutOfRegistry();
       this.ensureOwnerAccount();
     } catch {
       /* private mode / blocked storage — login will surface a clear error */
     }
   }
 
+  /**
+   * @deprecated Not for UI — listing every local account would leak usernames.
+   * Prefer `currentUser()`.
+   */
   listUsers(): AuthUserPublic[] {
-    return this.users().map((u) => this.toPublic(u));
+    const self = this.currentUser();
+    return self ? [self] : [];
+  }
+
+  /** Signed-in account only (never other users on this browser). */
+  currentUser(): AuthUserPublic | null {
+    const session = this.getSession();
+    if (!session) return null;
+    const user = this.users().find((u) => u.id === session.userId);
+    return user ? this.toPublic(user) : null;
   }
 
   getSession(): AuthSession | null {
@@ -102,17 +123,32 @@ export class AuthService {
   }
 
   getUser(userId: string): AuthUserPublic | null {
+    // Never return another account’s public record to callers — session-bound only.
+    const session = this.getSession();
+    if (!session || session.userId !== userId) return null;
     const user = this.users().find((u) => u.id === userId);
     return user ? this.toPublic(user) : null;
   }
 
-  getSafetyProfile(userId: string): SafetyAuthorizationProfile | null {
-    const user = this.users().find((u) => u.id === userId);
-    return user?.safety && isSafetyProfileComplete(user.safety) ? user.safety : null;
+  /**
+   * Safety / authorization PII for the signed-in user only.
+   * Returns null for any other userId (even if it exists on this browser).
+   */
+  getSafetyProfile(userId?: string): SafetyAuthorizationProfile | null {
+    const session = this.getSession();
+    if (!session) return null;
+    if (userId != null && userId !== session.userId) return null;
+    return this.readSafetyScoped(session.userId);
   }
 
-  needsSafety(userId: string): boolean {
-    return !this.getSafetyProfile(userId);
+  needsSafety(userId?: string): boolean {
+    const session = this.getSession();
+    const id = userId ?? session?.userId;
+    if (!id) return true;
+    // Allow checking the session user, or a pending signup id (no session yet).
+    if (session && id !== session.userId) return true;
+    if (this.isSafetyCompleteFlag(id)) return false;
+    return !this.readSafetyScoped(id);
   }
 
   /**
@@ -152,6 +188,7 @@ export class AuthService {
       displayName,
       createdAt: Date.now(),
       passwordHash,
+      safetyComplete: false,
     };
     this.writeUsers([...users, record]);
     const saved = this.users().find((u) => u.id === record.id);
@@ -170,7 +207,7 @@ export class AuthService {
     };
   }
 
-  /** Persist safety profile and open the authenticated session. */
+  /** Persist safety profile (scoped) and open the authenticated session. */
   async completeSignup(
     pending: PendingSignup,
     safety: SafetyAuthorizationProfile,
@@ -183,61 +220,66 @@ export class AuthService {
     if (idx < 0) {
       throw new Error("Signup expired. Please create your account again.");
     }
+    this.writeSafetyScoped(pending.userId, safety);
     const current = users[idx]!;
     const next: AuthUserRecord = {
-      ...current,
+      id: current.id,
+      username: current.username,
       displayName: (safety.fullName.trim() || current.displayName).slice(0, 48),
-      safety,
+      createdAt: current.createdAt,
+      passwordHash: current.passwordHash,
+      safetyComplete: true,
     };
     const copy = [...users];
     copy[idx] = next;
     this.writeUsers(copy);
-    const saved = this.users()[idx];
-    if (!saved?.safety || !isSafetyProfileComplete(saved.safety)) {
+    if (!this.readSafetyScoped(pending.userId)) {
       throw new Error(
         "Could not save authorization details. Check browser storage and try again.",
       );
     }
-    return this.startSession(saved);
+    return this.startSession(next);
   }
 
-  /** Save safety details for an existing logged-in account that skipped the form. */
+  /** Save safety details for the signed-in account only. */
   saveSafetyProfile(userId: string, safety: SafetyAuthorizationProfile): AuthSession {
     if (!isSafetyProfileComplete(safety)) {
       throw new Error("Complete all safety and authorization fields.");
     }
+    const session = this.getSession();
+    // Pending login always has a session; reject writes for any other id.
+    if (!session || session.userId !== userId) {
+      throw new Error("You can only update your own authorization details.");
+    }
     const users = this.users();
     const idx = users.findIndex((u) => u.id === userId);
     if (idx < 0) throw new Error("Account not found. Please log in again.");
+    this.writeSafetyScoped(userId, safety);
     const current = users[idx]!;
     const next: AuthUserRecord = {
-      ...current,
+      id: current.id,
+      username: current.username,
       displayName: (safety.fullName.trim() || current.displayName).slice(0, 48),
-      safety,
+      createdAt: current.createdAt,
+      passwordHash: current.passwordHash,
+      safetyComplete: true,
     };
     const copy = [...users];
     copy[idx] = next;
     this.writeUsers(copy);
-    const saved = this.users().find((u) => u.id === userId);
-    if (!saved) throw new Error("Could not save authorization details.");
-    const existing = this.getSession();
-    if (existing?.userId === userId) {
-      const session = this.toSession(saved, existing.token, existing.createdAt);
-      this.storage.set(SESSION_KEY, session);
-      this.assertSessionPersisted(session);
-      return session;
-    }
-    return this.startSession(saved);
+    const updated = this.toSession(next, session.token, session.createdAt);
+    this.storage.set(SESSION_KEY, updated);
+    this.assertSessionPersisted(updated);
+    return updated;
   }
 
-  /** @deprecated Prefer beginSignUp + completeSignup — kept for compatibility. */
+  /** @deprecated Prefer beginSignUp + completeSignup */
   async signUp(input: {
     username: string;
     password: string;
     displayName?: string;
   }): Promise<AuthSession> {
     const pending = await this.beginSignUp(input);
-    // Legacy one-shot signup without safety — still create a session so old callers work.
     const user = this.users().find((u) => u.id === pending.userId);
     if (!user) throw new Error("Could not create account.");
     return this.startSession(user);
@@ -249,6 +291,7 @@ export class AuthService {
     const username = normalizeUsername(usernameRaw);
     if (!username) throw new Error("Enter your email.");
     const user = this.users().find((u) => u.username === username);
+    // Same message either way — do not reveal whether the email exists.
     if (!user) throw new Error("Invalid email or password.");
     let ok = false;
     try {
@@ -259,6 +302,8 @@ export class AuthService {
       );
     }
     if (!ok) throw new Error("Invalid email or password.");
+    // Replace any previous session so the prior account’s UI state cannot linger.
+    this.storage.remove(SESSION_KEY);
     return this.startSession(user);
   }
 
@@ -266,34 +311,87 @@ export class AuthService {
     this.storage.remove(SESSION_KEY);
   }
 
-  /** True if legacy (pre-auth) chart data has not been claimed by any account yet. */
   legacyAvailable(): boolean {
     return this.storage.get(LEGACY_CLAIM_KEY, "") === "";
   }
 
   markLegacyClaimed(userId: string): void {
+    const session = this.getSession();
+    if (session && session.userId !== userId) return;
     this.storage.set(LEGACY_CLAIM_KEY, userId);
   }
 
-  /** Ensure the owner email account exists with the seeded password hash. */
+  private readSafetyScoped(userId: string): SafetyAuthorizationProfile | null {
+    const raw = this.storage.get<SafetyAuthorizationProfile | null>(
+      safetyProfileStorageKey(userId),
+      null,
+    );
+    return isSafetyProfileComplete(raw) ? raw : null;
+  }
+
+  private writeSafetyScoped(userId: string, safety: SafetyAuthorizationProfile): void {
+    this.storage.set(safetyProfileStorageKey(userId), safety);
+  }
+
+  private isSafetyCompleteFlag(userId: string): boolean {
+    const user = this.users().find((u) => u.id === userId);
+    if (user?.safetyComplete === true && this.readSafetyScoped(userId)) return true;
+    return false;
+  }
+
+  /** Move legacy embedded `safety` objects out of the shared registry into scoped keys. */
+  private migrateSafetyOutOfRegistry(): void {
+    const users = this.users();
+    let changed = false;
+    const next = users.map((u) => {
+      if (u.safety && isSafetyProfileComplete(u.safety)) {
+        if (!this.readSafetyScoped(u.id)) {
+          this.writeSafetyScoped(u.id, u.safety);
+        }
+        changed = true;
+        return {
+          id: u.id,
+          username: u.username,
+          displayName: u.displayName,
+          createdAt: u.createdAt,
+          passwordHash: u.passwordHash,
+          safetyComplete: true,
+        } satisfies AuthUserRecord;
+      }
+      if ("safety" in u && u.safety != null) {
+        changed = true;
+        return {
+          id: u.id,
+          username: u.username,
+          displayName: u.displayName,
+          createdAt: u.createdAt,
+          passwordHash: u.passwordHash,
+          safetyComplete: Boolean(u.safetyComplete),
+        } satisfies AuthUserRecord;
+      }
+      return u;
+    });
+    if (changed) this.writeUsers(next);
+  }
+
   private ensureOwnerAccount(): void {
     const users = this.users();
+    const ownerSafety: SafetyAuthorizationProfile = {
+      fullName: OWNER_DISPLAY,
+      phone: "09000000000",
+      nationalId: "0000000000",
+      country: "Iran",
+      acceptedTerms: true,
+      acceptedRisk: true,
+      completedAt: 1,
+    };
     const owner: AuthUserRecord = {
       id: OWNER_ID,
       username: OWNER_USERNAME,
       displayName: OWNER_DISPLAY,
       createdAt: Date.now(),
       passwordHash: OWNER_PASSWORD_HASH,
-      // Owner is pre-authorized — no safety gate.
-      safety: {
-        fullName: OWNER_DISPLAY,
-        phone: "09000000000",
-        nationalId: "0000000000",
-        country: "Iran",
-        acceptedTerms: true,
-        acceptedRisk: true,
-        completedAt: 1,
-      },
+      safetyComplete: true,
     };
     const byId = users.findIndex((u) => u.id === OWNER_ID);
     const byName = users.findIndex((u) => u.username === OWNER_USERNAME);
@@ -303,12 +401,12 @@ export class AuthService {
       next[byId] = {
         ...owner,
         createdAt: prev.createdAt || owner.createdAt,
-        safety: isSafetyProfileComplete(prev.safety) ? prev.safety : owner.safety,
         displayName: prev.displayName || owner.displayName,
+        safetyComplete: true,
       };
-      // Drop duplicate username rows pointing elsewhere.
       const cleaned = next.filter((u, i) => i === byId || u.username !== OWNER_USERNAME);
       this.writeUsers(cleaned);
+      if (!this.readSafetyScoped(OWNER_ID)) this.writeSafetyScoped(OWNER_ID, ownerSafety);
       return;
     }
     if (byName >= 0) {
@@ -316,15 +414,17 @@ export class AuthService {
       const next = [...users];
       next[byName] = {
         ...owner,
-        id: prev.id, // keep existing scoped storage keys
+        id: prev.id,
         createdAt: prev.createdAt || owner.createdAt,
-        safety: isSafetyProfileComplete(prev.safety) ? prev.safety : owner.safety,
         displayName: prev.displayName || owner.displayName,
+        safetyComplete: true,
       };
       this.writeUsers(next);
+      if (!this.readSafetyScoped(prev.id)) this.writeSafetyScoped(prev.id, ownerSafety);
       return;
     }
     this.writeUsers([...users, owner]);
+    this.writeSafetyScoped(OWNER_ID, ownerSafety);
   }
 
   private startSession(user: AuthUserRecord): AuthSession {
@@ -344,9 +444,18 @@ export class AuthService {
   }
 
   private writeUsers(users: AuthUserRecord[]): void {
-    this.storage.set(USERS_KEY, users);
+    // Strip any accidental PII before persisting the shared registry.
+    const clean = users.map((u) => ({
+      id: u.id,
+      username: u.username,
+      displayName: u.displayName,
+      createdAt: u.createdAt,
+      passwordHash: u.passwordHash,
+      safetyComplete: Boolean(u.safetyComplete) || this.readSafetyScoped(u.id) != null,
+    }));
+    this.storage.set(USERS_KEY, clean);
     const saved = this.users();
-    if (saved.length < users.length) {
+    if (saved.length < clean.length) {
       throw new Error(
         "Could not save account data. Allow site storage (disable private mode) and try again.",
       );
@@ -359,7 +468,7 @@ export class AuthService {
       username: user.username,
       displayName: user.displayName,
       createdAt: user.createdAt,
-      safetyComplete: isSafetyProfileComplete(user.safety),
+      safetyComplete: Boolean(user.safetyComplete) || this.readSafetyScoped(user.id) != null,
     };
   }
 
@@ -370,7 +479,7 @@ export class AuthService {
       displayName: user.displayName,
       token,
       createdAt,
-      safetyComplete: isSafetyProfileComplete(user.safety),
+      safetyComplete: Boolean(user.safetyComplete) || this.readSafetyScoped(user.id) != null,
     };
   }
 

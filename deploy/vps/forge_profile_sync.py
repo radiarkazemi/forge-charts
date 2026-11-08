@@ -75,12 +75,17 @@ async def get_profile(request: web.Request) -> web.Response:
     doc = coll().find_one({"_id": account_key})
     if not doc:
         return web.json_response({"updatedAt": 0, "payload": None})
+    # Wrong password / other user's key — never return payload (no account enumeration).
     if doc.get("syncKey") != sync_key:
+        return web.json_response({"error": "forbidden"}, status=403)
+    # Only the matching accountKey document is returned — never another profile.
+    if str(doc.get("_id") or "").lower() != account_key:
         return web.json_response({"error": "forbidden"}, status=403)
     return web.json_response(
         {
             "updatedAt": int(doc.get("updatedAt") or 0),
             "payload": doc.get("payload"),
+            "accountKey": account_key,
         }
     )
 

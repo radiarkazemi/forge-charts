@@ -10,6 +10,7 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { ForgeMark } from "@/brand/ForgeMark";
 import {
+  clearSyncCredentials,
   deriveAccountKey,
   deriveSyncKey,
   type ProfileSyncCredentials,
@@ -59,6 +60,8 @@ export function AuthGate({ auth, onAuthenticated }: AuthGateProps) {
     setError(null);
     setBusy(true);
     try {
+      // Drop any previous account’s sync keys before touching a new identity.
+      clearSyncCredentials();
       if (mode === "signup") {
         if (password !== confirm) throw new Error("Passwords do not match.");
         const pending = await auth.beginSignUp({
@@ -74,7 +77,7 @@ export function AuthGate({ auth, onAuthenticated }: AuthGateProps) {
       }
 
       const session = await auth.login(username, password);
-      if (auth.needsSafety(session.userId)) {
+      if (auth.needsSafety()) {
         setPendingLogin({ session, password });
         setPendingSignup(null);
         setPhase("safety");
@@ -118,9 +121,7 @@ export function AuthGate({ auth, onAuthenticated }: AuthGateProps) {
       <SafetyAuthorizationPage
         username={name}
         displayName={label}
-        initial={
-          pendingLogin ? auth.getSafetyProfile(pendingLogin.session.userId) ?? undefined : undefined
-        }
+        initial={pendingLogin ? auth.getSafetyProfile() ?? undefined : undefined}
         onComplete={completeSafety}
         onBack={
           pendingSignup
