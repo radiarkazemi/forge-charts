@@ -26,7 +26,7 @@ import { SESSIONS_STUDY_ID } from "@/features/chart/sessions-indicator";
 import { SI_STUDY_ID } from "@/features/chart/structure-intelligence-indicator";
 import { WATERMARK_STUDY_ID } from "@/features/chart/watermark-indicator";
 import { allowNativeIndicatorsOnce } from "@/features/chart/indicators-intercept";
-import { isOpenEndedDrawingTool } from "@/features/chart/open-ended-draw-tools";
+import { shouldSkipDrawingOneShot } from "@/features/chart/drawing-oneshot-guard";
 
 export interface ChartState {
   readonly symbol: string;
@@ -163,14 +163,24 @@ export class ChartController {
     this.ensureStayInDrawingModeOff();
     window.setTimeout(() => this.ensureStayInDrawingModeOff(), 200);
     window.setTimeout(() => this.ensureStayInDrawingModeOff(), 800);
-    // Belt-and-suspenders: any finished shape on this pane returns to Cross even
-    // if layout-sync missed the create event (multipane races).
-    // Skip Path / Polyline / Brush — "create" fires on the first click while
-    // the tool is still collecting points (otherwise the stroke cuts off).
+    // Belt-and-suspenders: finished user shapes return to Cross even if
+    // layout-sync missed the create event. Never oneshot for:
+    // - Path / Text / Note / Callout (still editing), or
+    // - Forge indicator overlays (Sessions boxes etc.) — those create storms
+    //   were forcing Cross and cancelling Text mid-edit.
     if (!this.oneShotDrawingHandler) {
-      this.oneShotDrawingHandler = (_id, eventType) => {
+      this.oneShotDrawingHandler = (id, eventType) => {
         if (eventType !== "create") return;
-        if (isOpenEndedDrawingTool(this.selectedLineTool())) return;
+        const chart = this.activeChart();
+        if (
+          shouldSkipDrawingOneShot({
+            chart,
+            entityId: id,
+            selectedTool: this.selectedLineTool(),
+          })
+        ) {
+          return;
+        }
         void this.exitDrawingTool();
         window.setTimeout(() => void this.exitDrawingTool(), 50);
         window.setTimeout(() => void this.exitDrawingTool(), 180);
@@ -615,12 +625,20 @@ export class ChartController {
   /** Select a drawing tool (same as left toolbar click). */
   async selectLineTool(tool: string): Promise<void> {
     try {
-      // Cross / eraser always leave sticky draw mode.
-      if (tool === "cursor" || tool === "arrow_cursor" || tool === "eraser" || tool === "dot") {
+      const key = tool.trim().toLowerCase();
+      const isCursor =
+        key === "cursor" || key === "arrow_cursor" || key === "eraser" || key === "dot";
+      // Text menu needs the editor to stay alive — do not hammer stay-in-draw OFF
+      // while arming Text/Note/Callout (that cancels the in-place text input).
+      const isTextMenu = /^(text|anchored_text|note|anchored_note|callout|comment|price_label|price_note|signpost|balloon|emoji|sticker|icon|flag|linetooltext|linetoolnote|linetoolcallout)/.test(
+        key.replace(/[\s-]+/g, ""),
+      );
+      if (isCursor) {
         this.ensureStayInDrawingModeOff();
       }
       await this.widget?.selectLineTool(tool as never);
-      // Always keep stay-in-draw OFF so finished shapes return to Cross (TV default).
+      if (isTextMenu) return;
+      // Keep stay-in-draw OFF so finished shapes return to Cross (TV default).
       this.ensureStayInDrawingModeOff();
       window.setTimeout(() => this.ensureStayInDrawingModeOff(), 0);
       window.setTimeout(() => this.ensureStayInDrawingModeOff(), 120);

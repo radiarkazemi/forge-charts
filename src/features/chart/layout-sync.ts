@@ -9,7 +9,7 @@ import {
   readShapeSnapshotRetry,
   type ShapeSnapshot,
 } from "./drawing-sync";
-import { isOpenEndedDrawingTool } from "./open-ended-draw-tools";
+import { isForgeOverlayDrawing, shouldSkipDrawingOneShot } from "./drawing-oneshot-guard";
 
 export interface LayoutSyncFlags {
   readonly symbol: boolean;
@@ -98,6 +98,8 @@ class LayoutSyncBus {
    * Without it, onSelectedLineToolChanged / stay-in-draw re-arms rectangle after Cross.
    */
   private oneShotLockUntil = 0;
+  /** Last user drawing tool that completed oneshot — echoes of THIS tool are dropped. */
+  private lastOneShotTool: string | null = null;
 
   private clearToolReapplyTimers(): void {
     for (const id of this.toolReapplyTimers) window.clearTimeout(id);
@@ -117,8 +119,11 @@ class LayoutSyncBus {
   }
 
   /** Lock tool selection to Cross so CL / multipane echoes cannot re-arm a shape. */
-  private beginOneShotLock(ms = 900): void {
+  private beginOneShotLock(ms = 900, completedTool?: string | null): void {
     this.oneShotLockUntil = Date.now() + ms;
+    if (completedTool && !this.isCursorTool(completedTool)) {
+      this.lastOneShotTool = completedTool;
+    }
     this.clearToolReapplyTimers();
     this.sharedTool = "cursor";
   }
@@ -415,11 +420,21 @@ class LayoutSyncBus {
     if (this.applyingTool) return;
     if (sourceIndex !== 0) return;
     const isCursor = this.isCursorTool(tool);
-    // One-shot lock: drop CL echoes that re-select rectangle/trend after Cross.
-    // Real toolbar picks after the lock window still work normally.
+    // One-shot lock: drop CL *echoes* that re-select the just-finished tool
+    // (rectangle/trend). Do NOT block a deliberate new pick (e.g. Text) — and
+    // never force Cross while indicator overlays are painting.
     if (!isCursor && this.isOneShotLocked()) {
-      void this.applyToolToAllPanes("cursor");
-      return;
+      const sameAsCompleted =
+        tool != null &&
+        this.lastOneShotTool != null &&
+        tool.toLowerCase() === this.lastOneShotTool.toLowerCase();
+      if (sameAsCompleted) {
+        void this.applyToolToAllPanes("cursor");
+        return;
+      }
+      // User picked a different tool (Text, …) — clear lock and arm it.
+      this.oneShotLockUntil = 0;
+      this.lastOneShotTool = null;
     }
     this.clearToolReapplyTimers();
     this.sharedTool = tool;
@@ -857,23 +872,35 @@ class LayoutSyncBus {
     // Do NOT gate on applyingTool — exitDrawingTool / multipane apply often
     // sets it true during create, which previously skipped the Cross reset and
     // left the toolbar stuck on rectangle/trend. Skip mirrors / in-flight sync copies.
-    // Path / Polyline / Brush fire "create" on the first click while still open —
-    // resetting to Cross there cuts the stroke mid-draw.
-    const activeTool =
-      this.panes.get(paneIndex)?.controller.selectedLineTool() ?? this.sharedTool;
-    const openEnded = isOpenEndedDrawingTool(activeTool);
+    // Path / Text / Note and Forge overlay paints must never oneshot-reset.
+    const pane = this.panes.get(paneIndex);
+    const activeTool = pane?.controller.selectedLineTool() ?? this.sharedTool;
+    const guardChart = pane?.controller.getWidget()?.activeChart() ?? null;
+    const skipOneShot =
+      eventType === "create" &&
+      shouldSkipDrawingOneShot({
+        chart: guardChart,
+        entityId,
+        selectedTool: activeTool,
+        sharedTool: this.sharedTool,
+      });
     const shouldResetTool =
       eventType === "create" &&
-      !openEnded &&
+      !skipOneShot &&
       !this.mirrorIds.has(idKey) &&
       !this.syncingDrawings;
 
     // Drop the armed tool immediately so delayed re-apply timers cannot stick
     // on rectangle/trend after the shape is finished.
     if (shouldResetTool) {
-      this.beginOneShotLock(900);
+      this.beginOneShotLock(900, activeTool);
       // Kick Cross ASAP; full reset still runs at the end of this handler.
       void this.resetToolsToCursor();
+    }
+
+    // Indicator overlays never mirror across panes / never oneshot.
+    if (eventType === "create" && isForgeOverlayDrawing(guardChart, entityId)) {
+      return;
     }
 
     // Single-pane (or drawings sync off): still return to Cross after one use.
