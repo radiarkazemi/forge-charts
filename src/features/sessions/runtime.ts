@@ -93,7 +93,7 @@ export interface SessionsDashboardState {
 /**
  * Trader startup presets (from LuxAlgo Sessions setup).
  * Colors match LuxAlgo Style defaults: NY orange, London blue, Tokyo pink, Sydney yellow.
- * Hours are interpreted in New York time (UTC−4).
+ * Hours are interpreted in New York time (default UTC−5 / America/New_York).
  */
 export const DEFAULT_SESSION_DEFS: SessionDef[] = [
   {
@@ -201,9 +201,12 @@ export const DEFAULT_SESSIONS_TEXT = [
 export const SESSIONS_DEFAULTS = {
   sessionsText: DEFAULT_SESSIONS_TEXT,
   historyLimit: 0,
-  /** Fixed New York offset (UTC−4). Hours below are NY wall-clock. */
-  timezoneOffset: -4,
-  useExchangeTimezone: false,
+  /**
+   * Fixed New York offset fallback (UTC−5 standard time).
+   * Prefer `useExchangeTimezone` + America/New_York so DST is handled correctly.
+   */
+  timezoneOffset: -5,
+  useExchangeTimezone: true,
   exchangeTimezone: "America/New_York",
   /** Soft sample look — high transparency so candles stay readable. */
   rangeTransparency: 88,
@@ -930,14 +933,31 @@ export async function paintSessionsOnChart(
   const limited = ordered.length > maxDrawings ? ordered.slice(0, maxDrawings) : ordered;
   const ownerStudyId = options?.ownerStudyId;
 
+  const lockShape = (id: EntityId | null | undefined) => {
+    if (!id) return;
+    try {
+      const api = chart.getShapeById(id);
+      api.setSelectionEnabled(false);
+      api.setSavingEnabled(false);
+      api.setShowInObjectsTreeEnabled(false);
+      api.setUserEditEnabled(false);
+      api.sendToBack();
+    } catch {
+      /* shape may already be gone */
+    }
+  };
+
   for (let i = 0; i < limited.length; i += 1) {
     const cmd = limited[i]!;
     const stroke = clColor(cmd.color);
+    // Fixed indicator overlays — never selectable / scalable / editable on chart.
     const common = {
+      lock: true,
       disableSelection: true,
       disableSave: true,
       disableUndo: true,
       showInObjectsTree: false,
+      zOrder: "bottom" as const,
       ...(ownerStudyId ? { ownerStudyId } : {}),
     } as const;
     try {
@@ -955,6 +975,7 @@ export async function paintSessionsOnChart(
             },
           },
         );
+        lockShape(id);
         if (id) ids.push(id);
       } else if (cmd.kind === "line" && cmd.t2 != null && cmd.p2 != null) {
         const id = await chart.createMultipointShape(
@@ -974,6 +995,7 @@ export async function paintSessionsOnChart(
             },
           },
         );
+        lockShape(id);
         if (id) ids.push(id);
       } else if (cmd.kind === "rect" && cmd.t2 != null && cmd.p2 != null) {
         // CL rectangles: solid hex + transparency. Soft fill + thin dotted border.
@@ -1003,6 +1025,7 @@ export async function paintSessionsOnChart(
             },
           },
         );
+        lockShape(id);
         if (id) ids.push(id);
       } else if (cmd.kind === "label" || cmd.kind === "dot") {
         const text = cmd.kind === "dot" ? "·" : (cmd.text ?? "").trim() || "·";
@@ -1024,6 +1047,7 @@ export async function paintSessionsOnChart(
             },
           },
         );
+        lockShape(id);
         if (id) ids.push(id);
       }
     } catch {

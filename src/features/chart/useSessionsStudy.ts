@@ -9,6 +9,7 @@ import type { EntityId } from "@/infrastructure/tradingview";
 import { clColor, computeSessions, mergeSessionDefs, paintSessionsOnChart, publishSessionsDashboard, SESSION_COLOR_PALETTE, SESSIONS_DEFAULTS, type SessionsOptions } from "@/features/sessions/runtime";
 import { readSessionSlotsFromMap, stylePlotIdForIndex, SESSIONS_STUDY_DEFAULTS, SESSIONS_MAX_COUNT } from "./sessions-indicator";
 import { chartAllowedByMaxMinutes, liveChartResolution, studyIsVisible, markChartPaintBusy } from "./study-paint-gate";
+import { readStylePlot } from "./study-style-plots";
 
 import { exportChartBarsCached, STUDY_DEBOUNCE_MS, STUDY_LIVE_REFRESH_MS, STUDY_MAX_BARS, STUDY_PRESENCE_POLL_MS, STUDY_PAINT_MUTE_MS } from "./chart-export-cache";
 
@@ -36,53 +37,20 @@ function readStyleColors(
   count: number,
 ): { color: string; transparency: number }[] {
   const out: { color: string; transparency: number }[] = [];
-  let styles: Record<string, unknown> = {};
-  try {
-    const raw = api.getStyleValues?.() as Record<string, unknown> | null;
-    if (raw && typeof raw === "object") {
-      const nested = raw.styles;
-      if (nested && typeof nested === "object") {
-        styles = nested as Record<string, unknown>;
-      } else {
-        // Some CL builds return the style map at the top level.
-        styles = raw;
-      }
-    }
-  } catch {
-    styles = {};
-  }
-  const slotLetters = "ABCDEFGHIJKL";
   for (let i = 0; i < count; i += 1) {
     const plotId = stylePlotIdForIndex(i);
-    const letter = slotLetters[i] ?? "A";
     const fallbackHex = SESSION_COLOR_PALETTE[i % SESSION_COLOR_PALETTE.length] ?? "#ff5d00";
-    // Prefer exact plot id; also accept index / loose style_s* keys.
-    const looseKey = Object.keys(styles).find(
-      (k) => k === plotId || k.endsWith(`s${letter}`) || k === `style_s${letter}`,
-    );
-    const candidates: unknown[] = [
-      styles[plotId],
-      looseKey ? styles[looseKey] : undefined,
-      styles[String(i)],
-      styles[`plot_${i}`],
-    ];
-    let color: string = fallbackHex;
-    let transparency: number = SESSIONS_DEFAULTS.rangeTransparency;
-    for (const cand of candidates) {
-      if (!cand || typeof cand !== "object") continue;
-      const st = cand as { color?: string; transparency?: number };
-      if (typeof st.color === "string" && st.color.trim()) {
-        const norm = clColor(st.color, "");
-        if (norm) {
-          color = norm;
-          if (typeof st.transparency === "number" && Number.isFinite(st.transparency)) {
-            transparency = Math.max(0, Math.min(100, st.transparency));
-          }
-          break;
-        }
-      }
-    }
-    out.push({ color, transparency });
+    const st = readStylePlot(api, plotId, {
+      color: fallbackHex,
+      visible: true,
+      transparency: SESSIONS_DEFAULTS.rangeTransparency,
+      linewidth: 1,
+      linestyle: 0,
+    });
+    out.push({
+      color: clColor(st.color, fallbackHex) || fallbackHex,
+      transparency: Math.max(0, Math.min(100, st.transparency)),
+    });
   }
   return out;
 }
@@ -258,15 +226,18 @@ export function useSessionsStudy(enabled = true): void {
             0,
             Math.min(240, Math.floor(num("maxMinutes", SESSIONS_STUDY_DEFAULTS.maxMinutes))),
           ),
-          timezoneOffset: Math.max(
-            -12,
-            Math.min(14, Math.floor(num("timezoneOffset", SESSIONS_STUDY_DEFAULTS.timezoneOffset))),
-          ),
+          timezoneOffset: (() => {
+            // Migrate stale default UTC−4 → UTC−5 (NY standard) when still on old value.
+            const raw = Math.floor(num("timezoneOffset", SESSIONS_STUDY_DEFAULTS.timezoneOffset));
+            const offset = raw === -4 ? -5 : raw;
+            return Math.max(-12, Math.min(14, offset));
+          })(),
           useExchangeTimezone: bool(
             "useExchangeTimezone",
             SESSIONS_STUDY_DEFAULTS.useExchangeTimezone,
           ),
-          exchangeTimezone: str("exchangeTimezone", SESSIONS_STUDY_DEFAULTS.exchangeTimezone),
+          exchangeTimezone: str("exchangeTimezone", SESSIONS_STUDY_DEFAULTS.exchangeTimezone) ||
+            "America/New_York",
           rangeTransparency: SESSIONS_DEFAULTS.rangeTransparency,
           showRangeOutline: bool("showRangeOutline", SESSIONS_STUDY_DEFAULTS.showRangeOutline),
           showRangeLabel: bool("showRangeLabel", SESSIONS_STUDY_DEFAULTS.showRangeLabel),

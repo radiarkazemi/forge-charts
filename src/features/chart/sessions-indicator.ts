@@ -156,10 +156,11 @@ export function createSessionsIndicator(PineJS: {
     const id = stylePlotId(L);
     // isHidden: keep Style-tab colors, but NEVER dump LQ/Open/NY… into the legend
     // title row (that made gear/eye/× unreachable and looked “broken”).
+    // Keep Style-tab rows visible so box colors/opacity are customizable.
+    // plots return NaN + display:0 so nothing draws on the price scale / legend.
     stylesMeta[id] = {
       title: i < DEFAULT_ZONE_COUNT ? d.name : `Session ${L}`,
       histogramBase: 0,
-      isHidden: true,
     };
     stylesDefaults[id] = {
       linestyle: 0,
@@ -167,7 +168,7 @@ export function createSessionsIndicator(PineJS: {
       plottype: 0,
       trackPrice: false,
       transparency: SESSIONS_DEFAULTS.rangeTransparency,
-      visible: false,
+      visible: true,
       color: d.color,
       display: 0,
     };
@@ -250,24 +251,24 @@ export function createSessionsIndicator(PineJS: {
           max: 240,
         },
         {
-          id: "timezoneOffset",
-          name: "Timezone · UTC (+/-)  [default New York −4]",
-          defval: SESSIONS_STUDY_DEFAULTS.timezoneOffset,
-          type: "integer",
-          min: -12,
-          max: 14,
-        },
-        {
           id: "useExchangeTimezone",
-          name: "Timezone · Use Exchange Timezone",
+          name: "Timezone · New York (America/New_York) — default ON",
           defval: SESSIONS_STUDY_DEFAULTS.useExchangeTimezone,
           type: "bool",
         },
         {
           id: "exchangeTimezone",
-          name: "Timezone · IANA (only if Exchange on)",
+          name: "Timezone · IANA (when New York mode is on)",
           defval: SESSIONS_STUDY_DEFAULTS.exchangeTimezone,
           type: "text",
+        },
+        {
+          id: "timezoneOffset",
+          name: "Timezone · UTC offset fallback (NY standard = −5)",
+          defval: SESSIONS_STUDY_DEFAULTS.timezoneOffset,
+          type: "integer",
+          min: -12,
+          max: 14,
         },
         {
           id: "showRangeOutline",
