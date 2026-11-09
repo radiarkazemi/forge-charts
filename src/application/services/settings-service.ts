@@ -17,10 +17,16 @@ export interface LayoutSyncSettings {
   readonly symbol: boolean;
   readonly interval: boolean;
   readonly crosshair: boolean;
+  /** Pan / scroll / zoom time axis across panes (TV “Time”). */
   readonly time: boolean;
   readonly dateRange: boolean;
   /** Mirror drawings across panes by absolute time/price (cross-TF). */
   readonly drawings: boolean;
+  /**
+   * When ON, new indicators are cloned onto every visible pane.
+   * When OFF, header-added studies only land on the active pane.
+   */
+  readonly indicators: boolean;
 }
 
 /** Per-person local profile (TradingView-style account identity). */
@@ -69,10 +75,13 @@ export const DEFAULT_LAYOUT_SYNC: LayoutSyncSettings = {
   interval: false,
   // Do not recenter other panes on mouse move (looks like zoom/scale fighting).
   crosshair: false,
+  // Pan/scroll independent unless the user turns Scroll/move ON.
   time: false,
   dateRange: false,
   // Drawings share time/price across panes (TV sample behavior).
   drawings: true,
+  // Indicators stay on the active pane unless synced.
+  indicators: false,
 };
 
 export const AVATAR_COLORS = ["#9c27b0", "#2962ff", "#089981", "#f57c00", "#e91e63", "#00bcd4"] as const;
@@ -175,6 +184,7 @@ function sanitizeLayoutSync(value: unknown): LayoutSyncSettings {
     time: Boolean(raw.time),
     dateRange: Boolean(raw.dateRange),
     drawings: raw.drawings !== false,
+    indicators: Boolean(raw.indicators),
   };
 }
 

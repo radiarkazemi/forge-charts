@@ -57,7 +57,14 @@ export interface TradingViewWidgetDeps {
   readonly onEnterBarReplay: () => void;
   readonly onSetChartLayout: (layout: ChartLayoutId) => void;
   readonly onToggleLayoutSync?: (
-    key: "symbol" | "interval" | "crosshair" | "time" | "dateRange" | "drawings",
+    key:
+      | "symbol"
+      | "interval"
+      | "crosshair"
+      | "time"
+      | "dateRange"
+      | "drawings"
+      | "indicators",
   ) => void;
   readonly getLayoutSync?: () => {
     symbol: boolean;
@@ -66,6 +73,7 @@ export interface TradingViewWidgetDeps {
     time: boolean;
     dateRange: boolean;
     drawings: boolean;
+    indicators: boolean;
   };
   readonly onSymbolChanged?: (paneIndex: number, symbol: string) => void;
   readonly getLastPrice: () => number | null;
@@ -155,8 +163,16 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
   const onWidgetReady = useEffectEvent((widget: IChartingLibraryWidget) => deps.onWidgetReady?.(widget));
   const onSetChartLayout = useEffectEvent((layout: ChartLayoutId) => deps.onSetChartLayout(layout));
   const onToggleLayoutSync = useEffectEvent(
-    (key: "symbol" | "interval" | "crosshair" | "time" | "dateRange" | "drawings") =>
-      deps.onToggleLayoutSync?.(key),
+    (
+      key:
+        | "symbol"
+        | "interval"
+        | "crosshair"
+        | "time"
+        | "dateRange"
+        | "drawings"
+        | "indicators",
+    ) => deps.onToggleLayoutSync?.(key),
   );
   const getLayoutSync = useEffectEvent(
     () =>
@@ -167,6 +183,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         time: false,
         dateRange: false,
         drawings: true,
+        indicators: false,
       },
   );
   const onSymbolChanged = useEffectEvent((symbol: string) => deps.onSymbolChanged?.(paneIndex, symbol));

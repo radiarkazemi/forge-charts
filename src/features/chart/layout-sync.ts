@@ -21,10 +21,13 @@ export interface LayoutSyncFlags {
   readonly symbol: boolean;
   readonly interval: boolean;
   readonly crosshair: boolean;
+  /** Pan / scroll / zoom shared across panes (“Scroll / move” in the menu). */
   readonly time: boolean;
   readonly dateRange: boolean;
   /** Mirror drawings across panes (same time/price — works across TFs). */
   readonly drawings: boolean;
+  /** Clone new indicators onto every visible pane. */
+  readonly indicators: boolean;
 }
 
 export const DEFAULT_LAYOUT_SYNC: LayoutSyncFlags = {
@@ -34,6 +37,7 @@ export const DEFAULT_LAYOUT_SYNC: LayoutSyncFlags = {
   time: false,
   dateRange: false,
   drawings: true,
+  indicators: false,
 };
 
 interface PaneEntry {
@@ -112,6 +116,12 @@ class LayoutSyncBus {
    * Sessions overlays paint and briefly flip selectedLineTool to cursor.
    */
   private armedTool: string | null = null;
+  /** Temporary vertical-line ids used to mirror crosshair (CL has no setCrossHair). */
+  private readonly crosshairMarkers = new Map<number, EntityId>();
+  private crosshairRaf = 0;
+  private pendingCrosshair: { sourceIndex: number; time: number } | null = null;
+  /** Suppress visible-range echo while we apply a peer’s range. */
+  private applyingVisibleRange = false;
 
   private clearToolReapplyTimers(): void {
     for (const id of this.toolReapplyTimers) window.clearTimeout(id);
@@ -142,7 +152,7 @@ class LayoutSyncBus {
   }
 
   setFlags(flags: LayoutSyncFlags): void {
-    const prevSymbol = this.flags.symbol;
+    const prev = this.flags;
     // Always keep drawings ON unless the user explicitly turns them off.
     // Interval sync stays OFF unless the user turns it on (independent TFs).
     this.flags = {
@@ -150,16 +160,38 @@ class LayoutSyncBus {
       ...flags,
       interval: flags.interval === true,
       drawings: flags.drawings !== false,
+      indicators: flags.indicators === true,
+      time: flags.time === true,
+      dateRange: flags.dateRange === true,
+      crosshair: flags.crosshair === true,
     };
     // Symbol sync just turned ON — push the active pane’s ticker to every pane
     // so the header and plots stop disagreeing (e.g. NAS100 header / XAUUSD pane).
-    if (!prevSymbol && this.flags.symbol) {
+    if (!prev.symbol && this.flags.symbol) {
       const ticker =
         this.paneSymbols.get(this.activePane) ||
         this.panes.get(this.activePane)?.controller.state.get().symbol ||
         this.paneSymbols.get(0) ||
         "";
       if (ticker) this.notifySymbol(this.activePane, ticker);
+    }
+    // Scroll / date-range just turned ON — mirror the active pane’s visible range now
+    // (without waiting for a refresh or the next pan gesture).
+    if (
+      (!prev.time && this.flags.time) ||
+      (!prev.dateRange && this.flags.dateRange)
+    ) {
+      const src = this.panes.get(this.activePane) ?? this.panes.get(0);
+      const range = src?.controller.getVisibleRange();
+      if (range) this.notifyVisibleRange(this.activePane, range.from, range.to);
+    }
+    // Crosshair off → drop temp markers immediately.
+    if (prev.crosshair && !this.flags.crosshair) {
+      this.clearCrosshairMarkers();
+    }
+    // Indicators just turned ON — clone studies from the active pane onto peers.
+    if (!prev.indicators && this.flags.indicators) {
+      void this.seedStudiesFromPane(this.activePane);
     }
   }
 
@@ -831,20 +863,81 @@ class LayoutSyncBus {
   }
 
   notifyVisibleRange(sourceIndex: number, from: number, to: number): void {
+    // Scroll/move = `time`; zoom extent = `dateRange`. Either enables range sync.
     if ((!this.flags.time && !this.flags.dateRange) || this.locked) return;
+    if (this.applyingVisibleRange) return;
     if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return;
-    this.withLock(() => {
-      for (const { index, controller } of this.panes.values()) {
-        if (index === sourceIndex || index >= this.activeCount) continue;
-        void controller.setVisibleRange(from, to);
-      }
-    });
+    this.applyingVisibleRange = true;
+    try {
+      this.withLock(() => {
+        for (const { index, controller } of this.panes.values()) {
+          if (index === sourceIndex || index >= this.activeCount) continue;
+          if (!controller.isReady) continue;
+          void controller.setVisibleRange(from, to);
+        }
+      });
+    } finally {
+      // Release on next frame so peer onVisibleRangeChanged echoes are ignored.
+      window.requestAnimationFrame(() => {
+        this.applyingVisibleRange = false;
+      });
+    }
   }
 
   notifyCrosshair(sourceIndex: number, time: number): void {
     if (!this.flags.crosshair || this.locked) return;
-    void sourceIndex;
-    void time;
+    if (!Number.isFinite(time) || time <= 0) return;
+    this.pendingCrosshair = { sourceIndex, time };
+    if (this.crosshairRaf) return;
+    this.crosshairRaf = window.requestAnimationFrame(() => {
+      this.crosshairRaf = 0;
+      const pending = this.pendingCrosshair;
+      this.pendingCrosshair = null;
+      if (!pending || !this.flags.crosshair) return;
+      void this.applyCrosshairMarkers(pending.sourceIndex, pending.time);
+    });
+  }
+
+  private clearCrosshairMarkers(): void {
+    for (const [paneIndex, entityId] of this.crosshairMarkers) {
+      this.panes.get(paneIndex)?.controller.removeEntity(entityId);
+    }
+    this.crosshairMarkers.clear();
+  }
+
+  /**
+   * CL has no public setCrossHairPosition — mirror with a locked vertical line
+   * at the peer’s crosshair time (TradingView-like linked crosshair).
+   */
+  private async applyCrosshairMarkers(sourceIndex: number, time: number): Promise<void> {
+    if (!this.flags.crosshair || this.activeCount < 2) {
+      this.clearCrosshairMarkers();
+      return;
+    }
+    // Drop the marker on the source pane (native crosshair is enough there).
+    const sourceMarker = this.crosshairMarkers.get(sourceIndex);
+    if (sourceMarker != null) {
+      this.panes.get(sourceIndex)?.controller.removeEntity(sourceMarker);
+      this.crosshairMarkers.delete(sourceIndex);
+    }
+
+    for (const { index, controller } of this.panes.values()) {
+      if (index === sourceIndex || index >= this.activeCount) continue;
+      if (!controller.isReady) continue;
+      const existing = this.crosshairMarkers.get(index);
+      if (existing != null) {
+        const moved = controller.moveVerticalLineMarker(existing, time);
+        if (moved) continue;
+        controller.removeEntity(existing);
+        this.crosshairMarkers.delete(index);
+      }
+      const created = await controller.createVerticalLineMarker(time);
+      if (created) {
+        this.crosshairMarkers.set(index, created);
+        // Never treat sync markers as user drawings (oneshot / multipane mirror).
+        this.mirrorIds.add(String(created));
+      }
+    }
   }
 
   private clonePrimarySymbolToNewPanes(fromIndex: number): void {
@@ -1181,29 +1274,65 @@ class LayoutSyncBus {
 
   /**
    * Studies added via the shared header Indicators dialog land on pane 0.
-   * Move them to the active plot so layers match TradingView.
+   * - Indicators sync OFF → move to the active plot only (TV layers).
+   * - Indicators sync ON → keep on pane 0 and clone onto every other visible pane.
    */
   private async onPrimaryStudyEvent(entityId: EntityId, eventType: string): Promise<void> {
     if (this.migratingStudy || this.locked) return;
     if (eventType !== "create" && eventType !== "paste_study") return;
     if (this.activeCount < 2) return;
-    const target = this.headerTargetPane();
-    if (target <= 0 || target >= this.activeCount) return;
 
     const source = this.panes.get(0);
-    const dest = this.panes.get(target);
-    if (!source?.controller.isReady || !dest?.controller.isReady) return;
+    if (!source?.controller.isReady) return;
 
     // Let CL finish initializing the study before we read inputs / remove it.
     await new Promise<void>((resolve) => {
-      window.setTimeout(resolve, 60);
+      window.setTimeout(resolve, 80);
     });
 
     this.migratingStudy = true;
     try {
+      if (this.flags.indicators) {
+        const snap = source.controller.snapshotStudy(entityId);
+        if (!snap) return;
+        for (const { index, controller } of this.panes.values()) {
+          if (index === 0 || index >= this.activeCount || !controller.isReady) continue;
+          controller.createStudyFromSnapshot(snap.name, snap.inputs, snap.forceOverlay);
+        }
+        return;
+      }
+
+      const target = this.headerTargetPane();
+      if (target <= 0 || target >= this.activeCount) return;
+      const dest = this.panes.get(target);
+      if (!dest?.controller.isReady) return;
       const snap = source.controller.takeStudyForMigrate(entityId);
       if (!snap) return;
-      dest.controller.createStudyFromSnapshot(snap.name, snap.inputs);
+      dest.controller.createStudyFromSnapshot(snap.name, snap.inputs, snap.forceOverlay);
+    } finally {
+      this.migratingStudy = false;
+    }
+  }
+
+  /** Clone every study on `sourceIndex` onto other visible panes (Indicators sync ON). */
+  private async seedStudiesFromPane(sourceIndex: number): Promise<void> {
+    if (!this.flags.indicators || this.activeCount < 2) return;
+    const source = this.panes.get(sourceIndex);
+    if (!source?.controller.isReady) return;
+    const snaps = source.controller.listStudySnapshots();
+    if (snaps.length === 0) return;
+    this.migratingStudy = true;
+    try {
+      for (const { index, controller } of this.panes.values()) {
+        if (index === sourceIndex || index >= this.activeCount || !controller.isReady) continue;
+        const existing = new Set(
+          controller.listStudySnapshots().map((s) => s.name.toLowerCase()),
+        );
+        for (const snap of snaps) {
+          if (existing.has(snap.name.toLowerCase())) continue;
+          controller.createStudyFromSnapshot(snap.name, snap.inputs, snap.forceOverlay);
+        }
+      }
     } finally {
       this.migratingStudy = false;
     }

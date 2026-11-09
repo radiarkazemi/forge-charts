@@ -3,8 +3,8 @@
  */
 
 import { useEffect } from "react";
-import { useServices } from "@/app/use-services";
-import { useStore } from "@/shared/hooks/useStore";
+import type { ChartController } from "./chart-controller";
+import { useBoundChartState } from "./study-controller-bind";
 import type { EntityId } from "@/infrastructure/tradingview";
 import {
   publishWatermarkOverlay,
@@ -37,14 +37,11 @@ function asHAlign(raw: unknown, fallback: WatermarkHAlign): WatermarkHAlign {
   return fallback;
 }
 
-export function useWatermarkStudy(enabled = true): void {
-  const { chart } = useServices();
-  const ready = useStore(chart.state, (s) => s.ready);
-  const symbol = useStore(chart.state, (s) => s.symbol);
-  const interval = useStore(chart.state, (s) => s.interval);
+export function useWatermarkStudy(chart: ChartController | null): void {
+  const { ready, symbol, interval } = useBoundChartState(chart);
 
   useEffect(() => {
-    if (!enabled || !ready) {
+    if (!chart || !ready) {
       publishWatermarkOverlay(null);
       return;
     }
@@ -284,5 +281,5 @@ export function useWatermarkStudy(enabled = true): void {
       }
       publishWatermarkOverlay(null);
     };
-  }, [enabled, ready, chart, symbol, interval]);
+  }, [chart, ready, symbol, interval]);
 }

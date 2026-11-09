@@ -716,43 +716,27 @@ export class ChartController {
     };
   }
 
-  /**
-   * Snapshot a study for cloning onto another pane, then remove it locally.
-   * Returns null when the study cannot be read.
-   */
-  takeStudyForMigrate(entityId: EntityId): {
-    readonly name: string;
-    readonly inputs: Record<string, unknown>;
-  } | null {
+  private resolveStudyCreateName(displayName: string): string {
+    const name = displayName.trim();
+    if (!name) return name;
+    // Custom indicators must be recreated with their metainfo id, not the
+    // friendly display name (createStudy("Dealing Ranges") fails silently).
+    if (/dealing\s*ranges/i.test(name)) return DEALING_RANGES_STUDY_ID;
+    if (/irl\s*\/\s*erl|irl\s*·\s*erl/i.test(name)) return IRL_ERL_STUDY_ID;
+    if (/^watermark$/i.test(name) || /forge\s*watermark/i.test(name)) return WATERMARK_STUDY_ID;
+    if (/forge\s*structure\s*intelligence|forge\s*si/i.test(name)) return SI_STUDY_ID;
+    if (/forge\s*sessions|sessions\s*\[luxalgo\]/i.test(name)) return SESSIONS_STUDY_ID;
+    if (/forge\s*trading\s*assistant|forge\s*ta\b/i.test(name)) return FTA_STUDY_ID;
+    if (/forge\s*certainty/i.test(name)) return CERTAINTY_STUDY_ID;
+    if (/forge\s*replay\s*mentor|replay\s*mentor/i.test(name)) return REPLAY_MENTOR_STUDY_ID;
+    if (/ict\s*htf\s*candles/i.test(name)) return HTF_CANDLES_STUDY_ID;
+    return name;
+  }
+
+  private readStudyInputs(entityId: EntityId): Record<string, unknown> {
     const chart = this.activeChart();
-    if (!chart) return null;
+    if (!chart) return {};
     try {
-      const info = chart
-        .getAllStudies()
-        .find((s: { id?: string | EntityId; name?: string }) => String(s.id) === String(entityId));
-      // Custom indicators must be recreated with their metainfo id, not the
-      // friendly display name (createStudy("Dealing Ranges") fails silently).
-      const displayName = (info?.name || "").trim();
-      if (!displayName) return null;
-      const name = /dealing\s*ranges/i.test(displayName)
-        ? DEALING_RANGES_STUDY_ID
-        : /irl\s*\/\s*erl|irl\s*·\s*erl/i.test(displayName)
-          ? IRL_ERL_STUDY_ID
-          : /^watermark$/i.test(displayName) || /forge\s*watermark/i.test(displayName)
-            ? WATERMARK_STUDY_ID
-          : /forge\s*structure\s*intelligence|forge\s*si/i.test(displayName)
-            ? SI_STUDY_ID
-            : /forge\s*sessions|sessions\s*\[luxalgo\]/i.test(displayName)
-              ? SESSIONS_STUDY_ID
-              : /forge\s*trading\s*assistant|forge\s*ta\b/i.test(displayName)
-                ? FTA_STUDY_ID
-                : /forge\s*certainty/i.test(displayName)
-                  ? CERTAINTY_STUDY_ID
-                  : /forge\s*replay\s*mentor|replay\s*mentor/i.test(displayName)
-                    ? REPLAY_MENTOR_STUDY_ID
-                    : /ict\s*htf\s*candles/i.test(displayName)
-                      ? HTF_CANDLES_STUDY_ID
-                      : displayName;
       const study = chart.getStudyById(entityId);
       const inputs: Record<string, unknown> = {};
       for (const item of study.getInputValues()) {
@@ -760,15 +744,131 @@ export class ChartController {
         const value = (item as { value?: unknown }).value;
         if (id != null) inputs[id] = value;
       }
-      chart.removeEntity(entityId);
-      return { name, inputs };
+      return inputs;
+    } catch {
+      return {};
+    }
+  }
+
+  /** Read a study without removing it (Indicators sync clone). */
+  snapshotStudy(entityId: EntityId): {
+    readonly name: string;
+    readonly inputs: Record<string, unknown>;
+    readonly forceOverlay?: boolean;
+  } | null {
+    const chart = this.activeChart();
+    if (!chart) return null;
+    try {
+      const info = chart
+        .getAllStudies()
+        .find((s: { id?: string | EntityId; name?: string }) => String(s.id) === String(entityId));
+      const displayName = (info?.name || "").trim();
+      if (!displayName) return null;
+      return {
+        name: this.resolveStudyCreateName(displayName),
+        inputs: this.readStudyInputs(entityId),
+      };
     } catch {
       return null;
     }
   }
 
+  /** Snapshot every study currently on this chart (for Indicators sync seed). */
+  listStudySnapshots(): Array<{
+    readonly name: string;
+    readonly inputs: Record<string, unknown>;
+    readonly forceOverlay?: boolean;
+  }> {
+    const chart = this.activeChart();
+    if (!chart) return [];
+    try {
+      const out: Array<{
+        readonly name: string;
+        readonly inputs: Record<string, unknown>;
+        readonly forceOverlay?: boolean;
+      }> = [];
+      for (const s of chart.getAllStudies()) {
+        const id = (s as { id?: EntityId }).id;
+        const displayName = String((s as { name?: string }).name ?? "").trim();
+        if (!id || !displayName) continue;
+        out.push({
+          name: this.resolveStudyCreateName(displayName),
+          inputs: this.readStudyInputs(id),
+        });
+      }
+      return out;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Snapshot a study for cloning onto another pane, then remove it locally.
+   * Returns null when the study cannot be read.
+   */
+  takeStudyForMigrate(entityId: EntityId): {
+    readonly name: string;
+    readonly inputs: Record<string, unknown>;
+    readonly forceOverlay?: boolean;
+  } | null {
+    const snap = this.snapshotStudy(entityId);
+    if (!snap) return null;
+    try {
+      this.activeChart()?.removeEntity(entityId);
+    } catch {
+      /* ignore */
+    }
+    return snap;
+  }
+
+  /** Locked vertical line used as a multipane crosshair stand-in. */
+  async createVerticalLineMarker(time: number): Promise<EntityId | null> {
+    const chart = this.activeChart();
+    if (!chart || !Number.isFinite(time)) return null;
+    try {
+      return await chart.createShape(
+        { time },
+        {
+          shape: "vertical_line",
+          lock: true,
+          disableSelection: true,
+          disableSave: true,
+          disableUndo: true,
+          showInObjectsTree: false,
+          overrides: {
+            linecolor: "#787B86",
+            linestyle: 2,
+            linewidth: 1,
+            showLabel: false,
+            showTime: false,
+            transparency: 30,
+          },
+        },
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  /** Move an existing vertical-line marker to `time`. Returns false if gone. */
+  moveVerticalLineMarker(entityId: EntityId, time: number): boolean {
+    const chart = this.activeChart();
+    if (!chart || !Number.isFinite(time)) return false;
+    try {
+      const shape = chart.getShapeById(entityId);
+      shape.setPoints([{ time }]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Create a study from a migrated snapshot. */
-  createStudyFromSnapshot(name: string, inputs: Record<string, unknown>): void {
+  createStudyFromSnapshot(
+    name: string,
+    inputs: Record<string, unknown>,
+    forceOverlay = false,
+  ): void {
     const chart = this.activeChart();
     if (!chart) return;
     const fallback =
@@ -794,10 +894,10 @@ export class ChartController {
                         ? HTF_CANDLES_STUDY_ID
                         : null;
     void chart
-      .createStudy(name, false, false, inputs as never)
+      .createStudy(name, forceOverlay, false, inputs as never)
       .catch(() => {
         if (!fallback || fallback === name) return null;
-        return chart.createStudy(fallback, false, false, inputs as never);
+        return chart.createStudy(fallback, forceOverlay, false, inputs as never);
       })
       .catch(() => null);
   }

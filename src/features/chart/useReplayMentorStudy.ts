@@ -9,6 +9,8 @@
 import { useEffect, useRef } from "react";
 import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
+import type { ChartController } from "./chart-controller";
+import { useBoundChartState } from "./study-controller-bind";
 import type { EntityId } from "@/infrastructure/tradingview";
 
 import { computeReplayMentor, paintReplayMentor, type MentorInputs, MENTOR_DEFAULTS } from "@/features/replay-mentor/runtime";
@@ -33,11 +35,9 @@ function fingerprint(
     .join("|");
 }
 
-export function useReplayMentorStudy(enabled = true): void {
-  const { chart, barReplay } = useServices();
-  const ready = useStore(chart.state, (s) => s.ready);
-  const symbol = useStore(chart.state, (s) => s.symbol);
-  const interval = useStore(chart.state, (s) => s.interval);
+export function useReplayMentorStudy(chart: ChartController | null): void {
+  const { barReplay } = useServices();
+  const { ready, symbol, interval } = useBoundChartState(chart);
   // Only coarse replay presence in React deps — cursor ticks use store.subscribe
   // so we do NOT tear down / clear drawings on every forming candle update.
   const replayActive = useStore(barReplay.state, (s) => s.active);
@@ -50,7 +50,7 @@ export function useReplayMentorStudy(enabled = true): void {
   const pendingRef = useRef(false);
 
   useEffect(() => {
-    if (!enabled || !ready) return;
+    if (!chart || !ready) return;
     const widget = chart.getWidget();
     if (!widget) return;
 
@@ -354,5 +354,5 @@ export function useReplayMentorStudy(enabled = true): void {
       clearDrawings();
       lastClosedCursorRef.current = -1;
     };
-  }, [chart, barReplay, enabled, ready, symbol, interval, replayActive]);
+  }, [chart, barReplay, ready, symbol, interval, replayActive]);
 }

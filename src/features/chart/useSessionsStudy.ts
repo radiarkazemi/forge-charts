@@ -4,12 +4,13 @@
 
 import { useEffect, useRef } from "react";
 import { useServices } from "@/app/use-services";
-import { useStore } from "@/shared/hooks/useStore";
 import type { EntityId } from "@/infrastructure/tradingview";
 import { clColor, computeSessions, mergeSessionDefs, paintSessionsOnChart, publishSessionsDashboard, SESSION_COLOR_PALETTE, SESSIONS_DEFAULTS, type SessionsOptions } from "@/features/sessions/runtime";
 import { readSessionSlotsFromMap, stylePlotIdForIndex, SESSIONS_STUDY_DEFAULTS, SESSIONS_MAX_COUNT } from "./sessions-indicator";
 import { chartAllowedByMaxMinutes, liveChartResolution, studyIsVisible, markChartPaintBusy } from "./study-paint-gate";
 import { readStylePlot } from "./study-style-plots";
+import type { ChartController } from "./chart-controller";
+import { useBoundChartState } from "./study-controller-bind";
 
 import { exportChartBarsCached, STUDY_DEBOUNCE_MS, STUDY_LIVE_REFRESH_MS, STUDY_MAX_BARS, STUDY_PRESENCE_POLL_MS, STUDY_PAINT_MUTE_MS } from "./chart-export-cache";
 
@@ -19,6 +20,8 @@ const MAX_BARS = STUDY_MAX_BARS;
 const PRESENCE_POLL_MS = STUDY_PRESENCE_POLL_MS;
 /** Soft refresh so forming session boxes track live bars — keep light for chart FPS. */
 const LIVE_REFRESH_MS = STUDY_LIVE_REFRESH_MS;
+/** Style-tab color changes sometimes skip study_properties_changed — poll lightly. */
+const STYLE_POLL_MS = 1_200;
 
 function fingerprintCmds(
   cmds: readonly { kind: string; t1: number; p1: number; color?: string; fill?: string }[],
@@ -77,20 +80,20 @@ function defaultOpts(): SessionsOptions {
   };
 }
 
-export function useSessionsStudy(enabled = true): void {
-  const { chart } = useServices();
-  const ready = useStore(chart.state, (s) => s.ready);
-  const symbol = useStore(chart.state, (s) => s.symbol);
-  const interval = useStore(chart.state, (s) => s.interval);
+export function useSessionsStudy(chart: ChartController | null): void {
+  const { chart: primaryChart } = useServices();
+  const { ready, symbol, interval } = useBoundChartState(chart);
+  const isPrimaryPane = chart != null && chart === primaryChart;
   const entityIdsRef = useRef<EntityId[]>([]);
   const busyRef = useRef(false);
   const lastKeyRef = useRef("");
   const lastFpRef = useRef("");
+  const lastStyleFpRef = useRef("");
   const genRef = useRef(0);
   const pendingRef = useRef(false);
 
   useEffect(() => {
-    if (!enabled || !ready) return;
+    if (!chart || !ready) return;
     const widget = chart.getWidget();
     if (!widget) return;
 
@@ -112,7 +115,7 @@ export function useSessionsStudy(enabled = true): void {
           /* ignore */
         }
       }
-      publishSessionsDashboard(null);
+      if (isPrimaryPane) publishSessionsDashboard(null);
     }
 
     const clearDrawings = clearDrawingsSafe;
@@ -330,12 +333,15 @@ export function useSessionsStudy(enabled = true): void {
 
         // Tip changes as the active session extends — must refresh or boxes “stick”.
         const tip = bars[bars.length - 1]!;
-        const key = `${optsKey}|${tip.time}:${tip.high}:${tip.low}:${tip.close}`;
+        const styleFp = (opts.sessions ?? [])
+          .map((s) => `${s.color}:${s.transparency ?? ""}`)
+          .join("|");
+        const key = `${optsKey}|${tip.time}:${tip.high}:${tip.low}:${tip.close}|${styleFp}`;
 
         const { cmds, dashboard } = computeSessions(bars, opts);
         const fp = fingerprintCmds(cmds);
         if (!force && fp === lastFpRef.current && lastKeyRef.current === key) {
-          publishSessionsDashboard(dashboard);
+          if (isPrimaryPane) publishSessionsDashboard(dashboard);
           return;
         }
         if (cancelled || myGen !== genRef.current) return;
@@ -360,7 +366,8 @@ export function useSessionsStudy(enabled = true): void {
         entityIdsRef.current = ids;
         lastKeyRef.current = key;
         lastFpRef.current = fp;
-        publishSessionsDashboard(dashboard);
+        lastStyleFpRef.current = styleFp;
+        if (isPrimaryPane) publishSessionsDashboard(dashboard);
         for (const id of prev) {
           try {
             chart.removeEntity(id);
@@ -461,6 +468,25 @@ export function useSessionsStudy(enabled = true): void {
       void repaint(true);
     }, LIVE_REFRESH_MS);
 
+    // Style-tab color/opacity often skips study_properties_changed on custom studies.
+    const stylePoll = window.setInterval(() => {
+      if (cancelled || busyRef.current) return;
+      const ids = findStudyIds();
+      if (ids.length === 0) return;
+      try {
+        const api = widget.activeChart()?.getStudyById(ids[0]!);
+        if (!api) return;
+        const colors = readStyleColors(api, SESSIONS_MAX_COUNT);
+        const fp = colors.map((c) => `${c.color}:${c.transparency}`).join("|");
+        if (fp && fp !== lastStyleFpRef.current) {
+          lastStyleFpRef.current = fp;
+          scheduleRepaint();
+        }
+      } catch {
+        /* ignore */
+      }
+    }, STYLE_POLL_MS);
+
     // Resolution changes sometimes fire before React store updates — clear ASAP.
     const onIntervalChanged = (_res: string) => {
       // Synchronously clear if the new TF is above maxMinutes.
@@ -520,6 +546,7 @@ export function useSessionsStudy(enabled = true): void {
       window.clearTimeout(kickoffTimer2);
       window.clearInterval(presencePoll);
       window.clearInterval(livePoll);
+      window.clearInterval(stylePoll);
       try {
         widget.unsubscribe("study_event", onStudyEvent as never);
         widget.unsubscribe("study_properties_changed", onStudyProperties as never);
@@ -540,5 +567,5 @@ export function useSessionsStudy(enabled = true): void {
       lastKeyRef.current = "";
       lastFpRef.current = "";
     };
-  }, [chart, enabled, ready, symbol, interval]);
+  }, [chart, ready, symbol, interval, isPrimaryPane]);
 }

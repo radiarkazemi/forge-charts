@@ -84,6 +84,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
       time: layoutSync?.time === true,
       dateRange: layoutSync?.dateRange === true,
       drawings: layoutSync?.drawings !== false,
+      indicators: layoutSync?.indicators === true,
     });
   }, [layoutSync]);
 
@@ -136,6 +137,80 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  /**
+   * CL’s header fullscreen targets the primary iframe only — multipane secondaries
+   * then sit outside the fullscreen element and paint white. Promote fullscreen to
+   * the whole workspace so every pane stays sized and visible.
+   */
+  useEffect(() => {
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+
+    let promoting = false;
+    const reflow = () => {
+      const measure = () => {
+        setWorkspaceSize({
+          width: workspace.clientWidth,
+          height: workspace.clientHeight,
+        });
+      };
+      measure();
+      layoutSyncBus.reflowVisible();
+      window.setTimeout(measure, 50);
+      window.setTimeout(() => layoutSyncBus.reflowVisible(), 80);
+      window.setTimeout(() => layoutSyncBus.reflowVisible(), 250);
+      window.setTimeout(() => layoutSyncBus.reflowVisible(), 600);
+    };
+
+    const onFsChange = () => {
+      const fsEl = document.fullscreenElement;
+      if (!fsEl) {
+        reflow();
+        return;
+      }
+      // Already the workspace — just reflow after size settles.
+      if (fsEl === workspace) {
+        reflow();
+        return;
+      }
+      // Primary (or any) iframe went fullscreen while multipane — lift to workspace.
+      if (multi && workspace.contains(fsEl) && fsEl !== workspace && !promoting) {
+        promoting = true;
+        const req =
+          workspace.requestFullscreen?.bind(workspace) ??
+          (
+            workspace as HTMLElement & {
+              webkitRequestFullscreen?: () => Promise<void> | void;
+            }
+          ).webkitRequestFullscreen?.bind(workspace);
+        void document
+          .exitFullscreen()
+          .catch(() => undefined)
+          .then(() => {
+            try {
+              return req?.();
+            } catch {
+              return undefined;
+            }
+          })
+          .finally(() => {
+            promoting = false;
+            reflow();
+          });
+        return;
+      }
+      reflow();
+    };
+
+    document.addEventListener("fullscreenchange", onFsChange);
+    // Some WebKit builds still fire the prefixed event.
+    document.addEventListener("webkitfullscreenchange", onFsChange as EventListener);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFsChange);
+      document.removeEventListener("webkitfullscreenchange", onFsChange as EventListener);
+    };
+  }, [multi]);
 
   // Clip primary plot to pane 0; leave the original top navbar full width.
   // Single-pane: always tear down any leftover multi clip so the chart fills.

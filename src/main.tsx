@@ -49,11 +49,13 @@ function runBootRecovery(): void {
             time: false,
             dateRange: false,
             drawings: true,
+            indicators: false,
           };
         } else {
           const ls = settings.layoutSync as Record<string, unknown>;
           if (typeof ls.drawings !== "boolean") ls.drawings = true;
           if (typeof ls.symbol !== "boolean") ls.symbol = true;
+          if (typeof ls.indicators !== "boolean") ls.indicators = false;
         }
         // Seed / rename layout profile → Radiar (never wipe chart autosave).
         const profiles = Array.isArray(settings.profiles) ? [...settings.profiles] : [];
@@ -131,6 +133,7 @@ function runBootRecovery(): void {
             time: false,
             dateRange: false,
             drawings: true,
+            indicators: false,
           },
           lastSymbol: "XAUUSD",
           lastInterval: "15",

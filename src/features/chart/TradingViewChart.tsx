@@ -269,19 +269,21 @@ export function TradingViewChart({
   });
 
   useChartAlertLines(isPrimary ? controller : null, alerts);
-  // Must run on every pane — header Indicators can migrate the study off pane 0.
-  useDealingRangesStudy(true);
-  useStructureIntelligenceStudy(true);
-  useSessionsStudy(true);
-  useHtfCandlesStudy(true);
-  useReplayMentorStudy(true);
-  useForgeTradingAssistantStudy(true);
-  useForgeCertaintyStudy(true);
-  useFractalIgorStudy(true);
-  useRealSwingsStudy(true);
-  useBosMssStudy(true);
-  useIrlErlStudy(true);
-  useWatermarkStudy(true);
+  // Each pane paints against its own widget — required after Indicators migrate /
+  // Indicators-sync clones studies onto secondaries (and avoids 4× primary work).
+  useDealingRangesStudy(controller);
+  useStructureIntelligenceStudy(controller);
+  useSessionsStudy(controller);
+  useHtfCandlesStudy(controller);
+  useReplayMentorStudy(controller);
+  useForgeTradingAssistantStudy(controller);
+  useForgeCertaintyStudy(controller);
+  useFractalIgorStudy(controller);
+  useRealSwingsStudy(controller);
+  useBosMssStudy(controller);
+  useIrlErlStudy(controller);
+  // Global overlay publishers — primary only (secondaries would fight the HUD).
+  useWatermarkStudy(isPrimary ? controller : null);
 
   return (
     <Box

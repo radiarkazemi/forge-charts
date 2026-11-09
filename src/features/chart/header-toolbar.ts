@@ -58,9 +58,10 @@ function syncLabel(key: SyncKey, on: boolean): string {
     symbol: "Symbol",
     interval: "Interval",
     crosshair: "Crosshair",
-    time: "Time",
+    time: "Scroll / move",
     dateRange: "Date range",
     drawings: "Drawings",
+    indicators: "Indicators",
   };
   return `${names[key]}  ${on ? "● ON" : "○ OFF"}`;
 }
@@ -73,8 +74,17 @@ function buildLayoutMenuItems(handlers: HeaderToolbarHandlers) {
     time: false,
     dateRange: false,
     drawings: true,
+    indicators: false,
   };
-  const syncKeys: SyncKey[] = ["symbol", "interval", "crosshair", "time", "dateRange", "drawings"];
+  const syncKeys: SyncKey[] = [
+    "symbol",
+    "interval",
+    "crosshair",
+    "time",
+    "dateRange",
+    "drawings",
+    "indicators",
+  ];
   return [
     ...CHART_LAYOUT_CHOICES.map((choice) => ({
       title: choice.title,

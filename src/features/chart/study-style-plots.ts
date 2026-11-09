@@ -86,10 +86,31 @@ function readStylesMap(api: { getStyleValues?: () => unknown }): Record<string, 
     if (!raw || typeof raw !== "object") return {};
     const nested = raw.styles;
     if (nested && typeof nested === "object") return nested as Record<string, unknown>;
+    // Some CL builds flatten plot prefs at the top level.
     return raw;
   } catch {
     return {};
   }
+}
+
+function extractColor(raw: unknown, fallback: string): string {
+  if (typeof raw === "string" && raw.trim()) {
+    const norm = clColor(raw, "");
+    if (norm) return norm;
+  }
+  // Rare: palette / themed color object `{ color: "#…" }`
+  if (raw && typeof raw === "object") {
+    const obj = raw as { color?: unknown; value?: unknown };
+    if (typeof obj.color === "string" && obj.color.trim()) {
+      const norm = clColor(obj.color, "");
+      if (norm) return norm;
+    }
+    if (typeof obj.value === "string" && obj.value.trim()) {
+      const norm = clColor(obj.value, "");
+      if (norm) return norm;
+    }
+  }
+  return fallback;
 }
 
 /** Read one Style-tab plot (color palette + advanced options). */
@@ -101,11 +122,16 @@ export function readStylePlot(
   if (!api) return { ...fallback };
   const styles = readStylesMap(api);
   const looseKey = Object.keys(styles).find(
-    (k) => k === plotId || k.endsWith(plotId) || k === `style_${plotId}`,
+    (k) =>
+      k === plotId ||
+      k.endsWith(plotId) ||
+      k === `style_${plotId}` ||
+      k.toLowerCase() === plotId.toLowerCase() ||
+      k.replace(/^styles?\./i, "") === plotId,
   );
   const cand = (styles[plotId] ?? (looseKey ? styles[looseKey] : undefined)) as
     | {
-        color?: string;
+        color?: unknown;
         transparency?: number;
         visible?: boolean;
         linewidth?: number;
@@ -114,11 +140,7 @@ export function readStylePlot(
     | undefined;
   if (!cand || typeof cand !== "object") return { ...fallback };
 
-  let color = fallback.color;
-  if (typeof cand.color === "string" && cand.color.trim()) {
-    const norm = clColor(cand.color, "");
-    if (norm) color = norm;
-  }
+  const color = extractColor(cand.color, fallback.color);
   const transparency =
     typeof cand.transparency === "number" && Number.isFinite(cand.transparency)
       ? Math.max(0, Math.min(100, cand.transparency))

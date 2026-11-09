@@ -6,8 +6,8 @@
  */
 
 import { useEffect, useRef } from "react";
-import { useServices } from "@/app/use-services";
-import { useStore } from "@/shared/hooks/useStore";
+import type { ChartController } from "./chart-controller";
+import { useBoundChartState } from "./study-controller-bind";
 import type { EntityId } from "@/infrastructure/tradingview";
 
 import {
@@ -56,11 +56,8 @@ function fingerprint(cmds: readonly FractalDrawCmd[]): string {
   return `${cmds.length}|${[...head, ...tail].map(part).join(";")}`;
 }
 
-export function useFractalIgorStudy(enabled = true): void {
-  const { chart } = useServices();
-  const ready = useStore(chart.state, (s) => s.ready);
-  const symbol = useStore(chart.state, (s) => s.symbol);
-  const interval = useStore(chart.state, (s) => s.interval);
+export function useFractalIgorStudy(chart: ChartController | null): void {
+  const { ready, symbol, interval } = useBoundChartState(chart);
   const entityIdsRef = useRef<EntityId[]>([]);
   const busyRef = useRef(false);
   const lastKeyRef = useRef("");
@@ -70,7 +67,7 @@ export function useFractalIgorStudy(enabled = true): void {
   const muteUntilRef = useRef(0);
 
   useEffect(() => {
-    if (!enabled || !ready) return;
+    if (!chart || !ready) return;
     const widget = chart.getWidget();
     if (!widget) return;
 
@@ -390,5 +387,5 @@ export function useFractalIgorStudy(enabled = true): void {
       lastKeyRef.current = "";
       lastFpRef.current = "";
     };
-  }, [chart, enabled, ready, symbol, interval]);
+  }, [chart, ready, symbol, interval]);
 }
