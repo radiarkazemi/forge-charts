@@ -44,6 +44,7 @@ export function useStructureIntelligenceStudy(chart: ChartController | null): vo
   useEffect(() => {
     if (!chart || !ready) return;
     const widget = chart.getWidget();
+    const paneChart = chart;
     if (!widget) return;
 
     let cancelled = false;
@@ -54,7 +55,7 @@ export function useStructureIntelligenceStudy(chart: ChartController | null): vo
       entityIdsRef.current = [];
       for (const id of ids) {
         try {
-          chart.removeEntity(id);
+          paneChart.removeEntity(id);
         } catch {
           /* ignore */
         }
@@ -199,7 +200,7 @@ export function useStructureIntelligenceStudy(chart: ChartController | null): vo
         if (cancelled || myGen !== genRef.current) {
           for (const id of ids) {
             try {
-              chart.removeEntity(id);
+              paneChart.removeEntity(id);
             } catch {
               /* ignore */
             }
@@ -212,7 +213,7 @@ export function useStructureIntelligenceStudy(chart: ChartController | null): vo
         lastFpRef.current = fp;
         for (const id of prev) {
           try {
-            chart.removeEntity(id);
+            paneChart.removeEntity(id);
           } catch {
             /* ignore */
           }

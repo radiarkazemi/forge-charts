@@ -45,7 +45,8 @@ export function useWatermarkStudy(chart: ChartController | null): void {
       publishWatermarkOverlay(null);
       return;
     }
-    const widget = chart.getWidget();
+    const paneChart = chart;
+    const widget = paneChart.getWidget();
     if (!widget) {
       publishWatermarkOverlay(null);
       return;

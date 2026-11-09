@@ -74,6 +74,7 @@ export function useHtfCandlesStudy(chart: ChartController | null): void {
   useEffect(() => {
     if (!chart || !ready) return;
     const widget = chart.getWidget();
+    const paneChart = chart;
     if (!widget) return;
 
     let cancelled = false;
@@ -88,7 +89,7 @@ export function useHtfCandlesStudy(chart: ChartController | null): void {
       entityIdsRef.current = [];
       for (const id of ids) {
         try {
-          chart.removeEntity(id);
+          paneChart.removeEntity(id);
         } catch {
           /* ignore */
         }
@@ -287,7 +288,7 @@ export function useHtfCandlesStudy(chart: ChartController | null): void {
         if (cancelled || myGen !== genRef.current) {
           for (const id of ids) {
             try {
-              chart.removeEntity(id);
+              paneChart.removeEntity(id);
             } catch {
               /* ignore */
             }
@@ -300,7 +301,7 @@ export function useHtfCandlesStudy(chart: ChartController | null): void {
         lastFpRef.current = fp;
         for (const id of prev) {
           try {
-            chart.removeEntity(id);
+            paneChart.removeEntity(id);
           } catch {
             /* ignore */
           }
