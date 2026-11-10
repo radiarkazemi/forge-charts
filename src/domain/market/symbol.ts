@@ -51,6 +51,11 @@ export const SESSION_FX = "2200-2159:123456";
  * collapses it (Faraz-style no-gap) instead of painting 11h holes.
  */
 export const SESSION_IRAN_GOLD = "0900-2200:1234567";
+/**
+ * Tehran Stock Exchange cash session (Asia/Tehran, no DST).
+ * Sat–Wed 09:00–12:30. TradingView day index: 7=Sat … 4=Wed.
+ */
+export const SESSION_TSE = "0900-1230:71234";
 
 export function normalizeTicker(ticker: string): string {
   const raw = ticker.trim().toUpperCase();
@@ -105,6 +110,13 @@ export function isMarketSessionOpen(symbol: SymbolInfo, nowMs: number = Date.now
     if (day === 5 && hhmm > 2159) return false; // Friday after 21:59 close
     if (day === 0 && hhmm < 2200) return false; // Sunday before open
     return true;
+  }
+
+  // Tehran Stock Exchange: Sat–Wed 09:00–12:30 (Asia/Tehran). Closed Thu/Fri.
+  if (session.startsWith("0900-1230")) {
+    const { day, hhmm } = zonedParts(nowMs, tz.includes("Tehran") ? "Asia/Tehran" : tz);
+    if (day === 4 || day === 5) return false;
+    return hhmm >= 900 && hhmm < 1230;
   }
 
   // Iran gold / Faraz: 0900-2200 every day (Asia/Tehran)

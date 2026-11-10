@@ -15,6 +15,7 @@ import {
   CpFetcherProvider,
   GermanyMarketProvider,
   IranGoldProvider,
+  TsetmcProvider,
   generateId,
   LocalSaveLoadAdapter,
   LocalStorageAdapter,
@@ -64,6 +65,7 @@ function buildProviders(config: AppConfig): MarketDataProvider[] {
   // TradingView broker books (FOREXCOM/CAPITALCOM/OANDA/…) before Mongo/Yahoo
   // so NAS100/US30/FX match each exchange’s TV source — not NQ=F/YM=F proxies.
   const providers: MarketDataProvider[] = [
+    new TsetmcProvider(),
     new IranGoldProvider(),
     new GermanyMarketProvider(),
     new TradingViewBrokerProvider(),

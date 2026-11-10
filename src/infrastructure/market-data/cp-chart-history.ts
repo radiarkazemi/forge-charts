@@ -107,6 +107,7 @@ export async function fetchCpChartHistory(
   apiSymbol: string,
   interval: Interval,
   range: BarRange,
+  options?: { readonly fxSession?: boolean },
 ): Promise<Bar[]> {
   const plan = mongoHistoryPlan(interval);
   if (!plan) throw new Error(`cp-chart-history: unsupported interval ${interval}`);
@@ -134,8 +135,9 @@ export async function fetchCpChartHistory(
     .filter((b) => b.time < before)
     .sort((a, b) => a.time - b.time);
 
-  // Native 1D only — weekly/monthly aggregates keep server bucket times.
-  if (plan.timeframe === "1d" && plan.group === 1) {
+  // FX/metals only. Snapping crypto (and equities) onto 22:00 UTC while the
+  // live feed stays on midnight UTC painted a second daily candle.
+  if (options?.fxSession && plan.timeframe === "1d" && plan.group === 1) {
     bars = alignFxDailyBars(bars).filter((b) => b.time < before);
   }
 

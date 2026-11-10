@@ -304,26 +304,35 @@ class PriceHub:
         start_id = before_id(start, parent) or ""
         end_id = before_id(end, parent) or "9999"
         # Inclusive start via $gte on _id string; exclusive end via $lt.
-        query = {"_id": {"$gte": start_id, "$lt": end_id}}
-        bars: list[list[float]] = []
-        for doc in coll.find(query, projection={"data": 1}).sort("_id", 1):
-            data = doc.get("data") or {}
-            t = to_unix(data.get("time") or doc.get("_id"))
-            if t is None or t < start or t >= end:
-                continue
-            try:
-                bars.append(
-                    [
-                        float(t),
-                        float(data["open"]),
-                        float(data["high"]),
-                        float(data["low"]),
-                        float(data["close"]),
-                        float(data.get("volume") or 0),
-                    ]
-                )
-            except (KeyError, TypeError, ValueError):
-                continue
+        def collect(id_from: str, t_min: int) -> list[list[float]]:
+            query = {"_id": {"$gte": id_from, "$lt": end_id}}
+            found: list[list[float]] = []
+            for doc in coll.find(query, projection={"data": 1}).sort("_id", 1):
+                data = doc.get("data") or {}
+                t = to_unix(data.get("time") or doc.get("_id"))
+                if t is None or t < t_min or t >= end:
+                    continue
+                try:
+                    found.append(
+                        [
+                            float(t),
+                            float(data["open"]),
+                            float(data["high"]),
+                            float(data["low"]),
+                            float(data["close"]),
+                            float(data.get("volume") or 0),
+                        ]
+                    )
+                except (KeyError, TypeError, ValueError):
+                    continue
+            return found
+
+        bars = collect(start_id, start)
+        # _id is sometimes the close stamp, so a tight window misses every parent
+        # and the forming 4h candle is just the latest 1h/5m tick (same size).
+        if not bars and parent != "1d":
+            pad = STEP_SEC.get(parent, 60) * 2
+            bars = collect(before_id(start - pad, parent) or "", start)
         return bars
 
     def read_forming_bar(self, symbol: str, parent: str, group: int, label: str) -> dict[str, Any] | None:

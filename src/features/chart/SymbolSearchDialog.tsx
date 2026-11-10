@@ -13,7 +13,8 @@ import SearchIcon from "@mui/icons-material/Search";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import { useServices } from "@/app/use-services";
 import type { UiLanguage } from "@/application";
-import type { SymbolInfo } from "@/domain";
+import { SESSION_TSE, type SymbolInfo } from "@/domain";
+import { StaticSymbolRepository } from "@/infrastructure";
 import { useStore } from "@/shared/hooks/useStore";
 import { brokerLogoForExchange } from "./broker-logos";
 import { layoutSyncBus } from "./layout-sync";
@@ -30,6 +31,7 @@ type ChipId =
   | "forexcom"
   | "fxpro"
   | "binance"
+  | "tse"
   | "indices"
   | "stocks";
 
@@ -41,6 +43,7 @@ const CHIP_LABELS: Record<UiLanguage, Record<ChipId, string>> = {
     forexcom: "Global — FOREXCOM",
     fxpro: "Global — FXPRO",
     binance: "Binance",
+    tse: "Tehran — TSETMC",
     indices: "Indices",
     stocks: "Stocks",
   },
@@ -51,6 +54,7 @@ const CHIP_LABELS: Record<UiLanguage, Record<ChipId, string>> = {
     forexcom: "بازار جهانی - FOREXCOM",
     fxpro: "بازار جهانی - FXPRO",
     binance: "بایننس",
+    tse: "بورس تهران",
     indices: "شاخص‌ها",
     stocks: "سهام",
   },
@@ -85,6 +89,7 @@ function avatarFor(symbol: SymbolInfo): { text: string; color: string } {
   if (symbol.type === "forex" || t.includes("USD") || t.includes("EUR") || t.includes("GBP")) {
     return { text: "FX", color: "#ef6c00" };
   }
+  if (ex === "TSE") return { text: symbol.ticker.slice(0, 1) || "س", color: "#00897b" };
   if (symbol.type === "crypto" || ex === "BINANCE") return { text: "CR", color: "#f0b90b" };
   if (symbol.type === "index") return { text: "IX", color: "#42a5f5" };
   const hash = (t.charCodeAt(0) + t.charCodeAt(1) || 0) % AVATAR_COLORS.length;
@@ -106,10 +111,12 @@ function chipMatches(chip: ChipId, s: SymbolInfo): boolean {
       return ex === "FXPRO";
     case "binance":
       return ex === "BINANCE";
+    case "tse":
+      return ex === "TSE";
     case "indices":
       return s.type === "index" || ["TVC", "SP", "DJ"].includes(ex);
     case "stocks":
-      return s.type === "stock" || ex === "NASDAQ" || ex === "NYSE";
+      return ex !== "TSE" && (s.type === "stock" || ex === "NASDAQ" || ex === "NYSE");
     default:
       return true;
   }
@@ -122,6 +129,7 @@ function categoryLabel(language: UiLanguage, s: SymbolInfo): string {
   if (ex === "FOREXCOM") return language === "fa" ? "بازار جهانی - FOREXCOM" : "Global — FOREXCOM";
   if (ex === "FXPRO") return language === "fa" ? "بازار جهانی - FXPRO" : "Global — FXPRO";
   if (ex === "BINANCE") return "Binance";
+  if (ex === "TSE") return language === "fa" ? "بورس تهران · تعدیل‌شده" : "Tehran · adjusted";
   return s.exchange;
 }
 
@@ -134,6 +142,7 @@ export function SymbolSearchDialog({ open, onClose }: SymbolSearchDialogProps) {
   const rtl = language === "fa";
   const [query, setQuery] = useState("");
   const [chip, setChip] = useState<ChipId>("all");
+  const [remote, setRemote] = useState<SymbolInfo[]>([]);
 
   useEffect(() => {
     if (!open) return;
@@ -156,7 +165,46 @@ export function SymbolSearchDialog({ open, onClose }: SymbolSearchDialogProps) {
     };
   }, [open]);
 
-  const all = useMemo(() => symbols.all(), [symbols]);
+  useEffect(() => {
+    const q = query.trim();
+    if (!open || q.length < 1) {
+      setRemote([]);
+      return;
+    }
+    const ctrl = new AbortController();
+    const timer = window.setTimeout(() => {
+      void fetch(`/iran-gold/tsetmc/search?q=${encodeURIComponent(q)}`, { signal: ctrl.signal })
+        .then((response) => (response.ok ? response.json() : { hits: [] }))
+        .then((data: { hits?: Array<{ symbol?: string; name?: string }> }) => {
+          const repo = symbols instanceof StaticSymbolRepository ? symbols : null;
+          const next: SymbolInfo[] = [];
+          for (const hit of data.hits ?? []) {
+            const ticker = String(hit.symbol ?? "").trim();
+            if (!ticker) continue;
+            const info: SymbolInfo = {
+              ticker,
+              name: String(hit.name || ticker),
+              exchange: "TSE",
+              type: "stock",
+              pricePrecision: 0,
+              session: SESSION_TSE,
+              timezone: "Asia/Tehran",
+            };
+            next.push(repo ? repo.registerDynamic(info) : info);
+          }
+          setRemote(next);
+        })
+        .catch(() => {
+          /* seeded names still resolve when the VPS search is unreachable */
+        });
+    }, 320);
+    return () => {
+      window.clearTimeout(timer);
+      ctrl.abort();
+    };
+  }, [open, query, symbols]);
+
+  const all = useMemo(() => symbols.all(), [symbols, remote]);
   const chips = useMemo(() => {
     const present = new Set(all.map((s) => s.exchange.toUpperCase()));
     const ids: ChipId[] = ["all"];
@@ -165,6 +213,7 @@ export function SymbolSearchDialog({ open, onClose }: SymbolSearchDialogProps) {
     if (present.has("FOREXCOM")) ids.push("forexcom");
     if (present.has("FXPRO")) ids.push("fxpro");
     if (present.has("BINANCE")) ids.push("binance");
+    if (present.has("TSE")) ids.push("tse");
     if (all.some((s) => s.type === "index")) ids.push("indices");
     if (all.some((s) => s.type === "stock")) ids.push("stocks");
     return ids;
@@ -172,14 +221,16 @@ export function SymbolSearchDialog({ open, onClose }: SymbolSearchDialogProps) {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return all
+    const seen = new Set(all.map((s) => `${s.exchange}:${s.ticker}`));
+    const extra = remote.filter((s) => !seen.has(`${s.exchange}:${s.ticker}`));
+    return [...all, ...extra]
       .filter((s) => chipMatches(chip, s))
       .filter((s) => {
         if (!q) return true;
         return `${s.ticker} ${s.name} ${s.exchange}`.toLowerCase().includes(q);
       })
       .slice(0, 200);
-  }, [all, chip, query]);
+  }, [all, remote, chip, query]);
 
   const pick = (s: SymbolInfo) => {
     const ticker = `${s.exchange}:${s.ticker}`;

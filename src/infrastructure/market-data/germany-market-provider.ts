@@ -9,6 +9,7 @@ import {
   mongoHistoryPlan,
 } from "./cp-chart-history";
 import { aggregateBars, synthesizeFromMinuteBars } from "./synthesize-seconds";
+import { volumeDelta, type VolumeCursor } from "./volume-delta";
 
 /**
  * Germany Market Price API via `/market-api/` + browser Binance tick streams.
@@ -623,7 +624,9 @@ export class GermanyMarketProvider implements MarketDataProvider {
       // only returns the latest ~1–2k and cannot page older windows.
       if (mongoHistoryPlan(interval)) {
         try {
-          bars = await fetchCpChartHistory(route.apiSymbol, interval, range);
+          bars = await fetchCpChartHistory(route.apiSymbol, interval, range, {
+            fxSession: route.kind === "forex" || route.kind === "metal",
+          });
         } catch {
           bars = [];
         }
@@ -663,8 +666,9 @@ export class GermanyMarketProvider implements MarketDataProvider {
     // `to <= 0` means “latest window” (TV first request sometimes sends 0).
     const before = range.to > 0 ? range.to : Number.POSITIVE_INFINITY;
     let filtered = bars.filter((b) => b.time < before).sort((a, b) => a.time - b.time);
-    // Germany `/ohlc/` 1D is midnight UTC — snap onto the FX 22:00 grid so TV keeps them.
-    if (unit === "days" && count === 1) {
+    // Germany `/ohlc/` 1D is midnight UTC — snap FX/metals onto the 22:00 grid.
+    // Crypto and other 24h books stay on midnight so they match the live candle.
+    if (unit === "days" && count === 1 && (route.kind === "forex" || route.kind === "metal")) {
       filtered = alignFxDailyBars(filtered).filter((b) => b.time < before);
     }
     if (!filtered.length) return [];
@@ -678,7 +682,8 @@ export class GermanyMarketProvider implements MarketDataProvider {
     const { unit, count } = parseInterval(interval);
     // History already snaps 1D onto 22:00 UTC; live ticks must use the same grid
     // or `alignTime(..., 86400)` opens a midnight candle that looks "new" on Daily.
-    const fxDaily = unit === "days" && count === 1;
+    const fxDaily =
+      unit === "days" && count === 1 && (route.kind === "forex" || route.kind === "metal");
     const disposers: Unsubscribe[] = [];
     let current: Bar | null = null;
     let lastEmittedClose = Number.NaN;
@@ -686,6 +691,9 @@ export class GermanyMarketProvider implements MarketDataProvider {
     let lastTickMs = 0;
     let readyForTicks = false;
     const pendingTicks: Array<{ price: number; tsSec: number; volumeDelta: number }> = [];
+    // TV quote volume is the session total. Keep only the increment so a busy
+    // 5m print is not copied, at the same size, onto the 4h candle.
+    const quoteVolume: VolumeCursor = { last: null };
 
     const emit = (bar: Bar) => {
       current = bar;
@@ -836,7 +844,10 @@ export class GermanyMarketProvider implements MarketDataProvider {
           : `crypto:${route.apiSymbol.toLowerCase()}`;
     disposers.push(
       openMarketTicksSocket(channel, (price, ts, vol) => {
-        onTick(price, ts, vol ?? 0);
+        // Binance trade qty already carries real size for crypto. TV's field is
+        // the day total — adding it again doubles crypto and matches 5m to 4h.
+        const delta = route.tickSymbol ? 0 : volumeDelta(quoteVolume, vol ?? 0);
+        onTick(price, ts, delta);
       }),
     );
 
@@ -860,7 +871,9 @@ export class GermanyMarketProvider implements MarketDataProvider {
           high: Math.max(base.high, next.high, closeFrom === "tick" ? base.close : next.close),
           low: Math.min(base.low, next.low, closeFrom === "tick" ? base.close : next.close),
           close: closeFrom === "tick" ? base.close : next.close,
-          volume: Math.max(base.volume, next.volume),
+          // Server OHLC volume is per candle. A 0 from FX keeps the summed
+          // quote deltas already accumulated on `base`.
+          volume: next.volume > 0 ? next.volume : base.volume,
         });
 
         // Prefer raw ticks when they are fresh — but still allow chart_ws to present

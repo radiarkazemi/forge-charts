@@ -1,6 +1,7 @@
-import { normalizeTicker, parseInterval, isMarketSessionOpen, SYMBOL_TYPE_LABELS, type Bar, type SymbolInfo } from "@/domain";
+import { normalizeTicker, parseInterval, intervalSeconds, isMarketSessionOpen, SYMBOL_TYPE_LABELS, type Bar, type SymbolInfo } from "@/domain";
 import { createStore, type MarketDataService, type Store, type SymbolRepository, type Unsubscribe } from "@/application";
 import { EXCHANGE_PRIORITY } from "@/infrastructure/symbols/static-symbol-repository";
+import { canonicalizeBar, collapseDailyBars } from "@/infrastructure/market-data/session-bars";
 import type {
   DatafeedConfiguration,
   DatafeedErrorCallback,
@@ -48,6 +49,14 @@ export const SUPPORTED_RESOLUTIONS = [
   "1M",
 ] as ResolutionString[];
 
+function barStep(resolution: string): number {
+  try {
+    return Math.max(1, intervalSeconds(resolution as never));
+  } catch {
+    return 300;
+  }
+}
+
 const SECONDS_MULTIPLIERS = ["1", "5", "10", "15", "30", "45"];
 const INTRADAY_MULTIPLIERS = ["1", "2", "3", "5", "10", "15", "30", "45", "60", "120", "180", "240", "360", "480", "720"];
 
@@ -57,7 +66,7 @@ export interface DataSourceInfo {
   readonly isSynthetic: boolean;
 }
 
-function toTvBar(bar: Bar) {
+function toTvBar(bar: Bar, stepSec = 300) {
   // Library crashes with RangeError: Invalid time value if `time` is NaN/non-finite.
   const timeSec = Number(bar.time);
   if (!Number.isFinite(timeSec) || timeSec <= 0) {
@@ -65,12 +74,15 @@ function toTvBar(bar: Bar) {
   }
   const rawVol = Number(bar.volume);
   let volume = Number.isFinite(rawVol) && rawVol > 0 ? rawVol : 0;
-  // FX / some CFDs omit volume — synthesize tick volume so the Volume pane is usable.
+  // No exchange volume: estimate activity from range, scaled by bar length.
+  // A raw range proxy made a 5m spike and the 4h candle that contains it
+  // draw the same volume bar.
   if (volume <= 0) {
     const range = Math.abs(bar.high - bar.low);
     const body = Math.abs(bar.close - bar.open);
-    const proxy = Math.round((range * 4 + body * 2) * 1e4);
-    volume = Math.max(1, proxy);
+    const proxy = (range * 4 + body * 2) * 1e4;
+    const slots = Math.max(1, stepSec / 300);
+    volume = Math.max(1, Math.round(proxy / slots));
   }
   return {
     time: timeSec * 1000,
@@ -195,7 +207,7 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   /** Push one synthetic realtime bar while live feed is muted. */
   pushReplayBar(bar: Bar): void {
     if (this.barSubs.size === 0) return;
-    const tvBar = toTvBar(bar);
+    const tvBar = toTvBar(bar, this.replayPushResolution ? barStep(this.replayPushResolution) : 300);
     const wantTicker = this.replayPushTicker;
     const wantRes = this.replayPushResolution
       ? normalizeReplayResolution(this.replayPushResolution)
@@ -391,7 +403,9 @@ export class TradingViewDatafeed implements IBasicDataFeed {
           onResult([], { noData: true });
           return;
         }
-        onResult(slice.map(toTvBar), { noData: false });
+        onResult(collapseDailyBars(symbol, resolution, slice).map((bar) => toTvBar(bar, barStep(resolution))), {
+          noData: false,
+        });
         return;
       }
 
@@ -424,7 +438,10 @@ export class TradingViewDatafeed implements IBasicDataFeed {
         onResult([], { noData: true });
         return;
       }
-      onResult(filtered.map(toTvBar), { noData: false });
+      onResult(
+        collapseDailyBars(symbol, resolution, filtered).map((bar) => toTvBar(bar, barStep(resolution))),
+        { noData: false },
+      );
     } catch (error) {
       onError(error instanceof Error ? error.message : String(error));
     }
@@ -447,10 +464,11 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       onTick,
     });
 
+    const step = barStep(resolution);
     const unsubscribe = this.marketData.subscribe(symbol, resolution, (bar) => {
       if (this.replayActive) return; // muted during Bar Replay
       try {
-        onTick(toTvBar(bar));
+        onTick(toTvBar(canonicalizeBar(symbol, resolution, bar), step));
       } catch {
         /* drop corrupt realtime bars instead of crashing the widget */
       }
@@ -497,23 +515,27 @@ export class TradingViewDatafeed implements IBasicDataFeed {
 
   private toLibrarySymbolInfo(symbol: SymbolInfo): LibrarySymbolInfo {
     const native = this.marketData.describe(symbol).nativeIntervals;
+    const exchange = symbol.exchange.toUpperCase();
+    const iran = exchange === "IRAN" || exchange === "TGJU";
+    const tse = exchange === "TSE";
     const hasIntraday = native.some((iv) => parseInterval(iv).unit === "minutes");
     // Any feed that can serve 1m can synthesize 5S (Yahoo / cp / Binance / Germany).
+    // TSE has no sub-minute tape worth streaming. Advertising seconds would
+    // synthesize a fake series and keep the chart busier than the cash session.
     const hasSeconds =
-      native.some((iv) => parseInterval(iv).unit === "seconds") || hasIntraday;
+      !tse && (native.some((iv) => parseInterval(iv).unit === "seconds") || hasIntraday);
     const sessionOpen = isMarketSessionOpen(symbol);
-
-    const iran = symbol.exchange.toUpperCase() === "IRAN" || symbol.exchange.toUpperCase() === "TGJU";
+    const adjusted = tse && !symbol.ticker.endsWith(".U");
     return {
-      // Iran: show Faraz Farsi titles in the legend (آبشده نقدی, گرم طلا ۱۸, …).
-      name: iran ? symbol.name : symbol.ticker,
+      // Iran / TSE: show the Persian title in the legend.
+      name: iran || tse ? symbol.name : symbol.ticker,
       ticker: `${symbol.exchange}:${symbol.ticker}`,
-      description: iran ? symbol.ticker : symbol.name,
+      description: iran ? symbol.ticker : tse ? (adjusted ? "تعدیل‌شده" : "تعدیل‌نشده") : symbol.name,
       ...(iran
-        ? {
-            listed_exchange: "Faraz",
-          }
-        : { listed_exchange: symbol.exchange }),
+        ? { listed_exchange: "Faraz" }
+        : tse
+          ? { listed_exchange: "TSETMC" }
+          : { listed_exchange: symbol.exchange }),
       type: symbol.type,
       session: symbol.session,
       timezone: symbol.timezone as Timezone,

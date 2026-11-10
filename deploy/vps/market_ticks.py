@@ -104,7 +104,7 @@ LAST_SRC: dict[str, str] = {}
 TV_WANTED: set[str] = set()
 LOCK = asyncio.Lock()
 # Higher wins. Lower-priority sources cannot clobber a fresh higher-priority tick.
-SOURCE_PRIORITY = {"tv": 40, "iran": 30, "mongo": 20, "germany": 10, "cache": 0}
+SOURCE_PRIORITY = {"tse": 45, "tv": 40, "iran": 30, "mongo": 20, "germany": 10, "cache": 0}
 SOURCE_HOLD_MS = {"tv": 1_200, "iran": 900, "mongo": 400, "germany": 250}
 
 # Iran gold fields → market-ticks channels (Faraz only).
@@ -290,9 +290,15 @@ def parse_updated_at(raw: Any) -> int:
 
 
 def normalize_channel(raw: str) -> str | None:
-    channel = raw.strip().lower()
-    if not channel:
+    stripped = raw.strip()
+    if not stripped:
         return None
+    # Persian symbols have no case. Keep the ticker exactly as subscribed so
+    # "فولاد" and a ".U" unadjusted suffix round-trip.
+    if stripped.lower().startswith("tse:"):
+        symbol = stripped.split(":", 1)[1].strip()
+        return f"tse:{symbol}" if symbol else None
+    channel = stripped.lower()
     if channel.startswith("forex:"):
         parts = channel.split(":")
         if len(parts) < 2 or not parts[1]:
@@ -3531,6 +3537,51 @@ async def poll_purge_flat_ticks() -> None:
         await asyncio.sleep(3600.0)
 
 
+async def tsetmc_history(request: web.Request) -> web.Response:
+    """OHLC for a Tehran symbol. Default is قیمت تعدیل‌شده (adjust=1).
+
+    Query: symbol, interval=1|5|15|60|240|1D|1W|1M, limit, before, adjust=0|1.
+    Mounted under /iran-gold/tsetmc/history so the public nginx location already
+    forwards it, and under /tsetmc/history for direct VPS calls.
+    """
+    from tsetmc_feed import build_history, _adjust_flag
+
+    symbol = str(request.query.get("symbol") or "").strip()
+    if not symbol:
+        return web.json_response({"detail": "symbol required"}, status=400)
+    interval = str(request.query.get("interval") or "1D")
+    adjust_raw = request.query.get("adjust")
+    requested = int(adjust_raw) if adjust_raw not in (None, "") else None
+    adjust = _adjust_flag(symbol, requested)
+    limit = int(request.query.get("limit") or 500)
+    before_raw = request.query.get("before")
+    before = int(float(before_raw)) if before_raw not in (None, "") else None
+    session: aiohttp.ClientSession = request.app["session"]
+    try:
+        bars = await build_history(session, symbol, interval, adjust, limit, before)
+    except Exception as exc:
+        LOG.warning("tsetmc history %s: %s", symbol, exc)
+        bars = []
+    return web.json_response({"bars": bars, "adjust": adjust, "symbol": symbol, "interval": interval})
+
+
+async def tsetmc_search(request: web.Request) -> web.Response:
+    from tsetmc_feed import search_hits
+
+    query = str(request.query.get("q") or request.query.get("query") or "").strip()
+    if len(query) < 1:
+        return web.json_response({"hits": []})
+    session: aiohttp.ClientSession = request.app["session"]
+    hits = await search_hits(session, query)
+    return web.json_response({"hits": hits})
+
+
+async def _poll_tsetmc(session: aiohttp.ClientSession) -> None:
+    from tsetmc_feed import poll_tsetmc
+
+    await poll_tsetmc(session, lambda: list(SUBS.keys()), broadcast)
+
+
 async def start_background(app: web.Application) -> None:
     headers = {"X-API-Key": API_KEY} if API_KEY else {}
     session = aiohttp.ClientSession(headers=headers)
@@ -3562,6 +3613,7 @@ async def start_background(app: web.Application) -> None:
         asyncio.create_task(poll_iran_bootstrap(session)),
         asyncio.create_task(poll_iran_faraz_tail(session)),
         asyncio.create_task(poll_purge_flat_ticks()),
+        asyncio.create_task(_poll_tsetmc(session)),
     ]
 
 
@@ -3579,6 +3631,10 @@ def main() -> None:
     app.router.add_get("/market-ticks", ws_handler)
     app.router.add_get("/iran-gold/history", iran_gold_history)
     app.router.add_get("/iran-gold/quote", iran_gold_quote)
+    app.router.add_get("/iran-gold/tsetmc/history", tsetmc_history)
+    app.router.add_get("/iran-gold/tsetmc/search", tsetmc_search)
+    app.router.add_get("/tsetmc/history", tsetmc_history)
+    app.router.add_get("/tsetmc/search", tsetmc_search)
     app.router.add_get("/tv-history", tv_history)
     app.router.add_get("/health", health)
     app.on_startup.append(start_background)

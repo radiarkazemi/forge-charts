@@ -4,6 +4,7 @@ import {
   SESSION_24X7,
   SESSION_FX,
   SESSION_IRAN_GOLD,
+  SESSION_TSE,
   SESSION_US_EQUITY,
   type SymbolInfo,
   type SymbolType,
@@ -68,6 +69,22 @@ const SEEDS: readonly Seed[] = [
   ["NIM", "نیم سکه", "IRAN", "commodity", 0],
   ["ROB", "ربع سکه", "IRAN", "commodity", 0],
   ["ONS", "انس جهانی", "IRAN", "commodity", 2],
+  // Tehran Stock Exchange — قیمت تعدیل‌شده from TSETMC (live + history on the Iran VPS).
+  ["فولاد", "فولاد مبارکه اصفهان", "TSE", "stock", 0],
+  ["فملی", "ملی صنایع مس ایران", "TSE", "stock", 0],
+  ["شپنا", "پالایش نفت اصفهان", "TSE", "stock", 0],
+  ["خودرو", "ایران خودرو", "TSE", "stock", 0],
+  ["وبملت", "بانک ملت", "TSE", "stock", 0],
+  ["شستا", "سرمایه گذاری تامین اجتماعی", "TSE", "stock", 0],
+  ["خساپا", "سایپا", "TSE", "stock", 0],
+  ["شبندر", "پالایش نفت بندرعباس", "TSE", "stock", 0],
+  ["وتجارت", "بانک تجارت", "TSE", "stock", 0],
+  ["فارس", "صنایع پتروشیمی خلیج فارس", "TSE", "stock", 0],
+  ["کگل", "معدنی و صنعتی گل گهر", "TSE", "stock", 0],
+  ["ومعادن", "توسعه معادن و فلزات", "TSE", "stock", 0],
+  ["شتران", "پالایش نفت تهران", "TSE", "stock", 0],
+  ["اپال", "فرآوری معدنی اپال کانی پارس", "TSE", "stock", 0],
+  ["اهرم", "سهامی اهرمی کاریزما", "TSE", "stock", 0],
   // Gold / FX / indices — FOREXCOM / FXPRO / FXCM (Germany live for XAU; TV broker books for indices/FX)
   ["XAUUSD", "Gold Spot / U.S. Dollar", "FOREXCOM", "forex", 2],
   ["XAUUSD", "Gold Spot / U.S. Dollar", "FXPRO", "forex", 2],
@@ -171,6 +188,11 @@ export const EXCHANGE_PRIORITY = [
 const FEATURED_TICKERS = [
   "ABSHODE",
   "G18",
+  "فولاد",
+  "فملی",
+  "شپنا",
+  "خودرو",
+  "وبملت",
   "SEKKE",
   "XAUUSD",
   "NAS100",
@@ -208,6 +230,7 @@ const CFD_EXCHANGES = new Set<string>([
 
 function sessionFor(type: SymbolType, exchange: string): { session: string; timezone: string } {
   const ex = exchange.toUpperCase();
+  if (ex === "TSE") return { session: SESSION_TSE, timezone: TEHRAN };
   if (CFD_EXCHANGES.has(ex) && (type === "index" || type === "forex" || type === "commodity" || type === "futures")) {
     return { session: SESSION_FX, timezone: UTC };
   }
@@ -245,13 +268,23 @@ function featuredRank(ticker: string): number {
 /** In-memory reference data. Swap for an API-backed repository without touching callers. */
 export class StaticSymbolRepository implements SymbolRepository {
   private readonly symbols: readonly SymbolInfo[];
+  /** Symbols discovered from TSETMC search. Not preloaded — only what the user typed. */
+  private readonly dynamic: SymbolInfo[] = [];
 
   constructor(seeds: readonly Seed[] = SEEDS) {
     this.symbols = seeds.map(toSymbol);
   }
 
   all(): readonly SymbolInfo[] {
-    return this.symbols;
+    return this.dynamic.length ? [...this.symbols, ...this.dynamic] : this.symbols;
+  }
+
+  /** Remember a TSETMC hit so the chart datafeed can resolve it after the picker closes. */
+  registerDynamic(info: SymbolInfo): SymbolInfo {
+    const existing = this.findByTicker(info.ticker, info.exchange);
+    if (existing) return existing;
+    this.dynamic.push(info);
+    return info;
   }
 
   findByTicker(ticker: string, exchange?: string): SymbolInfo | undefined {
@@ -259,15 +292,17 @@ export class StaticSymbolRepository implements SymbolRepository {
     const fromPrefix = raw.includes(":") ? raw.slice(0, raw.lastIndexOf(":")).trim().toUpperCase() : undefined;
     const ex = (exchange?.trim() || fromPrefix || "").toUpperCase() || undefined;
     const needle = normalizeTicker(raw);
+    const pool = this.dynamic.length ? [...this.symbols, ...this.dynamic] : this.symbols;
     if (ex) {
-      return this.symbols.find((s) => s.ticker === needle && s.exchange.toUpperCase() === ex);
+      return pool.find((s) => s.ticker === needle && s.exchange.toUpperCase() === ex);
     }
-    return this.symbols.find((s) => s.ticker === needle);
+    return pool.find((s) => s.ticker === needle);
   }
 
   search(query: string, type: SymbolType | "" = ""): SymbolInfo[] {
     const needle = query.trim().toLowerCase();
-    return this.symbols
+    const pool = this.dynamic.length ? [...this.symbols, ...this.dynamic] : this.symbols;
+    return pool
       .filter((s) => symbolMatches(s, needle, type))
       .sort((a, b) => {
         // Empty query: featured markets first (Iran / gold / crypto / indices).

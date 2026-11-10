@@ -29,6 +29,9 @@ echo "Uploading faraz_history_proxy.py → root@${GERMANY}:${GERMANY_PROXY_DEST}
 
 echo "Uploading market_ticks.py → root@${IRAN}:${IRAN_MT_DEST}"
 "${SCP[@]}" "$ROOT/deploy/vps/market_ticks.py" "root@${IRAN}:${IRAN_MT_DEST}"
+IRAN_TSETMC_DEST="${IRAN_TSETMC_PATH:-$(dirname "$IRAN_MT_DEST")/tsetmc_feed.py}"
+echo "Uploading tsetmc_feed.py → root@${IRAN}:${IRAN_TSETMC_DEST}"
+"${SCP[@]}" "$ROOT/deploy/vps/tsetmc_feed.py" "root@${IRAN}:${IRAN_TSETMC_DEST}"
 "${SSH[@]}" "root@${IRAN}" \
   "systemctl restart forge-market-ticks.service && sleep 2 && systemctl is-active forge-market-ticks.service && (curl -sS 'http://127.0.0.1:8015/iran-gold/quote' || curl -sS 'http://127.0.0.1:8088/iran-gold/quote' || curl -sS 'https://forgechart.ir/iran-gold/quote') | head -c 300; echo"
 

@@ -14,6 +14,7 @@ import { startPolling } from "./polling";
 import { aggregateBars, synthesizeFromMinuteBars, SYNTH_SECONDS_INTERVALS } from "./synthesize-seconds";
 import { isTvBrokerSymbol, marketTicksChannelFor, tradingViewSymbolFor } from "./tv-broker-symbols";
 import { fetchCpChartHistory, mongoHistoryPlan } from "./cp-chart-history";
+import { volumeDelta, type VolumeCursor } from "./volume-delta";
 
 const HISTORY_BASE = "/tv-history";
 /** Live quotes stay snappy; replay/deep history may page on the VPS. */
@@ -257,12 +258,14 @@ export class TradingViewBrokerProvider implements MarketDataProvider {
     const channel = marketTicksChannelFor(symbol);
     const disposers: Unsubscribe[] = [];
     let current: Bar | null = null;
+    const quoteVolume: VolumeCursor = { last: null };
 
-    const emit = (price: number, tsSec: number, volume = 0) => {
+    const emit = (price: number, tsSec: number, reported = 0) => {
       if (!isMarketSessionOpen(symbol) && !current) return;
+      const delta = volumeDelta(quoteVolume, reported);
       const bucket = Math.floor(tsSec / step) * step;
       if (!current || current.time !== bucket) {
-        current = { time: bucket, open: price, high: price, low: price, close: price, volume };
+        current = { time: bucket, open: price, high: price, low: price, close: price, volume: delta };
       } else {
         current = {
           time: bucket,
@@ -270,7 +273,7 @@ export class TradingViewBrokerProvider implements MarketDataProvider {
           high: Math.max(current.high, price),
           low: Math.min(current.low, price),
           close: price,
-          volume: current.volume + (volume || 0),
+          volume: current.volume + delta,
         };
       }
       onBar(current);
