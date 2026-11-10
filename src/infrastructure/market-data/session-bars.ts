@@ -24,7 +24,13 @@ export function isDailyInterval(interval: Interval | string): boolean {
 export function sessionDailyOpen(symbol: SymbolInfo, timeSec: number): number {
   const session = (symbol.session || "").toLowerCase();
   const exchange = symbol.exchange.toUpperCase();
-  if (session.startsWith("2200-2159")) return alignFxSessionDailyTime(timeSec);
+  if (
+    session.startsWith("2200-2159") ||
+    session.startsWith("1700-1700") ||
+    session.startsWith("1700-1659")
+  ) {
+    return alignFxSessionDailyTime(timeSec);
+  }
   if (session.startsWith("0900-") || exchange === "TSE" || exchange === "IRAN" || exchange === "TGJU") {
     return tehranClockOpen(timeSec, 9 * 3_600);
   }

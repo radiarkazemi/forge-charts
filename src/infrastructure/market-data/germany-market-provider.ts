@@ -857,8 +857,12 @@ export class GermanyMarketProvider implements MarketDataProvider {
       openCpFetcherSocket(route.apiSymbol, interval, (bar) => {
         if (!isMarketSessionOpen(symbol)) return;
         // Server sends period open in `t` for native + derived TFs.
-        const wallBucket = alignTime(Math.floor(Date.now() / 1000), step);
-        let openTime = alignTime(bar.time, step);
+        // Daily FX must use the New York 17:00 open. Midnight-flooring a 23:00
+        // gold bar landed it on the previous session and the chart drew both.
+        const bucketOf = (ts: number) =>
+          fxDaily ? alignFxSessionDailyTime(ts) : alignTime(ts, step);
+        const wallBucket = bucketOf(Math.floor(Date.now() / 1000));
+        let openTime = bucketOf(bar.time);
         // Refuse future buckets — only the current wall-clock candle may form.
         if (openTime > wallBucket) openTime = wallBucket;
         const aligned = { ...bar, time: openTime };

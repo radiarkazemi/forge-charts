@@ -70,23 +70,52 @@ function parsePackedBar(row: unknown): Bar | null {
   };
 }
 
-/** FX session open used by `SESSION_FX` with `Etc/UTC` (`2200-2159:123456`). */
-const FX_SESSION_OPEN_SEC = 22 * 3_600;
+const NY = "America/New_York";
+
+function nyClock(timeSec: number): { year: number; month: number; day: number; hour: number } {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: NY,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hourCycle: "h23",
+  });
+  const parts = fmt.formatToParts(new Date(timeSec * 1000));
+  const pick = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  let hour = pick("hour");
+  if (hour === 24) hour = 0;
+  return { year: pick("year"), month: pick("month"), day: pick("day"), hour };
+}
+
+/** UTC instant of `hour:00` on a New York calendar day, DST-aware. */
+function utcAtNewYork(year: number, month: number, day: number, hour: number): number {
+  const desired = Date.UTC(year, month - 1, day, hour, 0, 0);
+  const guess = Math.floor(desired / 1000);
+  const got = nyClock(guess);
+  const gotAsUtc = Date.UTC(got.year, got.month - 1, got.day, got.hour, 0, 0);
+  return Math.floor((desired - (gotAsUtc - desired)) / 1000);
+}
 
 /**
- * Snap a daily bar onto the TradingView FX daily grid (22:00 UTC).
+ * Snap a daily bar onto the forex day open: 17:00 America/New_York.
  *
- * Mongo XAUUSD dailies alternate 22:00 UTC (EDT months) and 23:00 UTC (EST).
- * With symbol.timezone `Etc/UTC`, the library only keeps bars on the 22:00
- * grid — winter 23:00 stamps are dropped, which carved Nov→spring holes on 1D.
+ * Euro dailies are already 17:00 New York (21:00 UTC in summer, 22:00 UTC in
+ * winter). Gold is stamped an hour later (22:00 / 23:00 UTC). A fixed 22:00 UTC
+ * session cannot hold both, so the library drew each winter/summer day twice.
  */
 export function alignFxSessionDailyTime(timeSec: number): number {
-  const day = Math.floor(timeSec / 86_400) * 86_400;
-  const tod = timeSec - day;
-  if (tod < FX_SESSION_OPEN_SEC) {
-    return day - 86_400 + FX_SESSION_OPEN_SEC;
+  const ny = nyClock(timeSec);
+  let year = ny.year;
+  let month = ny.month;
+  let day = ny.day;
+  if (ny.hour < 17) {
+    const prev = new Date(Date.UTC(year, month - 1, day) - 86_400_000);
+    year = prev.getUTCFullYear();
+    month = prev.getUTCMonth() + 1;
+    day = prev.getUTCDate();
   }
-  return day + FX_SESSION_OPEN_SEC;
+  return utcAtNewYork(year, month, day, 17);
 }
 
 /** Dedupe daily bars onto the 22:00 UTC session grid (last write wins). */

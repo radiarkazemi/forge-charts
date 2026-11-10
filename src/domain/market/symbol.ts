@@ -41,10 +41,11 @@ export const SESSION_24X7 = "24x7";
 /** US equities regular session (exchange TZ America/New_York). */
 export const SESSION_US_EQUITY = "0930-1600";
 /**
- * Spot FX / metals (FOREXCOM-style): Sun 22:00 → Fri 21:59 in the symbol timezone.
- * Weekends closed — matches TradingView countdown / market-status behavior.
+ * Spot FX / metals. 17:00 America/New_York → next day 17:00 (Sun–Thu starts).
+ * A fixed 22:00 UTC grid only matches winter, so summer bars (21:00 UTC) and
+ * the gold feed (18:00 New York) were drawn a second time beside the real candle.
  */
-export const SESSION_FX = "2200-2159:123456";
+export const SESSION_FX = "1700-1700:12345";
 /**
  * Iran gold / Faraz cash session (exchange TZ Asia/Tehran).
  * 09:00–22:00 every day — overnight is outside session so the chart
@@ -103,12 +104,16 @@ export function isMarketSessionOpen(symbol: SymbolInfo, nowMs: number = Date.now
         ? "UTC"
         : symbol.timezone || "UTC";
 
-  // FX / metals: 2200-2159:123456 (Sun 22:00 → Fri 21:59)
-  if (session.startsWith("2200-2159")) {
-    const { day, hhmm } = zonedParts(nowMs, tz === "UTC" ? "UTC" : tz);
+  // FX / metals: 17:00 America/New_York, Sun open → Fri 17:00 close.
+  // 2200-2159 remains for any saved layout that still has the old UTC session.
+  if (session.startsWith("1700-1700") || session.startsWith("1700-1659") || session.startsWith("2200-2159")) {
+    const ny = session.startsWith("1700");
+    const { day, hhmm } = zonedParts(nowMs, ny ? "America/New_York" : tz === "UTC" ? "UTC" : tz);
     if (day === 6) return false; // Saturday
-    if (day === 5 && hhmm > 2159) return false; // Friday after 21:59 close
-    if (day === 0 && hhmm < 2200) return false; // Sunday before open
+    const close = ny ? 1700 : 2159;
+    const open = ny ? 1700 : 2200;
+    if (day === 5 && hhmm >= close) return false;
+    if (day === 0 && hhmm < open) return false;
     return true;
   }
 

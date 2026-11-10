@@ -232,7 +232,7 @@ function sessionFor(type: SymbolType, exchange: string): { session: string; time
   const ex = exchange.toUpperCase();
   if (ex === "TSE") return { session: SESSION_TSE, timezone: TEHRAN };
   if (CFD_EXCHANGES.has(ex) && (type === "index" || type === "forex" || type === "commodity" || type === "futures")) {
-    return { session: SESSION_FX, timezone: UTC };
+    return { session: SESSION_FX, timezone: NY };
   }
   switch (type) {
     case "stock":
@@ -244,7 +244,7 @@ function sessionFor(type: SymbolType, exchange: string): { session: string; time
     case "commodity":
     case "futures":
       // Spot FX/metals close for the weekend — required for TV countdown/market status.
-      return { session: SESSION_FX, timezone: UTC };
+      return { session: SESSION_FX, timezone: NY };
     case "crypto":
     default:
       return { session: SESSION_24X7, timezone: UTC };
