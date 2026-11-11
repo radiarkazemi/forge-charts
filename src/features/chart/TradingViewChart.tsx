@@ -21,6 +21,7 @@ import { useForgeCertaintyStudy } from "./useForgeCertaintyStudy";
 import { useFractalIgorStudy } from "./useFractalIgorStudy";
 import { useRealSwingsStudy } from "./useRealSwingsStudy";
 import { useBosMssStudy } from "./useBosMssStudy";
+import { useOrderBlockCisdStudy } from "./useOrderBlockCisdStudy";
 import { useIrlErlStudy } from "./useIrlErlStudy";
 import { SessionsDashboard } from "@/features/sessions/SessionsDashboard";
 import { WatermarkOverlay } from "@/features/watermark/WatermarkOverlay";
@@ -281,6 +282,7 @@ export function TradingViewChart({
   useFractalIgorStudy(controller);
   useRealSwingsStudy(controller);
   useBosMssStudy(controller);
+  useOrderBlockCisdStudy(controller);
   useIrlErlStudy(controller);
   // Global overlay publishers — primary only (secondaries would fight the HUD).
   useWatermarkStudy(isPrimary ? controller : null);

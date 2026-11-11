@@ -4,6 +4,7 @@
  */
 
 import { BOS_MSS_STUDY_ID, BOS_MSS_STUDY_NAME } from "./bos-mss-indicator";
+import { OB_CISD_STUDY_ID, OB_CISD_STUDY_NAME } from "./order-block-cisd-indicator";
 import { DEALING_RANGES_STUDY_ID, DEALING_RANGES_STUDY_NAME } from "./dealing-ranges-indicator";
 import { FRACTAL_IGOR_STUDY_ID, FRACTAL_IGOR_STUDY_NAME } from "./fractal-igor-indicator";
 import { CERTAINTY_STUDY_ID, CERTAINTY_STUDY_NAME } from "./forge-certainty-indicator";
@@ -131,6 +132,17 @@ export const BUILTIN_INDICATORS: readonly ForgeIndicatorEntry[] = [
 ] as const;
 
 export const FORGE_INDICATORS: readonly ForgeIndicatorEntry[] = [
+  {
+    id: "forge-ob-cisd",
+    name: OB_CISD_STUDY_NAME,
+    studyId: OB_CISD_STUDY_ID,
+    author: "Forge",
+    shortDescription: "Order block · dashed CISD level",
+    tags: ["orderblock", "ob", "cisd", "ict", "smc"],
+    favorite: true,
+    usesLabel: "Forge",
+    section: "forge",
+  },
   {
     id: "forge-bos-mss",
     name: BOS_MSS_STUDY_NAME,
