@@ -105,6 +105,22 @@ function purgeLegacyAutosaves(storage: KeyValueStorage): void {
   }
 }
 
+/**
+ * Saved charts can still carry the TSE cash session. The library then reserves
+ * empty slots for nights and holidays, which shows up as a hole between candles.
+ * The live symbol info is 24x7; the saved copy has to match.
+ */
+function openSavedTseSession(saved: object | undefined): object | undefined {
+  if (!saved) return saved;
+  try {
+    const json = JSON.stringify(saved);
+    if (!json.includes("0900-1230")) return saved;
+    return JSON.parse(json.replaceAll("0900-1230:71234", "24x7").replaceAll("0900-1230", "24x7")) as object;
+  } catch {
+    return saved;
+  }
+}
+
 /** Reject corrupt / incomplete library snapshots that leave the chart spinning forever. */
 function readAutosave(storage: KeyValueStorage): object | undefined {
   purgeLegacyAutosaves(storage);
@@ -439,7 +455,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
     loadChartingLibrary(libraryPath)
       .then((Widget) => {
         if (cancelled) return;
-        const saved = isPrimary ? readAutosave(storage) : undefined;
+        const saved = isPrimary ? openSavedTseSession(readAutosave(storage)) : undefined;
         try {
           mount(Widget, saved);
         } catch {

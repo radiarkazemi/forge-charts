@@ -11,6 +11,8 @@ import type { Bar } from "@/domain";
 
 export interface TsePackedSeries {
   readonly step: number;
+  /** Original bars, original timestamps. Re-packing always starts from these. */
+  readonly real: readonly Bar[];
   readonly realTimes: readonly number[];
   readonly packed: readonly Bar[];
 }
@@ -39,18 +41,24 @@ function dedupe(bars: readonly Bar[]): Bar[] {
   return [...byTime.values()].sort((a, b) => a.time - b.time);
 }
 
+const TEHRAN_OFFSET_SEC = 3 * 3_600 + 30 * 60;
+
 export function emptyTseSeries(step: number): TsePackedSeries {
-  return { step: Math.max(1, step), realTimes: [], packed: [] };
+  return { step: Math.max(1, step), real: [], realTimes: [], packed: [] };
 }
 
 /**
  * Where the newest bar sits on the packed scale.
- * Daily and higher resolutions must be 00:00 UTC — the charting library
- * otherwise snaps them onto the cash session and opens the holes again.
+ * Daily and higher bars sit on Tehran midnight — the exchange-day boundary
+ * the chart uses. UTC midnight is 03:30 in Tehran, and the library was
+ * opening a hole when it snapped that back onto the cash session.
  * Intraday keeps the real timestamp so the live candle stays put.
  */
 function slotAnchor(last: number, step: number): number {
-  if (step >= 86_400 && step % 86_400 === 0) return Math.floor(last / 86_400) * 86_400;
+  if (step >= 86_400 && step % 86_400 === 0) {
+    const local = last + TEHRAN_OFFSET_SEC;
+    return Math.floor(local / 86_400) * 86_400 - TEHRAN_OFFSET_SEC;
+  }
   return last;
 }
 
@@ -64,7 +72,7 @@ export function packNewestWindow(bars: readonly Bar[], step: number): TsePackedS
     ...bar,
     time: last - (real.length - 1 - i) * slot,
   }));
-  return { step: slot, realTimes: real.map((bar) => bar.time), packed };
+  return { step: slot, real, realTimes: real.map((bar) => bar.time), packed };
 }
 
 /** Older real bars go to the left. Packed times already on the chart do not move. */
@@ -79,9 +87,11 @@ export function prependOlder(series: TsePackedSeries, older: readonly Bar[]): Ts
     ...bar,
     time: firstPacked - (fresh.length - i) * slot,
   }));
+  const real = dedupe([...fresh, ...series.real]);
   return {
     step: slot,
-    realTimes: [...fresh.map((bar) => bar.time), ...series.realTimes],
+    real,
+    realTimes: real.map((bar) => bar.time),
     packed: [...added, ...series.packed],
   };
 }
@@ -99,13 +109,16 @@ export function appendLive(series: TsePackedSeries, bar: Bar): { series: TsePack
     const updated: Bar = { ...bar, time: lastPacked.time };
     const packed = series.packed.slice();
     packed[packed.length - 1] = updated;
-    return { series: { ...series, packed }, packed: updated };
+    const real = series.real.map((item) => (item.time === bar.time ? { ...bar } : item));
+    return { series: { ...series, real, packed }, packed: updated };
   }
   const packedBar: Bar = { ...bar, time: lastPacked.time + series.step };
+  const real = dedupe([...series.real, bar]);
   return {
     series: {
       step: series.step,
-      realTimes: [...series.realTimes, bar.time],
+      real,
+      realTimes: real.map((item) => item.time),
       packed: [...series.packed, packedBar],
     },
     packed: packedBar,

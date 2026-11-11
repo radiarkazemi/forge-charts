@@ -4,10 +4,8 @@ import { EXCHANGE_PRIORITY } from "@/infrastructure/symbols/static-symbol-reposi
 import { canonicalizeBar, collapseDailyBars } from "@/infrastructure/market-data/session-bars";
 import {
   appendLive,
-  appendNewer,
   emptyTseSeries,
   packNewestWindow,
-  prependOlder,
   slicePacked,
   type TsePackedSeries,
 } from "@/infrastructure/market-data/tse-pack";
@@ -552,10 +550,10 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     const step = barStep(resolution);
     const key = this.tsePackKey(symbol, resolution);
     const prev = this.tsePacks.get(key);
-    const series =
-      !prev || prev.step !== step || periodParams.firstDataRequest
-        ? packNewestWindow(bars, step)
-        : appendNewer(prependOlder(prev, bars), bars);
+    // One timeline for every page. Replacing the series on each first request
+    // anchored an older page to an old date and left a hole before the newest page.
+    const known = prev && prev.step === step ? prev.real : [];
+    const series = packNewestWindow([...known, ...bars], step);
     this.tsePacks.set(key, series.packed.length > 0 ? series : emptyTseSeries(step));
     const countBack = Math.max(periodParams.countBack || 300, 1);
     const to = asUnixSec(periodParams.to, Number.POSITIVE_INFINITY);

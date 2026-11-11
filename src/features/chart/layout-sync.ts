@@ -919,37 +919,11 @@ class LayoutSyncBus {
     return run;
   }
 
-  private async paintCrosshairMarkers(sourceIndex: number, time: number): Promise<void> {
-    if (!this.flags.crosshair || this.activeCount < 2) {
-      this.clearCrosshairMarkers();
-      return;
-    }
-    const markerTime = time > 10_000_000_000 ? Math.floor(time / 1000) : time;
-    // Drop the marker on the source pane (native crosshair is enough there).
-    const sourceMarker = this.crosshairMarkers.get(sourceIndex);
-    if (sourceMarker != null) {
-      this.panes.get(sourceIndex)?.controller.removeEntity(sourceMarker);
-      this.crosshairMarkers.delete(sourceIndex);
-    }
-
-    markChartPaintBusy(800);
-    for (const { index, controller } of this.panes.values()) {
-      if (index === sourceIndex || index >= this.activeCount) continue;
-      if (!controller.isReady) continue;
-      const existing = this.crosshairMarkers.get(index);
-      if (existing != null) {
-        const moved = controller.moveVerticalLineMarker(existing, markerTime);
-        if (moved) continue;
-        controller.removeEntity(existing);
-        this.crosshairMarkers.delete(index);
-      }
-      const created = await controller.createVerticalLineMarker(markerTime);
-      if (created) {
-        this.crosshairMarkers.set(index, created);
-        // Never treat sync markers as user drawings (oneshot / multipane mirror).
-        this.mirrorIds.add(String(created));
-      }
-    }
+  private async paintCrosshairMarkers(_sourceIndex: number, _time: number): Promise<void> {
+    // A locked vertical line was the multipane crosshair. Each mouse move left
+    // another full-height line, and the line followed the unscaled chart.
+    // The pane under the pointer keeps the library crosshair.
+    this.clearCrosshairMarkers();
   }
 
   private clonePrimarySymbolToNewPanes(fromIndex: number): void {

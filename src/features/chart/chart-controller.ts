@@ -391,24 +391,17 @@ export class ChartController {
     }
   }
 
-  /** Ask the library iframe to reflow after CSS grid / visibility changes. */
+  /** Ask the library iframe to reflow after its box changes size. */
   requestResize(): void {
-    try {
-      window.dispatchEvent(new Event("resize"));
-    } catch {
-      /* ignore */
-    }
     const widget = this.widget;
     if (!widget) return;
-    // Charting Library often ignores window.resize for hidden→shown iframes
-    // (bottom layers in 4-pane layouts). Hit the widget + iframe directly.
     try {
-      const anyWidget = widget as unknown as {
-        resize?: (width?: number, height?: number) => void;
-        _iFrame?: HTMLIFrameElement;
-      };
-      anyWidget.resize?.();
-      anyWidget._iFrame?.contentWindow?.dispatchEvent(new Event("resize"));
+      const iframe = (widget as unknown as { _iFrame?: HTMLIFrameElement })._iFrame;
+      const win = iframe?.contentWindow;
+      if (!win) return;
+      // The outer window resize handler only acts in fullscreen mode.
+      // The chart inside the iframe lays out from its own window size.
+      win.dispatchEvent(new Event("resize"));
     } catch {
       /* ignore */
     }

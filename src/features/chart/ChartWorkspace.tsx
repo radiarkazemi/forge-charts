@@ -5,11 +5,9 @@ import type { ChartLayoutId } from "@/application";
 import { useStore } from "@/shared/hooks/useStore";
 import { BarReplayToolbar } from "./bar-replay/BarReplayToolbar";
 import {
-  applyPrimaryLayoutClip,
   clearPrimaryLayoutClip,
   clipPathExcludingHole,
   defaultSplitEdges,
-  mountPrimaryLayoutClip,
   paneRectInWorkspace,
   RESIZABLE_LAYOUTS,
   sanitizeSplitEdges,
@@ -29,6 +27,8 @@ interface ChartWorkspaceProps {
 }
 
 const DEFAULT_CHROME: ChromeInsets = { headerHeight: 38, leftToolbarWidth: 52, priceAxisWidth: 56 };
+/** Multi-layout panes tile the workspace. Header and toolbar live inside pane 0. */
+const PANE_CHROME: ChromeInsets = { headerHeight: 0, leftToolbarWidth: 0, priceAxisWidth: 0 };
 
 function isVerticalSplit(layout: ChartLayoutId): boolean {
   return layout === "2h" || layout === "3h" || layout === "4h";
@@ -68,7 +68,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   const multi = grid.count > 1;
   const layoutId = chartLayout ?? "s";
   const [activePane, setActivePane] = useState(0);
-  const [chrome, setChrome] = useState<ChromeInsets>(DEFAULT_CHROME);
+  const chrome = DEFAULT_CHROME;
   const [workspaceSize, setWorkspaceSize] = useState({ width: 0, height: 0 });
   const [splitEdges, setSplitEdges] = useState<number[]>(() => defaultSplitEdges(layoutId));
   const [draggingEdge, setDraggingEdge] = useState<number | null>(null);
@@ -228,47 +228,21 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
     };
   }, [multi]);
 
-  // Clip primary plot to pane 0; leave the original top navbar full width.
-  // Single-pane: always tear down any leftover multi clip so the chart fills.
+  // Drop any leftover full-window crop. Each pane's widget is the pane's size.
   useEffect(() => {
     const host = primaryHostRef.current;
     if (!host) return;
-    if (!multi) {
+    clearPrimaryLayoutClip(host);
+    const t1 = window.setTimeout(() => {
       clearPrimaryLayoutClip(host);
-      const t1 = window.setTimeout(() => {
-        clearPrimaryLayoutClip(host);
-        layoutSyncBus.reflowVisible();
-      }, 50);
-      const t2 = window.setTimeout(() => layoutSyncBus.reflowVisible(), 300);
-      return () => {
-        window.clearTimeout(t1);
-        window.clearTimeout(t2);
-      };
-    }
-    return mountPrimaryLayoutClip(
-      host,
-      () => layoutRef.current,
-      (next) => {
-        setChrome((prev) =>
-          prev.headerHeight === next.headerHeight &&
-          prev.leftToolbarWidth === next.leftToolbarWidth &&
-          prev.priceAxisWidth === next.priceAxisWidth
-            ? prev
-            : next,
-        );
-      },
-      () => splitEdgesRef.current,
-    );
+      layoutSyncBus.reflowVisible();
+    }, 50);
+    const t2 = window.setTimeout(() => layoutSyncBus.reflowVisible(), 300);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
   }, [chartLayout, multi]);
-
-  // Divider drags update the clip without tearing down the observers
-  // (remounting them on every pixel was flashing the panes).
-  useEffect(() => {
-    if (!multi) return;
-    const host = primaryHostRef.current;
-    if (!host) return;
-    applyPrimaryLayoutClip(host, layoutId, splitEdges);
-  }, [multi, layoutId, splitEdges]);
 
   // Layout / TF / indicator menus live in the primary iframe — punch a hole in layers.
   useEffect(() => {
@@ -331,6 +305,10 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   const edgesForLayout = RESIZABLE_LAYOUTS.has(layoutId)
     ? sanitizeSplitEdges(layoutId, splitEdges)
     : [];
+  const layoutChrome = multi ? PANE_CHROME : chrome;
+  const primaryRect = multi
+    ? paneRectInWorkspace(layoutId, 0, workspaceSize, layoutChrome, edgesForLayout)
+    : null;
 
   const beginDrag = useCallback((edgeIndex: number, event: ReactPointerEvent<HTMLElement>) => {
     event.preventDefault();
@@ -346,10 +324,10 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
       const el = workspaceRef.current;
       if (!el) return;
       const rect = el.getBoundingClientRect();
-      const contentLeft = rect.left + chrome.leftToolbarWidth;
-      const contentTop = rect.top + chrome.headerHeight;
-      const contentW = Math.max(1, rect.width - chrome.leftToolbarWidth);
-      const contentH = Math.max(1, rect.height - chrome.headerHeight);
+      const contentLeft = rect.left + layoutChrome.leftToolbarWidth;
+      const contentTop = rect.top + layoutChrome.headerHeight;
+      const contentW = Math.max(1, rect.width - layoutChrome.leftToolbarWidth);
+      const contentH = Math.max(1, rect.height - layoutChrome.headerHeight);
       const frac = vertical
         ? (event.clientX - contentLeft) / contentW
         : (event.clientY - contentTop) / contentH;
@@ -368,7 +346,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
     };
-  }, [draggingEdge, layoutId, chrome.headerHeight, chrome.leftToolbarWidth]);
+  }, [draggingEdge, layoutId, layoutChrome.headerHeight, layoutChrome.leftToolbarWidth]);
 
   return (
     <Box
@@ -384,19 +362,24 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
         userSelect: draggingEdge != null ? "none" : undefined,
       }}
     >
-      {/* Primary widget: original CL navbar spans the full workspace width. */}
+      {/* Primary widget fills pane 0 so the library lays the chart out at that size. */}
       <Box
         ref={primaryHostRef}
         // Header / left toolbar clicks must NOT steal focus from the active layer.
         // Pane 0 focus comes from CL mouse_down on the plot (and the plot outline hit area).
         sx={{
           position: "absolute",
-          inset: 0,
-          // Stay under secondary layers. Menus show through clip-path holes instead.
-          zIndex: 1,
-          bgcolor: multi ? "transparent" : "background.default",
-          backgroundColor: multi ? "transparent" : undefined,
-          "& iframe": multi ? { backgroundColor: "transparent !important" } : undefined,
+          ...(primaryRect
+            ? {
+                left: primaryRect.left,
+                top: primaryRect.top,
+                width: primaryRect.width,
+                height: primaryRect.height,
+              }
+            : { inset: 0 }),
+          zIndex: menusOpen ? 6 : 1,
+          bgcolor: "background.default",
+          overflow: "hidden",
         }}
       >
         <TradingViewChart
@@ -414,7 +397,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
         const index = offset + 1;
         const visible = multi && index < grid.count;
         const rect = visible
-          ? paneRectInWorkspace(layoutId, index, workspaceSize, chrome, edgesForLayout)
+          ? paneRectInWorkspace(layoutId, index, workspaceSize, layoutChrome, edgesForLayout)
           : null;
         const shown = Boolean(visible && rect && rect.width >= 8 && rect.height >= 8);
         const isActive = shown && activePane === index;
@@ -492,7 +475,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
       {/* Active outline for primary plot slot (navbar stays untouched). */}
       {multi && activePane === 0
         ? (() => {
-            const rect = paneRectInWorkspace(layoutId, 0, workspaceSize, chrome, edgesForLayout);
+            const rect = paneRectInWorkspace(layoutId, 0, workspaceSize, layoutChrome, edgesForLayout);
             if (!rect) return null;
             return (
               <Box
@@ -517,14 +500,14 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
       {multi && edgesForLayout.length > 0
         ? edgesForLayout.map((frac, edgeIndex) => {
             const vertical = isVerticalSplit(layoutId);
-            const contentW = Math.max(0, workspaceSize.width - chrome.leftToolbarWidth);
-            const contentH = Math.max(0, workspaceSize.height - chrome.headerHeight);
+            const contentW = Math.max(0, workspaceSize.width - layoutChrome.leftToolbarWidth);
+            const contentH = Math.max(0, workspaceSize.height - layoutChrome.headerHeight);
             const left = vertical
-              ? chrome.leftToolbarWidth + frac * contentW - 3
-              : chrome.leftToolbarWidth;
+              ? layoutChrome.leftToolbarWidth + frac * contentW - 3
+              : layoutChrome.leftToolbarWidth;
             const top = vertical
-              ? chrome.headerHeight
-              : chrome.headerHeight + frac * contentH - 3;
+              ? layoutChrome.headerHeight
+              : layoutChrome.headerHeight + frac * contentH - 3;
             const width = vertical ? 6 : contentW;
             const height = vertical ? contentH : 6;
             return (
