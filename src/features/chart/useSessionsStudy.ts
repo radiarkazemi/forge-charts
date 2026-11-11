@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 import { useServices } from "@/app/use-services";
 import type { EntityId } from "@/infrastructure/tradingview";
 import { clColor, computeSessions, mergeSessionDefs, paintSessionsOnChart, publishSessionsDashboard, SESSION_COLOR_PALETTE, SESSIONS_DEFAULTS, type SessionsOptions } from "@/features/sessions/runtime";
+import type { DrawCmd } from "@/features/pine/orca-runtime";
 import { readSessionSlotsFromMap, stylePlotIdForIndex, SESSIONS_STUDY_DEFAULTS, SESSIONS_MAX_COUNT } from "./sessions-indicator";
 import { chartAllowedByMaxMinutes, liveChartResolution, studyIsVisible, markChartPaintBusy } from "./study-paint-gate";
 import { readStylePlot } from "./study-style-plots";
@@ -23,15 +24,51 @@ const LIVE_REFRESH_MS = STUDY_LIVE_REFRESH_MS;
 /** Style-tab color changes sometimes skip study_properties_changed — poll lightly. */
 const STYLE_POLL_MS = 1_200;
 
-function fingerprintCmds(
-  cmds: readonly { kind: string; t1: number; p1: number; color?: string; fill?: string }[],
-): string {
-  if (cmds.length === 0) return "empty";
-  const head = cmds.slice(0, 6);
-  const tail = cmds.length > 6 ? cmds.slice(-6) : [];
-  const part = (c: (typeof cmds)[number]) =>
-    `${c.kind}:${c.t1}:${c.p1}:${c.color ?? ""}:${c.fill ?? ""}`;
-  return `${cmds.length}|${[...head, ...tail].map(part).join(";")}`;
+/** Full geometry hash. A partial head/tail check missed live-box edits and redrew everything. */
+function hashCmds(cmds: readonly DrawCmd[]): string {
+  let h = 2166136261;
+  const mix = (s: string) => {
+    for (let i = 0; i < s.length; i += 1) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    h ^= 0x1f;
+  };
+  mix(String(cmds.length));
+  for (const c of cmds) {
+    mix(c.kind);
+    mix(String(c.t1));
+    mix(String(c.p1));
+    mix(String(c.t2 ?? ""));
+    mix(String(c.p2 ?? ""));
+    mix(c.color);
+    mix(c.fill ?? "");
+    mix(c.text ?? "");
+    mix(c.style ?? "");
+    mix(String(c.width ?? ""));
+  }
+  return cmds.length === 0 ? "empty" : (h >>> 0).toString(36);
+}
+
+function samePaintStyle(a: DrawCmd, b: DrawCmd): boolean {
+  return (
+    a.kind === b.kind &&
+    a.color === b.color &&
+    (a.fill ?? "") === (b.fill ?? "") &&
+    (a.text ?? "") === (b.text ?? "") &&
+    (a.style ?? "") === (b.style ?? "") &&
+    (a.width ?? 0) === (b.width ?? 0)
+  );
+}
+
+function pointsOf(cmd: DrawCmd): { time: number; price: number }[] {
+  if ((cmd.kind === "line" || cmd.kind === "rect") && cmd.t2 != null && cmd.p2 != null) {
+    return [
+      { time: cmd.t1, price: cmd.p1 },
+      { time: cmd.t2, price: cmd.p2 },
+    ];
+  }
+  return [{ time: cmd.t1, price: cmd.p1 }];
 }
 
 /** Pull Style-tab plot color + transparency for session slots (boxes + labels). */
@@ -56,6 +93,13 @@ function readStyleColors(
     });
   }
   return out;
+}
+
+function styleFingerprint(api: { getStyleValues?: () => unknown } | null | undefined): string {
+  if (!api) return "";
+  return readStyleColors(api, SESSIONS_MAX_COUNT)
+    .map((c) => `${c.color}:${c.transparency}`)
+    .join("|");
 }
 
 function defaultOpts(): SessionsOptions {
@@ -84,13 +128,18 @@ export function useSessionsStudy(chart: ChartController | null): void {
   const { chart: primaryChart } = useServices();
   const { ready, symbol, interval } = useBoundChartState(chart);
   const isPrimaryPane = chart != null && chart === primaryChart;
-  const entityIdsRef = useRef<EntityId[]>([]);
+  const stableIdsRef = useRef<EntityId[]>([]);
+  const liveIdsRef = useRef<EntityId[]>([]);
+  const stableCmdsRef = useRef<DrawCmd[]>([]);
+  const liveCmdsRef = useRef<DrawCmd[]>([]);
   const busyRef = useRef(false);
   const lastKeyRef = useRef("");
-  const lastFpRef = useRef("");
+  const lastStableFpRef = useRef("");
+  const lastLiveFpRef = useRef("");
   const lastStyleFpRef = useRef("");
   const genRef = useRef(0);
   const pendingRef = useRef(false);
+  const muteUntilRef = useRef(0);
 
   useEffect(() => {
     if (!chart || !ready) return;
@@ -104,11 +153,21 @@ export function useSessionsStudy(chart: ChartController | null): void {
     genRef.current += 1;
     clearDrawingsSafe();
     lastKeyRef.current = "";
-    lastFpRef.current = "";
+    lastStableFpRef.current = "";
+    lastLiveFpRef.current = "";
+
+    const mutePaintEvents = () => {
+      muteUntilRef.current = Date.now() + STUDY_PAINT_MUTE_MS;
+      markChartPaintBusy(STUDY_PAINT_MUTE_MS);
+    };
+    const isMuted = () => Date.now() < muteUntilRef.current;
 
     function clearDrawingsSafe(): void {
-      const ids = entityIdsRef.current;
-      entityIdsRef.current = [];
+      const ids = [...stableIdsRef.current, ...liveIdsRef.current];
+      stableIdsRef.current = [];
+      liveIdsRef.current = [];
+      stableCmdsRef.current = [];
+      liveCmdsRef.current = [];
       for (const id of ids) {
         try {
           paneChart.removeEntity(id);
@@ -218,10 +277,6 @@ export function useSessionsStudy(chart: ChartController | null): void {
         }));
 
         const sessions = mergeSessionDefs(coloredSlots, sessionCount, extra);
-        console.info(
-          `[forge-sessions] study=${String(studyId)} zones=${sessions.length}`,
-          sessions.map((s) => `${s.name}:${s.hours}:${s.color}:t${s.transparency ?? "?"}`).join(", "),
-        );
 
         return {
           sessions,
@@ -259,7 +314,41 @@ export function useSessionsStudy(chart: ChartController | null): void {
       }
     };
 
-    const repaint = async (force = false) => {
+    const hasDrawings = () => stableIdsRef.current.length + liveIdsRef.current.length > 0;
+
+    const dropIds = (ids: readonly EntityId[]) => {
+      mutePaintEvents();
+      for (const id of ids) {
+        try {
+          paneChart.removeEntity(id);
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+
+    /** Move existing shapes when only the box edge changed. Returns false if they must be recreated. */
+    const tryMoveShapes = (
+      chartApi: NonNullable<ReturnType<typeof widget.activeChart>>,
+      ids: readonly EntityId[],
+      prev: readonly DrawCmd[],
+      next: readonly DrawCmd[],
+    ): boolean => {
+      if (ids.length === 0 || ids.length !== next.length || prev.length !== next.length) return false;
+      for (let i = 0; i < next.length; i += 1) {
+        if (!samePaintStyle(prev[i]!, next[i]!)) return false;
+      }
+      try {
+        for (let i = 0; i < next.length; i += 1) {
+          chartApi.getShapeById(ids[i]!).setPoints(pointsOf(next[i]!));
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    const repaint = async () => {
       if (cancelled) return;
       if (busyRef.current) {
         pendingRef.current = true;
@@ -271,7 +360,8 @@ export function useSessionsStudy(chart: ChartController | null): void {
         genRef.current += 1;
         clearDrawings();
         lastKeyRef.current = "";
-        lastFpRef.current = "";
+        lastStableFpRef.current = "";
+        lastLiveFpRef.current = "";
         return;
       }
 
@@ -296,21 +386,19 @@ export function useSessionsStudy(chart: ChartController | null): void {
       const visible = studyIsVisible(studyApi);
       // Honor Visibility eye + “≤ N minute” gate (drawings ignore CL Visibility alone).
       if (!visible || !allowedTf) {
-        if (entityIdsRef.current.length > 0 || lastKeyRef.current) {
+        if (hasDrawings() || lastKeyRef.current) {
           genRef.current += 1;
           clearDrawings();
         }
         lastKeyRef.current = `hidden:${symbol}:${res}:max${maxMinutes}`;
-        lastFpRef.current = "";
-        console.info(
-          `[forge-sessions] gated off · res=${res} maxMinutes=${maxMinutes} visible=${visible} allowedTf=${allowedTf}`,
-        );
+        lastStableFpRef.current = "";
+        lastLiveFpRef.current = "";
         return;
       }
       const optsKey = JSON.stringify({ symbol, res, maxMinutes, opts, studies: studyIds });
 
-      const myGen = ++genRef.current;
       busyRef.current = true;
+      let myGen = genRef.current;
       try {
         const api = widget.activeChart();
         if (!api) return;
@@ -327,65 +415,85 @@ export function useSessionsStudy(chart: ChartController | null): void {
           volume: b.volume ?? 0,
         }));
         if (bars.length < 5) {
-          console.warn("[forge-sessions] not enough bars", bars.length);
-          if (entityIdsRef.current.length === 0) lastKeyRef.current = "";
+          if (!hasDrawings()) lastKeyRef.current = "";
           return;
         }
 
-        // Tip changes as the active session extends — must refresh or boxes “stick”.
-        const tip = bars[bars.length - 1]!;
-        const styleFp = (opts.sessions ?? [])
-          .map((s) => `${s.color}:${s.transparency ?? ""}`)
-          .join("|");
-        const key = `${optsKey}|${tip.time}:${tip.high}:${tip.low}:${tip.close}|${styleFp}`;
-
-        const { cmds, dashboard } = computeSessions(bars, opts);
-        const fp = fingerprintCmds(cmds);
-        if (!force && fp === lastFpRef.current && lastKeyRef.current === key) {
+        const { stable, live, dashboard } = computeSessions(bars, opts);
+        const stableFp = hashCmds(stable);
+        const liveFp = hashCmds(live);
+        const styleFp = styleFingerprint(studyApi);
+        if (
+          stableFp === lastStableFpRef.current &&
+          liveFp === lastLiveFpRef.current &&
+          optsKey === lastKeyRef.current
+        ) {
+          lastStyleFpRef.current = styleFp;
           if (isPrimaryPane) publishSessionsDashboard(dashboard);
           return;
         }
         if (cancelled || myGen !== genRef.current) return;
 
-        markChartPaintBusy(STUDY_PAINT_MUTE_MS);
-        const ids =
-          cmds.length === 0
-            ? ([] as EntityId[])
-            : await paintSessionsOnChart(api, cmds, { ownerStudyId: studyId });
-        if (cancelled || myGen !== genRef.current) {
-          for (const id of ids) {
-            try {
-              paneChart.removeEntity(id);
-            } catch {
-              /* ignore */
-            }
-          }
+        // Closed boxes stay put. Only the forming session is moved, so the chart does not flash.
+        const stableMoved =
+          stableFp === lastStableFpRef.current ||
+          tryMoveShapes(api, stableIdsRef.current, stableCmdsRef.current, stable);
+        const liveMoved =
+          liveFp === lastLiveFpRef.current ||
+          tryMoveShapes(api, liveIdsRef.current, liveCmdsRef.current, live);
+
+        if (stableMoved && liveMoved) {
+          stableCmdsRef.current = stable;
+          liveCmdsRef.current = live;
+          lastStableFpRef.current = stableFp;
+          lastLiveFpRef.current = liveFp;
+          lastStyleFpRef.current = styleFp;
+          lastKeyRef.current = optsKey;
+          if (isPrimaryPane) publishSessionsDashboard(dashboard);
           return;
         }
 
-        const prev = entityIdsRef.current;
-        entityIdsRef.current = ids;
-        lastKeyRef.current = key;
-        lastFpRef.current = fp;
-        lastStyleFpRef.current = styleFp;
-        if (isPrimaryPane) publishSessionsDashboard(dashboard);
-        for (const id of prev) {
-          try {
-            paneChart.removeEntity(id);
-          } catch {
-            /* ignore */
-          }
+        myGen = ++genRef.current;
+        mutePaintEvents();
+        const paintGroup = async (cmds: readonly DrawCmd[]): Promise<EntityId[]> =>
+          cmds.length === 0 ? [] : paintSessionsOnChart(api, cmds, { ownerStudyId: studyId });
+
+        const nextStable = stableMoved ? stableIdsRef.current : await paintGroup(stable);
+        if (cancelled || myGen !== genRef.current) {
+          if (!stableMoved) dropIds(nextStable);
+          return;
         }
+        const nextLive = liveMoved ? liveIdsRef.current : await paintGroup(live);
+        if (cancelled || myGen !== genRef.current) {
+          if (!stableMoved) dropIds(nextStable);
+          if (!liveMoved) dropIds(nextLive);
+          return;
+        }
+
+        const prevStable = stableMoved ? [] : stableIdsRef.current;
+        const prevLive = liveMoved ? [] : liveIdsRef.current;
+        if (!stableMoved) stableIdsRef.current = nextStable;
+        if (!liveMoved) liveIdsRef.current = nextLive;
+        stableCmdsRef.current = stable;
+        liveCmdsRef.current = live;
+        lastStableFpRef.current = stableFp;
+        lastLiveFpRef.current = liveFp;
+        lastStyleFpRef.current = styleFp;
+        lastKeyRef.current = optsKey;
+        if (isPrimaryPane) publishSessionsDashboard(dashboard);
+        dropIds([...prevStable, ...prevLive]);
       } catch (err) {
         console.warn("[forge-sessions] paint failed", err);
         // Allow the next poll to retry instead of looking permanently stuck.
         lastKeyRef.current = "";
+        lastStableFpRef.current = "";
+        lastLiveFpRef.current = "";
       } finally {
         busyRef.current = false;
         if (!cancelled && pendingRef.current) {
           pendingRef.current = false;
           window.setTimeout(() => {
-            void repaint(false);
+            void repaint();
           }, 150);
         }
       }
@@ -394,11 +502,12 @@ export function useSessionsStudy(chart: ChartController | null): void {
     const scheduleRepaint = () => {
       window.clearTimeout(studyTimer);
       studyTimer = window.setTimeout(() => {
-        void repaint(true);
+        void repaint();
       }, STUDY_DEBOUNCE_MS);
     };
 
     const onStudyEvent = (...args: unknown[]) => {
+      if (isMuted()) return;
       const eventType = String(args[1] ?? args[0] ?? "");
       if (/remove/i.test(eventType)) {
         window.clearTimeout(studyTimer);
@@ -406,7 +515,8 @@ export function useSessionsStudy(chart: ChartController | null): void {
           genRef.current += 1;
           clearDrawings();
           lastKeyRef.current = "";
-          lastFpRef.current = "";
+          lastStableFpRef.current = "";
+          lastLiveFpRef.current = "";
           return;
         }
       }
@@ -416,13 +526,14 @@ export function useSessionsStudy(chart: ChartController | null): void {
     };
 
     const onStudyProperties = (...args: unknown[]) => {
+      if (isMuted()) return;
       const id = String(args[0] ?? "");
       if (!id) return;
       if (findStudyIds().some((s) => String(s) === id)) scheduleRepaint();
     };
 
     const kickoff = () => {
-      void repaint(true);
+      void repaint();
     };
     try {
       widget.activeChart()?.dataReady(kickoff);
@@ -433,56 +544,54 @@ export function useSessionsStudy(chart: ChartController | null): void {
     const kickoffTimer2 = window.setTimeout(kickoff, 2_400);
 
     const presencePoll = window.setInterval(() => {
-      if (cancelled || busyRef.current) return;
+      if (cancelled || busyRef.current || isMuted()) return;
       const ids = findStudyIds();
       if (ids.length === 0) {
-        if (entityIdsRef.current.length > 0 || lastKeyRef.current) {
+        if (hasDrawings() || lastKeyRef.current) {
           genRef.current += 1;
           clearDrawings();
           lastKeyRef.current = "";
-          lastFpRef.current = "";
+          lastStableFpRef.current = "";
+          lastLiveFpRef.current = "";
         }
         return;
       }
       try {
         const api = widget.activeChart()?.getStudyById(ids[0]!);
         if (!studyIsVisible(api)) {
-          if (entityIdsRef.current.length > 0 || (lastKeyRef.current && !String(lastKeyRef.current).startsWith("hidden:"))) {
+          if (hasDrawings() || (lastKeyRef.current && !String(lastKeyRef.current).startsWith("hidden:"))) {
             genRef.current += 1;
             clearDrawings();
             lastKeyRef.current = "hidden:presence";
-            lastFpRef.current = "";
+            lastStableFpRef.current = "";
+            lastLiveFpRef.current = "";
           }
           return;
         }
       } catch {
         /* ignore */
       }
-      if (lastKeyRef.current === "" || String(lastKeyRef.current).startsWith("hidden:")) void repaint(false);
+      if (lastKeyRef.current === "" || String(lastKeyRef.current).startsWith("hidden:")) void repaint();
     }, PRESENCE_POLL_MS);
 
-    // Live tip refresh — forming LQ/Open/NY boxes track new highs/lows.
-    // Also re-check TF gate so a store lag cannot leave boxes on 15m/1H.
+    // Forming boxes track new highs and lows. Unchanged closed boxes are left alone.
     const livePoll = window.setInterval(() => {
-      if (cancelled || busyRef.current) return;
+      if (cancelled || busyRef.current || isMuted()) return;
       if (findStudyIds().length === 0) return;
-      void repaint(true);
+      void repaint();
     }, LIVE_REFRESH_MS);
 
     // Style-tab color/opacity often skips study_properties_changed on custom studies.
+    // Compare the same 12-slot fingerprint the painter stores, or this poll redraws forever.
     const stylePoll = window.setInterval(() => {
-      if (cancelled || busyRef.current) return;
+      if (cancelled || busyRef.current || isMuted()) return;
       const ids = findStudyIds();
       if (ids.length === 0) return;
       try {
         const api = widget.activeChart()?.getStudyById(ids[0]!);
         if (!api) return;
-        const colors = readStyleColors(api, SESSIONS_MAX_COUNT);
-        const fp = colors.map((c) => `${c.color}:${c.transparency}`).join("|");
-        if (fp && fp !== lastStyleFpRef.current) {
-          lastStyleFpRef.current = fp;
-          scheduleRepaint();
-        }
+        const fp = styleFingerprint(api);
+        if (fp && fp !== lastStyleFpRef.current) scheduleRepaint();
       } catch {
         /* ignore */
       }
@@ -509,7 +618,8 @@ export function useSessionsStudy(chart: ChartController | null): void {
           genRef.current += 1;
           clearDrawings();
           lastKeyRef.current = `hidden:${symbol}:${resNow}:max${maxMin}`;
-          lastFpRef.current = "";
+          lastStableFpRef.current = "";
+          lastLiveFpRef.current = "";
         }
       } catch {
         /* ignore */
@@ -566,7 +676,8 @@ export function useSessionsStudy(chart: ChartController | null): void {
       }
       clearDrawings();
       lastKeyRef.current = "";
-      lastFpRef.current = "";
+      lastStableFpRef.current = "";
+      lastLiveFpRef.current = "";
     };
   }, [chart, ready, symbol, interval, isPrimaryPane]);
 }

@@ -667,6 +667,10 @@ function pushSessionOverlays(
 
 export interface SessionsComputeResult {
   readonly cmds: DrawCmd[];
+  /** Closed sessions and dividers. These stay on the chart until history or style changes. */
+  readonly stable: DrawCmd[];
+  /** Forming session and the midnight line. These move with the live bar. */
+  readonly live: DrawCmd[];
   readonly dashboard: SessionsDashboardState | null;
 }
 
@@ -679,7 +683,7 @@ export function computeSessions(
   opts: SessionsOptions,
 ): SessionsComputeResult {
   const cmds: DrawCmd[] = [];
-  if (bars.length < 2) return { cmds, dashboard: null };
+  if (bars.length < 2) return { cmds, stable: [], live: [], dashboard: null };
 
   const defs = opts.sessions.filter((s) => s.enable && s.name.trim() && parseSessionHours(s.hours));
   const runs: (RunState | null)[] = defs.map(() => null);
@@ -787,18 +791,20 @@ export function computeSessions(
     }
   }
 
-  // Active (forming) sessions + trailing max/min to last bar.
+  // Forming sessions move every bar. Keep them off the stable list so a live
+  // update does not destroy and recreate every closed box (that flash is the blink).
+  const live: DrawCmd[] = [];
   const last = bars[bars.length - 1]!;
   for (let s = 0; s < defs.length; s += 1) {
     const def = defs[s]!;
     const run = runs[s];
     if (!run) continue;
     if (run.active) {
-      pushRange(cmds, run, last.time, def, opts);
-      pushSessionOverlays(cmds, run, last.time, def);
+      pushRange(live, run, last.time, def, opts);
+      pushSessionOverlays(live, run, last.time, def);
     } else if (def.maxMin && run.completedHigh != null && run.maxMinFromIdx != null) {
       const from = bars[run.maxMinFromIdx]!;
-      cmds.push({
+      live.push({
         kind: "line",
         t1: from.time,
         p1: run.completedHigh,
@@ -808,7 +814,7 @@ export function computeSessions(
         width: 1,
         style: "solid",
       });
-      cmds.push({
+      live.push({
         kind: "line",
         t1: from.time,
         p1: run.completedLow!,
@@ -833,13 +839,13 @@ export function computeSessions(
     }
   }
 
-  pushMidnightLine(cmds, bars, opts);
+  pushMidnightLine(live, bars, opts);
 
   const dashboard = opts.dashboard
     ? buildDashboard(defs, runs, bars, opts)
     : null;
 
-  return { cmds, dashboard };
+  return { cmds: [...cmds, ...live], stable: cmds, live, dashboard };
 }
 
 function buildDashboard(
