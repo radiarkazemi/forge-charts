@@ -26,7 +26,7 @@ export interface PaneRectPx {
 export type PaneSplitEdges = readonly number[];
 
 /** Layouts where the middle divider(s) can be dragged. */
-export const RESIZABLE_LAYOUTS = new Set<ChartLayoutId>(["2h", "2v", "3h", "3v", "3s"]);
+export const RESIZABLE_LAYOUTS = new Set<ChartLayoutId>(["2h", "2v", "3h", "3v", "3s", "4h", "4v"]);
 
 export function defaultSplitEdges(layout: ChartLayoutId): number[] {
   switch (layout) {
@@ -37,6 +37,9 @@ export function defaultSplitEdges(layout: ChartLayoutId): number[] {
     case "3v":
     case "3s":
       return [1 / 3, 2 / 3];
+    case "4h":
+    case "4v":
+      return [0.25, 0.5, 0.75];
     default:
       return [];
   }
@@ -97,6 +100,28 @@ function slotsFromEdges(layout: ChartLayoutId, edges: readonly number[]): Conten
       { x: 0, y: b, w: 1, h: 1 - b },
     ];
   }
+  if (layout === "4h") {
+    const a = edges[0] ?? 0.25;
+    const b = edges[1] ?? 0.5;
+    const c = edges[2] ?? 0.75;
+    return [
+      { x: 0, y: 0, w: a, h: 1 },
+      { x: a, y: 0, w: b - a, h: 1 },
+      { x: b, y: 0, w: c - b, h: 1 },
+      { x: c, y: 0, w: 1 - c, h: 1 },
+    ];
+  }
+  if (layout === "4v") {
+    const a = edges[0] ?? 0.25;
+    const b = edges[1] ?? 0.5;
+    const c = edges[2] ?? 0.75;
+    return [
+      { x: 0, y: 0, w: 1, h: a },
+      { x: 0, y: a, w: 1, h: b - a },
+      { x: 0, y: b, w: 1, h: c - b },
+      { x: 0, y: c, w: 1, h: 1 - c },
+    ];
+  }
   return null;
 }
 
@@ -136,11 +161,57 @@ const SLOTS: Record<ChartLayoutId, readonly ContentSlot[]> = {
     { x: 0, y: 0.5, w: 0.5, h: 0.5 },
     { x: 0.5, y: 0.5, w: 0.5, h: 0.5 },
   ],
+  "3l": [
+    { x: 0, y: 0, w: 0.5, h: 1 },
+    { x: 0.5, y: 0, w: 0.5, h: 0.5 },
+    { x: 0.5, y: 0.5, w: 0.5, h: 0.5 },
+  ],
+  "3r": [
+    { x: 0, y: 0, w: 0.5, h: 0.5 },
+    { x: 0, y: 0.5, w: 0.5, h: 0.5 },
+    { x: 0.5, y: 0, w: 0.5, h: 1 },
+  ],
   "4": [
     { x: 0, y: 0, w: 0.5, h: 0.5 },
     { x: 0.5, y: 0, w: 0.5, h: 0.5 },
     { x: 0, y: 0.5, w: 0.5, h: 0.5 },
     { x: 0.5, y: 0.5, w: 0.5, h: 0.5 },
+  ],
+  "4h": [
+    { x: 0, y: 0, w: 0.25, h: 1 },
+    { x: 0.25, y: 0, w: 0.25, h: 1 },
+    { x: 0.5, y: 0, w: 0.25, h: 1 },
+    { x: 0.75, y: 0, w: 0.25, h: 1 },
+  ],
+  "4v": [
+    { x: 0, y: 0, w: 1, h: 0.25 },
+    { x: 0, y: 0.25, w: 1, h: 0.25 },
+    { x: 0, y: 0.5, w: 1, h: 0.25 },
+    { x: 0, y: 0.75, w: 1, h: 0.25 },
+  ],
+  "4l": [
+    { x: 0, y: 0, w: 0.5, h: 1 },
+    { x: 0.5, y: 0, w: 0.5, h: 1 / 3 },
+    { x: 0.5, y: 1 / 3, w: 0.5, h: 1 / 3 },
+    { x: 0.5, y: 2 / 3, w: 0.5, h: 1 / 3 },
+  ],
+  "4r": [
+    { x: 0, y: 0, w: 0.5, h: 1 / 3 },
+    { x: 0, y: 1 / 3, w: 0.5, h: 1 / 3 },
+    { x: 0, y: 2 / 3, w: 0.5, h: 1 / 3 },
+    { x: 0.5, y: 0, w: 0.5, h: 1 },
+  ],
+  "3-1": [
+    { x: 0, y: 0, w: 1 / 3, h: 0.5 },
+    { x: 1 / 3, y: 0, w: 1 / 3, h: 0.5 },
+    { x: 2 / 3, y: 0, w: 1 / 3, h: 0.5 },
+    { x: 0, y: 0.5, w: 1, h: 0.5 },
+  ],
+  "1-3": [
+    { x: 0, y: 0, w: 1, h: 0.5 },
+    { x: 0, y: 0.5, w: 1 / 3, h: 0.5 },
+    { x: 1 / 3, y: 0.5, w: 1 / 3, h: 0.5 },
+    { x: 2 / 3, y: 0.5, w: 1 / 3, h: 0.5 },
   ],
 };
 

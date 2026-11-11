@@ -11,7 +11,24 @@ export type SidePanelId = "watchlist" | "alerts" | "data" | "pine";
 
 
 /** Multi-chart page layout (1 / 2 / 3 / 4 panes). */
-export type ChartLayoutId = "s" | "2h" | "2v" | "3s" | "3h" | "3v" | "2-1" | "1-2" | "4";
+export type ChartLayoutId =
+  | "s"
+  | "2h"
+  | "2v"
+  | "3h"
+  | "3v"
+  | "3s"
+  | "3l"
+  | "3r"
+  | "2-1"
+  | "1-2"
+  | "4"
+  | "4h"
+  | "4v"
+  | "4l"
+  | "4r"
+  | "3-1"
+  | "1-3";
 
 export interface LayoutSyncSettings {
   readonly symbol: boolean;
@@ -156,7 +173,25 @@ export const DEFAULT_SETTINGS: Settings = {
   activeProfileId: "local-radiar",
 };
 
-const VALID_LAYOUTS = new Set<ChartLayoutId>(["s", "2h", "2v", "3s", "3h", "3v", "2-1", "1-2", "4"]);
+const VALID_LAYOUTS = new Set<ChartLayoutId>([
+  "s",
+  "2h",
+  "2v",
+  "3h",
+  "3v",
+  "3s",
+  "3l",
+  "3r",
+  "2-1",
+  "1-2",
+  "4",
+  "4h",
+  "4v",
+  "4l",
+  "4r",
+  "3-1",
+  "1-3",
+]);
 
 function sanitizeLayout(value: unknown): ChartLayoutId {
   return typeof value === "string" && VALID_LAYOUTS.has(value as ChartLayoutId)

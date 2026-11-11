@@ -34,8 +34,6 @@ export function SafetyAuthorizationPage({
   onBack,
 }: SafetyAuthorizationPageProps) {
   const [fullName, setFullName] = useState(initial?.fullName ?? displayName ?? "");
-  const [phone, setPhone] = useState(initial?.phone ?? "");
-  const [nationalId, setNationalId] = useState(initial?.nationalId ?? "");
   const [country, setCountry] = useState(initial?.country ?? "Iran");
   const [acceptedTerms, setAcceptedTerms] = useState(initial?.acceptedTerms === true);
   const [acceptedRisk, setAcceptedRisk] = useState(initial?.acceptedRisk === true);
@@ -49,8 +47,8 @@ export function SafetyAuthorizationPage({
     try {
       const profile = validateSafetyDraft({
         fullName,
-        phone,
-        nationalId,
+        phone: initial?.phone ?? "",
+        nationalId: initial?.nationalId ?? "",
         country,
         acceptedTerms,
         acceptedRisk,
@@ -110,28 +108,6 @@ export function SafetyAuthorizationPage({
               size="small"
               autoComplete="name"
               placeholder="First and last name"
-            />
-            <TextField
-              label="Mobile phone"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              required
-              fullWidth
-              size="small"
-              autoComplete="tel"
-              placeholder="09121234567"
-              helperText="Used for account recovery and authorization notices"
-            />
-            <TextField
-              label="National ID / authorization code"
-              value={nationalId}
-              onChange={(e) => setNationalId(e.target.value)}
-              required
-              fullWidth
-              size="small"
-              inputMode="numeric"
-              placeholder="10-digit national ID"
-              helperText="Required for safety verification on this account"
             />
             <TextField
               label="Country / city"

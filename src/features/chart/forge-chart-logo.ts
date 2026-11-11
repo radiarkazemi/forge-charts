@@ -1,6 +1,6 @@
 /**
- * Inject Forge brand lockup into the Charting Library iframe (bottom-left of
- * the chart pane) — same mark + FORGE wordmark as `public/brand/forge-mark-dark.svg`.
+ * Bottom-left chart mark. Icon only — the geometric F already in the brand
+ * sheet (`public/brand/forge-mark-dark.svg`). No wordmark.
  */
 
 import type { IChartingLibraryWidget } from "@/infrastructure/tradingview";
@@ -8,7 +8,7 @@ import type { IChartingLibraryWidget } from "@/infrastructure/tradingview";
 const HOST_ATTR = "data-forge-chart-logo";
 
 /** Codebase mark (light fill) — matches AuthGate / brand sheet lockup. */
-const MARK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="18" height="18" aria-hidden="true" fill="none"><g transform="skewX(-12) translate(5 0)" fill="currentColor"><path d="M12 10h14l-8 44H4z"/><path d="M26 10h30l-5 14H21z"/><path d="M23 32h24l-5 14H18z"/></g></svg>`;
+const MARK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="22" height="22" aria-hidden="true" fill="none"><g transform="skewX(-12) translate(5 0)" fill="currentColor"><path d="M12 10h14l-8 44H4z"/><path d="M26 10h30l-5 14H21z"/><path d="M23 32h24l-5 14H18z"/></g></svg>`;
 
 function ensureStyle(doc: Document): void {
   if (doc.getElementById("forge-chart-logo-style")) return;
@@ -23,8 +23,9 @@ a[${HOST_ATTR}] {
   display: inline-flex;
   align-items: center;
   height: 28px;
-  padding: 0 8px 0 4px;
-  gap: 7px;
+  width: 28px;
+  padding: 0;
+  justify-content: center;
   border-radius: 6px;
   text-decoration: none;
   color: #f5f7fb;
@@ -45,13 +46,6 @@ a[${HOST_ATTR}]:hover {
 html.theme-light a[${HOST_ATTR}]:hover,
 .theme-light a[${HOST_ATTR}]:hover {
   background: rgba(255, 255, 255, 0.92);
-}
-a[${HOST_ATTR}] .forge-logo-text {
-  white-space: nowrap;
-  font: 700 12px/1 "Trebuchet MS", "Segoe UI", sans-serif;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: inherit;
 }
 a[${HOST_ATTR}] svg { display: block; flex-shrink: 0; color: inherit; }
 `;
@@ -104,13 +98,13 @@ export function mountForgeChartLogo(widget: IChartingLibraryWidget): () => void 
         link.href = "https://forgechart.ir";
         link.target = "_blank";
         link.rel = "noopener noreferrer";
-        link.title = "FORGE";
-        link.setAttribute("aria-label", "FORGE");
-        link.innerHTML = `${MARK_SVG}<span class="forge-logo-text">FORGE</span>`;
+        link.removeAttribute("title");
+        link.setAttribute("aria-label", "Forge");
+        link.innerHTML = MARK_SVG;
       } else {
-        link.innerHTML = `${MARK_SVG}<span class="forge-logo-text">FORGE</span>`;
-        link.title = "FORGE";
-        link.setAttribute("aria-label", "FORGE");
+        link.innerHTML = MARK_SVG;
+        link.removeAttribute("title");
+        link.setAttribute("aria-label", "Forge");
       }
       if (link.parentElement !== host) host.appendChild(link);
 

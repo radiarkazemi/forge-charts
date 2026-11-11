@@ -272,7 +272,7 @@ export function AuthGate({ auth, onAuthenticated }: AuthGateProps) {
 
           <Typography variant="caption" sx={{ color: "#787b86", textAlign: "center" }}>
             {mode === "signup"
-              ? "Next: safety & authorization details (name, phone, ID). Passwords stay on this device."
+              ? "Next: name and terms. Passwords stay on this device."
               : "Passwords stay on this device. Other people need their own account — they cannot open yours without your password."}
           </Typography>
         </Stack>

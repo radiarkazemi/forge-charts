@@ -18,8 +18,6 @@ export function isSafetyProfileComplete(
   if (!value) return false;
   return (
     Boolean(value.fullName?.trim()) &&
-    Boolean(value.phone?.trim()) &&
-    Boolean(value.nationalId?.trim()) &&
     Boolean(value.country?.trim()) &&
     value.acceptedTerms === true &&
     value.acceptedRisk === true &&
@@ -64,14 +62,10 @@ export function validateSafetyDraft(input: {
   if (fullName.length < 3) {
     throw new Error("Enter your full legal name (at least 3 characters).");
   }
-  const phone = normalizePhone(input.phone);
-  if (!isValidPhone(phone)) {
-    throw new Error("Enter a valid mobile number (example: 09121234567).");
-  }
-  const nationalId = normalizeNationalId(input.nationalId);
-  if (!isValidNationalId(nationalId)) {
-    throw new Error("Enter a valid national ID / authorization code (8–16 digits).");
-  }
+  // Phone and national ID are not collected for now. Keep the fields on the
+  // stored profile so older accounts still load.
+  const phone = input.phone ? normalizePhone(input.phone) : "";
+  const nationalId = input.nationalId ? normalizeNationalId(input.nationalId) : "";
   const country = input.country.trim().replace(/\s+/g, " ").slice(0, 56);
   if (country.length < 2) {
     throw new Error("Enter your country or city of residence.");

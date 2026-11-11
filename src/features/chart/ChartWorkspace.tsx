@@ -30,7 +30,7 @@ interface ChartWorkspaceProps {
 const DEFAULT_CHROME: ChromeInsets = { headerHeight: 38, leftToolbarWidth: 52, priceAxisWidth: 56 };
 
 function isVerticalSplit(layout: ChartLayoutId): boolean {
-  return layout === "2h" || layout === "3h";
+  return layout === "2h" || layout === "3h" || layout === "4h";
 }
 
 /**

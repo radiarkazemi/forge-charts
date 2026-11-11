@@ -2,6 +2,15 @@ import { normalizeTicker, parseInterval, intervalSeconds, isMarketSessionOpen, S
 import { createStore, type MarketDataService, type Store, type SymbolRepository, type Unsubscribe } from "@/application";
 import { EXCHANGE_PRIORITY } from "@/infrastructure/symbols/static-symbol-repository";
 import { canonicalizeBar, collapseDailyBars } from "@/infrastructure/market-data/session-bars";
+import {
+  appendLive,
+  appendNewer,
+  emptyTseSeries,
+  packNewestWindow,
+  prependOlder,
+  slicePacked,
+  type TsePackedSeries,
+} from "@/infrastructure/market-data/tse-pack";
 import type {
   DatafeedConfiguration,
   DatafeedErrorCallback,
@@ -146,6 +155,12 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   /** Optional pin so pushReplayBar only feeds matching ticker/TF (set by BarReplayController). */
   private replayPushTicker: string | null = null;
   private replayPushResolution: string | null = null;
+  /**
+   * TSE history is sparse. Each symbol/resolution keeps one packed series so
+   * missing minutes and holidays do not leave holes, and a later page does
+   * not move candles already on the chart.
+   */
+  private readonly tsePacks = new Map<string, TsePackedSeries>();
 
   constructor(
     private readonly marketData: MarketDataService,
@@ -438,10 +453,16 @@ export class TradingViewDatafeed implements IBasicDataFeed {
         onResult([], { noData: true });
         return;
       }
-      onResult(
-        collapseDailyBars(symbol, resolution, filtered).map((bar) => toTvBar(bar, barStep(resolution))),
-        { noData: false },
-      );
+      const collapsed = collapseDailyBars(symbol, resolution, filtered);
+      const ready =
+        symbol.exchange.toUpperCase() === "TSE"
+          ? await this.packTseBars(symbol, String(resolution), collapsed, periodParams)
+          : collapsed;
+      if (ready.length === 0) {
+        onResult([], { noData: true });
+        return;
+      }
+      onResult(ready.map((bar) => toTvBar(bar, barStep(resolution))), { noData: false });
     } catch (error) {
       onError(error instanceof Error ? error.message : String(error));
     }
@@ -468,7 +489,12 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     const unsubscribe = this.marketData.subscribe(symbol, resolution, (bar) => {
       if (this.replayActive) return; // muted during Bar Replay
       try {
-        onTick(toTvBar(canonicalizeBar(symbol, resolution, bar), step));
+        const canonical = canonicalizeBar(symbol, resolution, bar);
+        const packed =
+          symbol.exchange.toUpperCase() === "TSE"
+            ? this.packTseLive(symbol, resKey, canonical, step)
+            : canonical;
+        onTick(toTvBar(packed, step));
       } catch {
         /* drop corrupt realtime bars instead of crashing the widget */
       }
@@ -503,6 +529,41 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   }
 
   /* ── internals ─────────────────────────────────────────────────────── */
+
+  private tsePackKey(symbol: SymbolInfo, resolution: string): string {
+    return `${symbol.exchange}:${symbol.ticker}|${resolution}`;
+  }
+
+  /**
+   * Place the bars we actually have next to each other. Missing TSETMC
+   * minutes and holidays are not filled with flat candles.
+   */
+  private packTseBars(
+    symbol: SymbolInfo,
+    resolution: string,
+    bars: readonly Bar[],
+    periodParams: PeriodParams,
+  ): Bar[] {
+    const step = barStep(resolution);
+    const key = this.tsePackKey(symbol, resolution);
+    const prev = this.tsePacks.get(key);
+    const series =
+      !prev || prev.step !== step || periodParams.firstDataRequest
+        ? packNewestWindow(bars, step)
+        : appendNewer(prependOlder(prev, bars), bars);
+    this.tsePacks.set(key, series.packed.length > 0 ? series : emptyTseSeries(step));
+    const countBack = Math.max(periodParams.countBack || 300, 1);
+    const to = asUnixSec(periodParams.to, Number.POSITIVE_INFINITY);
+    return slicePacked(series, to, countBack, Boolean(periodParams.firstDataRequest));
+  }
+
+  private packTseLive(symbol: SymbolInfo, resolution: string, bar: Bar, step: number): Bar {
+    const key = this.tsePackKey(symbol, resolution);
+    const prev = this.tsePacks.get(key) ?? emptyTseSeries(step);
+    const next = appendLive(prev.step === step ? prev : emptyTseSeries(step), bar);
+    this.tsePacks.set(key, next.series);
+    return next.packed;
+  }
 
   private requireSymbol(symbolInfo: LibrarySymbolInfo): SymbolInfo {
     const ticker = normalizeTicker(stripExchange(symbolInfo.ticker ?? symbolInfo.name));
