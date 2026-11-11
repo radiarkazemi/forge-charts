@@ -4,11 +4,10 @@ import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
 import Stack from "@mui/material/Stack";
-import Tab from "@mui/material/Tab";
-import Tabs from "@mui/material/Tabs";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
-import { ForgeMark } from "@/brand/ForgeMark";
+import { LandingMark } from "@/brand/LandingMark";
+import { AuthCard, AuthShell, authButtonSx, authFieldSx } from "./AuthShell";
 import {
   clearSyncCredentials,
   deriveAccountKey,
@@ -138,145 +137,140 @@ export function AuthGate({ auth, onAuthenticated }: AuthGateProps) {
   }
 
   return (
-    <Box
-      sx={{
-        minHeight: "100dvh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        px: 2,
-        background:
-          "radial-gradient(1200px 600px at 20% -10%, rgba(41,98,255,0.22), transparent 55%), radial-gradient(900px 500px at 90% 110%, rgba(92,225,255,0.12), transparent 50%), #0b0e14",
-      }}
-    >
-      <Box
-        component="form"
-        onSubmit={(e) => void submitCredentials(e)}
-        sx={{
-          width: "100%",
-          maxWidth: 400,
-          bgcolor: "#1e222d",
-          border: "1px solid #2a2e39",
-          borderRadius: 2,
-          p: { xs: 2.5, sm: 3.5 },
-          boxShadow: "0 24px 64px rgba(0,0,0,0.45)",
-        }}
-      >
-        <Stack spacing={2.5} sx={{ alignItems: "center" }}>
-          <ForgeMark theme="dark" size={48} />
-          <Box sx={{ textAlign: "center" }}>
-            <Typography variant="h5" sx={{ fontWeight: 700, color: "#f5f7fb", letterSpacing: 0.2 }}>
-              Forge Charts
-            </Typography>
-            <Typography variant="body2" sx={{ color: "#787b86", mt: 0.75 }}>
-              Sign in so your Radiar layout, starred indicators, and candle styles
-              stay the same on every computer.
-            </Typography>
-          </Box>
+    <AuthShell>
+      <AuthCard>
+        <Box component="form" onSubmit={(e) => void submitCredentials(e)}>
+          <Stack spacing={2.5}>
+            <Stack direction="row" spacing={1.25} sx={{ alignItems: "center", justifyContent: "center", color: "#f4f7ff" }}>
+              <LandingMark size={28} />
+              <Typography sx={{ fontWeight: 700, letterSpacing: "0.28em", fontSize: 15, color: "#f4f7ff" }}>
+                FORGE
+              </Typography>
+            </Stack>
+            <Box sx={{ textAlign: "center" }}>
+              <Typography sx={{ fontWeight: 700, fontSize: 22, color: "#f4f7ff" }}>
+                {mode === "login" ? "Log in" : "Create account"}
+              </Typography>
+              <Typography variant="body2" sx={{ color: "#8b97ad", mt: 0.75 }}>
+                {mode === "login"
+                  ? "Sign in so your layouts and chart styles stay with you."
+                  : "Email and password. Your password stays on this device."}
+              </Typography>
+            </Box>
 
-          <Tabs
-            value={mode}
-            onChange={(_, v: Mode) => {
-              setMode(v);
-              setError(null);
-            }}
-            variant="fullWidth"
-            sx={{
-              width: "100%",
-              minHeight: 40,
-              "& .MuiTab-root": { color: "#787b86", minHeight: 40, textTransform: "none" },
-              "& .Mui-selected": { color: "#d1d4dc !important" },
-              "& .MuiTabs-indicator": { bgcolor: "#2962ff" },
-            }}
-          >
-            <Tab value="login" label="Log in" />
-            <Tab value="signup" label="Sign up" />
-          </Tabs>
+            <Box
+              sx={{
+                display: "flex",
+                p: "3px",
+                width: "100%",
+                borderRadius: 999,
+                border: "1px solid rgba(255,255,255,0.08)",
+                bgcolor: "rgba(255,255,255,0.03)",
+              }}
+            >
+              {(["login", "signup"] as const).map((value) => {
+                const selected = mode === value;
+                return (
+                  <Button
+                    key={value}
+                    type="button"
+                    onClick={() => {
+                      setMode(value);
+                      setError(null);
+                    }}
+                    sx={{
+                      flex: 1,
+                      borderRadius: 999,
+                      textTransform: "none",
+                      fontWeight: 650,
+                      py: 0.6,
+                      color: selected ? "#050810" : "#8b97ad",
+                      bgcolor: selected ? "#fff" : "transparent",
+                      "&:hover": { bgcolor: selected ? "#fff" : "rgba(255,255,255,0.04)" },
+                    }}
+                  >
+                    {value === "login" ? "Log in" : "Sign up"}
+                  </Button>
+                );
+              })}
+            </Box>
 
-          <Stack spacing={1.5} sx={{ width: "100%" }}>
-            {mode === "signup" ? (
+            <Stack spacing={1.5}>
+              {mode === "signup" ? (
+                <TextField
+                  label="Display name"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  autoComplete="nickname"
+                  fullWidth
+                  size="small"
+                  sx={authFieldSx}
+                />
+              ) : null}
               <TextField
-                label="Display name"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                autoComplete="nickname"
+                label="Email"
+                type="email"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoComplete="username"
+                required
                 fullWidth
                 size="small"
+                placeholder="you@email.com"
+                helperText={mode === "signup" ? "Use a real email — needed for account recovery" : undefined}
+                slotProps={{ htmlInput: { minLength: 5, maxLength: 64 } }}
+                sx={authFieldSx}
               />
-            ) : null}
-            <TextField
-              label="Email"
-              type="email"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoComplete="username"
-              required
-              fullWidth
-              size="small"
-              placeholder="you@email.com"
-              helperText={mode === "signup" ? "Use a real email — needed for account recovery" : undefined}
-              slotProps={{ htmlInput: { minLength: 5, maxLength: 64 } }}
-            />
-            <TextField
-              label="Password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete={mode === "signup" ? "new-password" : "current-password"}
-              required
-              fullWidth
-              size="small"
-              slotProps={{ htmlInput: { minLength: 6 } }}
-            />
-            {mode === "signup" ? (
               <TextField
-                label="Confirm password"
+                label="Password"
                 type="password"
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
-                autoComplete="new-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete={mode === "signup" ? "new-password" : "current-password"}
                 required
                 fullWidth
                 size="small"
                 slotProps={{ htmlInput: { minLength: 6 } }}
+                sx={authFieldSx}
               />
-            ) : null}
-            {error ? (
-              <Alert severity="error" sx={{ py: 0.5 }}>
-                {error}
-              </Alert>
-            ) : null}
-            <Button
-              type="submit"
-              variant="contained"
-              disabled={busy}
-              fullWidth
-              sx={{
-                mt: 0.5,
-                py: 1.1,
-                bgcolor: "#2962ff",
-                textTransform: "none",
-                fontWeight: 600,
-                "&:hover": { bgcolor: "#1e4fd6" },
-              }}
-            >
-              {busy ? (
-                <CircularProgress size={22} sx={{ color: "#fff" }} />
-              ) : mode === "login" ? (
-                "Log in"
-              ) : (
-                "Continue"
-              )}
-            </Button>
-          </Stack>
+              {mode === "signup" ? (
+                <TextField
+                  label="Confirm password"
+                  type="password"
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                  autoComplete="new-password"
+                  required
+                  fullWidth
+                  size="small"
+                  slotProps={{ htmlInput: { minLength: 6 } }}
+                  sx={authFieldSx}
+                />
+              ) : null}
+              {error ? (
+                <Alert severity="error" sx={{ py: 0.5 }}>
+                  {error}
+                </Alert>
+              ) : null}
+              <Button type="submit" variant="contained" disabled={busy} fullWidth sx={authButtonSx}>
+                {busy ? (
+                  <CircularProgress size={22} sx={{ color: "#fff" }} />
+                ) : mode === "login" ? (
+                  "Log in"
+                ) : (
+                  "Continue"
+                )}
+              </Button>
+            </Stack>
 
-          <Typography variant="caption" sx={{ color: "#787b86", textAlign: "center" }}>
-            {mode === "signup"
-              ? "Next: name and terms. Passwords stay on this device."
-              : "Passwords stay on this device. Other people need their own account — they cannot open yours without your password."}
-          </Typography>
-        </Stack>
-      </Box>
-    </Box>
+            <Typography variant="caption" sx={{ color: "#8b97ad", textAlign: "center", display: "block" }}>
+              {mode === "signup"
+                ? "Next: name and terms. Passwords stay on this device."
+                : "Passwords stay on this device. Other people need their own account."}
+            </Typography>
+          </Stack>
+        </Box>
+      </AuthCard>
+    </AuthShell>
   );
 }

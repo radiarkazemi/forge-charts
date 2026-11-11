@@ -8,7 +8,8 @@ import FormControlLabel from "@mui/material/FormControlLabel";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
-import { ForgeMark } from "@/brand/ForgeMark";
+import { LandingMark } from "@/brand/LandingMark";
+import { AuthCard, AuthShell, authButtonSx, authFieldSx } from "./AuthShell";
 import {
   validateSafetyDraft,
   type SafetyAuthorizationProfile,
@@ -61,39 +62,22 @@ export function SafetyAuthorizationPage({
   };
 
   return (
-    <Box
-      sx={{
-        minHeight: "100dvh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        px: 2,
-        py: 3,
-        background:
-          "radial-gradient(1200px 600px at 20% -10%, rgba(41,98,255,0.22), transparent 55%), radial-gradient(900px 500px at 90% 110%, rgba(92,225,255,0.12), transparent 50%), #0b0e14",
-      }}
-    >
-      <Box
-        component="form"
-        onSubmit={(e) => void submit(e)}
-        sx={{
-          width: "100%",
-          maxWidth: 460,
-          bgcolor: "#1e222d",
-          border: "1px solid #2a2e39",
-          borderRadius: 2,
-          p: { xs: 2.5, sm: 3.5 },
-          boxShadow: "0 24px 64px rgba(0,0,0,0.45)",
-        }}
-      >
+    <AuthShell>
+      <AuthCard>
+        <Box component="form" onSubmit={(e) => void submit(e)}>
         <Stack spacing={2.25}>
           <Stack spacing={1.25} sx={{ alignItems: "center", textAlign: "center" }}>
-            <ForgeMark theme="dark" size={44} />
-            <Typography variant="h5" sx={{ fontWeight: 700, color: "#f5f7fb" }}>
+            <Stack direction="row" spacing={1.25} sx={{ alignItems: "center", color: "#f4f7ff" }}>
+              <LandingMark size={26} />
+              <Typography sx={{ fontWeight: 700, letterSpacing: "0.28em", fontSize: 14 }}>
+                FORGE
+              </Typography>
+            </Stack>
+            <Typography sx={{ fontWeight: 700, fontSize: 22, color: "#f4f7ff" }}>
               Safety & authorization
             </Typography>
-            <Typography variant="body2" sx={{ color: "#787b86", maxWidth: 360 }}>
-              Account <strong style={{ color: "#d1d4dc" }}>{username}</strong> is created.
+            <Typography variant="body2" sx={{ color: "#8b97ad", maxWidth: 360 }}>
+              Account <strong style={{ color: "#f4f7ff" }}>{username}</strong> is created.
               Complete this step so we can protect your charts and authorize your access.
             </Typography>
           </Stack>
@@ -108,6 +92,7 @@ export function SafetyAuthorizationPage({
               size="small"
               autoComplete="name"
               placeholder="First and last name"
+              sx={authFieldSx}
             />
             <TextField
               label="Country / city"
@@ -117,6 +102,7 @@ export function SafetyAuthorizationPage({
               fullWidth
               size="small"
               autoComplete="country-name"
+              sx={authFieldSx}
             />
 
             <FormControlLabel
@@ -158,20 +144,7 @@ export function SafetyAuthorizationPage({
               </Alert>
             ) : null}
 
-            <Button
-              type="submit"
-              variant="contained"
-              disabled={busy}
-              fullWidth
-              sx={{
-                mt: 0.5,
-                py: 1.1,
-                bgcolor: "#2962ff",
-                textTransform: "none",
-                fontWeight: 600,
-                "&:hover": { bgcolor: "#1e4fd6" },
-              }}
-            >
+            <Button type="submit" variant="contained" disabled={busy} fullWidth sx={authButtonSx}>
               {busy ? <CircularProgress size={22} sx={{ color: "#fff" }} /> : "Continue to charts"}
             </Button>
             {onBack ? (
@@ -180,14 +153,15 @@ export function SafetyAuthorizationPage({
                 onClick={onBack}
                 disabled={busy}
                 fullWidth
-                sx={{ textTransform: "none", color: "#787b86" }}
+                sx={{ textTransform: "none", color: "#8b97ad" }}
               >
                 Back
               </Button>
             ) : null}
           </Stack>
         </Stack>
-      </Box>
-    </Box>
+        </Box>
+      </AuthCard>
+    </AuthShell>
   );
 }

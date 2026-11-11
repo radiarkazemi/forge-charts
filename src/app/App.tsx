@@ -22,6 +22,7 @@ import {
 } from "@/features/profile-sync";
 import { AppThemeProvider } from "./AppThemeProvider";
 import { createServices, type Services } from "./container";
+import { DEV_SESSION, isDevSite } from "../dev-site";
 import { ServicesProvider } from "./ServicesProvider";
 
 function buildSessionServices(session: AuthSession): Services {
@@ -63,20 +64,28 @@ function buildSessionServices(session: AuthSession): Services {
 
 /** Gate the chart behind login/signup + safety authorization. */
 export function App() {
+  const devSite = useMemo(() => isDevSite(), []);
   const rawStorage = useMemo(() => new LocalStorageAdapter(), []);
   const auth = useMemo(() => new AuthService(rawStorage), [rawStorage]);
   const [session, setSession] = useState<AuthSession | null>(() => {
+    if (devSite) return DEV_SESSION;
     const existing = auth.getSession();
     if (!existing) return null;
     // Incomplete safety — keep session object but force safety gate below.
     return existing;
   });
   const [needsSafetyBoot, setNeedsSafetyBoot] = useState(() => {
+    if (devSite) return false;
     const existing = auth.getSession();
     return Boolean(existing && auth.needsSafety(existing.userId));
   });
   const servicesRef = useRef<Services | null>(null);
   const [services, setServices] = useState<Services | null>(() => {
+    if (devSite) {
+      const built = buildSessionServices(DEV_SESSION);
+      servicesRef.current = built;
+      return built;
+    }
     const existing = auth.getSession();
     if (!existing || auth.needsSafety(existing.userId)) return null;
     const built = buildSessionServices(existing);
@@ -143,6 +152,7 @@ export function App() {
   );
 
   const signOut = useCallback(() => {
+    if (devSite) return;
     auth.logout();
     clearSyncCredentials();
     servicesRef.current?.dispose();
@@ -150,7 +160,7 @@ export function App() {
     setServices(null);
     setNeedsSafetyBoot(false);
     setSession(null);
-  }, [auth]);
+  }, [auth, devSite]);
 
   if (needsSafetyBoot && session) {
     return (
