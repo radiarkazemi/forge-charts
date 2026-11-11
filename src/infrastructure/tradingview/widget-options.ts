@@ -329,15 +329,18 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
   });
 
   const baseDisabled = secondary ? SECONDARY_DISABLED : hideHeader ? NO_HEADER_DISABLED : DISABLED_FEATURES;
-  // Mobile: drawing toolbar starts collapsed (Draw expands it). The bottom
-  // Date Range / clock bar stays — that is the TradingView mobile footer.
+  // Mobile: drawing toolbar starts collapsed. The Date Range footer is our bar,
+  // so the library timeframe strip stays off (it does not match the mobile layout).
   const disabled =
     mobile && !secondary
-      ? baseDisabled.filter((f) => f !== "hide_left_toolbar_by_default")
+      ? [
+          ...baseDisabled.filter((f) => f !== "hide_left_toolbar_by_default"),
+          "timeframes_toolbar" as ChartingLibraryFeatureset,
+        ]
       : baseDisabled;
 
   const customCss = mobile && !secondary
-    ? "/charts/tv-header-mobile.css"
+    ? "/charts/tv-header-mobile.css?v=2"
     : hideHeader
       ? "/charts/tv-header-secondary.css"
       : "/charts/tv-header.css";

@@ -31,45 +31,17 @@
   font-size: 12px !important;
 }
 
-/* TradingView mobile footer: Date Range on the left, session clock on the right. */
-.chart-controls-bar {
-  display: flex !important;
-  align-items: center !important;
-  box-sizing: border-box !important;
-  height: 34px !important;
-  min-height: 34px !important;
-  max-height: 34px !important;
-  padding: 0 8px !important;
-  gap: 8px !important;
-  border-top: 1px solid #e0e3eb !important;
-  background: #ffffff !important;
-  color: #131722 !important;
-  font-size: 13px !important;
-  font-weight: 500 !important;
+/* The mobile footer is our Date Range bar. Hide the library’s own strip. */
+.chart-controls-bar,
+.layout__area--bottom .chart-controls-bar {
+  display: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
   overflow: hidden !important;
-}
-
-html.theme-dark .chart-controls-bar,
-.theme-dark .chart-controls-bar {
-  border-top-color: #2a2e39 !important;
-  background: #131722 !important;
-  color: #d1d4dc !important;
-}
-
-.chart-controls-bar button,
-.chart-controls-bar [class*="button"],
-.chart-controls-bar [class*="item"] {
-  color: inherit !important;
-  font-size: 13px !important;
-  font-weight: 500 !important;
-}
-
-/* Quote currency sits at the top of the price scale ("USD ▾"). */
-.price-axis [class*="currency"],
-.price-axis-container [class*="currency"],
-[data-name="price-axis-currency"] {
-  font-size: 13px !important;
-  font-weight: 600 !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
 }
 
 html,

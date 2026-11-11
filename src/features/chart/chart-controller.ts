@@ -391,6 +391,34 @@ export class ChartController {
     }
   }
 
+  /** Show the last `spanMs` of the series without changing the interval. */
+  showDateRange(fromMs: number): void {
+    const to = Math.floor(Date.now() / 1000);
+    const from = Math.floor(fromMs / 1000);
+    if (to <= from) return;
+    void this.setVisibleRange(from, to);
+  }
+
+  /** Regular price scale ↔ percentage, the mobile “%” control. */
+  togglePercentageScale(): void {
+    try {
+      const chart = this.activeChart() as IChartWidgetApi & {
+        getPanes?: () => Array<{
+          getMainSourcePriceScale?: () => {
+            getMode?: () => number;
+            setMode?: (mode: number) => void;
+          } | null;
+        }>;
+      };
+      const scale = chart?.getPanes?.()?.[0]?.getMainSourcePriceScale?.();
+      if (!scale?.getMode || !scale.setMode) return;
+      // PriceScaleMode.Percentage = 2, Normal = 0.
+      scale.setMode(scale.getMode() === 2 ? 0 : 2);
+    } catch {
+      /* chart tearing down */
+    }
+  }
+
   /** Ask the library iframe to reflow after its box changes size. */
   requestResize(): void {
     const widget = this.widget;

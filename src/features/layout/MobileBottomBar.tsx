@@ -2,9 +2,11 @@ import Badge from "@mui/material/Badge";
 import Box from "@mui/material/Box";
 import ButtonBase from "@mui/material/ButtonBase";
 import Drawer from "@mui/material/Drawer";
+import Menu from "@mui/material/Menu";
+import MenuItem from "@mui/material/MenuItem";
 import SvgIcon from "@mui/material/SvgIcon";
 import type { SvgIconProps } from "@mui/material/SvgIcon";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useServices } from "@/app/use-services";
 import { useStore } from "@/shared/hooks/useStore";
 import { MOBILE_APP_NAV_HEIGHT, MOBILE_CHART_BAR_HEIGHT } from "./mobile-chrome";
@@ -13,7 +15,6 @@ const BAR_BG = "#131722";
 const BAR_BORDER = "#2a2e39";
 const IDLE = "#d1d4dc";
 const ACTIVE = "#2962FF";
-const MUTED = "#787b86";
 
 interface MobileBottomBarProps {
   readonly onCreateAlert: () => void;
@@ -38,25 +39,58 @@ function strokeIcon(d: string) {
   };
 }
 
-const DrawIcon = strokeIcon("M7 19.5 17.5 9l2.5 2.5L9.5 22H7v-2.5zM16.5 8l2-2 2.5 2.5-2 2-2.5-2.5z");
-const IndicatorsIcon = strokeIcon("M5.5 18.5v-4M10.5 18.5V9.5M15.5 18.5v-7M20.5 18.5V7.5");
-const MoreIcon = strokeIcon("M8 14h.01M14 14h.01M20 14h.01");
 const WatchlistIcon = strokeIcon("M9 5h10a1.5 1.5 0 0 1 1.5 1.5V22l-6.5-3.25L7.5 22V6.5A1.5 1.5 0 0 1 9 5z");
 const ChartIcon = strokeIcon("M6 18.5V12l4-3 4 5 4-7v11.5");
 const AlertsIcon = strokeIcon("M14 6.5a6 6 0 0 1 6 6v3.5l1.5 2H6.5l1.5-2V12.5a6 6 0 0 1 6-6zM12 22h4");
 const MenuIcon = strokeIcon("M7 9h14M7 14h14M7 19h14");
 
-function formatPrice(price: number | undefined, precision = 2): string {
-  if (price == null || !Number.isFinite(price)) return "";
-  return price.toLocaleString(undefined, {
-    minimumFractionDigits: Math.min(precision, 5),
-    maximumFractionDigits: Math.min(Math.max(precision, 2), 5),
-  });
+const DATE_RANGES = [
+  { id: "1d", label: "1 day", ms: 86_400_000 },
+  { id: "5d", label: "5 days", ms: 5 * 86_400_000 },
+  { id: "1m", label: "1 month", ms: 30 * 86_400_000 },
+  { id: "3m", label: "3 months", ms: 90 * 86_400_000 },
+  { id: "6m", label: "6 months", ms: 182 * 86_400_000 },
+  { id: "ytd", label: "Year to date", ms: 0 },
+  { id: "1y", label: "1 year", ms: 365 * 86_400_000 },
+  { id: "5y", label: "5 years", ms: 5 * 365 * 86_400_000 },
+  { id: "all", label: "All", ms: 20 * 365 * 86_400_000 },
+] as const;
+
+function sessionClock(timeZone: string, now: Date): string {
+  let time = "00:00:00";
+  try {
+    time = new Intl.DateTimeFormat("en-GB", {
+      timeZone,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }).format(now);
+  } catch {
+    time = new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+      timeZone: "UTC",
+    }).format(now);
+  }
+  let zone = "UTC";
+  try {
+    zone =
+      new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "shortOffset" })
+        .formatToParts(now)
+        .find((part) => part.type === "timeZoneName")?.value ?? "UTC";
+  } catch {
+    zone = "UTC";
+  }
+  const offset = zone.replace("GMT", "UTC").replace(":00", "");
+  return `${time} ${offset === "UTC+0" || offset === "UTC-0" ? "UTC" : offset}`;
 }
 
 /**
  * TradingView mobile chrome:
- * 1) Chart tools bar — Symbol · Interval · Draw · Indicators · More
+ * 1) Chart footer — Date Range · session clock
  * 2) App tab bar — Watchlist · Chart · Alerts · Menu
  */
 export function MobileBottomBar({
@@ -64,45 +98,26 @@ export function MobileBottomBar({
   onOpenWatchlist,
   onOpenAlerts,
 }: MobileBottomBarProps) {
-  const { chart, settings, quotes, alerts } = useServices();
+  const { chart, settings, alerts, symbols } = useServices();
   const symbol = useStore(chart.state, (s) => s.symbol);
   const sidePanel = useStore(settings.settings, (s) => s.sidePanel);
-  const quote = useStore(quotes.quotes, (book) => book[symbol]);
+  const appTheme = useStore(settings.settings, (s) => s.theme);
   const alertCount = useStore(alerts.alerts, (list) => list.filter((a) => a.status === "active").length);
-  const [moreOpen, setMoreOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [drawOpen, setDrawOpen] = useState(false);
+  const [rangeEl, setRangeEl] = useState<HTMLElement | null>(null);
+  const [now, setNow] = useState(() => new Date());
 
-  const priceLabel = formatPrice(quote?.price);
-  const change = quote?.changePercent;
-  const changeColor =
-    change == null || !Number.isFinite(change) ? MUTED : change > 0 ? "#26a69a" : change < 0 ? "#ef5350" : MUTED;
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
 
-  const chartActions = [
-    {
-      key: "draw",
-      label: "Draw",
-      Icon: DrawIcon,
-      active: drawOpen,
-      onClick: () => {
-        chart.toggleDrawingToolbar();
-        setDrawOpen((v) => !v);
-      },
-    },
-    {
-      key: "indicators",
-      label: "Indicators",
-      Icon: IndicatorsIcon,
-      onClick: () => chart.openIndicators(),
-    },
-    {
-      key: "more",
-      label: "More",
-      Icon: MoreIcon,
-      onClick: () => setMoreOpen(true),
-      active: moreOpen,
-    },
-  ] as const;
+  const dark = appTheme === "dark";
+  const barBg = dark ? BAR_BG : "#ffffff";
+  const barBorder = dark ? BAR_BORDER : "#e0e3eb";
+  const barText = dark ? "#d1d4dc" : "#131722";
+  const info = symbols.findByTicker(symbol.includes(":") ? symbol.slice(symbol.lastIndexOf(":") + 1) : symbol);
+  const clock = sessionClock(info?.timezone || "America/New_York", now);
 
   const appTabs = [
     {
@@ -142,65 +157,85 @@ export function MobileBottomBar({
     <>
       <Box
         component="nav"
-        aria-label="Mobile chart tools"
+        aria-label="Chart footer"
         sx={{
           flexShrink: 0,
-          bgcolor: BAR_BG,
-          borderTop: `1px solid ${BAR_BORDER}`,
+          bgcolor: barBg,
+          borderTop: `1px solid ${barBorder}`,
           zIndex: 30,
         }}
       >
-        {/* Chart tools — symbol/TF live in MobileTopBar (Faraz scroll chrome). */}
+        {/* Date Range · session clock — TradingView mobile footer. */}
         <Box
           sx={{
             display: "flex",
             alignItems: "center",
-            justifyContent: "space-around",
             height: MOBILE_CHART_BAR_HEIGHT,
-            px: 1,
-            gap: 0.25,
-            borderBottom: `1px solid ${BAR_BORDER}`,
+            px: 1.25,
+            gap: 1,
+            borderBottom: `1px solid ${barBorder}`,
+            color: barText,
           }}
         >
-          {priceLabel ? (
-            <Box
-              component="span"
-              sx={{
-                color: changeColor,
-                fontWeight: 700,
-                fontSize: 12,
-                fontVariantNumeric: "tabular-nums",
-                px: 1,
-                mr: "auto",
-                maxWidth: "40%",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {priceLabel}
-            </Box>
-          ) : (
-            <Box sx={{ flex: 1 }} />
-          )}
-          {chartActions.map((item) => (
-            <ButtonBase
-              key={item.key}
-              onClick={item.onClick}
-              aria-label={item.label}
-              title={item.label}
-              sx={{
-                width: 44,
-                height: 36,
-                borderRadius: "8px",
-                color: "active" in item && item.active ? ACTIVE : IDLE,
-                "&:active": { bgcolor: "rgba(209,212,220,0.08)" },
-              }}
-            >
-              <item.Icon />
-            </ButtonBase>
-          ))}
+          <ButtonBase
+            aria-label="Date range"
+            onClick={(e) => setRangeEl(e.currentTarget)}
+            sx={{
+              height: 28,
+              px: 0.5,
+              borderRadius: "4px",
+              color: "inherit",
+              fontSize: 14,
+              fontWeight: 500,
+              gap: 0.25,
+              "&:active": { bgcolor: dark ? "rgba(209,212,220,0.08)" : "rgba(19,23,34,0.06)" },
+            }}
+          >
+            Date Range
+            <SvgIcon viewBox="0 0 16 16" sx={{ fontSize: 16 }}>
+              <path d="M4 6.2 8 10l4-3.8" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" />
+            </SvgIcon>
+          </ButtonBase>
+          <Box sx={{ flex: 1 }} />
+          <Box
+            component="span"
+            sx={{
+              fontSize: 13,
+              fontWeight: 500,
+              fontVariantNumeric: "tabular-nums",
+              letterSpacing: 0.1,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {clock}
+          </Box>
         </Box>
+        <Menu
+          anchorEl={rangeEl}
+          open={Boolean(rangeEl)}
+          onClose={() => setRangeEl(null)}
+          slotProps={{
+            paper: {
+              sx: { bgcolor: dark ? "#1e222d" : "#ffffff", color: barText, minWidth: 180 },
+            },
+          }}
+        >
+          {DATE_RANGES.map((range) => (
+            <MenuItem
+              key={range.id}
+              sx={{ fontSize: 14 }}
+              onClick={() => {
+                const end = Date.now();
+                const from =
+                  range.id === "ytd" ? Date.UTC(new Date().getUTCFullYear(), 0, 1) : end - range.ms;
+                chart.showDateRange(from);
+                setRangeEl(null);
+              }}
+            >
+              {range.label}
+            </MenuItem>
+          ))}
+        </Menu>
 
         {/* App tab bar — Watchlist / Chart / Trade / Alerts / Menu */}
         <Box
@@ -268,71 +303,6 @@ export function MobileBottomBar({
 
       <Drawer
         anchor="bottom"
-        open={moreOpen}
-        onClose={() => setMoreOpen(false)}
-        slotProps={{
-          paper: {
-            sx: {
-              bgcolor: "#1e222d",
-              borderTopLeftRadius: 12,
-              borderTopRightRadius: 12,
-              borderTop: `1px solid ${BAR_BORDER}`,
-              pb: "calc(12px + env(safe-area-inset-bottom, 0px))",
-            },
-          },
-        }}
-      >
-        <Box sx={{ width: 36, height: 4, borderRadius: 2, bgcolor: "#434651", mx: "auto", mt: 1, mb: 1.5 }} />
-        <Box
-          sx={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
-            gap: 1,
-            px: 1.5,
-          }}
-        >
-          {(
-            [
-              { label: "Alert", run: onCreateAlert },
-              { label: "Compare", run: () => chart.openSymbolSearch() },
-              { label: "Object tree", run: () => chart.openObjectTree() },
-              { label: "Undo", run: () => chart.undo() },
-              { label: "Redo", run: () => chart.redo() },
-              { label: "Snapshot", run: () => chart.takeScreenshot() },
-              { label: "Settings", run: () => chart.openChartProperties() },
-              {
-                label: "Replay",
-                run: () => window.dispatchEvent(new Event("forge:enter-bar-replay")),
-              },
-            ] as const
-          ).map((action) => (
-            <ButtonBase
-              key={action.label}
-              onClick={() => {
-                action.run();
-                setMoreOpen(false);
-              }}
-              sx={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                py: 1.75,
-                borderRadius: "8px",
-                bgcolor: "#2a2e39",
-                color: IDLE,
-                fontSize: 13,
-                fontWeight: 600,
-                "&:active": { bgcolor: "#363a45" },
-              }}
-            >
-              {action.label}
-            </ButtonBase>
-          ))}
-        </Box>
-      </Drawer>
-
-      <Drawer
-        anchor="bottom"
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
         slotProps={{
@@ -352,12 +322,24 @@ export function MobileBottomBar({
           {(
             [
               {
+                label: "Indicators",
+                run: () => chart.openIndicators(),
+              },
+              {
                 label: "Theme",
                 run: () => settings.toggleTheme(),
               },
               {
                 label: "Create alert",
                 run: onCreateAlert,
+              },
+              {
+                label: "Undo",
+                run: () => chart.undo(),
+              },
+              {
+                label: "Redo",
+                run: () => chart.redo(),
               },
               {
                 label: "Pine Editor",
