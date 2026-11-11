@@ -85,6 +85,8 @@ const ENABLED_FEATURES: ChartingLibraryFeatureset[] = [
   "show_zoom_and_move_buttons_on_touch",
   // Candle close countdown on the price scale (intraday resolutions).
   "countdown",
+  // "USD" (quote currency) on the price scale, as on TradingView mobile.
+  "pricescale_currency",
 ];
 
 const DISABLED_FEATURES: ChartingLibraryFeatureset[] = [
@@ -279,6 +281,8 @@ export function chartOverrides(theme: ThemeMode): ChartingLibraryWidgetOptions["
     "paneProperties.crossHairProperties.color": t.crosshair,
     "scalesProperties.textColor": t.textMuted,
     "scalesProperties.lineColor": t.border,
+    "scalesProperties.showSeriesLastValue": true,
+    "mainSeriesProperties.showPriceLine": true,
     "mainSeriesProperties.showCountdown": true,
     "mainSeriesProperties.candleStyle.upColor": t.up,
     "mainSeriesProperties.candleStyle.downColor": t.down,
@@ -325,7 +329,8 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
   });
 
   const baseDisabled = secondary ? SECONDARY_DISABLED : hideHeader ? NO_HEADER_DISABLED : DISABLED_FEATURES;
-  // Mobile: toolbar starts collapsed (Draw expands it); drop bottom date-range strip for plot height.
+  // Mobile: drawing toolbar starts collapsed. The Date Range footer is our bar,
+  // so the library timeframe strip stays off (it does not match the mobile layout).
   const disabled =
     mobile && !secondary
       ? [
@@ -335,7 +340,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
       : baseDisabled;
 
   const customCss = mobile && !secondary
-    ? "/charts/tv-header-mobile.css"
+    ? "/charts/tv-header-mobile.css?v=2"
     : hideHeader
       ? "/charts/tv-header-secondary.css"
       : "/charts/tv-header.css";
@@ -389,6 +394,8 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
     // Beat localStorage / autosave that may have turned countdown off.
     settings_overrides: {
       "mainSeriesProperties.showCountdown": true,
+      "mainSeriesProperties.showPriceLine": true,
+      "scalesProperties.showSeriesLastValue": true,
     },
     studies_overrides: studiesOverrides(input.theme),
     save_load_adapter: input.saveLoadAdapter,
