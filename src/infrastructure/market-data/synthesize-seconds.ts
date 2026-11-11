@@ -98,3 +98,32 @@ export function synthesizeFromMinuteBars(parents: readonly Bar[], stepSec: numbe
 
 /** Seconds resolutions we can always synthesize from 1m parents. */
 export const SYNTH_SECONDS_INTERVALS = ["1S", "5S", "10S", "15S", "30S", "45S"] as const;
+
+/**
+ * Live seconds bars for one forming minute.
+ * History draws these from the closed 1m candle. Realtime must push the same
+ * slices: the bucket under `nowSec`, and — when that bucket just opened — the
+ * previous slice one last time so its wick is the minute path, not the raw tick.
+ */
+export function liveSecondUpdate(
+  parent: Bar,
+  stepSec: number,
+  nowSec: number,
+  lastEmittedTime: number,
+): Bar[] {
+  const step = Math.max(1, Math.floor(stepSec));
+  const slices = synthesizeFromMinuteBars([parent], step);
+  const bucket = alignTime(nowSec, step);
+  let current: Bar | null = null;
+  for (const slice of slices) {
+    if (slice.time <= bucket) current = slice;
+  }
+  if (!current) return [];
+  const out: Bar[] = [];
+  if (lastEmittedTime >= 0 && current.time > lastEmittedTime) {
+    const prev = slices.find((slice) => slice.time === lastEmittedTime);
+    if (prev) out.push(prev);
+  }
+  out.push(current);
+  return out;
+}

@@ -8,7 +8,7 @@ import {
   fetchCpChartHistory,
   mongoHistoryPlan,
 } from "./cp-chart-history";
-import { aggregateBars, synthesizeFromMinuteBars } from "./synthesize-seconds";
+import { aggregateBars, liveSecondUpdate, synthesizeFromMinuteBars } from "./synthesize-seconds";
 import { volumeDelta, type VolumeCursor } from "./volume-delta";
 
 /**
@@ -682,6 +682,13 @@ export class GermanyMarketProvider implements MarketDataProvider {
     const { unit, count } = parseInterval(interval);
     // History already snaps 1D onto 22:00 UTC; live ticks must use the same grid
     // or `alignTime(..., 86400)` opens a midnight candle that looks "new" on Daily.
+    // Seconds history is the 1m candle drawn as a clean path. Raw ticks, and the
+    // 1m bar the socket sends for a "30S" subscribe, were painted onto the
+    // forming slot — a wick from the whole minute on a 30s body. Refresh
+    // replaced that with the path. Live updates use the same path.
+    if (unit === "seconds") {
+      return this.subscribeSecondBars(symbol, route, step, onBar);
+    }
     const fxDaily =
       unit === "days" && count === 1 && (route.kind === "forex" || route.kind === "metal");
     const disposers: Unsubscribe[] = [];
@@ -989,6 +996,158 @@ export class GermanyMarketProvider implements MarketDataProvider {
         }
       }, BAR_RECONCILE_MS),
     );
+
+    return () => {
+      for (const stop of disposers) stop();
+    };
+  }
+
+  /**
+   * Seconds charts follow the same 1m path as history. Ticks and the 1m socket
+   * update that parent; the chart only receives the current seconds slice.
+   */
+  private subscribeSecondBars(
+    symbol: SymbolInfo,
+    route: Route,
+    step: number,
+    onBar: (bar: Bar) => void,
+  ): Unsubscribe {
+    const disposers: Unsubscribe[] = [];
+    let minute: Bar | null = null;
+    let tickClose = false;
+    let lastTickMs = 0;
+    let lastEmittedTime = -1;
+    let lastEmittedKey = "";
+    const quoteVolume: VolumeCursor = { last: null };
+
+    const project = () => {
+      if (!minute || !isMarketSessionOpen(symbol)) return;
+      const nowSec = Math.floor(Date.now() / 1000);
+      const updates = liveSecondUpdate(minute, step, nowSec, lastEmittedTime);
+      for (const bar of updates) {
+        const key = `${bar.time}:${bar.open}:${bar.high}:${bar.low}:${bar.close}`;
+        if (key === lastEmittedKey) continue;
+        lastEmittedKey = key;
+        lastEmittedTime = bar.time;
+        onBar(bar);
+      }
+    };
+
+    const onTick = (price: number, tsSec: number, volumeDelta = 0) => {
+      if (!isMarketSessionOpen(symbol)) return;
+      const nowSec = Math.floor(Date.now() / 1000);
+      let ts = tsSec;
+      if (ts > nowSec + 1) ts = nowSec;
+      if (nowSec - ts > 180) return;
+      lastTickMs = Date.now();
+      minute = applyTick(minute, price, ts, 60, volumeDelta, false);
+      tickClose = true;
+      project();
+    };
+
+    const adoptMinute = (bar: Bar) => {
+      if (!isMarketSessionOpen(symbol)) return;
+      const t = alignTime(bar.time, 60);
+      const wall = alignTime(Math.floor(Date.now() / 1000), 60);
+      if (t > wall || t < wall - 60) return;
+      if (!minute || t > minute.time) {
+        minute = { ...bar, time: t };
+        tickClose = false;
+      } else if (t === minute.time) {
+        minute = {
+          time: t,
+          open: bar.open,
+          high: Math.max(bar.high, minute.high),
+          low: Math.min(bar.low, minute.low),
+          close: tickClose ? minute.close : bar.close,
+          volume: bar.volume > 0 ? bar.volume : minute.volume,
+        };
+      } else {
+        return;
+      }
+      project();
+    };
+
+    void (async () => {
+      try {
+        const seed = await this.fetchBars(symbol, "1", {
+          from: Math.floor(Date.now() / 1000) - 180,
+          to: Math.floor(Date.now() / 1000) + 1,
+          countBack: 2,
+        });
+        const last = seed[seed.length - 1];
+        if (last) adoptMinute(last);
+      } catch {
+        /* ticks will open the minute */
+      }
+    })();
+
+    if (typeof window !== "undefined") {
+      const clock = window.setInterval(project, 250);
+      disposers.push(() => clearInterval(clock));
+    }
+
+    if (route.tickSymbol) {
+      disposers.push(
+        openBinanceTickSocket(route.tickSymbol, (price, qty, ts) => {
+          onTick(price, ts, qty);
+        }),
+      );
+    }
+
+    const channel =
+      route.kind === "metal"
+        ? `forex:xauusd:${route.exchange}`
+        : route.kind === "forex"
+          ? `forex:${route.apiSymbol.toLowerCase()}:${route.exchange}`
+          : `crypto:${route.apiSymbol.toLowerCase()}`;
+    disposers.push(
+      openMarketTicksSocket(channel, (price, ts, vol) => {
+        const delta = route.tickSymbol ? 0 : volumeDelta(quoteVolume, vol ?? 0);
+        onTick(price, ts, delta);
+      }),
+    );
+
+    // The socket has no seconds stream. "30S" used to resolve to the 1m bar
+    // and that whole candle was merged into one 30s slot.
+    disposers.push(
+      openCpFetcherSocket(route.apiSymbol, "1", (bar) => {
+        adoptMinute(bar);
+      }),
+    );
+
+    if (route.kind === "crypto") {
+      disposers.push(
+        startPolling(async () => {
+          if (!isMarketSessionOpen(symbol)) return;
+          if (Date.now() - lastTickMs < 450) return;
+          const latest = await fetchJson<CryptoLatest>(
+            buildUrl(`${BASE}/crypto/prices/${encodeURIComponent(route.apiSymbol.toLowerCase())}/`, {
+              timeframe: "1s",
+            }),
+            { timeoutMs: 1_200 },
+          );
+          const price = +latest.price;
+          if (!Number.isFinite(price)) return;
+          const ts = parseUpdatedAt(latest.updated_at);
+          if (Math.abs(Date.now() / 1000 - ts) > 120) return;
+          onTick(price, ts, 0);
+        }, TICK_POLL_MS),
+      );
+    } else {
+      disposers.push(
+        startPolling(async () => {
+          if (!isMarketSessionOpen(symbol)) return;
+          if (Date.now() - lastTickMs < 1_800) return;
+          const fx = await this.fetchForexXau();
+          const price = +fx.price;
+          if (!Number.isFinite(price)) return;
+          const ts = parseUpdatedAt(fx.updated_at);
+          if (Math.abs(Date.now() / 1000 - ts) > 120) return;
+          onTick(price, ts, 0);
+        }, FOREX_POLL_MS),
+      );
+    }
 
     return () => {
       for (const stop of disposers) stop();
