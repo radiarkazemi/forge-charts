@@ -15,7 +15,7 @@ import {
   shouldSkipDrawingOneShot,
 } from "./drawing-oneshot-guard";
 import { isOpenEndedDrawingTool } from "./open-ended-draw-tools";
-import { isChartPaintBusy } from "./study-paint-gate";
+import { isChartPaintBusy, markChartPaintBusy } from "./study-paint-gate";
 
 export interface LayoutSyncFlags {
   readonly symbol: boolean;
@@ -119,6 +119,8 @@ class LayoutSyncBus {
   /** Temporary vertical-line ids used to mirror crosshair (CL has no setCrossHair). */
   private readonly crosshairMarkers = new Map<number, EntityId>();
   private crosshairRaf = 0;
+  /** Serializes marker creates so a fast mouse cannot stack a column of lines. */
+  private crosshairChain: Promise<void> = Promise.resolve();
   private pendingCrosshair: { sourceIndex: number; time: number } | null = null;
   /** Suppress visible-range echo while we apply a peer’s range. */
   private applyingVisibleRange = false;
@@ -906,14 +908,23 @@ class LayoutSyncBus {
   }
 
   /**
-   * CL has no public setCrossHairPosition — mirror with a locked vertical line
-   * at the peer’s crosshair time (TradingView-like linked crosshair).
+   * CL has no public setCrossHairPosition — mirror with one locked vertical line
+   * per pane at the peer’s crosshair time (TradingView-like linked crosshair).
+   * Creates are serialized: overlapping mouse moves used to leave a column of lines
+   * and each create forced the toolbar back to Cross.
    */
-  private async applyCrosshairMarkers(sourceIndex: number, time: number): Promise<void> {
+  private applyCrosshairMarkers(sourceIndex: number, time: number): Promise<void> {
+    const run = this.crosshairChain.then(() => this.paintCrosshairMarkers(sourceIndex, time));
+    this.crosshairChain = run.catch(() => undefined);
+    return run;
+  }
+
+  private async paintCrosshairMarkers(sourceIndex: number, time: number): Promise<void> {
     if (!this.flags.crosshair || this.activeCount < 2) {
       this.clearCrosshairMarkers();
       return;
     }
+    const markerTime = time > 10_000_000_000 ? Math.floor(time / 1000) : time;
     // Drop the marker on the source pane (native crosshair is enough there).
     const sourceMarker = this.crosshairMarkers.get(sourceIndex);
     if (sourceMarker != null) {
@@ -921,17 +932,18 @@ class LayoutSyncBus {
       this.crosshairMarkers.delete(sourceIndex);
     }
 
+    markChartPaintBusy(800);
     for (const { index, controller } of this.panes.values()) {
       if (index === sourceIndex || index >= this.activeCount) continue;
       if (!controller.isReady) continue;
       const existing = this.crosshairMarkers.get(index);
       if (existing != null) {
-        const moved = controller.moveVerticalLineMarker(existing, time);
+        const moved = controller.moveVerticalLineMarker(existing, markerTime);
         if (moved) continue;
         controller.removeEntity(existing);
         this.crosshairMarkers.delete(index);
       }
-      const created = await controller.createVerticalLineMarker(time);
+      const created = await controller.createVerticalLineMarker(markerTime);
       if (created) {
         this.crosshairMarkers.set(index, created);
         // Never treat sync markers as user drawings (oneshot / multipane mirror).
@@ -974,6 +986,8 @@ class LayoutSyncBus {
     if (snaps.length === 0) return;
 
     this.syncingDrawings = true;
+    // Copied shapes must not snap every pane’s tool back to Cross.
+    markChartPaintBusy(4_000);
     try {
       const sourceSymbol = this.normalizeSymbol(source.controller.state.get().symbol);
       for (const { id, snap } of snaps) {

@@ -43,12 +43,23 @@ export function emptyTseSeries(step: number): TsePackedSeries {
   return { step: Math.max(1, step), realTimes: [], packed: [] };
 }
 
-/** First page. The last real bar stays on its real time; gaps before it close. */
+/**
+ * Where the newest bar sits on the packed scale.
+ * Daily and higher resolutions must be 00:00 UTC — the charting library
+ * otherwise snaps them onto the cash session and opens the holes again.
+ * Intraday keeps the real timestamp so the live candle stays put.
+ */
+function slotAnchor(last: number, step: number): number {
+  if (step >= 86_400 && step % 86_400 === 0) return Math.floor(last / 86_400) * 86_400;
+  return last;
+}
+
+/** First page. Gaps before the newest bar close; nothing is invented. */
 export function packNewestWindow(bars: readonly Bar[], step: number): TsePackedSeries {
   const real = dedupe(bars);
   const slot = Math.max(1, Math.floor(step));
   if (real.length === 0) return emptyTseSeries(slot);
-  const last = real[real.length - 1]!.time;
+  const last = slotAnchor(real[real.length - 1]!.time, slot);
   const packed = real.map((bar, i) => ({
     ...bar,
     time: last - (real.length - 1 - i) * slot,

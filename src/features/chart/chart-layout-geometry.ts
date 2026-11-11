@@ -776,7 +776,7 @@ export function mountPrimaryLayoutClip(
     const doc = container.querySelector("iframe")?.contentDocument;
     if (!doc?.getElementById(STYLE_ID)) return;
     pinPrimaryPriceAxes(doc);
-  }, 500);
+  }, 2_000);
 
   return () => {
     stopped = true;

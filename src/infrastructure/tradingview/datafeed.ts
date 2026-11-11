@@ -418,7 +418,12 @@ export class TradingViewDatafeed implements IBasicDataFeed {
           onResult([], { noData: true });
           return;
         }
-        onResult(collapseDailyBars(symbol, resolution, slice).map((bar) => toTvBar(bar, barStep(resolution))), {
+        const collapsed = collapseDailyBars(symbol, resolution, slice);
+        const ready =
+          symbol.exchange.toUpperCase() === "TSE"
+            ? this.packTseBars(symbol, String(resolution), collapsed, periodParams)
+            : collapsed;
+        onResult(ready.map((bar) => toTvBar(bar, barStep(resolution))), {
           noData: false,
         });
         return;
@@ -598,7 +603,11 @@ export class TradingViewDatafeed implements IBasicDataFeed {
           ? { listed_exchange: "TSETMC" }
           : { listed_exchange: symbol.exchange }),
       type: symbol.type,
-      session: symbol.session,
+      // TSE cash hours (Sat–Wed 09:00–12:30) make the library reserve
+      // empty slots for holidays and missing minutes. 24x7 lets the packed
+      // bars sit on adjacent slots. The cash session stays in the UI label.
+      session: tse ? "24x7" : symbol.session,
+      ...(tse ? { session_display: symbol.session } : {}),
       timezone: symbol.timezone as Timezone,
       exchange: symbol.exchange,
       format: "price",

@@ -5,6 +5,7 @@ import type { ChartLayoutId } from "@/application";
 import { useStore } from "@/shared/hooks/useStore";
 import { BarReplayToolbar } from "./bar-replay/BarReplayToolbar";
 import {
+  applyPrimaryLayoutClip,
   clearPrimaryLayoutClip,
   clipPathExcludingHole,
   defaultSplitEdges,
@@ -31,6 +32,21 @@ const DEFAULT_CHROME: ChromeInsets = { headerHeight: 38, leftToolbarWidth: 52, p
 
 function isVerticalSplit(layout: ChartLayoutId): boolean {
   return layout === "2h" || layout === "3h" || layout === "4h";
+}
+
+/** Drop a stuck crosshair in every pane except `keepIndex` (-1 clears all). */
+function releaseOtherChartPointers(root: HTMLElement | null, keepIndex: number): void {
+  if (!root) return;
+  const iframes = root.querySelectorAll("iframe");
+  iframes.forEach((iframe, index) => {
+    if (index === keepIndex) return;
+    const doc = iframe.contentDocument;
+    const target = doc?.querySelector(".chart-container") ?? doc?.body;
+    if (!target) return;
+    const gone = new MouseEvent("mouseleave", { bubbles: true, clientX: -1, clientY: -1 });
+    target.dispatchEvent(gone);
+    target.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, clientX: -1, clientY: -1 }));
+  });
 }
 
 /**
@@ -243,7 +259,16 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
       },
       () => splitEdgesRef.current,
     );
-  }, [chartLayout, multi, splitEdges]);
+  }, [chartLayout, multi]);
+
+  // Divider drags update the clip without tearing down the observers
+  // (remounting them on every pixel was flashing the panes).
+  useEffect(() => {
+    if (!multi) return;
+    const host = primaryHostRef.current;
+    if (!host) return;
+    applyPrimaryLayoutClip(host, layoutId, splitEdges);
+  }, [multi, layoutId, splitEdges]);
 
   // Layout / TF / indicator menus live in the primary iframe — punch a hole in layers.
   useEffect(() => {
@@ -270,6 +295,13 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
       });
     });
   }, [multi, chartLayout]);
+
+  // An open layout menu sits over the panes. Clear every crosshair so the
+  // full-size primary chart does not keep drawing a line under the menu.
+  useEffect(() => {
+    if (!menusOpen) return;
+    releaseOtherChartPointers(workspaceRef.current, -1);
+  }, [menusOpen]);
 
   // TV layers: route Symbol / Interval / Indicators from the shared header to the active pane.
   useEffect(() => {
@@ -397,6 +429,12 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
         return (
           <Box
             key={`forge-layer-${index}`}
+            onPointerEnter={() => {
+              if (!shown) return;
+              // The primary iframe is full-size under these panes. Leaving the
+              // crosshair alive there draws a column of lines and steals the cursor.
+              releaseOtherChartPointers(workspaceRef.current, index);
+            }}
             onPointerDownCapture={() => {
               if (shown && !menusOpen) layoutSyncBus.focusPaneFromPlot(index);
             }}
@@ -409,8 +447,9 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
               // Always above the primary shell so panes stay painted.
               zIndex: isActive ? 3 : 2,
               display: shown ? "block" : "none",
-              // Pass clicks through to primary header menus; clip a hole so the menu shows.
-              pointerEvents: menusOpen ? "none" : "auto",
+              // Keep the pane as the hit target. The menu shows through the
+              // clip-path hole, which does not receive the pointer.
+              pointerEvents: "auto",
               clipPath: holeClip,
               outline: isActive ? "2px solid #2962FF" : "1px solid #2a2e39",
               outlineOffset: "-1px",
