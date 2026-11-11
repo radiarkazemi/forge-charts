@@ -2,13 +2,14 @@
  * Order block + CISD (change in the state of delivery).
  *
  * A delivery is a run of candles closing the same way. The order block is the
- * candle that printed the extreme of that run (highest high of an up-delivery,
- * lowest low of a down-delivery). Its open is the CISD level.
+ * last meaningful candle of that run — an up candle before a bearish shift, a
+ * down candle before a bullish shift. Its open is the CISD level.
  *
- * The level prints only when an opposite candle *closes* through that open,
- * after a real push (series range and confirming body both vs ATR). The box is
- * that candle's high–low, extended forward until a close through the far side.
- * Drawing matches the sample: soft fill, dotted border, dashed line on the open.
+ * The zone prints when the new delivery *closes* through that open. One candle
+ * can do it, or the next few, as long as delivery stays in the new direction.
+ * A wick through the open does not count. The box is that candle's high–low,
+ * extended until a close through the far side: soft fill, dotted border, dashed
+ * line on the open. Bullish and bearish use the same rule.
  */
 
 import type { EntityId, IChartWidgetApi } from "@/infrastructure/tradingview";
@@ -72,8 +73,22 @@ interface Series {
   count: number;
   hi: number;
   lo: number;
-  /** Index of the candle that owns the extreme and the CISD open. */
-  extreme: number;
+}
+
+/** Bars the new delivery may take to close through the order-block open. */
+const CONFIRM_WINDOW = 8;
+
+interface Pending {
+  /** Direction of the delivery being invalidated. */
+  leg: 1 | -1;
+  obIndex: number;
+  cisd: number;
+  hi: number;
+  lo: number;
+  count: number;
+  rangeHi: number;
+  rangeLo: number;
+  born: number;
 }
 
 interface MutableZone {
@@ -120,38 +135,87 @@ export function detectOrderBlockCisd(
   const atrs = computeAtr(bars, 14);
   const zones: MutableZone[] = [];
   let series: Series | null = null;
+  let pending: Pending | null = null;
 
-  const tryEmit = (run: Series, confirmIndex: number) => {
-    const ob = bars[run.extreme]!;
+  const candleDir = (bar: ObCisdBar): 1 | -1 | 0 =>
+    bar.close > bar.open ? 1 : bar.close < bar.open ? -1 : 0;
+
+  /** Last candle of the run with a real body. Falls back to the final candle. */
+  const orderBlockIndex = (run: Series): number => {
+    for (let i = run.last; i >= run.start; i -= 1) {
+      const bar = bars[i]!;
+      if (candleDir(bar) !== run.dir) continue;
+      const atr = atrFloor(atrs[i] ?? 0, bar.close);
+      if (Math.abs(bar.close - bar.open) >= atr * Math.min(0.25, inputs.displacement)) return i;
+    }
+    return run.last;
+  };
+
+  const pushZone = (shift: Pending, confirmIndex: number) => {
+    const ob = bars[shift.obIndex]!;
     const confirm = bars[confirmIndex]!;
     const atr = atrFloor(atrs[confirmIndex] ?? 0, confirm.close);
-    const body = Math.abs(confirm.close - confirm.open);
-    if (body < atr * inputs.displacement) return;
-    if (run.hi - run.lo < atr * inputs.seriesAtr) return;
-    if (run.count < inputs.minSeries) return;
-    const cisd = ob.open;
-    const broke = run.dir === 1 ? confirm.close < cisd : confirm.close > cisd;
-    if (!broke) return;
-    if (!(ob.high > ob.low) || cisd < ob.low || cisd > ob.high) return;
-
-    const dir: 1 | -1 = run.dir === 1 ? -1 : 1;
-    // A new zone on top of a live one at the same price is the same level.
+    const dir: 1 | -1 = shift.leg === 1 ? -1 : 1;
     for (let z = zones.length - 1; z >= 0; z -= 1) {
       const prev = zones[z]!;
       if (prev.mitigated || prev.dir !== dir) continue;
-      if (Math.abs(prev.cisd - cisd) <= atr * 0.2) return;
+      if (Math.abs(prev.cisd - shift.cisd) <= atr * 0.2) return;
     }
     zones.push({
       dir,
       t0: ob.time,
-      obIndex: run.extreme,
+      obIndex: shift.obIndex,
       confirmIndex,
-      hi: ob.high,
-      lo: ob.low,
-      cisd,
+      hi: shift.hi,
+      lo: shift.lo,
+      cisd: shift.cisd,
       mitigated: false,
       mitIndex: -1,
     });
+  };
+
+  /**
+   * `emit` once the new delivery closes through the open with a real push.
+   * `drop` if delivery flips back, the window expires, or the leg was too small.
+   * `wait` while the new delivery is still working toward that open.
+   */
+  const consider = (shift: Pending, index: number): "emit" | "wait" | "drop" => {
+    if (index - shift.born >= CONFIRM_WINDOW) return "drop";
+    const bar = bars[index]!;
+    const dir = candleDir(bar);
+    if (dir === shift.leg) return "drop";
+    if (shift.leg === 1 && bar.close > shift.hi) return "drop";
+    if (shift.leg === -1 && bar.close < shift.lo) return "drop";
+    if (shift.count < inputs.minSeries) return "drop";
+    const atr = atrFloor(atrs[index] ?? 0, bar.close);
+    if (shift.rangeHi - shift.rangeLo < atr * inputs.seriesAtr) return "drop";
+    if (dir === 0) return "wait";
+    const broke = shift.leg === 1 ? bar.close < shift.cisd : bar.close > shift.cisd;
+    if (!broke) return "wait";
+    const body = Math.abs(bar.close - bar.open);
+    const push = shift.leg === 1 ? shift.rangeHi - bar.close : bar.close - shift.rangeLo;
+    if (body < atr * inputs.displacement && push < atr * inputs.displacement) return "wait";
+    if (!(shift.hi > shift.lo) || shift.cisd < shift.lo || shift.cisd > shift.hi) return "drop";
+    return "emit";
+  };
+
+  const arm = (run: Series, index: number) => {
+    const obAt = orderBlockIndex(run);
+    const ob = bars[obAt]!;
+    const shift: Pending = {
+      leg: run.dir,
+      obIndex: obAt,
+      cisd: ob.open,
+      hi: ob.high,
+      lo: ob.low,
+      count: run.count,
+      rangeHi: run.hi,
+      rangeLo: run.lo,
+      born: index,
+    };
+    const decision = consider(shift, index);
+    if (decision === "emit") pushZone(shift, index);
+    else if (decision === "wait") pending = shift;
   };
 
   for (let i = 0; i < bars.length; i += 1) {
@@ -168,11 +232,25 @@ export function detectOrderBlockCisd(
       }
     }
 
-    const dir: 1 | -1 | 0 = bar.close > bar.open ? 1 : bar.close < bar.open ? -1 : 0;
-    if (dir === 0) continue;
+    if (pending) {
+      const decision = consider(pending, i);
+      if (decision === "emit") {
+        pushZone(pending, i);
+        pending = null;
+      } else if (decision === "drop") pending = null;
+    }
+
+    const dir = candleDir(bar);
+    if (dir === 0) {
+      if (series) {
+        series.hi = Math.max(series.hi, bar.high);
+        series.lo = Math.min(series.lo, bar.low);
+      }
+      continue;
+    }
 
     if (!series || series.dir !== dir) {
-      if (series && dir === -series.dir) tryEmit(series, i);
+      if (series && dir === -series.dir) arm(series, i);
       series = {
         dir,
         start: i,
@@ -180,7 +258,6 @@ export function detectOrderBlockCisd(
         count: 1,
         hi: bar.high,
         lo: bar.low,
-        extreme: i,
       };
       continue;
     }
@@ -189,9 +266,6 @@ export function detectOrderBlockCisd(
     series.count += 1;
     series.hi = Math.max(series.hi, bar.high);
     series.lo = Math.min(series.lo, bar.low);
-    const extreme = bars[series.extreme]!;
-    if (dir === 1 && bar.high >= extreme.high) series.extreme = i;
-    if (dir === -1 && bar.low <= extreme.low) series.extreme = i;
   }
 
   const last = bars[bars.length - 1]!;
@@ -210,7 +284,12 @@ export function detectOrderBlockCisd(
     if (a.mitigated !== b.mitigated) return a.mitigated ? 1 : -1;
     return b.confirmIndex - a.confirmIndex;
   });
-  const capped = ranked.slice(0, Math.max(1, inputs.maxZones));
+  // Cap each side on its own so a run of bearish shifts cannot hide every bullish block.
+  const limit = Math.max(1, inputs.maxZones);
+  const capped = [
+    ...ranked.filter((zone) => zone.dir === 1).slice(0, limit),
+    ...ranked.filter((zone) => zone.dir === -1).slice(0, limit),
+  ];
 
   return capped
     .map((zone) => ({
