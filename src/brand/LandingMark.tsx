@@ -1,0 +1,23 @@
+type Props = {
+  size?: number | string;
+  title?: string;
+};
+
+/** Two-bar F from the forgechart.ir landing header. Icon only. */
+export function LandingMark({ size = 26, title = "Forge" }: Props) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 158 157"
+      role="img"
+      aria-label={title}
+      xmlns="http://www.w3.org/2000/svg"
+      fill="currentColor"
+    >
+      <title>{title}</title>
+      <path d="M13 84.5 L12.5 52 L46 14.5 L53 11.5 L144.5 12 L116 41.5 L112 43.5 L54 43.5 L49 45.5 Z" />
+      <path d="M13 143.5 L12.5 103 L16.5 97 L48 63.5 L52 61.5 L81 60.5 L125.5 61 L96 88.5 L68 89.5 L64 91.5 Z" />
+    </svg>
+  );
+}
