@@ -5,9 +5,9 @@ import type { ChartLayoutId } from "@/application";
 import { useStore } from "@/shared/hooks/useStore";
 import { BarReplayToolbar } from "./bar-replay/BarReplayToolbar";
 import {
-  clearPrimaryLayoutClip,
   clipPathExcludingHole,
   defaultSplitEdges,
+  mountFullWidthNavbar,
   paneRectInWorkspace,
   RESIZABLE_LAYOUTS,
   sanitizeSplitEdges,
@@ -27,8 +27,6 @@ interface ChartWorkspaceProps {
 }
 
 const DEFAULT_CHROME: ChromeInsets = { headerHeight: 38, leftToolbarWidth: 52, priceAxisWidth: 56 };
-/** Multi-layout panes tile the workspace. Header and toolbar live inside pane 0. */
-const PANE_CHROME: ChromeInsets = { headerHeight: 0, leftToolbarWidth: 0, priceAxisWidth: 0 };
 
 function isVerticalSplit(layout: ChartLayoutId): boolean {
   return layout === "2h" || layout === "3h" || layout === "4h";
@@ -68,7 +66,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   const multi = grid.count > 1;
   const layoutId = chartLayout ?? "s";
   const [activePane, setActivePane] = useState(0);
-  const chrome = DEFAULT_CHROME;
+  const [chrome, setChrome] = useState<ChromeInsets>(DEFAULT_CHROME);
   const [workspaceSize, setWorkspaceSize] = useState({ width: 0, height: 0 });
   const [splitEdges, setSplitEdges] = useState<number[]>(() => defaultSplitEdges(layoutId));
   const [draggingEdge, setDraggingEdge] = useState<number | null>(null);
@@ -228,20 +226,26 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
     };
   }, [multi]);
 
-  // Drop any leftover full-window crop. Each pane's widget is the pane's size.
+  // The primary iframe stays full-window so the original navbar spans every pane.
+  // The plot inside it is sized to pane 0; the header element is left alone.
   useEffect(() => {
     const host = primaryHostRef.current;
     if (!host) return;
-    clearPrimaryLayoutClip(host);
-    const t1 = window.setTimeout(() => {
-      clearPrimaryLayoutClip(host);
-      layoutSyncBus.reflowVisible();
-    }, 50);
-    const t2 = window.setTimeout(() => layoutSyncBus.reflowVisible(), 300);
-    return () => {
-      window.clearTimeout(t1);
-      window.clearTimeout(t2);
-    };
+    if (!multi) return;
+    return mountFullWidthNavbar(
+      host,
+      () => layoutRef.current,
+      (next) => {
+        setChrome((prev) =>
+          prev.headerHeight === next.headerHeight &&
+          prev.leftToolbarWidth === next.leftToolbarWidth &&
+          prev.priceAxisWidth === next.priceAxisWidth
+            ? prev
+            : next,
+        );
+      },
+      () => splitEdgesRef.current,
+    );
   }, [chartLayout, multi]);
 
   // Layout / TF / indicator menus live in the primary iframe — punch a hole in layers.
@@ -305,10 +309,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   const edgesForLayout = RESIZABLE_LAYOUTS.has(layoutId)
     ? sanitizeSplitEdges(layoutId, splitEdges)
     : [];
-  const layoutChrome = multi ? PANE_CHROME : chrome;
-  const primaryRect = multi
-    ? paneRectInWorkspace(layoutId, 0, workspaceSize, layoutChrome, edgesForLayout)
-    : null;
+  const layoutChrome = chrome;
 
   const beginDrag = useCallback((edgeIndex: number, event: ReactPointerEvent<HTMLElement>) => {
     event.preventDefault();
@@ -362,23 +363,18 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
         userSelect: draggingEdge != null ? "none" : undefined,
       }}
     >
-      {/* Primary widget fills pane 0 so the library lays the chart out at that size. */}
+      {/* Full-window widget so the original navbar spans the workspace. The plot is sized to pane 0. */}
       <Box
         ref={primaryHostRef}
         // Header / left toolbar clicks must NOT steal focus from the active layer.
         // Pane 0 focus comes from CL mouse_down on the plot (and the plot outline hit area).
         sx={{
           position: "absolute",
-          ...(primaryRect
-            ? {
-                left: primaryRect.left,
-                top: primaryRect.top,
-                width: primaryRect.width,
-                height: primaryRect.height,
-              }
-            : { inset: 0 }),
-          zIndex: menusOpen ? 6 : 1,
-          bgcolor: "background.default",
+          inset: 0,
+          // Stay under secondary layers. The navbar strip is above those layers
+          // because they begin below the header. Menus show through clip-path holes.
+          zIndex: 1,
+          bgcolor: multi ? "transparent" : "background.default",
           overflow: "hidden",
         }}
       >

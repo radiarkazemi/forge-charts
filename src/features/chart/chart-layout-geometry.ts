@@ -341,6 +341,177 @@ export function applyPrimaryLayoutClip(
   return doc ? readChrome(doc) : null;
 }
 
+type SizeBridge = {
+  value: () => number;
+  setValue: (next: number) => void;
+  subscribe: (cb: (next: number) => void) => void;
+  unsubscribe: (cb: (next: number) => void) => void;
+};
+
+function chartBridges(win: Window): { width: SizeBridge; height: SizeBridge } | null {
+  const api = (
+    win as unknown as {
+      tradingViewApi?: {
+        _chartWidgetCollection?: { _widthWV?: SizeBridge; _heightWV?: SizeBridge };
+      };
+    }
+  ).tradingViewApi;
+  const width = api?._chartWidgetCollection?._widthWV;
+  const height = api?._chartWidgetCollection?._heightWV;
+  if (!width?.setValue || !height?.setValue || !width.subscribe || !height.subscribe) return null;
+  return { width, height };
+}
+
+const PANE_BOX = "forgePaneBox";
+
+function releasePaneBox(el: HTMLElement | null | undefined): void {
+  if (!el || el.dataset[PANE_BOX] !== "1") return;
+  for (const prop of ["left", "top", "width", "height", "right", "bottom", "overflow"]) {
+    el.style.removeProperty(prop);
+  }
+  delete el.dataset[PANE_BOX];
+}
+
+/**
+ * Keep the original Charting Library navbar across the whole window.
+ * The navbar element is not restyled. Only pane 0's plot and its timeframe
+ * strip are given that pane's pixel size, so the other layers stay their own charts.
+ */
+export function mountFullWidthNavbar(
+  container: HTMLElement,
+  getLayout: () => ChartLayoutId,
+  onChrome: (chrome: ChromeInsets) => void,
+  getSplitEdges: () => PaneSplitEdges,
+): () => void {
+  let stopped = false;
+  let lock = false;
+  let hookedWin: Window | null = null;
+  let widthBridge: SizeBridge | null = null;
+  let heightBridge: SizeBridge | null = null;
+  let lastChromeKey = "";
+
+  const apply = () => {
+    if (stopped || lock) return;
+    const iframe = container.querySelector("iframe");
+    const win = iframe?.contentWindow ?? null;
+    const doc = iframe?.contentDocument;
+    if (!win || !doc?.documentElement) return;
+
+    doc.getElementById(STYLE_ID)?.remove();
+    clearPrimaryPriceAxisPins(doc);
+
+    const center = doc.querySelector(".layout__area--center") as HTMLElement | null;
+    const bottom = doc.querySelector(".layout__area--bottom") as HTMLElement | null;
+    const topEl = doc.querySelector(".layout__area--top") as HTMLElement | null;
+    const leftEl = doc.querySelector(".layout__area--left") as HTMLElement | null;
+    const headerHeight = topEl ? topEl.offsetTop + topEl.offsetHeight : DEFAULT_CHROME.headerHeight;
+    const leftToolbarWidth = leftEl?.offsetWidth ?? 0;
+    const chromeKey = `${headerHeight}|${leftToolbarWidth}`;
+    if (chromeKey !== lastChromeKey && headerHeight > 0) {
+      lastChromeKey = chromeKey;
+      onChrome({
+        headerHeight,
+        leftToolbarWidth,
+        priceAxisWidth: readPriceAxisWidth(doc, DEFAULT_CHROME.priceAxisWidth),
+      });
+    }
+
+    if (getLayout() === "s") {
+      releasePaneBox(center);
+      releasePaneBox(bottom);
+      return;
+    }
+
+    const bridges = chartBridges(win);
+    if (bridges && hookedWin !== win) {
+      widthBridge?.unsubscribe(onBridge);
+      heightBridge?.unsubscribe(onBridge);
+      hookedWin = win;
+      widthBridge = bridges.width;
+      heightBridge = bridges.height;
+      widthBridge.subscribe(onBridge);
+      heightBridge.subscribe(onBridge);
+    }
+
+    const W = doc.documentElement.clientWidth || container.clientWidth;
+    const H = doc.documentElement.clientHeight || container.clientHeight;
+    if (W < 32 || H < 32) return;
+    const slot = contentSlotsFor(getLayout(), getSplitEdges())[0];
+    if (!slot) return;
+
+    const contentW = Math.max(0, W - leftToolbarWidth);
+    const contentH = Math.max(0, H - headerHeight);
+    const paneW = Math.max(16, Math.round(slot.w * contentW));
+    const paneH = Math.max(16, Math.round(slot.h * contentH - (slot.y + slot.h < 1 ? PANE_GAP : 0)));
+    const bottomH = bottom?.offsetHeight ?? 0;
+    const plotH = Math.max(16, paneH - bottomH);
+    const left = Math.round(leftToolbarWidth + slot.x * contentW);
+    const top = Math.round(headerHeight + slot.y * contentH);
+    const sized =
+      center?.dataset[PANE_BOX] === "1" &&
+      Math.abs(center.offsetWidth - paneW) <= 1 &&
+      Math.abs(center.offsetHeight - plotH) <= 1 &&
+      bridges != null &&
+      Math.abs(bridges.width.value() - paneW) <= 1 &&
+      Math.abs(bridges.height.value() - plotH) <= 1;
+    if (sized) return;
+
+    lock = true;
+    try {
+      if (center) {
+        center.dataset[PANE_BOX] = "1";
+        center.style.setProperty("left", `${left}px`, "important");
+        center.style.setProperty("top", `${top}px`, "important");
+        center.style.setProperty("width", `${paneW}px`, "important");
+        center.style.setProperty("height", `${plotH}px`, "important");
+        center.style.setProperty("right", "auto", "important");
+        center.style.setProperty("bottom", "auto", "important");
+        center.style.setProperty("overflow", "hidden", "important");
+      }
+      if (bottom) {
+        bottom.dataset[PANE_BOX] = "1";
+        bottom.style.setProperty("left", `${left}px`, "important");
+        bottom.style.setProperty("top", `${top + plotH}px`, "important");
+        bottom.style.setProperty("width", `${paneW}px`, "important");
+        bottom.style.setProperty("right", "auto", "important");
+        bottom.style.setProperty("bottom", "auto", "important");
+      }
+      if (bridges) {
+        if (Math.abs(bridges.width.value() - paneW) > 1) bridges.width.setValue(paneW);
+        if (Math.abs(bridges.height.value() - plotH) > 1) bridges.height.setValue(plotH);
+      }
+    } finally {
+      lock = false;
+    }
+  };
+
+  const onBridge = () => apply();
+
+  apply();
+  const timers = [50, 200, 600, 1200].map((ms) => window.setTimeout(apply, ms));
+  const poll = window.setInterval(apply, 400);
+  const onResize = () => apply();
+  window.addEventListener("resize", onResize);
+
+  return () => {
+    stopped = true;
+    for (const timer of timers) window.clearTimeout(timer);
+    window.clearInterval(poll);
+    window.removeEventListener("resize", onResize);
+    widthBridge?.unsubscribe(onBridge);
+    heightBridge?.unsubscribe(onBridge);
+    const iframe = container.querySelector("iframe");
+    const doc = iframe?.contentDocument;
+    releasePaneBox(doc?.querySelector(".layout__area--center") as HTMLElement | null);
+    releasePaneBox(doc?.querySelector(".layout__area--bottom") as HTMLElement | null);
+    try {
+      iframe?.contentWindow?.dispatchEvent(new Event("resize"));
+    } catch {
+      /* ignore */
+    }
+  };
+}
+
 /** Remove only our clip stylesheet — leave TradingView inline layout alone. */
 export function clearPrimaryLayoutClip(container: HTMLElement): void {
   try {
