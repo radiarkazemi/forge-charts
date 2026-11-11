@@ -127,6 +127,20 @@ function parseExchangePrefix(symbolName: string): string | undefined {
  * `IBasicDataFeed` contract (Adapter pattern). Everything TradingView-specific
  * about symbology and resolution rules lives here.
  */
+/** Quote currency shown on the price scale (XAUUSD → USD, USDJPY → JPY). */
+function quoteCurrency(symbol: SymbolInfo): string {
+  const ticker = symbol.ticker.toUpperCase();
+  if (ticker.endsWith("USDT")) return "USDT";
+  if (ticker.endsWith("USDC")) return "USDC";
+  const quotes = ["USD", "EUR", "JPY", "GBP", "AUD", "CHF", "CAD", "NZD", "TRY", "IRT"];
+  for (const quote of quotes) {
+    if (ticker.endsWith(quote) && ticker.length > quote.length) return quote;
+  }
+  const exchange = symbol.exchange.toUpperCase();
+  if (exchange === "TSE" || exchange === "IRAN" || exchange === "TGJU") return "IRT";
+  return "USD";
+}
+
 export class TradingViewDatafeed implements IBasicDataFeed {
   /** Which provider is currently feeding the main series — lets the UI flag demo data. */
   readonly source: Store<DataSourceInfo | null> = createStore<DataSourceInfo | null>(null);
@@ -611,6 +625,8 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       format: "price",
       minmov: 1,
       pricescale: 10 ** symbol.pricePrecision,
+      currency_code: quoteCurrency(symbol),
+      original_currency_code: quoteCurrency(symbol),
       has_seconds: hasSeconds,
       seconds_multipliers: hasSeconds ? SECONDS_MULTIPLIERS : [],
       has_intraday: hasIntraday,

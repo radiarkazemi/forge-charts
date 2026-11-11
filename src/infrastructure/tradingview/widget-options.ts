@@ -85,6 +85,8 @@ const ENABLED_FEATURES: ChartingLibraryFeatureset[] = [
   "show_zoom_and_move_buttons_on_touch",
   // Candle close countdown on the price scale (intraday resolutions).
   "countdown",
+  // "USD" (quote currency) on the price scale, as on TradingView mobile.
+  "pricescale_currency",
 ];
 
 const DISABLED_FEATURES: ChartingLibraryFeatureset[] = [
@@ -279,6 +281,8 @@ export function chartOverrides(theme: ThemeMode): ChartingLibraryWidgetOptions["
     "paneProperties.crossHairProperties.color": t.crosshair,
     "scalesProperties.textColor": t.textMuted,
     "scalesProperties.lineColor": t.border,
+    "scalesProperties.showSeriesLastValue": true,
+    "mainSeriesProperties.showPriceLine": true,
     "mainSeriesProperties.showCountdown": true,
     "mainSeriesProperties.candleStyle.upColor": t.up,
     "mainSeriesProperties.candleStyle.downColor": t.down,
@@ -325,13 +329,11 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
   });
 
   const baseDisabled = secondary ? SECONDARY_DISABLED : hideHeader ? NO_HEADER_DISABLED : DISABLED_FEATURES;
-  // Mobile: toolbar starts collapsed (Draw expands it); drop bottom date-range strip for plot height.
+  // Mobile: drawing toolbar starts collapsed (Draw expands it). The bottom
+  // Date Range / clock bar stays — that is the TradingView mobile footer.
   const disabled =
     mobile && !secondary
-      ? [
-          ...baseDisabled.filter((f) => f !== "hide_left_toolbar_by_default"),
-          "timeframes_toolbar" as ChartingLibraryFeatureset,
-        ]
+      ? baseDisabled.filter((f) => f !== "hide_left_toolbar_by_default")
       : baseDisabled;
 
   const customCss = mobile && !secondary
@@ -389,6 +391,8 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
     // Beat localStorage / autosave that may have turned countdown off.
     settings_overrides: {
       "mainSeriesProperties.showCountdown": true,
+      "mainSeriesProperties.showPriceLine": true,
+      "scalesProperties.showSeriesLastValue": true,
     },
     studies_overrides: studiesOverrides(input.theme),
     save_load_adapter: input.saveLoadAdapter,

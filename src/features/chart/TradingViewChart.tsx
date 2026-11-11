@@ -26,6 +26,7 @@ import { useIfvgBprStudy } from "./useIfvgBprStudy";
 import { useIrlErlStudy } from "./useIrlErlStudy";
 import { SessionsDashboard } from "@/features/sessions/SessionsDashboard";
 import { WatermarkOverlay } from "@/features/watermark/WatermarkOverlay";
+import { MobilePriceRail } from "./MobilePriceRail";
 import { useWatermarkStudy } from "./useWatermarkStudy";
 import { useTradingViewWidget } from "./useTradingViewWidget";
 import { RADIAR_LAYOUT_NAME } from "@/infrastructure/tradingview";
@@ -311,6 +312,7 @@ export function TradingViewChart({
           Do NOT mount blue overlay / HTF remain strip — they duplicate & bleed into OHLC. */}
       <SessionsDashboard />
       <WatermarkOverlay />
+      {isPrimary ? <MobilePriceRail /> : null}
 
       {!ready && !error ? (
         <Box
