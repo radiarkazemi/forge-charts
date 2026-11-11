@@ -11,6 +11,7 @@ export const USER_SETTINGS_KEY = "forge.tv.userSettings.v1";
 /** Default starred Forge indicators (must match study description / UI name). */
 export const DEFAULT_FAVORITE_INDICATORS = [
   "Order Block + CISD",
+  "IFVG + BPR",
   "BOS / MSS",
   "IRL / ERL",
   "Real Swing High/Low",

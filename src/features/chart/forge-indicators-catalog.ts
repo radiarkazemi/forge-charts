@@ -5,6 +5,7 @@
 
 import { BOS_MSS_STUDY_ID, BOS_MSS_STUDY_NAME } from "./bos-mss-indicator";
 import { OB_CISD_STUDY_ID, OB_CISD_STUDY_NAME } from "./order-block-cisd-indicator";
+import { IFVG_BPR_STUDY_ID, IFVG_BPR_STUDY_NAME } from "./ifvg-bpr-indicator";
 import { DEALING_RANGES_STUDY_ID, DEALING_RANGES_STUDY_NAME } from "./dealing-ranges-indicator";
 import { FRACTAL_IGOR_STUDY_ID, FRACTAL_IGOR_STUDY_NAME } from "./fractal-igor-indicator";
 import { CERTAINTY_STUDY_ID, CERTAINTY_STUDY_NAME } from "./forge-certainty-indicator";
@@ -132,6 +133,17 @@ export const BUILTIN_INDICATORS: readonly ForgeIndicatorEntry[] = [
 ] as const;
 
 export const FORGE_INDICATORS: readonly ForgeIndicatorEntry[] = [
+  {
+    id: "forge-ifvg-bpr",
+    name: IFVG_BPR_STUDY_NAME,
+    studyId: IFVG_BPR_STUDY_ID,
+    author: "Forge",
+    shortDescription: "Inversion FVG · balanced price range",
+    tags: ["ifvg", "fvg", "bpr", "ict", "imbalance"],
+    favorite: true,
+    usesLabel: "Forge",
+    section: "forge",
+  },
   {
     id: "forge-ob-cisd",
     name: OB_CISD_STUDY_NAME,
