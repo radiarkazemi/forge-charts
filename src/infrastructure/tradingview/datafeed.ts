@@ -1,6 +1,7 @@
 import { normalizeTicker, parseInterval, intervalSeconds, isMarketSessionOpen, SYMBOL_TYPE_LABELS, type Bar, type SymbolInfo } from "@/domain";
 import { createStore, type MarketDataService, type Store, type SymbolRepository, type Unsubscribe } from "@/application";
 import { EXCHANGE_PRIORITY } from "@/infrastructure/symbols/static-symbol-repository";
+import { fillSingleHourGaps } from "@/infrastructure/market-data/hour-gaps";
 import { canonicalizeBar, collapseDailyBars } from "@/infrastructure/market-data/session-bars";
 import {
   appendLive,
@@ -430,7 +431,10 @@ export class TradingViewDatafeed implements IBasicDataFeed {
           onResult([], { noData: true });
           return;
         }
-        const collapsed = collapseDailyBars(symbol, resolution, slice);
+        const collapsed = fillSingleHourGaps(
+          collapseDailyBars(symbol, resolution, slice),
+          barStep(resolution),
+        );
         const ready =
           symbol.exchange.toUpperCase() === "TSE"
             ? this.packTseBars(symbol, String(resolution), collapsed, periodParams)
@@ -470,7 +474,10 @@ export class TradingViewDatafeed implements IBasicDataFeed {
         onResult([], { noData: true });
         return;
       }
-      const collapsed = collapseDailyBars(symbol, resolution, filtered);
+      const collapsed = fillSingleHourGaps(
+        collapseDailyBars(symbol, resolution, filtered),
+        barStep(resolution),
+      );
       const ready =
         symbol.exchange.toUpperCase() === "TSE"
           ? await this.packTseBars(symbol, String(resolution), collapsed, periodParams)

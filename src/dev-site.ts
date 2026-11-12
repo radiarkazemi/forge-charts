@@ -1,5 +1,3 @@
-import type { AuthSession } from "@/features/auth";
-
 const PREFIX = "forge.dev.";
 
 /** Development charts are served under /dev/. Product stays on /charts/. */
@@ -11,19 +9,6 @@ export function isDevSite(): boolean {
     return false;
   }
 }
-
-/**
- * Signed-in session for the private development site.
- * It never uses the product account registry.
- */
-export const DEV_SESSION: AuthSession = {
-  userId: "dev-private",
-  username: "dev",
-  displayName: "Development",
-  token: "dev-private",
-  createdAt: 1,
-  safetyComplete: true,
-};
 
 function prefixStore(raw: Storage): void {
   const getItem = raw.getItem.bind(raw);
