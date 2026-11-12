@@ -348,18 +348,71 @@ type SizeBridge = {
   unsubscribe: (cb: (next: number) => void) => void;
 };
 
-function chartBridges(win: Window): { width: SizeBridge; height: SizeBridge } | null {
+type SizeView = {
+  subscribe?: (cb: (next: number) => void) => void;
+  unsubscribe?: (cb: (next: number) => void) => void;
+  ownership?: () => SizeBridge;
+};
+
+type ChartWidget = {
+  resize?: () => void;
+  _options?: { width?: SizeView; height?: SizeView };
+};
+
+/**
+ * The collection's `_widthWV` is a read-only view of the full window.
+ * Writing it does nothing, so Alt+R kept the last bar at the window's right
+ * edge (under the other panes) and the price scale stayed there too.
+ * The chart widget's own width is writable through `ownership()`.
+ */
+function primaryChartWidget(win: Window): ChartWidget | null {
   const api = (
     win as unknown as {
       tradingViewApi?: {
-        _chartWidgetCollection?: { _widthWV?: SizeBridge; _heightWV?: SizeBridge };
+        _chartWidgetCollection?: {
+          _subscribedChartWidget?: ChartWidget;
+          activeChartWidget?: { value?: () => ChartWidget };
+        };
       };
     }
   ).tradingViewApi;
-  const width = api?._chartWidgetCollection?._widthWV;
-  const height = api?._chartWidgetCollection?._heightWV;
-  if (!width?.setValue || !height?.setValue || !width.subscribe || !height.subscribe) return null;
-  return { width, height };
+  const col = api?._chartWidgetCollection;
+  return col?._subscribedChartWidget ?? col?.activeChartWidget?.value?.() ?? null;
+}
+
+function chartOwners(win: Window): { chart: ChartWidget; width: SizeBridge; height: SizeBridge } | null {
+  try {
+    const chart = primaryChartWidget(win);
+    if (!chart) return null;
+    const width = chart._options?.width?.ownership?.();
+    const height = chart._options?.height?.ownership?.();
+    if (
+      !width?.setValue ||
+      !height?.setValue ||
+      typeof width.value !== "function" ||
+      typeof height.value !== "function"
+    ) {
+      return null;
+    }
+    return { chart, width, height };
+  } catch {
+    return null;
+  }
+}
+
+function fitPrimaryChart(win: Window, width: number, height: number): void {
+  const owners = chartOwners(win);
+  if (!owners || width < 16 || height < 16) return;
+  let changed = false;
+  if (Math.abs(owners.width.value() - width) > 1) {
+    owners.width.setValue(width);
+    changed = true;
+  }
+  if (Math.abs(owners.height.value() - height) > 1) {
+    owners.height.setValue(height);
+    changed = true;
+  }
+  if (changed) owners.chart.resize?.();
 }
 
 const PANE_BOX = "forgePaneBox";
@@ -374,8 +427,9 @@ function releasePaneBox(el: HTMLElement | null | undefined): void {
 
 /**
  * Keep the original Charting Library navbar across the whole window.
- * The navbar element is not restyled. Only pane 0's plot and its timeframe
- * strip are given that pane's pixel size, so the other layers stay their own charts.
+ * The navbar element is not restyled. Pane 0's chart widget is given that
+ * pane's pixel size, so Alt+R and the price scale use the visible pane
+ * instead of the full window hidden under the other layers.
  */
 export function mountFullWidthNavbar(
   container: HTMLElement,
@@ -385,9 +439,9 @@ export function mountFullWidthNavbar(
 ): () => void {
   let stopped = false;
   let lock = false;
-  let hookedWin: Window | null = null;
-  let widthBridge: SizeBridge | null = null;
-  let heightBridge: SizeBridge | null = null;
+  let hookedChart: ChartWidget | null = null;
+  let widthView: SizeView | null = null;
+  let heightView: SizeView | null = null;
   let lastChromeKey = "";
 
   const apply = () => {
@@ -419,18 +473,21 @@ export function mountFullWidthNavbar(
     if (getLayout() === "s") {
       releasePaneBox(center);
       releasePaneBox(bottom);
+      const W = doc.documentElement.clientWidth || container.clientWidth;
+      const H = doc.documentElement.clientHeight || container.clientHeight;
+      fitPrimaryChart(win, W - leftToolbarWidth, H - headerHeight);
       return;
     }
 
-    const bridges = chartBridges(win);
-    if (bridges && hookedWin !== win) {
-      widthBridge?.unsubscribe(onBridge);
-      heightBridge?.unsubscribe(onBridge);
-      hookedWin = win;
-      widthBridge = bridges.width;
-      heightBridge = bridges.height;
-      widthBridge.subscribe(onBridge);
-      heightBridge.subscribe(onBridge);
+    const chart = primaryChartWidget(win);
+    if (chart && hookedChart !== chart) {
+      widthView?.unsubscribe?.(onBridge);
+      heightView?.unsubscribe?.(onBridge);
+      hookedChart = chart;
+      widthView = chart._options?.width ?? null;
+      heightView = chart._options?.height ?? null;
+      widthView?.subscribe?.(onBridge);
+      heightView?.subscribe?.(onBridge);
     }
 
     const W = doc.documentElement.clientWidth || container.clientWidth;
@@ -447,13 +504,14 @@ export function mountFullWidthNavbar(
     const plotH = Math.max(16, paneH - bottomH);
     const left = Math.round(leftToolbarWidth + slot.x * contentW);
     const top = Math.round(headerHeight + slot.y * contentH);
+    const owners = chartOwners(win);
     const sized =
       center?.dataset[PANE_BOX] === "1" &&
       Math.abs(center.offsetWidth - paneW) <= 1 &&
       Math.abs(center.offsetHeight - plotH) <= 1 &&
-      bridges != null &&
-      Math.abs(bridges.width.value() - paneW) <= 1 &&
-      Math.abs(bridges.height.value() - plotH) <= 1;
+      owners != null &&
+      Math.abs(owners.width.value() - paneW) <= 1 &&
+      Math.abs(owners.height.value() - plotH) <= 1;
     if (sized) return;
 
     lock = true;
@@ -476,10 +534,9 @@ export function mountFullWidthNavbar(
         bottom.style.setProperty("right", "auto", "important");
         bottom.style.setProperty("bottom", "auto", "important");
       }
-      if (bridges) {
-        if (Math.abs(bridges.width.value() - paneW) > 1) bridges.width.setValue(paneW);
-        if (Math.abs(bridges.height.value() - plotH) > 1) bridges.height.setValue(plotH);
-      }
+      // The price scale lives inside this widget. Matching the pane width
+      // puts it on the pane's trailing edge and makes Alt+R land there.
+      fitPrimaryChart(win, paneW, plotH);
     } finally {
       lock = false;
     }
@@ -498,14 +555,28 @@ export function mountFullWidthNavbar(
     for (const timer of timers) window.clearTimeout(timer);
     window.clearInterval(poll);
     window.removeEventListener("resize", onResize);
-    widthBridge?.unsubscribe(onBridge);
-    heightBridge?.unsubscribe(onBridge);
+    widthView?.unsubscribe?.(onBridge);
+    heightView?.unsubscribe?.(onBridge);
+    hookedChart = null;
     const iframe = container.querySelector("iframe");
     const doc = iframe?.contentDocument;
-    releasePaneBox(doc?.querySelector(".layout__area--center") as HTMLElement | null);
+    const win = iframe?.contentWindow ?? null;
+    const center = doc?.querySelector(".layout__area--center") as HTMLElement | null;
+    const topEl = doc?.querySelector(".layout__area--top") as HTMLElement | null;
+    const leftEl = doc?.querySelector(".layout__area--left") as HTMLElement | null;
+    releasePaneBox(center);
     releasePaneBox(doc?.querySelector(".layout__area--bottom") as HTMLElement | null);
+    if (win && doc) {
+      const header = topEl ? topEl.offsetTop + topEl.offsetHeight : 0;
+      const left = leftEl?.offsetWidth ?? 0;
+      fitPrimaryChart(
+        win,
+        doc.documentElement.clientWidth - left,
+        doc.documentElement.clientHeight - header,
+      );
+    }
     try {
-      iframe?.contentWindow?.dispatchEvent(new Event("resize"));
+      win?.dispatchEvent(new Event("resize"));
     } catch {
       /* ignore */
     }
