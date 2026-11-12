@@ -88,9 +88,9 @@ function FieldRow({
         display: "flex",
         alignItems: "center",
         gap: 1.25,
-        height: 48,
-        px: 1.6,
-        borderRadius: "14px",
+        height: "10cqw",
+        px: "2cqw",
+        borderRadius: "1.6cqw",
         border: "1px solid rgba(206,196,180,0.42)",
         bgcolor: "rgba(0,0,0,0.28)",
         boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04), 0 10px 22px rgba(0,0,0,0.28)",
@@ -171,13 +171,13 @@ export function ForgeLoginPicture({
   const credentialHoles = (frame: "full" | "fields") => {
     const emailBox = frame === "full"
       ? { left: "25.2%", top: "37%", width: "57.9%", height: "7.58%" }
-      : { left: "25.2%", top: "10.1%", width: "57.9%", height: "31.6%" };
+      : { left: "25.2%", top: "11%", width: "57.9%", height: "34.4%" };
     const passwordBox = frame === "full"
       ? { left: "25.2%", top: "48.64%", width: "50.3%", height: "7.58%" }
-      : { left: "25.2%", top: "58.9%", width: "50.3%", height: "31.6%" };
+      : { left: "25.2%", top: "64.2%", width: "50.3%", height: "34.4%" };
     const eyeBox = frame === "full"
       ? { left: "77.6%", top: "49.6%", width: "6.7%", height: "6.1%" }
-      : { left: "77.6%", top: "63%", width: "6.7%", height: "22%" };
+      : { left: "77.6%", top: "68.6%", width: "6.7%", height: "24%" };
     return (
       <>
         <Box
@@ -212,36 +212,49 @@ export function ForgeLoginPicture({
     );
   };
   const footControls = (frame: "full" | "foot") => {
+    // Interior of the painted robot frame (807×182, inset so the border stays visible).
     const captcha = frame === "full"
-      ? { left: "16.4%", top: "60.6%", width: "67.2%", height: "8.8%" }
-      : { left: "16.4%", top: "5.1%", width: "67.2%", height: "21.2%" };
+      ? { left: "16.86%", top: "57.27%", width: "66.36%", height: "12.58%" }
+      : { left: "16.86%", top: "1.4%", width: "66.36%", height: "29.02%" };
     const button = frame === "full"
       ? { left: "14%", top: "74.1%", width: "72%", height: "9.2%" }
-      : { left: "14%", top: "37.6%", width: "72%", height: "22.6%" };
+      : { left: "14%", top: "40.2%", width: "72%", height: "21.7%" };
     const link = frame === "full"
       ? { left: "28%", top: "85.4%", width: "44%" }
-      : { left: "28%", top: "65%", width: "44%" };
+      : { left: "28%", top: "66.4%", width: "44%" };
     return (
       <>
         <Box
           sx={{
             position: "absolute",
             ...captcha,
-            display: "grid",
-            placeItems: "center",
             overflow: "hidden",
             bgcolor: "#070707",
-            borderRadius: "14px",
+            borderRadius: "1.5cqw",
           }}
         >
-          <Box sx={{ transform: "scale(calc(100cqw / 820px)) translateY(-36px)", transformOrigin: "center" }}>
+          <Box
+            sx={{
+              width: 304,
+              height: 78,
+              overflow: "hidden",
+              position: "relative",
+              transformOrigin: "top left",
+              transform:
+                "scaleX(calc(100cqw * 0.6636 / 304px)) scaleY(calc(100cqw * 0.1393 / 78px))",
+            }}
+          >
             <RecaptchaField
+              key={mode}
               onToken={(token) => {
                 setCaptchaToken(token);
                 if (token) setLocalError(null);
               }}
               onError={(next) => setLocalError(next)}
             />
+            {/* The test key paints a red line over the logo. Cover it; the checkbox starts lower. */}
+            <Box sx={{ position: "absolute", left: 0, top: 0, width: 304, height: 12, bgcolor: "#222", pointerEvents: "none" }} />
+            <Box sx={{ position: "absolute", left: 0, top: 12, width: 236, height: 11, bgcolor: "#222", pointerEvents: "none" }} />
           </Box>
         </Box>
         {message ? (
@@ -249,7 +262,7 @@ export function ForgeLoginPicture({
             sx={{
               position: "absolute",
               left: "16%",
-              top: frame === "full" ? "69.7%" : "31%",
+              top: frame === "full" ? "71.2%" : "33%",
               width: "68%",
               color: "#ffb4b4",
               fontSize: "2.2cqw",
@@ -290,6 +303,7 @@ export function ForgeLoginPicture({
           type="button"
           onClick={() => {
             setLocalError(null);
+            setCaptchaToken(null);
             onMode(mode === "login" ? "signup" : "login");
           }}
           sx={{
@@ -345,9 +359,7 @@ export function ForgeLoginPicture({
           display: "flex",
           alignItems: "center",
           justifyContent: { xs: "center", md: "flex-end" },
-          // The artwork keeps a wider dark margin on the right of the card than 7vw.
-          pl: { xs: 2, md: 2 },
-          pr: { xs: 2, md: "11vw" },
+          px: { xs: 2, md: "7vw" },
           py: 3,
           overflow: "auto",
         }}
@@ -356,25 +368,21 @@ export function ForgeLoginPicture({
           <Box
             component="a"
             href="?view=landing"
+            aria-label="Forge"
             sx={{
               position: "fixed",
               zIndex: 2,
               top: 16,
               left: 16,
-              color: "#f3ddb8",
-              textDecoration: "none",
-              fontSize: 13,
-              fontWeight: 600,
-              letterSpacing: "0.04em",
-              fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif',
-              px: 1.4,
-              py: 0.6,
-              borderRadius: "999px",
-              bgcolor: "rgba(0,0,0,0.5)",
-              border: "1px solid rgba(240,200,140,0.28)",
+              lineHeight: 0,
             }}
           >
-            Landing
+            <Box
+              component="img"
+              src={brandSrc("forge-f.png")}
+              alt=""
+              sx={{ height: 52, width: "auto", display: "block" }}
+            />
           </Box>
         ) : null}
 
@@ -382,7 +390,10 @@ export function ForgeLoginPicture({
           component="form"
           onSubmit={submit}
           sx={{
-            width: "min(720px, calc((100dvh - 40px) / 1.108), 100%)",
+            width: mode === "signup"
+              ? "min(720px, calc((100dvh - 40px) / 1.36), 100%)"
+              : "min(720px, calc((100dvh - 40px) / 1.108), 100%)",
+            containerType: "inline-size",
             fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif',
             color: "#f6f3ee",
           }}
@@ -395,8 +406,8 @@ export function ForgeLoginPicture({
                   backgroundImage: `url(${brandSrc("forge-form-side.png")})`,
                   backgroundRepeat: "repeat-y",
                   backgroundSize: "100% auto",
-                  px: "15.5%",
-                  py: 1.25,
+                  px: "7%",
+                  py: "1.2cqw",
                 }}
               >
                 <FieldRow
@@ -417,8 +428,8 @@ export function ForgeLoginPicture({
                   backgroundImage: `url(${brandSrc("forge-form-side.png")})`,
                   backgroundRepeat: "repeat-y",
                   backgroundSize: "100% auto",
-                  px: "15.5%",
-                  py: 1.25,
+                  px: "7%",
+                  py: "1.2cqw",
                 }}
               >
                 <FieldRow
