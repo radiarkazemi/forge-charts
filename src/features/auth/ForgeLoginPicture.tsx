@@ -109,10 +109,14 @@ function FieldRow({
         gap: 1.25,
         height: 48,
         px: 1.6,
-        borderRadius: "12px",
-        border: "1px solid rgba(255,255,255,0.18)",
-        bgcolor: "rgba(8,7,6,0.72)",
-        "&:focus-within": { borderColor: "rgba(232,190,120,0.8)" },
+        borderRadius: "14px",
+        border: "1px solid rgba(206,196,180,0.42)",
+        bgcolor: "rgba(0,0,0,0.28)",
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04), 0 10px 22px rgba(0,0,0,0.28)",
+        "&:focus-within": {
+          borderColor: "rgba(232,196,130,0.85)",
+          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06), 0 0 16px rgba(210,150,50,0.22)",
+        },
       }}
     >
       {icon}
@@ -171,14 +175,18 @@ export function ForgeLoginPicture({
   return (
     <Box sx={{ minHeight: "100dvh", position: "relative", bgcolor: "#050403" }}>
       <Box
-        aria-hidden
+        component="img"
+        src={brandSrc("forge-background-hi.webp")}
+        alt=""
         sx={{
           position: "fixed",
           inset: 0,
-          backgroundImage: `url(${brandSrc("forge-background.png")})`,
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-          backgroundRepeat: "no-repeat",
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+          objectPosition: "center",
+          pointerEvents: "none",
+          userSelect: "none",
         }}
       />
       <Box
@@ -224,38 +232,30 @@ export function ForgeLoginPicture({
           component="form"
           onSubmit={submit}
           sx={{
-            width: "min(420px, 100%)",
-            display: "flex",
-            flexDirection: "column",
-            gap: 1.35,
-            px: 2.75,
-            pt: 13,
-            pb: 2.25,
-            position: "relative",
-            borderRadius: "8px 22px 8px 22px",
-            background: "linear-gradient(180deg, rgba(18,16,14,0.94), rgba(6,6,6,0.92))",
-            border: "1px solid rgba(214,176,112,0.42)",
-            boxShadow: "0 28px 80px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,226,180,0.12)",
+            width: "min(440px, 100%)",
             fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif',
             color: "#f6f3ee",
           }}
         >
           <Box
             component="img"
-            src={brandSrc("forge-f.png")}
+            src={brandSrc("forge-form-top.png")}
             alt=""
-            sx={{
-              position: "absolute",
-              top: -16,
-              left: "50%",
-              transform: "translateX(-50%)",
-              width: 132,
-              height: "auto",
-              userSelect: "none",
-              pointerEvents: "none",
-            }}
+            sx={{ width: "100%", height: "auto", display: "block", userSelect: "none", pointerEvents: "none" }}
           />
-
+          <Box
+            sx={{
+              backgroundImage: `url(${brandSrc("forge-form-side.png")})`,
+              backgroundRepeat: "repeat-y",
+              backgroundSize: "100% auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: 1.35,
+              px: "15.5%",
+              pt: 0.25,
+              pb: 1.25,
+            }}
+          >
           {mode === "signup" ? (
             <FieldRow
               icon={<PersonIcon />}
@@ -327,27 +327,6 @@ export function ForgeLoginPicture({
 
           <Box
             component="button"
-            type="submit"
-            disabled={busy}
-            sx={{
-              height: 50,
-              border: "none",
-              borderRadius: "12px",
-              cursor: busy ? "progress" : "pointer",
-              color: "#1c140c",
-              font: "inherit",
-              fontSize: 16,
-              fontWeight: 650,
-              background: "linear-gradient(180deg, #f6e2bc 0%, #e7c07a 38%, #c4893c 100%)",
-              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.45)",
-              "&:disabled": { opacity: 0.65 },
-            }}
-          >
-            {busy ? "Please wait…" : mode === "login" ? "Sign In →" : "Create account →"}
-          </Box>
-
-          <Box
-            component="button"
             type="button"
             onClick={() => {
               setLocalError(null);
@@ -365,6 +344,41 @@ export function ForgeLoginPicture({
             }}
           >
             {mode === "login" ? "Create account" : "Back to sign in"}
+          </Box>
+          </Box>
+          <Box sx={{ position: "relative" }}>
+            <Box
+              component="img"
+              src={brandSrc("forge-form-bottom.png")}
+              alt=""
+              sx={{ width: "100%", height: "auto", display: "block", userSelect: "none", pointerEvents: "none" }}
+            />
+            <Box
+              component="button"
+              type="submit"
+              disabled={busy}
+              sx={{
+                position: "absolute",
+                left: "13.7%",
+                top: "4.2%",
+                width: "72.7%",
+                height: "34%",
+                border: "none",
+                borderRadius: "12px",
+                cursor: busy ? "progress" : "pointer",
+                color: mode === "login" && !busy ? "transparent" : "#1c140c",
+                font: "inherit",
+                fontSize: 16,
+                fontWeight: 650,
+                background:
+                  mode === "login" && !busy
+                    ? "transparent"
+                    : "linear-gradient(180deg, #f6e2bc 0%, #e7c07a 38%, #c4893c 100%)",
+                "&:disabled": { opacity: 0.65 },
+              }}
+            >
+              {busy ? "Please wait…" : mode === "login" ? "Sign In" : "Create account →"}
+            </Box>
           </Box>
         </Box>
       </Box>
