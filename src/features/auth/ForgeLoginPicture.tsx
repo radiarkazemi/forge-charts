@@ -1,6 +1,7 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import Box from "@mui/material/Box";
 import { isDevSite } from "@/dev-site";
+import { RecaptchaField } from "./RecaptchaField";
 
 function brandSrc(file: string): string {
   const base = import.meta.env.BASE_URL || "/";
@@ -24,33 +25,117 @@ interface ForgeLoginPictureProps {
   readonly onSubmit: (event: FormEvent) => void;
 }
 
-const CHECK_URL = `url("data:image/svg+xml;utf8,${encodeURIComponent(
-  `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M3 8.2 6.4 11.5 13 4.5' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>`,
-)}")`;
-
-const fieldInputSx = {
-  width: "100%",
-  height: "100%",
+const inputSx = {
+  flex: 1,
+  minWidth: 0,
   border: "none",
   outline: "none",
   background: "transparent",
-  color: "#f4f1ec",
+  color: "#f6f3ee",
   font: "inherit",
-  fontSize: "2.55cqh",
-  letterSpacing: "0.01em",
-  padding: "0 2cqw",
-  boxSizing: "border-box" as const,
+  fontSize: 15,
+  "&::placeholder": { color: "#b7b1a8", opacity: 1 },
   "&:-webkit-autofill, &:-webkit-autofill:hover, &:-webkit-autofill:focus": {
-    WebkitTextFillColor: "#f4f1ec",
-    WebkitBoxShadow: "0 0 0 1000px #0d0d0c inset",
+    WebkitTextFillColor: "#f6f3ee",
+    WebkitBoxShadow: "0 0 0 1000px #12100e inset",
     caretColor: "#f0c27a",
     transition: "background-color 99999s ease-out",
   },
 };
 
+function MailIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden fill="none" stroke="#d9d3cb" strokeWidth="1.6">
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M4 7l8 6 8-6" />
+    </svg>
+  );
+}
+
+function LockIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden fill="none" stroke="#d9d3cb" strokeWidth="1.6">
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+    </svg>
+  );
+}
+
+function PersonIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden fill="none" stroke="#d9d3cb" strokeWidth="1.6">
+      <circle cx="12" cy="8" r="3.2" />
+      <path d="M5 19c1.4-3 3.8-4.5 7-4.5S17.6 16 19 19" />
+    </svg>
+  );
+}
+
+function EyeIcon({ off }: { readonly off: boolean }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden fill="none" stroke="#cfc8c0" strokeWidth="1.6">
+      <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z" />
+      <circle cx="12" cy="12" r="2.5" />
+      {off ? <path d="M4 5l16 14" /> : null}
+    </svg>
+  );
+}
+
+function FieldRow({
+  icon,
+  label,
+  type = "text",
+  value,
+  onChange,
+  autoComplete,
+  required = true,
+  minLength,
+  end,
+}: {
+  readonly icon: ReactNode;
+  readonly label: string;
+  readonly type?: string;
+  readonly value: string;
+  readonly onChange: (value: string) => void;
+  readonly autoComplete: string;
+  readonly required?: boolean;
+  readonly minLength?: number;
+  readonly end?: ReactNode;
+}) {
+  return (
+    <Box
+      sx={{
+        display: "flex",
+        alignItems: "center",
+        gap: 1.25,
+        height: 48,
+        px: 1.6,
+        borderRadius: "12px",
+        border: "1px solid rgba(255,255,255,0.18)",
+        bgcolor: "rgba(8,7,6,0.72)",
+        "&:focus-within": { borderColor: "rgba(232,190,120,0.8)" },
+      }}
+    >
+      {icon}
+      <Box
+        component="input"
+        aria-label={label}
+        placeholder={label}
+        type={type}
+        required={required}
+        minLength={minLength}
+        value={value}
+        autoComplete={autoComplete}
+        onChange={(event) => onChange(event.target.value)}
+        sx={inputSx}
+      />
+      {end}
+    </Box>
+  );
+}
+
 /**
- * The full molten scene, with a real sign-in form sitting on the card
- * in the same place as the original artwork.
+ * Full-page molten background with a sign-in card.
+ * Account creation stays inside the same card.
  */
 export function ForgeLoginPicture({
   mode,
@@ -68,13 +153,13 @@ export function ForgeLoginPicture({
   onSubmit,
 }: ForgeLoginPictureProps) {
   const [showPassword, setShowPassword] = useState(false);
-  const [robot, setRobot] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const dev = isDevSite();
   const message = localError || error;
 
   const submit = (event: FormEvent) => {
-    if (!robot) {
+    if (!captchaToken) {
       event.preventDefault();
       setLocalError("Confirm you are not a robot.");
       return;
@@ -84,61 +169,50 @@ export function ForgeLoginPicture({
   };
 
   return (
-    <Box
-      sx={{
-        minHeight: "100dvh",
-        bgcolor: "#000",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        overflow: { xs: "auto", md: "hidden" },
-      }}
-    >
+    <Box sx={{ minHeight: "100dvh", position: "relative", bgcolor: "#050403" }}>
+      <Box
+        aria-hidden
+        sx={{
+          position: "fixed",
+          inset: 0,
+          backgroundImage: `url(${brandSrc("forge-background.png")})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          backgroundRepeat: "no-repeat",
+        }}
+      />
       <Box
         sx={{
           position: "relative",
-          width: { xs: "100%", md: "min(100vw, calc(100dvh * 1672 / 941))" },
-          aspectRatio: { md: "1672 / 941" },
-          display: { xs: "flex", md: "block" },
-          flexDirection: "column",
+          zIndex: 1,
+          minHeight: "100dvh",
+          display: "flex",
           alignItems: "center",
-          containerType: { md: "size" },
+          justifyContent: { xs: "center", md: "flex-end" },
+          px: { xs: 2, md: "7vw" },
+          py: 3,
+          overflow: "auto",
         }}
       >
-        <Box
-          component="img"
-          src={brandSrc("forge-background.png")}
-          alt=""
-          sx={{
-            position: { xs: "relative", md: "absolute" },
-            inset: { md: 0 },
-            width: "100%",
-            height: { xs: "auto", md: "100%" },
-            display: "block",
-            userSelect: "none",
-            pointerEvents: "none",
-          }}
-        />
-
         {dev ? (
           <Box
             component="a"
             href="?view=landing"
             sx={{
-              position: "absolute",
-              zIndex: 3,
-              left: "1.6%",
-              top: "2.4%",
+              position: "fixed",
+              zIndex: 2,
+              top: 16,
+              left: 16,
               color: "#f3ddb8",
               textDecoration: "none",
-              fontSize: { xs: 13, md: "1.15cqw" },
-              fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif',
+              fontSize: 13,
               fontWeight: 600,
               letterSpacing: "0.04em",
-              px: "0.8cqw",
-              py: "0.35cqw",
+              fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif',
+              px: 1.4,
+              py: 0.6,
               borderRadius: "999px",
-              bgcolor: "rgba(0,0,0,0.45)",
+              bgcolor: "rgba(0,0,0,0.5)",
               border: "1px solid rgba(240,200,140,0.28)",
             }}
           >
@@ -150,219 +224,144 @@ export function ForgeLoginPicture({
           component="form"
           onSubmit={submit}
           sx={{
-            position: { xs: "relative", md: "absolute" },
-            left: { xs: "auto", md: "54.713%" },
-            top: { xs: "auto", md: "12.585%" },
-            width: { xs: "min(92vw, 440px)", md: "38.15%" },
-            height: { xs: "auto", md: "75.079%" },
-            aspectRatio: { xs: "1192 / 1320", md: "auto" },
-            my: { xs: 2, md: 0 },
-            containerType: "size",
+            width: "min(420px, 100%)",
+            display: "flex",
+            flexDirection: "column",
+            gap: 1.35,
+            px: 2.75,
+            pt: 13,
+            pb: 2.25,
+            position: "relative",
+            borderRadius: "8px 22px 8px 22px",
+            background: "linear-gradient(180deg, rgba(18,16,14,0.94), rgba(6,6,6,0.92))",
+            border: "1px solid rgba(214,176,112,0.42)",
+            boxShadow: "0 28px 80px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,226,180,0.12)",
             fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif',
+            color: "#f6f3ee",
           }}
         >
           <Box
             component="img"
-            src={brandSrc("forge-login-form.png")}
+            src={brandSrc("forge-f.png")}
             alt=""
             sx={{
               position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              display: "block",
+              top: -16,
+              left: "50%",
+              transform: "translateX(-50%)",
+              width: 132,
+              height: "auto",
               userSelect: "none",
               pointerEvents: "none",
             }}
           />
 
-          <Box
-            component="input"
-            aria-label="Email"
-            type="email"
-            required
-            value={username}
-            autoComplete="username"
-            onChange={(event) => onUsername(event.target.value)}
-            sx={{
-              ...fieldInputSx,
-              position: "absolute",
-              left: "23.3%",
-              top: "37.0%",
-              width: "61%",
-              height: "9.6%",
-              bgcolor: username ? "#0d0d0c" : "transparent",
-            }}
-          />
-          <Box
-            component="input"
-            aria-label="Password"
-            type={showPassword ? "text" : "password"}
-            required
-            minLength={6}
-            value={password}
-            autoComplete={mode === "signup" ? "new-password" : "current-password"}
-            onChange={(event) => onPassword(event.target.value)}
-            sx={{
-              ...fieldInputSx,
-              position: "absolute",
-              left: "23.3%",
-              top: "48.6%",
-              width: "54%",
-              height: "10%",
-              bgcolor: password ? "#0d0d0c" : "transparent",
-            }}
-          />
-          <Box
-            component="button"
-            type="button"
-            aria-label={showPassword ? "Hide password" : "Show password"}
-            onClick={() => setShowPassword((value) => !value)}
-            sx={{
-              position: "absolute",
-              left: "77.6%",
-              top: "49.6%",
-              width: "6.7%",
-              height: "5.3%",
-              p: 0,
-              border: "none",
-              bgcolor: "transparent",
-              cursor: "pointer",
-            }}
-          />
-          <Box
-            component="input"
-            type="checkbox"
-            aria-label="I'm not a robot"
-            checked={robot}
-            onChange={(event) => {
-              setRobot(event.target.checked);
-              setLocalError(null);
-            }}
-            sx={{
-              position: "absolute",
-              left: "18.0%",
-              top: "62.7%",
-              width: "5.4%",
-              height: "4.6%",
-              m: 0,
-              p: 0,
-              appearance: "none",
-              WebkitAppearance: "none",
-              bgcolor: "transparent",
-              border: "none",
-              cursor: "pointer",
-              backgroundRepeat: "no-repeat",
-              backgroundPosition: "center",
-              backgroundSize: "78%",
-              "&:checked": { backgroundImage: CHECK_URL },
-            }}
-          />
-
           {mode === "signup" ? (
-            <>
+            <FieldRow
+              icon={<PersonIcon />}
+              label="Name"
+              value={displayName}
+              onChange={onDisplayName}
+              autoComplete="nickname"
+              required={false}
+            />
+          ) : null}
+          <FieldRow
+            icon={<MailIcon />}
+            label="Email"
+            type="email"
+            value={username}
+            onChange={onUsername}
+            autoComplete="username"
+          />
+          <FieldRow
+            icon={<LockIcon />}
+            label="Password"
+            type={showPassword ? "text" : "password"}
+            value={password}
+            onChange={onPassword}
+            autoComplete={mode === "signup" ? "new-password" : "current-password"}
+            minLength={6}
+            end={
               <Box
-                component="input"
-                aria-label="Name"
-                placeholder="Name"
-                value={displayName}
-                autoComplete="nickname"
-                onChange={(event) => onDisplayName(event.target.value)}
+                component="button"
+                type="button"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                onClick={() => setShowPassword((value) => !value)}
                 sx={{
-                  ...fieldInputSx,
-                  position: "absolute",
-                  left: "16%",
-                  top: "28.2%",
-                  width: "68%",
-                  height: "7.2%",
-                  borderRadius: "10px",
-                  border: "1px solid rgba(232,190,120,0.4)",
-                  bgcolor: "rgba(8,8,8,0.92)",
-                  "&::placeholder": { color: "#a8a097", opacity: 1 },
+                  display: "grid",
+                  placeItems: "center",
+                  p: 0.5,
+                  border: "none",
+                  bgcolor: "transparent",
+                  cursor: "pointer",
                 }}
-              />
-              <Box
-                component="input"
-                aria-label="Confirm password"
-                placeholder="Confirm password"
-                type="password"
-                required
-                minLength={6}
-                value={confirm}
-                autoComplete="new-password"
-                onChange={(event) => onConfirm(event.target.value)}
-                sx={{
-                  ...fieldInputSx,
-                  position: "absolute",
-                  left: "16%",
-                  top: "86.2%",
-                  width: "68%",
-                  height: "7.2%",
-                  borderRadius: "10px",
-                  border: "1px solid rgba(232,190,120,0.4)",
-                  bgcolor: "rgba(8,8,8,0.92)",
-                  "&::placeholder": { color: "#a8a097", opacity: 1 },
-                }}
-              />
-            </>
+              >
+                <EyeIcon off={showPassword} />
+              </Box>
+            }
+          />
+          {mode === "signup" ? (
+            <FieldRow
+              icon={<LockIcon />}
+              label="Confirm password"
+              type="password"
+              value={confirm}
+              onChange={onConfirm}
+              autoComplete="new-password"
+              minLength={6}
+            />
           ) : null}
 
+          <RecaptchaField
+            onToken={(token) => {
+              setCaptchaToken(token);
+              if (token) setLocalError(null);
+            }}
+            onError={(next) => setLocalError(next)}
+          />
+
           {message ? (
-            <Box
-              sx={{
-                position: "absolute",
-                left: "16%",
-                top: "70.6%",
-                width: "68%",
-                color: "#ffb4b4",
-                fontSize: "1.9cqh",
-                lineHeight: 1.2,
-                textAlign: "center",
-                textShadow: "0 1px 2px #000",
-                pointerEvents: "none",
-              }}
-            >
-              {message}
-            </Box>
+            <Box sx={{ color: "#ffb4b4", fontSize: 13, lineHeight: 1.35, textAlign: "center" }}>{message}</Box>
           ) : null}
 
           <Box
             component="button"
             type="submit"
             disabled={busy}
-            aria-label={mode === "login" ? "Sign in" : "Create account"}
             sx={{
-              position: "absolute",
-              left: "12.6%",
-              top: "73.3%",
-              width: "75.1%",
-              height: "10.9%",
+              height: 50,
               border: "none",
-              bgcolor: "transparent",
+              borderRadius: "12px",
               cursor: busy ? "progress" : "pointer",
-              color: "transparent",
+              color: "#1c140c",
               font: "inherit",
+              fontSize: 16,
+              fontWeight: 650,
+              background: "linear-gradient(180deg, #f6e2bc 0%, #e7c07a 38%, #c4893c 100%)",
+              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.45)",
+              "&:disabled": { opacity: 0.65 },
             }}
           >
-            {busy ? "Please wait" : mode === "login" ? "Sign In" : "Create account"}
+            {busy ? "Please wait…" : mode === "login" ? "Sign In →" : "Create account →"}
           </Box>
 
           <Box
             component="button"
             type="button"
-            onClick={() => onMode(mode === "login" ? "signup" : "login")}
+            onClick={() => {
+              setLocalError(null);
+              onMode(mode === "login" ? "signup" : "login");
+            }}
             sx={{
-              position: "absolute",
-              left: "30%",
-              top: mode === "signup" ? "94%" : "86.5%",
-              width: "40%",
               border: "none",
               bgcolor: "transparent",
               color: "#e7c79a",
               font: "inherit",
-              fontSize: "2.1cqh",
+              fontSize: 14,
               cursor: "pointer",
-              textShadow: "0 1px 2px #000",
+              py: 0.25,
+              alignSelf: "center",
             }}
           >
             {mode === "login" ? "Create account" : "Back to sign in"}
