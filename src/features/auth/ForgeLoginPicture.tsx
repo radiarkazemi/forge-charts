@@ -345,7 +345,9 @@ export function ForgeLoginPicture({
           display: "flex",
           alignItems: "center",
           justifyContent: { xs: "center", md: "flex-end" },
-          px: { xs: 2, md: "7vw" },
+          // The artwork keeps a wider dark margin on the right of the card than 7vw.
+          pl: { xs: 2, md: 2 },
+          pr: { xs: 2, md: "11vw" },
           py: 3,
           overflow: "auto",
         }}
