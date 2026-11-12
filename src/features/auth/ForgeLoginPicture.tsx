@@ -359,25 +359,23 @@ export function ForgeLoginPicture({
               disabled={busy}
               sx={{
                 position: "absolute",
-                left: "13.7%",
-                top: "4.2%",
-                width: "72.7%",
-                height: "34%",
+                left: "12%",
+                top: "3.2%",
+                width: "76%",
+                height: "37%",
                 border: "none",
-                borderRadius: "12px",
+                borderRadius: "14px",
                 cursor: busy ? "progress" : "pointer",
-                color: mode === "login" && !busy ? "transparent" : "#1c140c",
+                color: "#1a120c",
                 font: "inherit",
                 fontSize: 16,
                 fontWeight: 650,
-                background:
-                  mode === "login" && !busy
-                    ? "transparent"
-                    : "linear-gradient(180deg, #f6e2bc 0%, #e7c07a 38%, #c4893c 100%)",
-                "&:disabled": { opacity: 0.65 },
+                opacity: 1,
+                background: "linear-gradient(180deg, #f8e7b0 0%, #f5b24e 22%, #f1ae4a 78%, #e39a32 100%)",
+                "&:disabled": { opacity: 1, color: "#1a120c" },
               }}
             >
-              {busy ? "Please wait…" : mode === "login" ? "Sign In" : "Create account →"}
+              {busy ? "Please wait…" : mode === "login" ? "Sign In →" : "Create account →"}
             </Box>
           </Box>
         </Box>
