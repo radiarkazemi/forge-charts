@@ -43,15 +43,6 @@ const inputSx = {
   },
 };
 
-function MailIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden fill="none" stroke="#d9d3cb" strokeWidth="1.6">
-      <rect x="3" y="5" width="18" height="14" rx="2" />
-      <path d="M4 7l8 6 8-6" />
-    </svg>
-  );
-}
-
 function LockIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden fill="none" stroke="#d9d3cb" strokeWidth="1.6">
@@ -66,16 +57,6 @@ function PersonIcon() {
     <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden fill="none" stroke="#d9d3cb" strokeWidth="1.6">
       <circle cx="12" cy="8" r="3.2" />
       <path d="M5 19c1.4-3 3.8-4.5 7-4.5S17.6 16 19 19" />
-    </svg>
-  );
-}
-
-function EyeIcon({ off }: { readonly off: boolean }) {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden fill="none" stroke="#cfc8c0" strokeWidth="1.6">
-      <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z" />
-      <circle cx="12" cy="12" r="2.5" />
-      {off ? <path d="M4 5l16 14" /> : null}
     </svg>
   );
 }
@@ -161,6 +142,173 @@ export function ForgeLoginPicture({
   const [localError, setLocalError] = useState<string | null>(null);
   const dev = isDevSite();
   const message = localError || error;
+  const art = (file: string) => (
+    <Box
+      component="img"
+      src={brandSrc(file)}
+      alt=""
+      sx={{ width: "100%", height: "auto", display: "block", userSelect: "none", pointerEvents: "none" }}
+    />
+  );
+  const hole = (filled: boolean) => ({
+    position: "absolute" as const,
+    border: "none",
+    outline: "none",
+    color: "#f4f1ec",
+    font: "inherit",
+    fontSize: "3cqw",
+    lineHeight: 1,
+    padding: "0 1cqw",
+    caretColor: "#f0c27a",
+    bgcolor: filled ? "#0c0c0c" : "transparent",
+    "&:focus": { bgcolor: "#0c0c0c" },
+    "&:-webkit-autofill, &:-webkit-autofill:hover, &:-webkit-autofill:focus": {
+      WebkitTextFillColor: "#f4f1ec",
+      WebkitBoxShadow: "0 0 0 1000px #0c0c0c inset",
+      caretColor: "#f0c27a",
+    },
+  });
+  const credentialHoles = (frame: "full" | "fields") => {
+    const emailBox = frame === "full"
+      ? { left: "25.2%", top: "37%", width: "57.9%", height: "7.58%" }
+      : { left: "25.2%", top: "10.1%", width: "57.9%", height: "31.6%" };
+    const passwordBox = frame === "full"
+      ? { left: "25.2%", top: "48.64%", width: "50.3%", height: "7.58%" }
+      : { left: "25.2%", top: "58.9%", width: "50.3%", height: "31.6%" };
+    const eyeBox = frame === "full"
+      ? { left: "77.6%", top: "49.6%", width: "6.7%", height: "6.1%" }
+      : { left: "77.6%", top: "63%", width: "6.7%", height: "22%" };
+    return (
+      <>
+        <Box
+          component="input"
+          aria-label="Email"
+          type="email"
+          required
+          value={username}
+          autoComplete="username"
+          onChange={(event) => onUsername(event.target.value)}
+          sx={{ ...hole(Boolean(username)), ...emailBox }}
+        />
+        <Box
+          component="input"
+          aria-label="Password"
+          type={showPassword ? "text" : "password"}
+          required
+          minLength={6}
+          value={password}
+          autoComplete={mode === "signup" ? "new-password" : "current-password"}
+          onChange={(event) => onPassword(event.target.value)}
+          sx={{ ...hole(Boolean(password)), ...passwordBox }}
+        />
+        <Box
+          component="button"
+          type="button"
+          aria-label={showPassword ? "Hide password" : "Show password"}
+          onClick={() => setShowPassword((value) => !value)}
+          sx={{ position: "absolute", p: 0, border: "none", bgcolor: "transparent", cursor: "pointer", ...eyeBox }}
+        />
+      </>
+    );
+  };
+  const footControls = (frame: "full" | "foot") => {
+    const captcha = frame === "full"
+      ? { left: "16.4%", top: "60.6%", width: "67.2%", height: "8.8%" }
+      : { left: "16.4%", top: "5.1%", width: "67.2%", height: "21.2%" };
+    const button = frame === "full"
+      ? { left: "14%", top: "74.1%", width: "72%", height: "9.2%" }
+      : { left: "14%", top: "37.6%", width: "72%", height: "22.6%" };
+    const link = frame === "full"
+      ? { left: "28%", top: "85.4%", width: "44%" }
+      : { left: "28%", top: "65%", width: "44%" };
+    return (
+      <>
+        <Box
+          sx={{
+            position: "absolute",
+            ...captcha,
+            display: "grid",
+            placeItems: "center",
+            overflow: "hidden",
+            bgcolor: "#070707",
+            borderRadius: "14px",
+          }}
+        >
+          <Box sx={{ transform: "scale(calc(100cqw / 820px)) translateY(-36px)", transformOrigin: "center" }}>
+            <RecaptchaField
+              onToken={(token) => {
+                setCaptchaToken(token);
+                if (token) setLocalError(null);
+              }}
+              onError={(next) => setLocalError(next)}
+            />
+          </Box>
+        </Box>
+        {message ? (
+          <Box
+            sx={{
+              position: "absolute",
+              left: "16%",
+              top: frame === "full" ? "69.7%" : "31%",
+              width: "68%",
+              color: "#ffb4b4",
+              fontSize: "2.2cqw",
+              lineHeight: 1.15,
+              textAlign: "center",
+              textShadow: "0 1px 2px #000",
+              pointerEvents: "none",
+            }}
+          >
+            {message}
+          </Box>
+        ) : null}
+        <Box
+          component="button"
+          type="submit"
+          disabled={busy}
+          sx={{
+            position: "absolute",
+            ...button,
+            border: "none",
+            borderRadius: "14px",
+            cursor: busy ? "progress" : "pointer",
+            color: busy || mode === "signup" ? "#1a120c" : "transparent",
+            font: "inherit",
+            fontSize: "3.4cqw",
+            fontWeight: 650,
+            opacity: 1,
+            background: busy || mode === "signup"
+              ? "linear-gradient(180deg, #f8e7b0 0%, #f5b24e 22%, #f1ae4a 78%, #e39a32 100%)"
+              : "transparent",
+            "&:disabled": { opacity: 1, color: "#1a120c" },
+          }}
+        >
+          {busy ? "Please wait…" : mode === "login" ? "Sign In" : "Create account"}
+        </Box>
+        <Box
+          component="button"
+          type="button"
+          onClick={() => {
+            setLocalError(null);
+            onMode(mode === "login" ? "signup" : "login");
+          }}
+          sx={{
+            position: "absolute",
+            ...link,
+            border: "none",
+            bgcolor: "transparent",
+            color: "#e7c79a",
+            font: "inherit",
+            fontSize: "2.6cqw",
+            cursor: "pointer",
+            textShadow: "0 1px 2px #000",
+          }}
+        >
+          {mode === "login" ? "Create account" : "Back to sign in"}
+        </Box>
+      </>
+    );
+  };
 
   const submit = (event: FormEvent) => {
     if (!captchaToken) {
@@ -232,152 +380,67 @@ export function ForgeLoginPicture({
           component="form"
           onSubmit={submit}
           sx={{
-            width: "min(440px, 100%)",
+            width: "min(720px, calc((100dvh - 40px) / 1.108), 100%)",
             fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif',
             color: "#f6f3ee",
           }}
         >
-          <Box
-            component="img"
-            src={brandSrc("forge-form-top.png")}
-            alt=""
-            sx={{ width: "100%", height: "auto", display: "block", userSelect: "none", pointerEvents: "none" }}
-          />
-          <Box
-            sx={{
-              backgroundImage: `url(${brandSrc("forge-form-side.png")})`,
-              backgroundRepeat: "repeat-y",
-              backgroundSize: "100% auto",
-              display: "flex",
-              flexDirection: "column",
-              gap: 1.35,
-              px: "15.5%",
-              pt: 0.25,
-              pb: 1.25,
-            }}
-          >
           {mode === "signup" ? (
-            <FieldRow
-              icon={<PersonIcon />}
-              label="Name"
-              value={displayName}
-              onChange={onDisplayName}
-              autoComplete="nickname"
-              required={false}
-            />
-          ) : null}
-          <FieldRow
-            icon={<MailIcon />}
-            label="Email"
-            type="email"
-            value={username}
-            onChange={onUsername}
-            autoComplete="username"
-          />
-          <FieldRow
-            icon={<LockIcon />}
-            label="Password"
-            type={showPassword ? "text" : "password"}
-            value={password}
-            onChange={onPassword}
-            autoComplete={mode === "signup" ? "new-password" : "current-password"}
-            minLength={6}
-            end={
+            <>
+              {art("forge-form-top.png")}
               <Box
-                component="button"
-                type="button"
-                aria-label={showPassword ? "Hide password" : "Show password"}
-                onClick={() => setShowPassword((value) => !value)}
                 sx={{
-                  display: "grid",
-                  placeItems: "center",
-                  p: 0.5,
-                  border: "none",
-                  bgcolor: "transparent",
-                  cursor: "pointer",
+                  backgroundImage: `url(${brandSrc("forge-form-side.png")})`,
+                  backgroundRepeat: "repeat-y",
+                  backgroundSize: "100% auto",
+                  px: "15.5%",
+                  py: 1.25,
                 }}
               >
-                <EyeIcon off={showPassword} />
+                <FieldRow
+                  icon={<PersonIcon />}
+                  label="Name"
+                  value={displayName}
+                  onChange={onDisplayName}
+                  autoComplete="nickname"
+                  required={false}
+                />
               </Box>
-            }
-          />
-          {mode === "signup" ? (
-            <FieldRow
-              icon={<LockIcon />}
-              label="Confirm password"
-              type="password"
-              value={confirm}
-              onChange={onConfirm}
-              autoComplete="new-password"
-              minLength={6}
-            />
-          ) : null}
-
-          <RecaptchaField
-            onToken={(token) => {
-              setCaptchaToken(token);
-              if (token) setLocalError(null);
-            }}
-            onError={(next) => setLocalError(next)}
-          />
-
-          {message ? (
-            <Box sx={{ color: "#ffb4b4", fontSize: 13, lineHeight: 1.35, textAlign: "center" }}>{message}</Box>
-          ) : null}
-
-          <Box
-            component="button"
-            type="button"
-            onClick={() => {
-              setLocalError(null);
-              onMode(mode === "login" ? "signup" : "login");
-            }}
-            sx={{
-              border: "none",
-              bgcolor: "transparent",
-              color: "#e7c79a",
-              font: "inherit",
-              fontSize: 14,
-              cursor: "pointer",
-              py: 0.25,
-              alignSelf: "center",
-            }}
-          >
-            {mode === "login" ? "Create account" : "Back to sign in"}
-          </Box>
-          </Box>
-          <Box sx={{ position: "relative" }}>
-            <Box
-              component="img"
-              src={brandSrc("forge-form-bottom.png")}
-              alt=""
-              sx={{ width: "100%", height: "auto", display: "block", userSelect: "none", pointerEvents: "none" }}
-            />
-            <Box
-              component="button"
-              type="submit"
-              disabled={busy}
-              sx={{
-                position: "absolute",
-                left: "12%",
-                top: "3.2%",
-                width: "76%",
-                height: "37%",
-                border: "none",
-                borderRadius: "14px",
-                cursor: busy ? "progress" : "pointer",
-                color: "#1a120c",
-                font: "inherit",
-                fontSize: 16,
-                fontWeight: 650,
-                opacity: 1,
-                background: "linear-gradient(180deg, #f8e7b0 0%, #f5b24e 22%, #f1ae4a 78%, #e39a32 100%)",
-                "&:disabled": { opacity: 1, color: "#1a120c" },
-              }}
-            >
-              {busy ? "Please wait…" : mode === "login" ? "Sign In →" : "Create account →"}
+              <Box sx={{ position: "relative", containerType: "inline-size" }}>
+                {art("forge-form-fields.png")}
+                {credentialHoles("fields")}
+              </Box>
+              <Box
+                sx={{
+                  backgroundImage: `url(${brandSrc("forge-form-side.png")})`,
+                  backgroundRepeat: "repeat-y",
+                  backgroundSize: "100% auto",
+                  px: "15.5%",
+                  py: 1.25,
+                }}
+              >
+                <FieldRow
+                  icon={<LockIcon />}
+                  label="Confirm password"
+                  type="password"
+                  value={confirm}
+                  onChange={onConfirm}
+                  autoComplete="new-password"
+                  minLength={6}
+                />
+              </Box>
+              <Box sx={{ position: "relative", containerType: "inline-size" }}>
+                {art("forge-form-foot.png")}
+                {footControls("foot")}
+              </Box>
+            </>
+          ) : (
+            <Box sx={{ position: "relative", containerType: "inline-size" }}>
+              {art("forge-login-form.png")}
+              {credentialHoles("full")}
+              {footControls("full")}
             </Box>
-          </Box>
+          )}
         </Box>
       </Box>
     </Box>
