@@ -41,11 +41,17 @@ export const SESSION_24X7 = "24x7";
 /** US equities regular session (exchange TZ America/New_York). */
 export const SESSION_US_EQUITY = "0930-1600";
 /**
- * Spot FX / metals. 17:00 America/New_York → next day 17:00 (Sun–Thu starts).
- * A fixed 22:00 UTC grid only matches winter, so summer bars (21:00 UTC) and
- * the gold feed (18:00 New York) were drawn a second time beside the real candle.
+ * Spot FX / metals. 17:00 America/New_York → next day 17:00.
+ * TradingView day index: 1=Sunday … 6=Friday.
+ * Friday has to be a start day too. Without it the library treats the
+ * Thursday 17:00 session (it ends Friday afternoon) as outside the week
+ * and deletes those candles, so gold 1H shows a hole into every weekend.
+ * Saturday is not listed, and there is no Saturday tape, so the Friday
+ * 16:00 → Sunday 18:00 close stays empty.
+ * A fixed 22:00 UTC grid only matches winter, so summer bars (21:00 UTC)
+ * and the gold feed (18:00 New York) were drawn a second time beside the real candle.
  */
-export const SESSION_FX = "1700-1700:12345";
+export const SESSION_FX = "1700-1700:123456";
 /**
  * Iran gold / Faraz cash session (exchange TZ Asia/Tehran).
  * 09:00–22:00 every day — overnight is outside session so the chart

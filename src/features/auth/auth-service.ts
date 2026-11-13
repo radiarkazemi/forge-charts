@@ -8,7 +8,30 @@ import { safetyProfileStorageKey } from "./user-isolation";
 
 const USERS_KEY = "forge.auth.users.v1";
 const SESSION_KEY = "forge.auth.session.v1";
+const SIGNED_OUT_KEY = "forge.auth.signedOut.v1";
 const LEGACY_CLAIM_KEY = "forge.auth.legacyClaimed.v1";
+
+/**
+ * The chart iframe snapshots localStorage and writes it back when it closes,
+ * which revives the session and deletes a localStorage-only sign-out mark.
+ * sessionStorage is not part of that snapshot.
+ */
+function sessionSignedOut(next?: boolean): boolean {
+  try {
+    if (typeof sessionStorage === "undefined") return false;
+    if (next === true) {
+      sessionStorage.setItem(SIGNED_OUT_KEY, "1");
+      return true;
+    }
+    if (next === false) {
+      sessionStorage.removeItem(SIGNED_OUT_KEY);
+      return false;
+    }
+    return sessionStorage.getItem(SIGNED_OUT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 /** Stable owner account — password stored as PBKDF2 hash only (never plaintext). */
 const OWNER_ID = "owner-radiarkazemi";
@@ -85,6 +108,8 @@ function assertCryptoAvailable(): void {
  * Chart data + safety PII live in per-user scoped keys — other accounts cannot read them.
  */
 export class AuthService {
+  private unguard: (() => void) | null = null;
+
   constructor(private readonly storage: KeyValueStorage) {
     try {
       this.migrateSafetyOutOfRegistry();
@@ -112,6 +137,12 @@ export class AuthService {
   }
 
   getSession(): AuthSession | null {
+    // Ignore a session the chart iframe copied back after sign-out.
+    if (sessionSignedOut() || this.storage.get(SIGNED_OUT_KEY, null)) {
+      this.storage.remove(SESSION_KEY);
+      this.armSignOutGuard();
+      return null;
+    }
     const session = this.storage.get<AuthSession | null>(SESSION_KEY, null);
     if (!session?.userId || !session.token) return null;
     const user = this.users().find((u) => u.id === session.userId);
@@ -308,7 +339,38 @@ export class AuthService {
   }
 
   logout(): void {
+    sessionSignedOut(true);
+    this.storage.set(SIGNED_OUT_KEY, Date.now());
     this.storage.remove(SESSION_KEY);
+    this.armSignOutGuard();
+  }
+
+  /**
+   * The chart iframe is another document on this origin. Its storage writes
+   * are visible here, so a revived session is removed again immediately.
+   */
+  private armSignOutGuard(): void {
+    if (typeof window === "undefined" || this.unguard) return;
+    const onStorage = (event: StorageEvent) => {
+      const key = event.key ?? "";
+      const sessionRevived = key.includes("forge.auth.session") && event.newValue != null;
+      const markCleared = key.includes("forge.auth.signedOut") && event.newValue == null;
+      if (!sessionRevived && !markCleared) return;
+      this.storage.remove(SESSION_KEY);
+      sessionSignedOut(true);
+      try {
+        this.storage.set(SIGNED_OUT_KEY, Date.now());
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    this.unguard = () => window.removeEventListener("storage", onStorage);
+  }
+
+  private disarmSignOutGuard(): void {
+    this.unguard?.();
+    this.unguard = null;
   }
 
   legacyAvailable(): boolean {
@@ -428,6 +490,9 @@ export class AuthService {
   }
 
   private startSession(user: AuthUserRecord): AuthSession {
+    this.disarmSignOutGuard();
+    sessionSignedOut(false);
+    this.storage.remove(SIGNED_OUT_KEY);
     const session = this.toSession(user, newId(), Date.now());
     this.storage.set(SESSION_KEY, session);
     this.assertSessionPersisted(session);

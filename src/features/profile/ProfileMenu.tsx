@@ -19,6 +19,7 @@ import LogoutIcon from "@mui/icons-material/Logout";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import CreditCardOutlinedIcon from "@mui/icons-material/CreditCardOutlined";
 import type { UiLanguage, UserProfile } from "@/application";
+import { isDevSite } from "@/dev-site";
 
 interface ProfileMenuProps {
   readonly anchorPosition?: { top: number; left: number } | null;
@@ -222,7 +223,13 @@ export function ProfileMenu({
       </Box>
 
       <List dense disablePadding>
-        <ListItemButton component="a" href="https://forgechart.ir/" target="_blank" rel="noopener" sx={{ py: 1.1, "&:hover": { bgcolor: hover } }}>
+        <ListItemButton
+          component="a"
+          href={isDevSite() ? "?view=landing" : "https://forgechart.ir/"}
+          target={isDevSite() ? undefined : "_blank"}
+          rel={isDevSite() ? undefined : "noopener"}
+          sx={{ py: 1.1, "&:hover": { bgcolor: hover } }}
+        >
           <ListItemIcon sx={{ minWidth: 40, color: "inherit" }}>
             <HomeOutlinedIcon fontSize="small" />
           </ListItemIcon>

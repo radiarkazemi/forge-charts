@@ -22,7 +22,8 @@ import {
 } from "@/features/profile-sync";
 import { AppThemeProvider } from "./AppThemeProvider";
 import { createServices, type Services } from "./container";
-import { DEV_SESSION, isDevSite } from "../dev-site";
+import { isDevSite } from "../dev-site";
+import { DevLanding } from "@/features/auth/DevLanding";
 import { ServicesProvider } from "./ServicesProvider";
 
 function buildSessionServices(session: AuthSession): Services {
@@ -62,31 +63,49 @@ function buildSessionServices(session: AuthSession): Services {
   return services;
 }
 
+function resumeSession(auth: AuthService): AuthSession | null {
+  // ?view=login is an explicit sign-out. Do not revive a session the chart copied back.
+  if (isDevSite() && pageView() === "login") {
+    auth.logout();
+    return null;
+  }
+  return auth.getSession();
+}
+
+function pageView(): string | null {
+  try {
+    return new URLSearchParams(window.location.search).get("view");
+  } catch {
+    return null;
+  }
+}
+
+function clearPageView(): void {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("view")) return;
+  url.searchParams.delete("view");
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
 /** Gate the chart behind login/signup + safety authorization. */
 export function App() {
   const devSite = useMemo(() => isDevSite(), []);
   const rawStorage = useMemo(() => new LocalStorageAdapter(), []);
   const auth = useMemo(() => new AuthService(rawStorage), [rawStorage]);
   const [session, setSession] = useState<AuthSession | null>(() => {
-    if (devSite) return DEV_SESSION;
-    const existing = auth.getSession();
+    const existing = resumeSession(auth);
     if (!existing) return null;
     // Incomplete safety — keep session object but force safety gate below.
     return existing;
   });
   const [needsSafetyBoot, setNeedsSafetyBoot] = useState(() => {
-    if (devSite) return false;
-    const existing = auth.getSession();
+    const existing = resumeSession(auth);
     return Boolean(existing && auth.needsSafety(existing.userId));
   });
+  const [view, setView] = useState<string | null>(() => pageView());
   const servicesRef = useRef<Services | null>(null);
   const [services, setServices] = useState<Services | null>(() => {
-    if (devSite) {
-      const built = buildSessionServices(DEV_SESSION);
-      servicesRef.current = built;
-      return built;
-    }
-    const existing = auth.getSession();
+    const existing = resumeSession(auth);
     if (!existing || auth.needsSafety(existing.userId)) return null;
     const built = buildSessionServices(existing);
     servicesRef.current = built;
@@ -123,6 +142,8 @@ export function App() {
     servicesRef.current = built;
     setServices(built);
     setNeedsSafetyBoot(false);
+    clearPageView();
+    setView(null);
     setSession(next);
   }, []);
 
@@ -152,17 +173,45 @@ export function App() {
   );
 
   const signOut = useCallback(() => {
-    if (devSite) return;
-    auth.logout();
-    clearSyncCredentials();
-    servicesRef.current?.dispose();
+    const dropSession = () => {
+      try {
+        auth.logout();
+      } catch {
+        /* storage blocked — React state still leaves the chart */
+      }
+      try {
+        clearSyncCredentials();
+      } catch {
+        /* ignore */
+      }
+    };
+    dropSession();
+    try {
+      servicesRef.current?.dispose();
+    } catch {
+      /* chart teardown must not keep the user signed in */
+    }
     servicesRef.current = null;
     setServices(null);
     setNeedsSafetyBoot(false);
     setSession(null);
+    if (devSite) {
+      const url = new URL(window.location.href);
+      url.searchParams.set("view", "login");
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+      setView("login");
+    }
+    // The chart iframe writes the previous session back while its window closes.
+    window.setTimeout(dropSession, 0);
+    window.setTimeout(dropSession, 400);
+    window.setTimeout(dropSession, 1200);
   }, [auth, devSite]);
 
-  if (needsSafetyBoot && session) {
+  if (devSite && view === "landing") {
+    return <DevLanding signedIn={Boolean(session && services)} />;
+  }
+
+  if (needsSafetyBoot && session && view !== "login") {
     return (
       <ThemeProvider theme={gateTheme}>
         <CssBaseline />
@@ -179,7 +228,7 @@ export function App() {
     );
   }
 
-  if (!session || !services) {
+  if (!session || !services || (devSite && view === "login")) {
     return (
       <ThemeProvider theme={gateTheme}>
         <CssBaseline />
