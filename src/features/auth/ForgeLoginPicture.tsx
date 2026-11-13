@@ -418,6 +418,8 @@ export function ForgeLoginPicture({
                   backgroundImage: `url(${brandSrc("forge-form-side.png")})`,
                   backgroundRepeat: "repeat-y",
                   backgroundSize: "100% auto",
+                  backgroundOrigin: "border-box",
+                  backgroundPosition: "left top",
                   pl: "13.76%",
                   pr: "13.76%",
                   pt: "1.5cqw",
@@ -442,10 +444,14 @@ export function ForgeLoginPicture({
                   backgroundImage: `url(${brandSrc("forge-form-side.png")})`,
                   backgroundRepeat: "repeat-y",
                   backgroundSize: "100% auto",
+                  backgroundOrigin: "border-box",
+                  backgroundPosition: "left top",
+                  mt: "-1.8cqw",
+                  mb: "-1.4cqw",
                   pl: "13.76%",
                   pr: "13.76%",
-                  pt: "2.68cqw",
-                  pb: "2.18cqw",
+                  pt: "4.48cqw",
+                  pb: "3.58cqw",
                 }}
               >
                 <FieldRow
@@ -473,18 +479,17 @@ export function ForgeLoginPicture({
           <Box
             sx={{
               position: "absolute",
-              left: captchaBox.left,
-              top: captchaBox.top,
-              width: captchaBox.width,
-              height: captchaBox.height,
+              left: captchaBox.left - captchaBox.width * 0.02,
+              top: captchaBox.top - captchaBox.height * 0.08,
+              width: captchaBox.width * 1.04,
+              height: captchaBox.height * 1.16,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              bgcolor: "#1a1a1a",
-              borderRadius: "2.4cqw",
+              bgcolor: "#0b0a08",
               overflow: "hidden",
               visibility: captchaBox.width > 0 ? "visible" : "hidden",
-              pointerEvents: "auto",
+              pointerEvents: "none",
             }}
           >
             <Box
@@ -493,7 +498,10 @@ export function ForgeLoginPicture({
                 width: 304,
                 height: 78,
                 flex: "0 0 auto",
-                zoom: captchaBox.height ? Math.min(captchaBox.width / 304, captchaBox.height / 78) : 1,
+                pointerEvents: "auto",
+                zoom: captchaBox.height
+                  ? Math.min(1, captchaBox.width / 304, captchaBox.height / 78)
+                  : 1,
               }}
             >
               <RecaptchaField
