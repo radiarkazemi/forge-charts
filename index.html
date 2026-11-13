@@ -23,14 +23,14 @@
         function signedIn() {
           try {
             if (new URLSearchParams(location.search).get("view") === "login") return false;
-            var keys = ["forge.auth.session.v1", "forge.dev.forge.auth.session.v1"];
-            for (var i = 0; i < keys.length; i++) {
-              var raw = localStorage.getItem(keys[i]);
-              if (!raw || raw.indexOf("userId") === -1) continue;
-              if (sessionStorage.getItem("forge.auth.signedOut.v1") === "1") return false;
-              if (sessionStorage.getItem("forge.dev.forge.auth.signedOut.v1") === "1") return false;
-              return true;
-            }
+            var path = location.pathname;
+            var dev = path === "/dev" || path.indexOf("/dev/") === 0 || path === "/team" || path.indexOf("/team/") === 0;
+            var key = dev ? "forge.dev.forge.auth.session.v1" : "forge.auth.session.v1";
+            var signedOut = dev ? "forge.dev.forge.auth.signedOut.v1" : "forge.auth.signedOut.v1";
+            var raw = localStorage.getItem(key);
+            if (!raw || raw.indexOf("userId") === -1) return false;
+            if (sessionStorage.getItem(signedOut) === "1") return false;
+            return true;
           } catch (e) {}
           return false;
         }
