@@ -139,7 +139,6 @@ export function ForgeLoginPicture({
 }: ForgeLoginPictureProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
-  const [captchaReady, setCaptchaReady] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [captchaBox, setCaptchaBox] = useState({ left: 0, top: 0, width: 0, height: 0 });
   const formRef = useRef<HTMLFormElement>(null);
@@ -266,8 +265,7 @@ export function ForgeLoginPicture({
           sx={{
             position: "absolute",
             ...captcha,
-            overflow: "hidden",
-            borderRadius: "2.4cqw",
+            overflow: "visible",
           }}
         />
         {message ? (
@@ -479,22 +477,23 @@ export function ForgeLoginPicture({
               top: captchaBox.top,
               width: captchaBox.width,
               height: captchaBox.height,
-              overflow: "hidden",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              bgcolor: "#1a1a1a",
               borderRadius: "2.4cqw",
+              overflow: "hidden",
               visibility: captchaBox.width > 0 ? "visible" : "hidden",
-              pointerEvents: captchaReady ? "auto" : "none",
+              pointerEvents: "auto",
             }}
           >
             <Box
               sx={{
+                position: "relative",
                 width: 304,
                 height: 78,
-                overflow: "hidden",
-                position: "relative",
-                transformOrigin: "top left",
-                transform: captchaBox.width
-                  ? `scaleX(${captchaBox.width / 304}) scaleY(${captchaBox.height / 78})`
-                  : "none",
+                flex: "0 0 auto",
+                zoom: captchaBox.height ? Math.min(captchaBox.width / 304, captchaBox.height / 78) : 1,
               }}
             >
               <RecaptchaField
@@ -503,14 +502,9 @@ export function ForgeLoginPicture({
                   if (token) setLocalError(null);
                 }}
                 onError={(next) => setLocalError(next)}
-                onReady={() => setCaptchaReady(true)}
               />
-              {captchaReady ? (
-                <>
-                  <Box sx={{ position: "absolute", left: 0, top: 0, width: 304, height: 12, bgcolor: "#222", pointerEvents: "none" }} />
-                  <Box sx={{ position: "absolute", left: 0, top: 12, width: 236, height: 11, bgcolor: "#222", pointerEvents: "none" }} />
-                </>
-              ) : null}
+              <Box sx={{ position: "absolute", left: 0, top: 0, width: 304, height: 14, bgcolor: "#222", pointerEvents: "none" }} />
+              <Box sx={{ position: "absolute", left: 0, top: 14, width: 228, height: 8, bgcolor: "#222", pointerEvents: "none" }} />
             </Box>
           </Box>
         </Box>
