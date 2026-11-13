@@ -24,42 +24,80 @@ function grecaptcha(): Grecaptcha | undefined {
 const RECAPTCHA_SRC = "https://www.recaptcha.net/recaptcha/api.js?render=explicit";
 
 let scriptPromise: Promise<void> | null = null;
+let widgetHolder: HTMLDivElement | null = null;
+let widgetReady: Promise<void> | null = null;
+let onTokenListener: (token: string | null) => void = () => {};
+let onErrorListener: (message: string) => void = () => {};
 
-function loadRecaptcha(attempt = 0): Promise<void> {
+function recaptchaScript(): HTMLScriptElement | null {
+  return document.querySelector('script[src*="recaptcha.net/recaptcha/api.js"]');
+}
+
+function loadRecaptcha(): Promise<void> {
   if (grecaptcha()) return Promise.resolve();
-  if (scriptPromise && attempt === 0) return scriptPromise;
+  if (scriptPromise) return scriptPromise;
+  const existing = recaptchaScript();
   scriptPromise = new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    // recaptcha.net is Google's endpoint for networks that block google.com.
-    script.src = RECAPTCHA_SRC;
-    script.async = true;
+    const script = existing ?? document.createElement("script");
     let settled = false;
+    let watch = 0;
     const finish = (ok: boolean) => {
       if (settled) return;
       settled = true;
-      window.clearTimeout(timer);
-      if (ok) {
+      window.clearInterval(watch);
+      if (ok || grecaptcha()) {
         resolve();
         return;
       }
-      script.remove();
       scriptPromise = null;
-      if (attempt < 2) {
-        loadRecaptcha(attempt + 1).then(resolve, reject);
-        return;
-      }
       reject(new Error("reCAPTCHA failed to load."));
     };
-    // A stuck connection never fires onerror. Retry so the checkbox is not a blank bar.
-    const timer = window.setTimeout(() => finish(false), 8000);
-    script.onload = () => finish(true);
-    script.onerror = () => finish(false);
-    document.head.appendChild(script);
+    watch = window.setInterval(() => {
+      if (grecaptcha()) finish(true);
+    }, 40);
+    script.addEventListener("load", () => finish(true), { once: true });
+    script.addEventListener("error", () => finish(false), { once: true });
+    if (!existing) {
+      // recaptcha.net is Google's endpoint for networks that block google.com.
+      // Leave a slow download running — aborting it and starting over showed up as a long spinner.
+      script.src = RECAPTCHA_SRC;
+      script.async = true;
+      document.head.appendChild(script);
+    }
   });
   return scriptPromise;
 }
 
-if (typeof document !== "undefined") loadRecaptcha();
+/** One widget for the whole page. StrictMode remounts must not render a second checkbox. */
+function ensureWidget(): Promise<void> {
+  if (widgetHolder?.querySelector("iframe")) return Promise.resolve();
+  if (widgetReady) return widgetReady;
+  widgetHolder = document.createElement("div");
+  widgetHolder.style.cssText = "position:fixed;left:-600px;top:0;width:304px;height:78px";
+  document.body.appendChild(widgetHolder);
+  widgetReady = loadRecaptcha().then(() => {
+    const api = grecaptcha();
+    const holder = widgetHolder;
+    if (!api || !holder) throw new Error("reCAPTCHA failed to load.");
+    return new Promise<void>((resolve) => {
+      api.ready(() => {
+        if (holder.childElementCount > 0) {
+          resolve();
+          return;
+        }
+        api.render(holder, {
+          sitekey: siteKey(),
+          theme: "dark",
+          callback: (token: string) => onTokenListener(token),
+          "expired-callback": () => onTokenListener(null),
+          "error-callback": () => onErrorListener("reCAPTCHA could not be confirmed."),
+        });
+        resolve();
+      });
+    });
+  });
+  return widgetReady;
+}
 
 interface RecaptchaFieldProps {
   readonly onToken: (token: string | null) => void;
@@ -79,27 +117,25 @@ export function RecaptchaField({ onToken, onError, onReady }: RecaptchaFieldProp
 
   useEffect(() => {
     let cancelled = false;
-    loadRecaptcha()
+    onTokenListener = (token) => onTokenRef.current(token);
+    onErrorListener = (message) => onErrorRef.current(message);
+    ensureWidget()
       .then(() => {
-        const api = grecaptcha();
-        if (cancelled || !host.current || !api) return;
-        api.ready(() => {
-          if (cancelled || !host.current || host.current.childElementCount > 0) return;
-          api.render(host.current, {
-            sitekey: siteKey(),
-            theme: "dark",
-            callback: (token: string) => onTokenRef.current(token),
-            "expired-callback": () => onTokenRef.current(null),
-            "error-callback": () => onErrorRef.current("reCAPTCHA could not be confirmed."),
-          });
-          onReadyRef.current?.();
-        });
+        const hostEl = host.current;
+        if (cancelled || !hostEl || !widgetHolder) return;
+        widgetHolder.style.cssText = "width:304px;height:78px";
+        hostEl.appendChild(widgetHolder);
+        onReadyRef.current?.();
       })
       .catch(() => {
         if (!cancelled) onErrorRef.current("reCAPTCHA failed to load. Refresh and try again.");
       });
     return () => {
       cancelled = true;
+      if (widgetHolder) {
+        widgetHolder.style.cssText = "position:fixed;left:-600px;top:0;width:304px;height:78px;pointer-events:none";
+        document.body.appendChild(widgetHolder);
+      }
     };
   }, []);
 
