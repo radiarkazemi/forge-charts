@@ -37,7 +37,7 @@ const fieldInput = {
   background: "transparent",
   color: "#f6f3ee",
   font: "inherit",
-  fontSize: "4cqw",
+  fontSize: "4.6cqw",
   "&::placeholder": { color: "#b7b1a8", opacity: 1 },
   "&:-webkit-autofill, &:-webkit-autofill:hover, &:-webkit-autofill:focus": {
     WebkitTextFillColor: "#f6f3ee",
@@ -125,7 +125,8 @@ function MobileField({
 
 const WIDGET_W = 304;
 const WIDGET_H = 78;
-const BANNER_H = 30;
+/** Red test-key lines sit above the checkbox. */
+const BANNER_H = 22;
 
 function CaptchaFit({
   onToken,
@@ -164,17 +165,17 @@ function CaptchaFit({
         borderRadius: "2.6cqw",
       }}
     >
-      <Box sx={{ marginTop: `${pad}px`, height: shown, overflow: "hidden" }}>
-        <Box
-          sx={{
-            width: WIDGET_W,
-            height: WIDGET_H,
-            transform: `translateY(${-BANNER_H * scale}px) scale(${scale})`,
-            transformOrigin: "top left",
-          }}
-        >
-          <RecaptchaField onToken={onToken} onError={onError} />
-        </Box>
+      <Box sx={{ height: shown, marginTop: `${pad}px`, overflow: "hidden" }}>
+      <Box
+        sx={{
+          width: WIDGET_W,
+          height: WIDGET_H,
+          transform: `translateY(${-BANNER_H * scale}px) scale(${scale})`,
+          transformOrigin: "top left",
+        }}
+      >
+        <RecaptchaField onToken={onToken} onError={onError} />
+      </Box>
       </Box>
     </Box>
   );
@@ -249,11 +250,13 @@ export function MobileForgeLogin({
         alt=""
         sx={{
           position: "fixed",
-          inset: 0,
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          objectPosition: "center top",
+          top: 0,
+          left: "50%",
+          // The artwork is a tall file; the scene is its top half. Size that half to the screen.
+          width: "196%",
+          height: "auto",
+          maxWidth: "none",
+          transform: "translateX(-50%)",
           pointerEvents: "none",
           userSelect: "none",
         }}
@@ -273,11 +276,11 @@ export function MobileForgeLogin({
           component="form"
           onSubmit={onSubmit}
           sx={{
-            width: "min(100%, 440px)",
+            width: "min(100%, 460px)",
             mx: "auto",
-            pt: "16dvh",
-            px: "3.5vw",
-            pb: "12dvh",
+            pt: "34dvh",
+            px: "2vw",
+            pb: "10dvh",
             containerType: "inline-size",
             fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif',
           }}
@@ -314,7 +317,7 @@ export function MobileForgeLogin({
                   value={username}
                   autoComplete="username"
                   onChange={(event) => onUsername(event.target.value)}
-                  sx={{ ...hole(Boolean(username)), left: "25.7%", top: "11.4%", width: "60%", height: "26.8%" }}
+                  sx={{ ...hole(Boolean(username)), left: "24.8%", top: "8%", width: "63%", height: "32%", fontSize: "4.6cqw" }}
                 />
                 <Box
                   component="input"
@@ -325,7 +328,7 @@ export function MobileForgeLogin({
                   value={password}
                   autoComplete="new-password"
                   onChange={(event) => onPassword(event.target.value)}
-                  sx={{ ...hole(Boolean(password)), left: "25.7%", top: "61.7%", width: "54%", height: "26.8%" }}
+                  sx={{ ...hole(Boolean(password)), left: "24.8%", top: "58%", width: "55%", height: "32%", fontSize: "4.6cqw" }}
                 />
                 <Box
                   component="button"
@@ -415,7 +418,7 @@ export function MobileForgeLogin({
                 value={username}
                 autoComplete="username"
                 onChange={(event) => onUsername(event.target.value)}
-                sx={{ ...hole(Boolean(username)), left: "25.7%", top: "29.9%", width: "60%", height: "6.4%" }}
+                sx={{ ...hole(Boolean(username)), left: "24.8%", top: "29.2%", width: "63%", height: "7.6%", fontSize: "4.6cqw" }}
               />
               <Box
                 component="input"
@@ -426,7 +429,7 @@ export function MobileForgeLogin({
                 value={password}
                 autoComplete="current-password"
                 onChange={(event) => onPassword(event.target.value)}
-                sx={{ ...hole(Boolean(password)), left: "25.7%", top: "39.9%", width: "54%", height: "6.4%" }}
+                sx={{ ...hole(Boolean(password)), left: "24.8%", top: "39.2%", width: "55%", height: "7.6%", fontSize: "4.6cqw" }}
               />
               <Box
                 component="button"
