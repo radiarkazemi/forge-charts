@@ -21,38 +21,61 @@ function grecaptcha(): Grecaptcha | undefined {
   return (window as Window & { grecaptcha?: Grecaptcha }).grecaptcha;
 }
 
+const RECAPTCHA_SRC = "https://www.recaptcha.net/recaptcha/api.js?render=explicit";
+
 let scriptPromise: Promise<void> | null = null;
 
-function loadRecaptcha(): Promise<void> {
+function loadRecaptcha(attempt = 0): Promise<void> {
   if (grecaptcha()) return Promise.resolve();
-  if (scriptPromise) return scriptPromise;
+  if (scriptPromise && attempt === 0) return scriptPromise;
   scriptPromise = new Promise((resolve, reject) => {
     const script = document.createElement("script");
     // recaptcha.net is Google's endpoint for networks that block google.com.
-    script.src = "https://www.recaptcha.net/recaptcha/api.js?render=explicit";
+    script.src = RECAPTCHA_SRC;
     script.async = true;
-    script.onload = () => resolve();
-    script.onerror = () => {
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      if (ok) {
+        resolve();
+        return;
+      }
+      script.remove();
       scriptPromise = null;
+      if (attempt < 2) {
+        loadRecaptcha(attempt + 1).then(resolve, reject);
+        return;
+      }
       reject(new Error("reCAPTCHA failed to load."));
     };
+    // A stuck connection never fires onerror. Retry so the checkbox is not a blank bar.
+    const timer = window.setTimeout(() => finish(false), 8000);
+    script.onload = () => finish(true);
+    script.onerror = () => finish(false);
     document.head.appendChild(script);
   });
   return scriptPromise;
 }
 
+if (typeof document !== "undefined") loadRecaptcha();
+
 interface RecaptchaFieldProps {
   readonly onToken: (token: string | null) => void;
   readonly onError: (message: string) => void;
+  readonly onReady?: () => void;
 }
 
 /** Official reCAPTCHA v2 checkbox. Submit stays blocked until Google accepts it. */
-export function RecaptchaField({ onToken, onError }: RecaptchaFieldProps) {
+export function RecaptchaField({ onToken, onError, onReady }: RecaptchaFieldProps) {
   const host = useRef<HTMLDivElement>(null);
   const onTokenRef = useRef(onToken);
   const onErrorRef = useRef(onError);
+  const onReadyRef = useRef(onReady);
   onTokenRef.current = onToken;
   onErrorRef.current = onError;
+  onReadyRef.current = onReady;
 
   useEffect(() => {
     let cancelled = false;
@@ -69,6 +92,7 @@ export function RecaptchaField({ onToken, onError }: RecaptchaFieldProps) {
             "expired-callback": () => onTokenRef.current(null),
             "error-callback": () => onErrorRef.current("reCAPTCHA could not be confirmed."),
           });
+          onReadyRef.current?.();
         });
       })
       .catch(() => {

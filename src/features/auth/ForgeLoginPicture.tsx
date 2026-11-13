@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Box from "@mui/material/Box";
 import { isDevSite } from "@/dev-site";
 import { RecaptchaField } from "./RecaptchaField";
@@ -45,7 +45,7 @@ const inputSx = {
 
 function LockIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden fill="none" stroke="#d9d3cb" strokeWidth="1.6">
+    <svg width="4.3cqw" height="4.3cqw" viewBox="0 0 24 24" aria-hidden fill="none" stroke="#f2efe9" strokeWidth="1.6">
       <rect x="5" y="11" width="14" height="9" rx="2" />
       <path d="M8 11V8a4 4 0 0 1 8 0v3" />
     </svg>
@@ -54,7 +54,7 @@ function LockIcon() {
 
 function PersonIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden fill="none" stroke="#d9d3cb" strokeWidth="1.6">
+    <svg width="4.3cqw" height="4.3cqw" viewBox="0 0 24 24" aria-hidden fill="none" stroke="#f2efe9" strokeWidth="1.6">
       <circle cx="12" cy="8" r="3.2" />
       <path d="M5 19c1.4-3 3.8-4.5 7-4.5S17.6 16 19 19" />
     </svg>
@@ -87,9 +87,9 @@ function FieldRow({
       sx={{
         display: "flex",
         alignItems: "center",
-        gap: 1.25,
+        gap: "5cqw",
         height: "9.9cqw",
-        px: "2cqw",
+        px: "4.6cqw",
         borderRadius: "2.6cqw",
         border: "1px solid rgba(214,206,192,0.55)",
         bgcolor: "rgba(0,0,0,0.28)",
@@ -111,7 +111,7 @@ function FieldRow({
         value={value}
         autoComplete={autoComplete}
         onChange={(event) => onChange(event.target.value)}
-        sx={inputSx}
+        sx={{ ...inputSx, fontSize: "2.7cqw" }}
       />
       {end}
     </Box>
@@ -139,7 +139,44 @@ export function ForgeLoginPicture({
 }: ForgeLoginPictureProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaReady, setCaptchaReady] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [captchaBox, setCaptchaBox] = useState({ left: 0, top: 0, width: 0, height: 0 });
+  const formRef = useRef<HTMLFormElement>(null);
+  const captchaSlotRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const form = formRef.current;
+    const slot = captchaSlotRef.current;
+    if (!form || !slot) return;
+    const place = () => {
+      const formBox = form.getBoundingClientRect();
+      const slotBox = slot.getBoundingClientRect();
+      const next = {
+        left: slotBox.left - formBox.left,
+        top: slotBox.top - formBox.top,
+        width: slotBox.width,
+        height: slotBox.height,
+      };
+      setCaptchaBox((prev) => (
+        Math.abs(prev.left - next.left) < 0.5
+        && Math.abs(prev.top - next.top) < 0.5
+        && Math.abs(prev.width - next.width) < 0.5
+        && Math.abs(prev.height - next.height) < 0.5
+          ? prev
+          : next
+      ));
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(form);
+    observer.observe(slot);
+    if (slot.parentElement) observer.observe(slot.parentElement);
+    window.addEventListener("resize", place);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", place);
+    };
+  }, [mode]);
   const dev = isDevSite();
   const message = localError || error;
   const art = (file: string) => (
@@ -171,13 +208,13 @@ export function ForgeLoginPicture({
   const credentialHoles = (frame: "full" | "fields") => {
     const emailBox = frame === "full"
       ? { left: "25.2%", top: "37%", width: "57.9%", height: "7.58%" }
-      : { left: "25.2%", top: "11%", width: "57.9%", height: "34.4%" };
+      : { left: "25.2%", top: "10.7%", width: "57.9%", height: "33.5%" };
     const passwordBox = frame === "full"
       ? { left: "25.2%", top: "48.64%", width: "50.3%", height: "7.58%" }
-      : { left: "25.2%", top: "64.2%", width: "50.3%", height: "34.4%" };
+      : { left: "25.2%", top: "62.5%", width: "50.3%", height: "33.5%" };
     const eyeBox = frame === "full"
       ? { left: "77.6%", top: "49.6%", width: "6.7%", height: "6.1%" }
-      : { left: "77.6%", top: "68.6%", width: "6.7%", height: "24%" };
+      : { left: "77.6%", top: "66.8%", width: "6.7%", height: "23.4%" };
     return (
       <>
         <Box
@@ -215,54 +252,30 @@ export function ForgeLoginPicture({
     // Same column as the email field. Inset a few pixels so the painted stroke stays visible.
     const captcha = frame === "full"
       ? { left: "14.01%", top: "59.92%", width: "71.98%", height: "10.15%" }
-      : { left: "14.01%", top: "7.52%", width: "71.98%", height: "23.43%" };
+      : { left: "14.01%", top: "2.76%", width: "71.98%", height: "24.63%" };
     const button = frame === "full"
       ? { left: "14%", top: "74.1%", width: "72%", height: "9.2%" }
-      : { left: "14%", top: "40.2%", width: "72%", height: "21.7%" };
+      : { left: "14%", top: "37.1%", width: "72%", height: "22.8%" };
     const link = frame === "full"
       ? { left: "28%", top: "85.4%", width: "44%" }
-      : { left: "28%", top: "66.4%", width: "44%" };
+      : { left: "28%", top: "64.7%", width: "44%" };
     return (
       <>
         <Box
+          ref={captchaSlotRef}
           sx={{
             position: "absolute",
             ...captcha,
             overflow: "hidden",
-            bgcolor: "#222",
             borderRadius: "2.4cqw",
           }}
-        >
-          <Box
-            sx={{
-              width: 304,
-              height: 78,
-              overflow: "hidden",
-              position: "relative",
-              transformOrigin: "top left",
-              transform:
-                "scaleX(calc(100cqw * 0.7198 / 304px)) scaleY(calc(100cqw * 0.1124 / 78px))",
-            }}
-          >
-            <RecaptchaField
-              key={mode}
-              onToken={(token) => {
-                setCaptchaToken(token);
-                if (token) setLocalError(null);
-              }}
-              onError={(next) => setLocalError(next)}
-            />
-            {/* The test key paints a red line over the logo. Cover it; the checkbox starts lower. */}
-            <Box sx={{ position: "absolute", left: 0, top: 0, width: 304, height: 12, bgcolor: "#222", pointerEvents: "none" }} />
-            <Box sx={{ position: "absolute", left: 0, top: 12, width: 236, height: 11, bgcolor: "#222", pointerEvents: "none" }} />
-          </Box>
-        </Box>
+        />
         {message ? (
           <Box
             sx={{
               position: "absolute",
               left: "16%",
-              top: frame === "full" ? "71.2%" : "33%",
+              top: frame === "full" ? "71.2%" : "29.6%",
               width: "68%",
               color: "#ffb4b4",
               fontSize: "2.2cqw",
@@ -303,7 +316,6 @@ export function ForgeLoginPicture({
           type="button"
           onClick={() => {
             setLocalError(null);
-            setCaptchaToken(null);
             onMode(mode === "login" ? "signup" : "login");
           }}
           sx={{
@@ -387,9 +399,11 @@ export function ForgeLoginPicture({
         ) : null}
 
         <Box
+          ref={formRef}
           component="form"
           onSubmit={submit}
           sx={{
+            position: "relative",
             width: mode === "signup"
               ? "min(640px, calc((100dvh - 64px) / 1.36), 100%)"
               : "min(640px, calc((100dvh - 64px) / 1.108), 100%)",
@@ -408,7 +422,8 @@ export function ForgeLoginPicture({
                   backgroundSize: "100% auto",
                   pl: "13.76%",
                   pr: "13.76%",
-                  py: "1.15cqw",
+                  pt: "1.5cqw",
+                  pb: "1.34cqw",
                 }}
               >
                 <FieldRow
@@ -431,7 +446,8 @@ export function ForgeLoginPicture({
                   backgroundSize: "100% auto",
                   pl: "13.76%",
                   pr: "13.76%",
-                  py: "1.15cqw",
+                  pt: "2.68cqw",
+                  pb: "2.18cqw",
                 }}
               >
                 <FieldRow
@@ -456,6 +472,47 @@ export function ForgeLoginPicture({
               {footControls("full")}
             </Box>
           )}
+          <Box
+            sx={{
+              position: "absolute",
+              left: captchaBox.left,
+              top: captchaBox.top,
+              width: captchaBox.width,
+              height: captchaBox.height,
+              overflow: "hidden",
+              borderRadius: "2.4cqw",
+              visibility: captchaBox.width > 0 ? "visible" : "hidden",
+              pointerEvents: captchaReady ? "auto" : "none",
+            }}
+          >
+            <Box
+              sx={{
+                width: 304,
+                height: 78,
+                overflow: "hidden",
+                position: "relative",
+                transformOrigin: "top left",
+                transform: captchaBox.width
+                  ? `scaleX(${captchaBox.width / 304}) scaleY(${captchaBox.height / 78})`
+                  : "none",
+              }}
+            >
+              <RecaptchaField
+                onToken={(token) => {
+                  setCaptchaToken(token);
+                  if (token) setLocalError(null);
+                }}
+                onError={(next) => setLocalError(next)}
+                onReady={() => setCaptchaReady(true)}
+              />
+              {captchaReady ? (
+                <>
+                  <Box sx={{ position: "absolute", left: 0, top: 0, width: 304, height: 12, bgcolor: "#222", pointerEvents: "none" }} />
+                  <Box sx={{ position: "absolute", left: 0, top: 12, width: 236, height: 11, bgcolor: "#222", pointerEvents: "none" }} />
+                </>
+              ) : null}
+            </Box>
+          </Box>
         </Box>
       </Box>
     </Box>
