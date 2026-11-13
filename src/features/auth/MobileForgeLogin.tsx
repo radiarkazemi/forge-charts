@@ -37,7 +37,7 @@ const fieldInput = {
   background: "transparent",
   color: "#f6f3ee",
   font: "inherit",
-  fontSize: 16,
+  fontSize: "4cqw",
   "&::placeholder": { color: "#b7b1a8", opacity: 1 },
   "&:-webkit-autofill, &:-webkit-autofill:hover, &:-webkit-autofill:focus": {
     WebkitTextFillColor: "#f6f3ee",
@@ -47,18 +47,9 @@ const fieldInput = {
   },
 };
 
-function EnvelopeIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden fill="none" stroke="#f3efe8" strokeWidth="1.6">
-      <rect x="3.5" y="5.5" width="17" height="13" rx="2" />
-      <path d="M4 7l8 6 8-6" />
-    </svg>
-  );
-}
-
 function LockIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden fill="none" stroke="#f3efe8" strokeWidth="1.6">
+    <svg width="4.6cqw" height="4.6cqw" viewBox="0 0 24 24" aria-hidden fill="none" stroke="#f3efe8" strokeWidth="1.6">
       <rect x="5" y="11" width="14" height="9" rx="2" />
       <path d="M8 11V8a4 4 0 0 1 8 0v3" />
     </svg>
@@ -67,19 +58,9 @@ function LockIcon() {
 
 function PersonIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden fill="none" stroke="#f3efe8" strokeWidth="1.6">
+    <svg width="4.6cqw" height="4.6cqw" viewBox="0 0 24 24" aria-hidden fill="none" stroke="#f3efe8" strokeWidth="1.6">
       <circle cx="12" cy="8" r="3.2" />
       <path d="M5 19c1.4-3 3.8-4.5 7-4.5S17.6 16 19 19" />
-    </svg>
-  );
-}
-
-function EyeIcon({ open }: { readonly open: boolean }) {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden fill="none" stroke="#c8c2b8" strokeWidth="1.6">
-      <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z" />
-      <circle cx="12" cy="12" r="2.5" />
-      {open ? null : <path d="M4 5l16 14" />}
     </svg>
   );
 }
@@ -110,13 +91,13 @@ function MobileField({
       sx={{
         display: "flex",
         alignItems: "center",
-        gap: "2.4cqw",
+        gap: "3cqw",
         width: "100%",
-        height: "100%",
-        px: "3.2cqw",
-        borderRadius: "3.2cqw",
-        border: "1px solid rgba(226, 216, 200, 0.5)",
-        bgcolor: "#141210",
+        height: "11.3cqw",
+        px: "4cqw",
+        borderRadius: "2.8cqw",
+        border: "1px solid rgba(214, 206, 192, 0.55)",
+        bgcolor: "rgba(0,0,0,0.28)",
         boxSizing: "border-box",
         "&:focus-within": {
           borderColor: "rgba(232, 196, 130, 0.85)",
@@ -144,7 +125,6 @@ function MobileField({
 
 const WIDGET_W = 304;
 const WIDGET_H = 78;
-/** Red “for testing only” lines sit in the top of the test-key widget. */
 const BANNER_H = 30;
 
 function CaptchaFit({
@@ -180,10 +160,8 @@ function CaptchaFit({
         width: "100%",
         height: "100%",
         overflow: "hidden",
-        bgcolor: "#222",
-        borderRadius: "2.4cqw",
-        border: "1px solid rgba(226, 216, 200, 0.35)",
-        boxSizing: "border-box",
+        bgcolor: "#161616",
+        borderRadius: "2.6cqw",
       }}
     >
       <Box sx={{ marginTop: `${pad}px`, height: shown, overflow: "hidden" }}>
@@ -206,20 +184,40 @@ const hole = (filled: boolean) => ({
   position: "absolute" as const,
   border: "none",
   outline: "none",
-  background: filled ? "#100e0c" : "transparent",
+  background: filled ? "#0e0d0b" : "transparent",
   color: "#f4f1ec",
   font: "inherit",
-  fontSize: "3.5cqw",
+  fontSize: "4cqw",
   padding: 0,
   caretColor: "#f0c27a",
   "&:-webkit-autofill, &:-webkit-autofill:hover, &:-webkit-autofill:focus": {
     WebkitTextFillColor: "#f4f1ec",
-    WebkitBoxShadow: "0 0 0 1000px #100e0c inset",
+    WebkitBoxShadow: "0 0 0 1000px #0e0d0b inset",
     caretColor: "#f0c27a",
   },
 });
 
-/** Phone sign-in uses the artwork itself. Create account keeps that frame and replaces the fields. */
+function Art({ file }: { readonly file: string }) {
+  return (
+    <Box
+      component="img"
+      src={brandSrc(file)}
+      alt=""
+      sx={{ width: "100%", height: "auto", display: "block", userSelect: "none", pointerEvents: "none" }}
+    />
+  );
+}
+
+const sideBand = {
+  backgroundImage: `url(${brandSrc("forge-mobile-side.webp")})`,
+  backgroundRepeat: "repeat-y",
+  backgroundSize: "100% auto",
+  backgroundPosition: "left top",
+  px: "12.1%",
+  py: "3.4cqw",
+};
+
+/** Phone sign-in: fixed scene, scrollable card. Create account grows the same card. */
 export function MobileForgeLogin({
   mode,
   username,
@@ -239,208 +237,255 @@ export function MobileForgeLogin({
   onCaptchaError,
   onSubmit,
 }: MobileForgeLoginProps) {
-  const artRef = useRef<HTMLImageElement>(null);
-  const [art, setArt] = useState({ w: 0, h: 0 });
   const [notice, setNotice] = useState<string | null>(null);
   const signup = mode === "signup";
   const dev = isDevSite();
-  useLayoutEffect(() => {
-    const img = artRef.current;
-    if (!img) return;
-    const measure = () => setArt({ w: img.clientWidth, h: img.clientHeight });
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(img);
-    return () => observer.disconnect();
-  }, []);
-  const at = (x: number, y: number, width: number, height: number) => ({
-    position: "absolute" as const,
-    left: art.w * x,
-    top: art.h * y,
-    width: art.w * width,
-    height: art.h * height,
-  });
+  const message = error || notice;
   return (
-    <Box
-      sx={{
-        minHeight: "100dvh",
-        bgcolor: "#050403",
-        display: "flex",
-        justifyContent: "center",
-      }}
-    >
+    <Box sx={{ height: "100dvh", overflow: "hidden", bgcolor: "#050403", position: "relative" }}>
       <Box
-        component="form"
-        onSubmit={onSubmit}
+        component="img"
+        src={brandSrc("forge-mobile-bg.webp")}
+        alt=""
+        sx={{
+          position: "fixed",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+          objectPosition: "center top",
+          pointerEvents: "none",
+          userSelect: "none",
+        }}
+      />
+      <Box
         sx={{
           position: "relative",
-          width: "min(100%, 480px)",
-          containerType: "inline-size",
-          fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif',
+          zIndex: 1,
+          height: "100%",
+          overflowY: "auto",
+          WebkitOverflowScrolling: "touch",
+          touchAction: "pan-y",
+          overscrollBehavior: "contain",
         }}
       >
         <Box
-          component="img"
-          ref={artRef}
-          src={brandSrc("forge-mobile-login.webp")}
-          alt=""
-          sx={{ width: "100%", height: "auto", display: "block", userSelect: "none", pointerEvents: "none" }}
-        />
-        {dev ? (
-          <Box
-            component="a"
-            href="?view=landing"
-            aria-label="Forge"
-            sx={{ position: "absolute", left: "38%", top: "43.2%", width: "24%", height: "4.2%" }}
-          />
-        ) : null}
-
-        {signup ? (
-          <>
-            <Box sx={{ ...at(0.105, 0.434, 0.79, 0.482), bgcolor: "#100e0c" }} />
-            <Box sx={{ ...at(0.12, 0.440, 0.76, 0.04), textAlign: "center" }}>
-              <Box sx={{ color: "#f6f3ee", fontSize: "5.6cqw", fontWeight: 650, letterSpacing: "-0.03em", lineHeight: 1.05 }}>
-                Create account
-              </Box>
-              <Box sx={{ color: "#c9c3ba", fontSize: "3cqw" }}>Join Forge</Box>
-            </Box>
-            <Box sx={at(0.127, 0.486, 0.746, 0.048)}>
-              <MobileField icon={<PersonIcon />} label="Name" value={displayName} onChange={onDisplayName} autoComplete="nickname" required={false} />
-            </Box>
-            <Box sx={at(0.127, 0.542, 0.746, 0.048)}>
-              <MobileField icon={<EnvelopeIcon />} label="Email" type="email" value={username} onChange={onUsername} autoComplete="username" />
-            </Box>
-            <Box sx={at(0.127, 0.598, 0.746, 0.048)}>
-              <MobileField
-                icon={<LockIcon />}
-                label="Password"
-                type={showPassword ? "text" : "password"}
-                value={password}
-                onChange={onPassword}
-                autoComplete="new-password"
-                minLength={6}
-                end={(
-                  <Box component="button" type="button" aria-label={showPassword ? "Hide password" : "Show password"} onClick={onTogglePassword} sx={{ p: 0, border: "none", bgcolor: "transparent", cursor: "pointer", lineHeight: 0 }}>
-                    <EyeIcon open={showPassword} />
-                  </Box>
-                )}
-              />
-            </Box>
-            <Box sx={at(0.127, 0.654, 0.746, 0.048)}>
-              <MobileField icon={<LockIcon />} label="Confirm password" type="password" value={confirm} onChange={onConfirm} autoComplete="new-password" minLength={6} />
-            </Box>
-            <Box sx={at(0.127, 0.710, 0.746, 0.064)}>
-              <CaptchaFit onToken={onCaptcha} onError={onCaptchaError} />
-            </Box>
-            {error || notice ? (
-              <Box sx={{ ...at(0.14, 0.776, 0.72, 0.018), color: "#ffb4b4", fontSize: "2.6cqw", textAlign: "center" }}>{error || notice}</Box>
-            ) : null}
+          component="form"
+          onSubmit={onSubmit}
+          sx={{
+            width: "min(100%, 440px)",
+            mx: "auto",
+            pt: "16dvh",
+            px: "3.5vw",
+            pb: "12dvh",
+            containerType: "inline-size",
+            fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif',
+          }}
+        >
+          {dev ? (
             <Box
-              component="button"
-              type="submit"
-              disabled={busy}
-              sx={{
-                ...at(0.127, 0.784, 0.746, 0.05),
-                border: "none",
-                borderRadius: "3cqw",
-                cursor: busy ? "progress" : "pointer",
-                color: "#1a120c",
-                font: "inherit",
-                fontSize: "4cqw",
-                fontWeight: 700,
-                background: "linear-gradient(180deg, #f8e7b0 0%, #f3c56a 42%, #e39a32 100%)",
-              }}
-            >
-              {busy ? "Please wait…" : "Create account →"}
-            </Box>
-            <Box sx={{ ...at(0.12, 0.842, 0.76, 0.028), textAlign: "center", color: "#d9d3cb", fontSize: "3.2cqw", lineHeight: 1.2 }}>
-              Already on Forge?{" "}
+              component="a"
+              href="?view=landing"
+              aria-label="Forge"
+              sx={{ position: "absolute", left: "34%", top: "18dvh", width: "32%", height: "7dvh", zIndex: 2 }}
+            />
+          ) : null}
+
+          {signup ? (
+            <>
+              <Art file="forge-mobile-top.webp" />
+              <Box sx={sideBand}>
+                <MobileField
+                  icon={<PersonIcon />}
+                  label="Name"
+                  value={displayName}
+                  onChange={onDisplayName}
+                  autoComplete="nickname"
+                  required={false}
+                />
+              </Box>
+              <Box sx={{ position: "relative" }}>
+                <Art file="forge-mobile-fields.webp" />
+                <Box
+                  component="input"
+                  aria-label="Email"
+                  type="email"
+                  required
+                  value={username}
+                  autoComplete="username"
+                  onChange={(event) => onUsername(event.target.value)}
+                  sx={{ ...hole(Boolean(username)), left: "25.7%", top: "11.4%", width: "60%", height: "26.8%" }}
+                />
+                <Box
+                  component="input"
+                  aria-label="Password"
+                  type={showPassword ? "text" : "password"}
+                  required
+                  minLength={6}
+                  value={password}
+                  autoComplete="new-password"
+                  onChange={(event) => onPassword(event.target.value)}
+                  sx={{ ...hole(Boolean(password)), left: "25.7%", top: "61.7%", width: "54%", height: "26.8%" }}
+                />
+                <Box
+                  component="button"
+                  type="button"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  onClick={onTogglePassword}
+                  sx={{ position: "absolute", left: "80.8%", top: "64%", width: "8%", height: "22%", p: 0, border: "none", bgcolor: "transparent", cursor: "pointer" }}
+                />
+              </Box>
+              <Box sx={sideBand}>
+                <MobileField
+                  icon={<LockIcon />}
+                  label="Confirm password"
+                  type="password"
+                  value={confirm}
+                  onChange={onConfirm}
+                  autoComplete="new-password"
+                  minLength={6}
+                />
+              </Box>
+              <Box sx={{ position: "relative" }}>
+                <Art file="forge-mobile-foot.webp" />
+                <Box sx={{ position: "absolute", left: "12.2%", top: "2.5%", width: "75.8%", height: "21.5%" }}>
+                  <CaptchaFit onToken={onCaptcha} onError={onCaptchaError} />
+                </Box>
+                {message ? (
+                  <Box sx={{ position: "absolute", left: "14%", top: "25%", width: "72%", color: "#ffb4b4", fontSize: "3cqw", textAlign: "center" }}>
+                    {message}
+                  </Box>
+                ) : null}
+                <Box
+                  component="button"
+                  type="submit"
+                  disabled={busy}
+                  sx={{
+                    position: "absolute",
+                    left: "9.6%",
+                    top: "32.4%",
+                    width: "80.7%",
+                    height: "18.3%",
+                    border: "none",
+                    borderRadius: "3.2cqw",
+                    cursor: busy ? "progress" : "pointer",
+                    color: "#1a120c",
+                    font: "inherit",
+                    fontSize: "4.4cqw",
+                    fontWeight: 700,
+                    background: "linear-gradient(180deg, #f8e7b0 0%, #f3c56a 42%, #e39a32 100%)",
+                  }}
+                >
+                  {busy ? "Please wait…" : "Create account →"}
+                </Box>
+                <Box
+                  sx={{
+                    position: "absolute",
+                    left: "12%",
+                    top: "58%",
+                    width: "76%",
+                    textAlign: "center",
+                    color: "#d9d3cb",
+                    fontSize: "3.6cqw",
+                  }}
+                >
+                  Already on Forge?{" "}
+                  <Box
+                    component="button"
+                    type="button"
+                    onClick={() => {
+                      setNotice(null);
+                      onMode("login");
+                    }}
+                    sx={{ p: 0, border: "none", bgcolor: "transparent", color: "#e4b15a", font: "inherit", fontWeight: 700, cursor: "pointer" }}
+                  >
+                    Sign in
+                  </Box>
+                </Box>
+              </Box>
+            </>
+          ) : (
+            <Box sx={{ position: "relative" }}>
+              <Art file="forge-mobile-form.webp" />
+              <Box
+                component="input"
+                aria-label="Email"
+                type="email"
+                required
+                value={username}
+                autoComplete="username"
+                onChange={(event) => onUsername(event.target.value)}
+                sx={{ ...hole(Boolean(username)), left: "25.7%", top: "29.9%", width: "60%", height: "6.4%" }}
+              />
+              <Box
+                component="input"
+                aria-label="Password"
+                type={showPassword ? "text" : "password"}
+                required
+                minLength={6}
+                value={password}
+                autoComplete="current-password"
+                onChange={(event) => onPassword(event.target.value)}
+                sx={{ ...hole(Boolean(password)), left: "25.7%", top: "39.9%", width: "54%", height: "6.4%" }}
+              />
               <Box
                 component="button"
                 type="button"
-                onClick={() => onMode("login")}
-                sx={{ p: 0, border: "none", bgcolor: "transparent", color: "#e4b15a", font: "inherit", fontWeight: 700, cursor: "pointer" }}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                onClick={onTogglePassword}
+                sx={{ position: "absolute", left: "80.5%", top: "40.6%", width: "8%", height: "5%", p: 0, border: "none", bgcolor: "transparent", cursor: "pointer" }}
+              />
+              <Box
+                component="button"
+                type="button"
+                onClick={() => setNotice("Password reset isn't available yet. Use the password for this account.")}
+                sx={{ position: "absolute", left: "63.5%", top: "48.4%", width: "26%", height: "2.8%", p: 0, border: "none", bgcolor: "transparent", cursor: "pointer" }}
+              />
+              <Box sx={{ position: "absolute", left: "12.2%", top: "53.7%", width: "75.8%", height: "10.2%" }}>
+                <CaptchaFit onToken={onCaptcha} onError={onCaptchaError} />
+              </Box>
+              {message ? (
+                <Box sx={{ position: "absolute", left: "14%", top: "64.4%", width: "72%", color: "#ffb4b4", fontSize: "2.8cqw", textAlign: "center", textShadow: "0 1px 2px #000" }}>
+                  {message}
+                </Box>
+              ) : null}
+              <Box
+                component="button"
+                type="submit"
+                disabled={busy}
+                aria-label={busy ? "Please wait" : "Sign in"}
+                sx={{
+                  position: "absolute",
+                  left: "9.6%",
+                  top: "67.9%",
+                  width: "80.7%",
+                  height: "8.7%",
+                  p: 0,
+                  border: "none",
+                  borderRadius: "16px",
+                  bgcolor: busy ? "#e39a32" : "transparent",
+                  color: busy ? "#1a120c" : "transparent",
+                  font: "inherit",
+                  fontSize: "4cqw",
+                  fontWeight: 700,
+                  cursor: busy ? "progress" : "pointer",
+                }}
               >
-                Sign in
+                {busy ? "Please wait…" : ""}
               </Box>
+              <Box
+                component="button"
+                type="button"
+                aria-label="Create account"
+                onClick={() => {
+                  setNotice(null);
+                  onMode("signup");
+                }}
+                sx={{ position: "absolute", left: "22%", top: "80.2%", width: "56%", height: "3.4%", p: 0, border: "none", bgcolor: "transparent", cursor: "pointer" }}
+              />
             </Box>
-          </>
-        ) : (
-          <>
-            <Box
-              component="input"
-              aria-label="Email"
-              type="email"
-              required
-              value={username}
-              autoComplete="username"
-              onChange={(event) => onUsername(event.target.value)}
-              sx={{ ...hole(Boolean(username)), ...at(0.254, 0.527, 0.593, 0.043), lineHeight: `${art.h * 0.043}px`, fontSize: art.h * 0.016 }}
-            />
-            <Box
-              component="input"
-              aria-label="Password"
-              type={showPassword ? "text" : "password"}
-              required
-              minLength={6}
-              value={password}
-              autoComplete="current-password"
-              onChange={(event) => onPassword(event.target.value)}
-              sx={{ ...hole(Boolean(password)), ...at(0.254, 0.595, 0.530, 0.043), lineHeight: `${art.h * 0.043}px`, fontSize: art.h * 0.016 }}
-            />
-            <Box
-              component="button"
-              type="button"
-              aria-label={showPassword ? "Hide password" : "Show password"}
-              onClick={onTogglePassword}
-              sx={{ ...at(0.795, 0.598, 0.08, 0.04), p: 0, border: "none", bgcolor: "transparent", cursor: "pointer" }}
-            />
-            <Box
-              component="button"
-              type="button"
-              onClick={() => setNotice("Password reset isn't available yet. Use the password for this account.")}
-              sx={{ ...at(0.62, 0.655, 0.26, 0.024), p: 0, border: "none", bgcolor: "transparent", cursor: "pointer" }}
-            />
-            <Box sx={at(0.124, 0.686, 0.750, 0.082)}>
-              <CaptchaFit onToken={onCaptcha} onError={onCaptchaError} />
-            </Box>
-            {error || notice ? (
-              <Box sx={{ position: "absolute", left: "14%", top: "76.4%", width: "72%", color: "#ffb4b4", fontSize: "2.8cqw", textAlign: "center", textShadow: "0 1px 2px #000" }}>
-                {error || notice}
-              </Box>
-            ) : null}
-            <Box
-              component="button"
-              type="submit"
-              disabled={busy}
-              aria-label={busy ? "Please wait" : "Sign in"}
-              sx={{
-                ...at(0.108, 0.789, 0.784, 0.056),
-                p: 0,
-                border: "none",
-                bgcolor: busy ? "#e39a32" : "transparent",
-                color: busy ? "#1a120c" : "transparent",
-                font: "inherit",
-                fontSize: "4cqw",
-                fontWeight: 700,
-                cursor: busy ? "progress" : "pointer",
-                borderRadius: "14px",
-              }}
-            >
-              {busy ? "Please wait…" : ""}
-            </Box>
-            <Box
-              component="button"
-              type="button"
-              aria-label="Create account"
-              onClick={() => {
-                setNotice(null);
-                onMode("signup");
-              }}
-              sx={{ ...at(0.22, 0.866, 0.56, 0.032), p: 0, border: "none", bgcolor: "transparent", cursor: "pointer" }}
-            />
-          </>
-        )}
+          )}
+        </Box>
       </Box>
     </Box>
   );
