@@ -1,6 +1,8 @@
 import { useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Box from "@mui/material/Box";
+import useMediaQuery from "@mui/material/useMediaQuery";
 import { isDevSite } from "@/dev-site";
+import { MobileForgeLogin } from "./MobileForgeLogin";
 import { RecaptchaField } from "./RecaptchaField";
 
 function brandSrc(file: string): string {
@@ -176,6 +178,7 @@ export function ForgeLoginPicture({
       window.removeEventListener("resize", place);
     };
   }, [mode]);
+  const mobile = useMediaQuery("(max-width:900px)", { noSsr: true });
   const dev = isDevSite();
   const message = localError || error;
   const art = (file: string) => (
@@ -343,6 +346,36 @@ export function ForgeLoginPicture({
     setLocalError(null);
     onSubmit(event);
   };
+
+  if (mobile) {
+    return (
+      <MobileForgeLogin
+        mode={mode}
+        username={username}
+        password={password}
+        confirm={confirm}
+        displayName={displayName}
+        error={message}
+        busy={busy}
+        showPassword={showPassword}
+        onTogglePassword={() => setShowPassword((value) => !value)}
+        onMode={(next) => {
+          setLocalError(null);
+          onMode(next);
+        }}
+        onUsername={onUsername}
+        onPassword={onPassword}
+        onConfirm={onConfirm}
+        onDisplayName={onDisplayName}
+        onCaptcha={(token) => {
+          setCaptchaToken(token);
+          if (token) setLocalError(null);
+        }}
+        onCaptchaError={setLocalError}
+        onSubmit={submit}
+      />
+    );
+  }
 
   return (
     <Box sx={{ minHeight: "100dvh", position: "relative", bgcolor: "#050403" }}>
