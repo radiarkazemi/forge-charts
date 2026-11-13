@@ -88,10 +88,10 @@ function FieldRow({
         display: "flex",
         alignItems: "center",
         gap: 1.25,
-        height: "10cqw",
+        height: "9.9cqw",
         px: "2cqw",
-        borderRadius: "1.6cqw",
-        border: "1px solid rgba(206,196,180,0.42)",
+        borderRadius: "2.6cqw",
+        border: "1px solid rgba(214,206,192,0.55)",
         bgcolor: "rgba(0,0,0,0.28)",
         boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04), 0 10px 22px rgba(0,0,0,0.28)",
         "&:focus-within": {
@@ -212,10 +212,10 @@ export function ForgeLoginPicture({
     );
   };
   const footControls = (frame: "full" | "foot") => {
-    // Interior of the painted robot frame (807×182, inset so the border stays visible).
+    // Same column as the email field. Inset a few pixels so the painted stroke stays visible.
     const captcha = frame === "full"
-      ? { left: "16.86%", top: "57.27%", width: "66.36%", height: "12.58%" }
-      : { left: "16.86%", top: "1.4%", width: "66.36%", height: "29.02%" };
+      ? { left: "14.01%", top: "59.92%", width: "71.98%", height: "10.15%" }
+      : { left: "14.01%", top: "7.52%", width: "71.98%", height: "23.43%" };
     const button = frame === "full"
       ? { left: "14%", top: "74.1%", width: "72%", height: "9.2%" }
       : { left: "14%", top: "40.2%", width: "72%", height: "21.7%" };
@@ -229,8 +229,8 @@ export function ForgeLoginPicture({
             position: "absolute",
             ...captcha,
             overflow: "hidden",
-            bgcolor: "#070707",
-            borderRadius: "1.5cqw",
+            bgcolor: "#222",
+            borderRadius: "2.4cqw",
           }}
         >
           <Box
@@ -241,7 +241,7 @@ export function ForgeLoginPicture({
               position: "relative",
               transformOrigin: "top left",
               transform:
-                "scaleX(calc(100cqw * 0.6636 / 304px)) scaleY(calc(100cqw * 0.1393 / 78px))",
+                "scaleX(calc(100cqw * 0.7198 / 304px)) scaleY(calc(100cqw * 0.1124 / 78px))",
             }}
           >
             <RecaptchaField
@@ -391,8 +391,8 @@ export function ForgeLoginPicture({
           onSubmit={submit}
           sx={{
             width: mode === "signup"
-              ? "min(720px, calc((100dvh - 40px) / 1.36), 100%)"
-              : "min(720px, calc((100dvh - 40px) / 1.108), 100%)",
+              ? "min(640px, calc((100dvh - 64px) / 1.36), 100%)"
+              : "min(640px, calc((100dvh - 64px) / 1.108), 100%)",
             containerType: "inline-size",
             fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif',
             color: "#f6f3ee",
@@ -406,8 +406,9 @@ export function ForgeLoginPicture({
                   backgroundImage: `url(${brandSrc("forge-form-side.png")})`,
                   backgroundRepeat: "repeat-y",
                   backgroundSize: "100% auto",
-                  px: "7%",
-                  py: "1.2cqw",
+                  pl: "13.76%",
+                  pr: "13.76%",
+                  py: "1.15cqw",
                 }}
               >
                 <FieldRow
@@ -428,8 +429,9 @@ export function ForgeLoginPicture({
                   backgroundImage: `url(${brandSrc("forge-form-side.png")})`,
                   backgroundRepeat: "repeat-y",
                   backgroundSize: "100% auto",
-                  px: "7%",
-                  py: "1.2cqw",
+                  pl: "13.76%",
+                  pr: "13.76%",
+                  py: "1.15cqw",
                 }}
               >
                 <FieldRow
