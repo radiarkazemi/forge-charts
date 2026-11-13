@@ -63,6 +63,15 @@ function buildSessionServices(session: AuthSession): Services {
   return services;
 }
 
+function resumeSession(auth: AuthService): AuthSession | null {
+  // ?view=login is an explicit sign-out. Do not revive a session the chart copied back.
+  if (isDevSite() && pageView() === "login") {
+    auth.logout();
+    return null;
+  }
+  return auth.getSession();
+}
+
 function pageView(): string | null {
   try {
     return new URLSearchParams(window.location.search).get("view");
@@ -84,19 +93,19 @@ export function App() {
   const rawStorage = useMemo(() => new LocalStorageAdapter(), []);
   const auth = useMemo(() => new AuthService(rawStorage), [rawStorage]);
   const [session, setSession] = useState<AuthSession | null>(() => {
-    const existing = auth.getSession();
+    const existing = resumeSession(auth);
     if (!existing) return null;
     // Incomplete safety — keep session object but force safety gate below.
     return existing;
   });
   const [needsSafetyBoot, setNeedsSafetyBoot] = useState(() => {
-    const existing = auth.getSession();
+    const existing = resumeSession(auth);
     return Boolean(existing && auth.needsSafety(existing.userId));
   });
   const [view, setView] = useState<string | null>(() => pageView());
   const servicesRef = useRef<Services | null>(null);
   const [services, setServices] = useState<Services | null>(() => {
-    const existing = auth.getSession();
+    const existing = resumeSession(auth);
     if (!existing || auth.needsSafety(existing.userId)) return null;
     const built = buildSessionServices(existing);
     servicesRef.current = built;
@@ -164,9 +173,24 @@ export function App() {
   );
 
   const signOut = useCallback(() => {
-    auth.logout();
-    clearSyncCredentials();
-    servicesRef.current?.dispose();
+    const dropSession = () => {
+      try {
+        auth.logout();
+      } catch {
+        /* storage blocked — React state still leaves the chart */
+      }
+      try {
+        clearSyncCredentials();
+      } catch {
+        /* ignore */
+      }
+    };
+    dropSession();
+    try {
+      servicesRef.current?.dispose();
+    } catch {
+      /* chart teardown must not keep the user signed in */
+    }
     servicesRef.current = null;
     setServices(null);
     setNeedsSafetyBoot(false);
@@ -177,6 +201,10 @@ export function App() {
       window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
       setView("login");
     }
+    // The chart iframe writes the previous session back while its window closes.
+    window.setTimeout(dropSession, 0);
+    window.setTimeout(dropSession, 400);
+    window.setTimeout(dropSession, 1200);
   }, [auth, devSite]);
 
   if (devSite && view === "landing") {
