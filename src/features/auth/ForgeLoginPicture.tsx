@@ -663,7 +663,7 @@ function SignupCard({
     <Box dir="ltr" sx={{ position: "relative", width: "100%", containerType: "inline-size" }}>
       <Box
         component="img"
-        src={brandSrc("forge-signup-form.png")}
+        src={`${brandSrc("forge-signup-form.png")}?v=3`}
         alt=""
         sx={{ width: "100%", height: "auto", display: "block", pointerEvents: "none", userSelect: "none" }}
       />
