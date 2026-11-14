@@ -107,6 +107,8 @@ export function createServices(
   const profilePusher = createProfileSyncPusher(storage);
   disposers.push(() => profilePusher.dispose());
   const notifyProfileDirty = () => profilePusher.notifyLocalChange();
+  // A new trendline should reach the other device without waiting out the chart autosave.
+  saveLoadAdapter.setOnChange(() => profilePusher.notifyLocalChange(400));
   const settingsAdapter = createSettingsAdapter(storage, notifyProfileDirty);
 
   // Quotes feed alert evaluation.

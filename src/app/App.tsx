@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CssBaseline from "@mui/material/CssBaseline";
 import { ThemeProvider } from "@mui/material/styles";
 import {
@@ -17,6 +17,8 @@ import {
   clearSyncCredentials,
   readSyncCredentials,
   storeSyncCredentials,
+  DRAWINGS_UPDATED_EVENT,
+  pullProfileIfNewer,
   syncProfileOnLogin,
   type ProfileSyncCredentials,
 } from "@/features/profile-sync";
@@ -37,17 +39,15 @@ function buildSessionServices(session: AuthSession): Services {
   try {
     const snap = services.settings.settings.get();
     const active = activeProfile(snap);
-    if (
-      active.username !== session.username ||
-      (session.displayName && active.displayName !== session.displayName)
-    ) {
+    // The email is the account. Keep a name that was already saved for it;
+    // a phone with a different label must not replace the shared one on boot.
+    if (active.username !== session.username || !active.displayName) {
+      const displayName = active.displayName || session.displayName;
       services.settings.upsertProfile({
         ...active,
         username: session.username,
-        displayName: session.displayName || active.displayName,
-        avatarInitial: (session.displayName || session.username || "U")
-          .slice(0, 1)
-          .toUpperCase(),
+        displayName,
+        avatarInitial: (displayName || session.username || "U").slice(0, 1).toUpperCase(),
       });
     }
   } catch {
@@ -105,28 +105,93 @@ export function App() {
   });
   const [view, setView] = useState<string | null>(() => pageView());
   const servicesRef = useRef<Services | null>(null);
-  const [services, setServices] = useState<Services | null>(() => {
-    // The site root sends people to ?view=login. Keep that page on the form.
-    if (pageView() === "login") return null;
-    const existing = resumeSession(auth);
-    if (!existing || auth.needsSafety(existing.userId)) return null;
-    const built = buildSessionServices(existing);
-    servicesRef.current = built;
-    // Resume cloud sync if this tab still has sessionStorage credentials.
-    const creds = readSyncCredentials();
-    if (creds) {
-      void syncProfileOnLogin(built.storage, creds).then((result) => {
-        if (!result.appliedRemote) return;
-        // Remote won — rebuild services so chart mounts with synced autosave.
-        servicesRef.current?.dispose();
-        const rebuilt = buildSessionServices(existing);
-        servicesRef.current = rebuilt;
-        setServices(rebuilt);
-      });
-    }
-    return built;
-  });
+  const [services, setServices] = useState<Services | null>(null);
+  const [bootDone, setBootDone] = useState(false);
   const gateTheme = useMemo(() => createAppTheme("dark"), []);
+
+  // Pull the account before the chart mounts, so a trendline saved on the
+  // computer is already here when the phone opens the same symbol.
+  useEffect(() => {
+    let cancelled = false;
+    let built: Services | null = null;
+    const existing = auth.getSession();
+    if (pageView() === "login" || !existing || auth.needsSafety(existing.userId)) {
+      setBootDone(true);
+      return;
+    }
+    built = buildSessionServices(existing);
+    const creds = readSyncCredentials();
+    const finish = () => {
+      if (cancelled || !built) {
+        built?.dispose();
+        return;
+      }
+      servicesRef.current = built;
+      setServices(built);
+      setBootDone(true);
+    };
+    if (!creds) {
+      finish();
+      return () => {
+        cancelled = true;
+      };
+    }
+    void (async () => {
+      try {
+        const result = await syncProfileOnLogin(built!.storage, creds);
+        if (result.appliedRemote && built) {
+          built.dispose();
+          built = buildSessionServices(existing);
+        }
+        const shared = activeProfile(built!.settings.settings.get());
+        const renamed = auth.adoptSharedName(shared.displayName);
+        if (renamed) setSession(renamed);
+      } catch {
+        /* offline — open the local chart */
+      }
+      finish();
+    })();
+    return () => {
+      cancelled = true;
+      built?.dispose();
+      if (servicesRef.current === built) {
+        servicesRef.current = null;
+        setServices(null);
+      }
+    };
+  }, [auth]);
+
+  useEffect(() => {
+    const current = services;
+    if (!current) return;
+    let pulling = false;
+    const pull = async () => {
+      if (pulling || document.visibilityState === "hidden") return;
+      const creds = readSyncCredentials();
+      if (!creds) return;
+      pulling = true;
+      try {
+        const result = await pullProfileIfNewer(current.storage, creds);
+        if (!result.appliedRemote || servicesRef.current !== current) return;
+        // The chart is already open. Ask it to paint the new line; don't send the user through login.
+        window.dispatchEvent(new CustomEvent(DRAWINGS_UPDATED_EVENT));
+      } catch {
+        /* offline */
+      } finally {
+        pulling = false;
+      }
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void pull();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    const timer = window.setInterval(() => void pull(), 1_500);
+    void pull();
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.clearInterval(timer);
+    };
+  }, [services, auth]);
 
   const enter = useCallback(async (next: AuthSession, syncCreds: ProfileSyncCredentials) => {
     storeSyncCredentials(syncCreds);
@@ -139,6 +204,9 @@ export function App() {
         built.dispose();
         built = buildSessionServices(next);
       }
+      const shared = activeProfile(built.settings.settings.get());
+      const renamed = auth.adoptSharedName(shared.displayName);
+      if (renamed) next = renamed;
     } catch {
       /* offline — local chart still works */
     }
@@ -148,7 +216,7 @@ export function App() {
     clearPageView();
     setView(null);
     setSession(next);
-  }, []);
+  }, [auth]);
 
   const completeBootSafety = useCallback(
     async (profile: SafetyAuthorizationProfile) => {
@@ -248,6 +316,14 @@ export function App() {
             signOut();
           }}
         />
+      </ThemeProvider>
+    );
+  }
+
+  if (session && !needsSafetyBoot && view !== "login" && !bootDone) {
+    return (
+      <ThemeProvider theme={gateTheme}>
+        <CssBaseline />
       </ThemeProvider>
     );
   }

@@ -314,6 +314,27 @@ export class AuthService {
     return updated;
   }
 
+  /**
+   * One email shares one display name. A phone that saved a different label
+   * adopts the name already stored for this account.
+   */
+  adoptSharedName(displayName: string): AuthSession | null {
+    const name = displayName.trim().slice(0, 48);
+    const session = this.getSession();
+    if (!session || !name || session.displayName === name) return null;
+    const users = this.users();
+    const idx = users.findIndex((u) => u.id === session.userId);
+    if (idx < 0) return null;
+    const current = users[idx]!;
+    const next: AuthUserRecord = { ...current, displayName: name };
+    const copy = [...users];
+    copy[idx] = next;
+    this.writeUsers(copy);
+    const updated = this.toSession(next, session.token, session.createdAt);
+    this.storage.set(SESSION_KEY, updated);
+    return updated;
+  }
+
   /** @deprecated Prefer beginSignUp + completeSignup */
   async signUp(input: {
     username: string;

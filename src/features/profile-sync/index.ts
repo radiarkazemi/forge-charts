@@ -23,6 +23,8 @@ export {
   clearSyncCredentials,
   readSyncCredentials,
   syncProfileOnLogin,
+  pullProfileIfNewer,
   createProfileSyncPusher,
+  DRAWINGS_UPDATED_EVENT,
   type ProfileSyncCredentials,
 } from "./profile-sync-client";
