@@ -1,12 +1,17 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import Box from "@mui/material/Box";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import { isDevSite } from "@/dev-site";
+import { googleClientId, mountGoogleButton } from "./google-sign-in";
 
 function brandSrc(file: string): string {
   const base = import.meta.env.BASE_URL || "/";
   const root = base.endsWith("/") ? base : `${base}/`;
   return `${root}brand/${file}`;
+}
+
+function homeHref(): string {
+  return isDevSite() ? "?view=landing" : "https://forgechart.ir/";
 }
 
 interface ForgeLoginPictureProps {
@@ -23,6 +28,7 @@ interface ForgeLoginPictureProps {
   readonly onConfirm: (value: string) => void;
   readonly onDisplayName: (value: string) => void;
   readonly onSubmit: (event: FormEvent) => void;
+  readonly onGoogleCredential: (idToken: string) => void;
 }
 
 type Lang = "en" | "fa";
@@ -251,6 +257,44 @@ function FooterLinks({ labels, compact }: { readonly labels: readonly string[]; 
   );
 }
 
+function DesktopTape({ quotes }: { readonly quotes: readonly (typeof QUOTES)[number][] }) {
+  const loop = [...quotes, ...quotes];
+  return (
+    <Box dir="ltr" sx={{
+      overflow: "hidden",
+      width: "100%",
+      flex: "0 0 auto",
+      borderTop: "1px solid rgba(224,176,90,0.28)",
+      bgcolor: "rgba(0,0,0,0.28)",
+      py: 1.15,
+      "@keyframes forgeTape": {
+        from: { transform: "translateX(0)" },
+        to: { transform: "translateX(-50%)" },
+      },
+    }}>
+      <Box sx={{
+        display: "flex",
+        width: "max-content",
+        alignItems: "center",
+        animation: "forgeTape 36s linear infinite",
+        "@media (prefers-reduced-motion: reduce)": { animation: "none" },
+      }}>
+        {loop.map((quote, index) => (
+          <Box key={`${quote.id}-${index}`} sx={{ display: "flex", alignItems: "center", gap: 0.8, px: 2.25, flex: "0 0 auto" }}>
+            <QuoteMark id={quote.id} />
+            <Box sx={{ display: "flex", alignItems: "baseline", gap: 0.8, fontSize: 13, whiteSpace: "nowrap" }}>
+              <Box component="span" sx={{ fontWeight: 750 }}>{quote.id}</Box>
+              <span>{quote.price}</span>
+              <Box component="span" dir="ltr" sx={{ color: "#3ddc84", unicodeBidi: "isolate" }}>▲ {quote.change}</Box>
+            </Box>
+            <Box sx={{ width: "1px", height: 16, bgcolor: "rgba(232,196,130,0.35)", ml: 1.5 }} />
+          </Box>
+        ))}
+      </Box>
+    </Box>
+  );
+}
+
 function MovingTape({ quotes }: { readonly quotes: readonly (typeof QUOTES)[number][] }) {
   const loop = [...quotes, ...quotes];
   return (
@@ -305,6 +349,66 @@ function hitStyle(area: { left: string; top: string; width: string; height: stri
   };
 }
 
+function GoogleHit({
+  label,
+  onUnavailable,
+  onCredential,
+}: {
+  readonly label: string;
+  readonly onUnavailable: () => void;
+  readonly onCredential: (idToken: string) => void;
+}) {
+  const host = useRef<HTMLDivElement>(null);
+  const credential = useRef(onCredential);
+  const unavailable = useRef(onUnavailable);
+  credential.current = onCredential;
+  unavailable.current = onUnavailable;
+  const clientId = googleClientId();
+  useEffect(() => {
+    const el = host.current;
+    if (!el || !clientId) return;
+    let dead = false;
+    let lastWidth = 0;
+    const paint = () => {
+      const width = Math.floor(el.clientWidth);
+      if (width < 40 || Math.abs(width - lastWidth) < 8) return;
+      lastWidth = width;
+      void mountGoogleButton(el, width, (jwt) => credential.current(jwt)).catch(() => {
+        if (!dead) unavailable.current();
+      });
+    };
+    paint();
+    const observer = new ResizeObserver(paint);
+    observer.observe(el);
+    return () => {
+      dead = true;
+      observer.disconnect();
+    };
+  }, [clientId]);
+  if (!clientId) {
+    return (
+      <Box
+        component="button"
+        type="button"
+        aria-label={label}
+        onClick={onUnavailable}
+        sx={hitStyle({ left: "22%", top: "82.2%", width: "56%", height: "6.4%" })}
+      />
+    );
+  }
+  return (
+    <Box
+      ref={host}
+      aria-label={label}
+      sx={{
+        ...hitStyle({ left: "22%", top: "82.2%", width: "56%", height: "6.4%" }),
+        overflow: "hidden",
+        opacity: 0,
+      }}
+    />
+  );
+}
+
 /** The painted card, with real controls in the holes. */
 function ArtCard({
   lang,
@@ -322,6 +426,7 @@ function ArtCard({
   onRemember,
   onForgot,
   onGoogle,
+  onGoogleCredential,
 }: {
   readonly lang: Lang;
   readonly t: CopyText;
@@ -338,6 +443,7 @@ function ArtCard({
   readonly onRemember: (value: boolean) => void;
   readonly onForgot: () => void;
   readonly onGoogle: () => void;
+  readonly onGoogleCredential: (idToken: string) => void;
 }) {
   const fa = lang === "fa";
   return (
@@ -495,13 +601,7 @@ function ArtCard({
       >
         {fa || busy ? `${busy ? "…" : t.signIn} →` : ""}
       </Box>
-      <Box
-        component="button"
-        type="button"
-        aria-label={t.google}
-        onClick={onGoogle}
-        sx={hitStyle({ left: "22%", top: "82.2%", width: "56%", height: "6.4%" })}
-      />
+      <GoogleHit label={t.google} onUnavailable={onGoogle} onCredential={onGoogleCredential} />
       {fa ? (
         <Box sx={{
           position: "absolute",
@@ -523,6 +623,7 @@ function ArtCard({
 }
 
 function SignupCard({
+  lang,
   t,
   displayName,
   username,
@@ -530,12 +631,14 @@ function SignupCard({
   confirm,
   busy,
   error,
+  onLanguage,
   onDisplayName,
   onUsername,
   onPassword,
   onConfirm,
   onSignIn,
 }: {
+  readonly lang: Lang;
   readonly t: CopyText;
   readonly displayName: string;
   readonly username: string;
@@ -543,6 +646,7 @@ function SignupCard({
   readonly confirm: string;
   readonly busy: boolean;
   readonly error: string | null;
+  readonly onLanguage: (lang: Lang) => void;
   readonly onDisplayName: (value: string) => void;
   readonly onUsername: (value: string) => void;
   readonly onPassword: (value: string) => void;
@@ -550,52 +654,114 @@ function SignupCard({
   readonly onSignIn: () => void;
 }) {
   const field = {
-    height: 48,
-    borderRadius: "12px",
-    border: "1px solid rgba(226,214,196,0.4)",
-    bgcolor: "rgba(0,0,0,0.35)",
+    flex: "1 1 0",
+    minHeight: 0,
+    width: "100%",
+    boxSizing: "border-box" as const,
+    borderRadius: "999px",
+    border: "1px solid rgba(214,196,170,0.48)",
+    bgcolor: "#12100e",
     color: "#f6f3ee",
-    px: 1.5,
+    px: "3.4cqw",
     font: "inherit",
-    fontSize: 15,
+    fontSize: "2.35cqw",
     outline: "none",
-    "&:focus": { borderColor: "rgba(232,196,130,0.85)" },
+    "&:focus": { borderColor: "rgba(232,196,130,0.95)" },
+    "&::placeholder": { color: "#cfc8be" },
   };
   return (
-    <Box sx={{
-      px: 2.5,
-      pt: 2,
-      pb: 2.25,
-      borderRadius: "22px",
-      border: "1px solid rgba(214,170,90,0.55)",
-      background: "linear-gradient(180deg, rgba(22,16,12,0.94), rgba(8,7,6,0.92))",
-      boxShadow: "0 24px 60px rgba(0,0,0,0.45)",
-    }}>
-      <Box sx={{ display: "flex", justifyContent: "center", mb: 1.5 }}>
-        <Box component="img" src={brandSrc("forge-f.png")} alt="" sx={{ height: 56, width: "auto" }} />
+    <Box dir="ltr" sx={{ position: "relative", width: "100%", containerType: "inline-size" }}>
+      <Box
+        component="img"
+        src={brandSrc("forge-mobile-v2-form.png")}
+        alt=""
+        sx={{ width: "100%", height: "auto", display: "block", pointerEvents: "none", userSelect: "none" }}
+      />
+      <Box sx={{
+        position: "absolute",
+        left: "65.5%",
+        top: "15.1%",
+        width: "20.2%",
+        height: "7.6%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        px: "0.6%",
+        borderRadius: 999,
+        bgcolor: "#0b0a08",
+        border: "1px solid rgba(226, 176, 90, 0.9)",
+        boxSizing: "border-box",
+      }}>
+        {(["en", "fa"] as const).map((code) => (
+          <Box
+            key={code}
+            component="button"
+            type="button"
+            onClick={() => onLanguage(code)}
+            sx={{
+              flex: 1,
+              height: "78%",
+              border: "none",
+              borderRadius: 999,
+              cursor: "pointer",
+              font: "inherit",
+              fontWeight: 800,
+              fontSize: "2.05cqw",
+              letterSpacing: "0.04em",
+              color: lang === code ? "#1a1208" : "#f4efe6",
+              bgcolor: lang === code ? "#f0b03a" : "transparent",
+            }}
+          >
+            {code.toUpperCase()}
+          </Box>
+        ))}
       </Box>
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 1.1 }}>
+      <Box sx={{
+        position: "absolute",
+        left: "14%",
+        width: "72%",
+        top: "30%",
+        height: "50%",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "space-between",
+        gap: "1.6cqw",
+        bgcolor: "#0c0b09",
+      }}>
         <Box component="input" aria-label={t.name} placeholder={t.name} value={displayName} onChange={(event) => onDisplayName(event.target.value)} sx={field} />
         <Box component="input" aria-label={t.email} placeholder={t.email} type="email" required value={username} autoComplete="username" onChange={(event) => onUsername(event.target.value)} sx={field} />
         <Box component="input" aria-label={t.password} placeholder={t.password} type="password" required minLength={6} value={password} autoComplete="new-password" onChange={(event) => onPassword(event.target.value)} sx={field} />
         <Box component="input" aria-label={t.confirm} placeholder={t.confirm} type="password" required minLength={6} value={confirm} autoComplete="new-password" onChange={(event) => onConfirm(event.target.value)} sx={field} />
-        {error ? <Box sx={{ color: "#ffb4b4", fontSize: 13, textAlign: "center" }}>{error}</Box> : null}
+        {error ? <Box sx={{ color: "#ffb4b4", fontSize: "2cqw", textAlign: "center", lineHeight: 1.25, flex: "0 0 auto" }}>{error}</Box> : null}
         <Box component="button" type="submit" disabled={busy} sx={{
-          height: 48,
+          flex: "1.05 1 0",
+          minHeight: 0,
           border: "none",
-          borderRadius: "12px",
+          borderRadius: "999px",
           cursor: busy ? "progress" : "pointer",
           color: "#1a1208",
           font: "inherit",
           fontWeight: 750,
-          fontSize: 16,
-          background: "linear-gradient(180deg, #f8e7b0, #f3c56a 40%, #e39a32)",
+          fontSize: "2.7cqw",
+          background: "linear-gradient(180deg, #f8e7b0 0%, #f6d98a 42%, #e7a84a 100%)",
         }}>{busy ? "…" : `${t.create} →`}</Box>
-        <Box sx={{ textAlign: "center", color: "#d9d3cb", fontSize: 13 }}>
-          {t.haveAccount}{" "}
-          <Box component="button" type="button" onClick={onSignIn} sx={{ p: 0, border: "none", bgcolor: "transparent", color: "#e4b15a", font: "inherit", fontWeight: 700, cursor: "pointer" }}>
-            {t.switchSign}
-          </Box>
+      </Box>
+      <Box sx={{
+        position: "absolute",
+        left: "14%",
+        width: "72%",
+        top: "79.4%",
+        height: "10.2%",
+        bgcolor: "#0c0b09",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "#d9d3cb",
+        fontSize: "2.15cqw",
+      }}>
+        {t.haveAccount}{" "}
+        <Box component="button" type="button" onClick={onSignIn} sx={{ p: 0, ml: "0.4cqw", border: "none", bgcolor: "transparent", color: "#e4b15a", font: "inherit", fontWeight: 700, cursor: "pointer" }}>
+          {t.switchSign}
         </Box>
       </Box>
     </Box>
@@ -617,6 +783,7 @@ export function ForgeLoginPicture({
   onConfirm,
   onDisplayName,
   onSubmit,
+  onGoogleCredential,
 }: ForgeLoginPictureProps) {
   const mobile = useMediaQuery("(max-width:900px)", { noSsr: true });
   const [lang, setLang] = useState<Lang>("en");
@@ -677,6 +844,7 @@ export function ForgeLoginPicture({
 
   const card = signup ? (
     <SignupCard
+      lang={lang}
       t={t}
       displayName={displayName}
       username={username}
@@ -684,6 +852,7 @@ export function ForgeLoginPicture({
       confirm={confirm}
       busy={busy}
       error={message}
+      onLanguage={chooseLanguage}
       onDisplayName={onDisplayName}
       onUsername={onUsername}
       onPassword={onPassword}
@@ -707,6 +876,7 @@ export function ForgeLoginPicture({
       onRemember={setRemember}
       onForgot={() => setNotice(t.forgotNote)}
       onGoogle={() => setNotice(t.googleNote)}
+      onGoogleCredential={onGoogleCredential}
     />
   );
 
@@ -760,7 +930,7 @@ export function ForgeLoginPicture({
             alignItems: "flex-start",
             px: signup ? 2 : 0,
           }}>
-            <Box sx={{ width: signup ? "min(100%, 460px)" : "116%", maxWidth: signup ? 460 : "none" }}>
+            <Box sx={{ width: "116%" }}>
               {card}
             </Box>
           </Box>
@@ -794,6 +964,24 @@ export function ForgeLoginPicture({
       color: "#f4f0ea",
       fontFamily: '"Segoe UI", Tahoma, "Helvetica Neue", Arial, sans-serif',
     }}>
+      <Box
+        component="a"
+        href={homeHref()}
+        aria-label="Forge"
+        sx={{
+          position: "absolute",
+          zIndex: 2,
+          top: 18,
+          left: 22,
+          display: "flex",
+          alignItems: "center",
+          lineHeight: 0,
+          opacity: 0.95,
+          "&:hover": { opacity: 1 },
+        }}
+      >
+        <Box component="img" src={brandSrc("forge-f.png")} alt="" sx={{ height: 46, width: "auto" }} />
+      </Box>
       <Box component="img" src={brandSrc("forge-background-hi.webp")} alt="" sx={{
         position: "absolute",
         inset: 0,
@@ -834,28 +1022,7 @@ export function ForgeLoginPicture({
             ) : null}
           </Box>
         </Box>
-        <Box dir="ltr" sx={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-around",
-          gap: 2,
-          px: 3,
-          py: 1.1,
-          borderTop: "1px solid rgba(224,176,90,0.28)",
-          bgcolor: "rgba(0,0,0,0.28)",
-        }}>
-          {QUOTES.slice(0, 4).map((quote, index) => (
-            <Box key={quote.id} sx={{ display: "flex", alignItems: "center", gap: 0.8 }}>
-              {index ? <Box sx={{ width: "1px", height: 16, bgcolor: "rgba(232,196,130,0.35)", mr: 1.5 }} /> : null}
-              <QuoteMark id={quote.id} />
-              <Box sx={{ display: "flex", alignItems: "baseline", gap: 0.8, fontSize: 13 }}>
-                <Box component="span" sx={{ fontWeight: 750 }}>{quote.id}</Box>
-                <span>{quote.price}</span>
-                <Box component="span" sx={{ color: "#3ddc84" }}>▲ {quote.change}</Box>
-              </Box>
-            </Box>
-          ))}
-        </Box>
+        <DesktopTape quotes={QUOTES} />
       </Box>
     </Box>
   );

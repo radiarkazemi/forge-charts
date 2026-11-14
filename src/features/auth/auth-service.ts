@@ -338,6 +338,66 @@ export class AuthService {
     return this.startSession(user);
   }
 
+  /**
+   * Sign in with a Google profile that was already verified against Google.
+   * New emails become accounts and still go through the safety page.
+   * The Google subject is the sync secret (stable on every device, never a password).
+   */
+  signInWithGoogle(profile: {
+    email: string;
+    name: string;
+    sub: string;
+  }):
+    | { readonly kind: "session"; readonly session: AuthSession; readonly syncSecret: string }
+    | { readonly kind: "pending"; readonly pending: PendingSignup; readonly syncSecret: string } {
+    assertCryptoAvailable();
+    const username = normalizeUsername(profile.email);
+    const sub = profile.sub.trim();
+    if (!isEmail(username) || sub.length < 4) {
+      throw new Error("Google could not confirm this sign-in.");
+    }
+    const marker = `google$${sub}`;
+    const users = this.users();
+    const existing = users.find((u) => u.username === username);
+    if (existing) {
+      if (!existing.passwordHash.startsWith("google$")) {
+        throw new Error("This email already has a password. Sign in with email and password.");
+      }
+      if (existing.passwordHash !== marker) {
+        throw new Error("This email is linked to a different Google account.");
+      }
+      this.storage.remove(SESSION_KEY);
+      return { kind: "session", session: this.startSession(existing), syncSecret: sub };
+    }
+    const displayName = (profile.name.trim() || username.split("@")[0] || username).slice(0, 48);
+    const record: AuthUserRecord = {
+      id: newId(),
+      username,
+      displayName,
+      createdAt: Date.now(),
+      passwordHash: marker,
+      safetyComplete: false,
+    };
+    this.writeUsers([...users, record]);
+    const saved = this.users().find((u) => u.id === record.id);
+    if (!saved) {
+      throw new Error(
+        "Could not save your account. Disable private mode / allow site storage, then try again.",
+      );
+    }
+    this.storage.remove(SESSION_KEY);
+    return {
+      kind: "pending",
+      pending: {
+        userId: saved.id,
+        username: saved.username,
+        displayName: saved.displayName,
+        password: sub,
+      },
+      syncSecret: sub,
+    };
+  }
+
   logout(): void {
     sessionSignedOut(true);
     this.storage.set(SIGNED_OUT_KEY, Date.now());
