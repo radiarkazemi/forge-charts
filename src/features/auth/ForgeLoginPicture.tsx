@@ -484,7 +484,7 @@ function ArtCard({
     <Box dir="ltr" sx={{ position: "relative", width: "100%", containerType: "inline-size" }}>
       <Box
         component="img"
-        src={brandSrc("forge-mobile-v2-form.png")}
+        src={brandSrc(fa ? "forge-signin-fa.png?v=1" : "forge-mobile-v2-form.png")}
         alt=""
         sx={{ width: "100%", height: "auto", display: "block", pointerEvents: "none", userSelect: "none" }}
       />
@@ -616,6 +616,20 @@ function ArtCard({
       >
         {fa ? t.forgot : ""}
       </Box>
+      {busy ? (
+        <Box
+          aria-hidden
+          sx={{
+            position: "absolute",
+            left: "40%",
+            top: "71.2%",
+            width: "20%",
+            height: "5.6%",
+            pointerEvents: "none",
+            background: "linear-gradient(90deg, #f6ad4c 0%, #fcc868 36%, #fdd981 70%, #fcd278 100%)",
+          }}
+        />
+      ) : null}
       <Box
         component="button"
         type="submit"
@@ -623,17 +637,14 @@ function ArtCard({
         disabled={busy}
         sx={{
           ...hitStyle({ left: "16.2%", top: "68.8%", width: "67.5%", height: "10.2%" }),
+          zIndex: 2,
           cursor: busy ? "progress" : "pointer",
-          color: "#1a1208",
-          fontWeight: 750,
-          fontSize: "3.1cqw",
-          ...(fa || busy ? {
-            background: "linear-gradient(180deg, #f8e7b0 0%, #f6d98a 42%, #e7a84a 100%)",
-            borderRadius: "999px",
-          } : null),
+          color: "#12100e",
+          fontWeight: 700,
+          fontSize: "3.4cqw",
         }}
       >
-        {fa || busy ? `${busy ? "…" : t.signIn} →` : ""}
+        {busy ? "…" : ""}
       </Box>
       <GoogleHit label="Continue with Google" onUnavailable={onGoogle} onCredential={onGoogleCredential} />
     </Box>
