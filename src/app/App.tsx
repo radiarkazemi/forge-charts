@@ -106,6 +106,8 @@ export function App() {
   const [view, setView] = useState<string | null>(() => pageView());
   const servicesRef = useRef<Services | null>(null);
   const [services, setServices] = useState<Services | null>(() => {
+    // The site root sends people to ?view=login. Keep that page on the form.
+    if (pageView() === "login") return null;
     const existing = resumeSession(auth);
     if (!existing || auth.needsSafety(existing.userId)) return null;
     const built = buildSessionServices(existing);
@@ -250,7 +252,7 @@ export function App() {
     );
   }
 
-  if (!session || !services || (devSite && view === "login")) {
+  if (!session || !services || view === "login") {
     return (
       <ThemeProvider theme={gateTheme}>
         <CssBaseline />
