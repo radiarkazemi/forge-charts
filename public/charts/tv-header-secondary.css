@@ -43,3 +43,30 @@
   border: none !important;
   pointer-events: none !important;
 }
+
+[data-name="legend"] [data-name="legend-source-item"] [data-name="actions"] {
+  display: flex !important;
+  width: auto !important;
+  max-width: 132px !important;
+  overflow: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+[data-name="legend"] [data-name="legend-source-item"] button[data-name="legend-show-hide-action"],
+[data-name="legend"] [data-name="legend-source-item"] button[data-name="legend-settings-action"],
+[data-name="legend"] [data-name="legend-source-item"] button[data-name="legend-delete-action"],
+[data-name="legend"] [data-name="legend-source-item"] button[data-name="legend-more-action"] {
+  display: inline-flex !important;
+  width: 28px !important;
+  height: 28px !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+.theme-dark [data-name="legend-source-item"] button[data-name="legend-show-hide-action"],
+.theme-dark [data-name="legend-source-item"] button[data-name="legend-settings-action"],
+.theme-dark [data-name="legend-source-item"] button[data-name="legend-delete-action"],
+.theme-dark [data-name="legend-source-item"] button[data-name="legend-more-action"] {
+  color: #d1d4dc !important;
+}

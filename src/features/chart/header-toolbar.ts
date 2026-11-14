@@ -376,8 +376,12 @@ export function mountHeaderToolbar(
     const Ctor = view?.Element;
     const target = e.target;
     if (!Ctor || !(target instanceof Ctor)) return;
-    const hit = target.closest("#header-toolbar-symbol-search, [data-name='legend-source-title']");
-    if (!hit) return;
+    // Only the symbol name opens search. A study title must keep its own
+    // Hide / Settings / Remove buttons.
+    const search = target.closest("#header-toolbar-symbol-search");
+    const title = target.closest("[data-name='legend-source-title']");
+    const seriesTitle = title?.closest("[data-name='legend-series-item']");
+    if (!search && !seriesTitle) return;
     e.preventDefault();
     e.stopPropagation();
     if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
