@@ -797,7 +797,7 @@ export function ForgeLoginPicture({
           display: "flex",
           flexDirection: "column",
         }}>
-          <Box sx={{ flex: "0 0 22%" }} />
+          <Box sx={{ flex: "0 0 30%" }} />
           <Box sx={{ containerType: "inline-size", px: 1, flex: "0 0 auto" }}>
             <Tagline text={t} compact />
           </Box>
