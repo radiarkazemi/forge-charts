@@ -90,7 +90,7 @@ export const DEFAULT_LAYOUT_SYNC: LayoutSyncSettings = {
   symbol: true,
   // Independent intervals (15m next to 4H).
   interval: false,
-  // Do not recenter other panes on mouse move (looks like zoom/scale fighting).
+  // Crosshair follows other panes with the same symbol only when the user turns it on.
   crosshair: false,
   // Pan/scroll independent unless the user turns Scroll/move ON.
   time: false,
@@ -337,14 +337,14 @@ export class SettingsService {
     // Fill missing secondary panes with the primary symbol (don't invent AAPL/etc.).
     while (panes.length < 4) panes.push(panes[0] ?? primary);
     if (!panes[0]) panes[0] = primary;
-    // Multi-pane: keep drawings + symbol linked; interval stays per-pane (select chart, then TF).
+    // Multi-pane: keep the Symbol and Crosshair switches the user set.
+    // Interval stays per-pane unless they turn that switch on.
     const layoutSync =
       next === "s"
         ? this.settings.get().layoutSync
         : sanitizeLayoutSync({
             ...this.settings.get().layoutSync,
             drawings: true,
-            symbol: true,
             interval: false,
           });
     this.patch({ chartLayout: next, paneSymbols: panes, layoutSync });

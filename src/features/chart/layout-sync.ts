@@ -116,12 +116,12 @@ class LayoutSyncBus {
    * Sessions overlays paint and briefly flip selectedLineTool to cursor.
    */
   private armedTool: string | null = null;
-  /** Temporary vertical-line ids used to mirror crosshair (CL has no setCrossHair). */
-  private readonly crosshairMarkers = new Map<number, EntityId>();
+  /** One linked cross per pane (CL has no setCrossHair across widgets). */
+  private readonly crosshairMarkers = new Map<number, { vert: EntityId; horz: EntityId | null }>();
   private crosshairRaf = 0;
   /** Serializes marker creates so a fast mouse cannot stack a column of lines. */
   private crosshairChain: Promise<void> = Promise.resolve();
-  private pendingCrosshair: { sourceIndex: number; time: number } | null = null;
+  private pendingCrosshair: { sourceIndex: number; time: number; price: number } | null = null;
   /** Suppress visible-range echo while we apply a peer’s range. */
   private applyingVisibleRange = false;
 
@@ -840,7 +840,13 @@ class LayoutSyncBus {
   }
 
   notifySymbol(sourceIndex: number, ticker: string): void {
+    const previous = this.normalizeSymbol(this.paneSymbols.get(sourceIndex) ?? "");
     this.paneSymbols.set(sourceIndex, ticker);
+    // A symbol change can leave a cross on a pane that no longer matches.
+    if (!this.locked && this.flags.crosshair && previous !== this.normalizeSymbol(ticker)) {
+      this.clearCrosshairMarkers();
+    }
+    // Symbol OFF: each pane keeps the ticker it was given.
     if (!this.flags.symbol || this.locked) return;
     this.withLock(() => {
       for (const { index, controller } of this.panes.values()) {
@@ -886,25 +892,44 @@ class LayoutSyncBus {
     }
   }
 
-  notifyCrosshair(sourceIndex: number, time: number): void {
+  notifyCrosshair(sourceIndex: number, time: number, price = Number.NaN): void {
     if (!this.flags.crosshair || this.locked) return;
     if (!Number.isFinite(time) || time <= 0) return;
-    this.pendingCrosshair = { sourceIndex, time };
+    this.pendingCrosshair = { sourceIndex, time, price };
     if (this.crosshairRaf) return;
     this.crosshairRaf = window.requestAnimationFrame(() => {
       this.crosshairRaf = 0;
       const pending = this.pendingCrosshair;
       this.pendingCrosshair = null;
       if (!pending || !this.flags.crosshair) return;
-      void this.applyCrosshairMarkers(pending.sourceIndex, pending.time);
+      void this.applyCrosshairMarkers(pending.sourceIndex, pending.time, pending.price);
     });
   }
 
   private clearCrosshairMarkers(): void {
-    for (const [paneIndex, entityId] of this.crosshairMarkers) {
-      this.panes.get(paneIndex)?.controller.removeEntity(entityId);
+    for (const [paneIndex, marker] of this.crosshairMarkers) {
+      const controller = this.panes.get(paneIndex)?.controller;
+      controller?.removeEntity(marker.vert);
+      controller?.forgetIgnoredDrawing(marker.vert);
+      if (marker.horz) {
+        controller?.removeEntity(marker.horz);
+        controller?.forgetIgnoredDrawing(marker.horz);
+      }
     }
     this.crosshairMarkers.clear();
+  }
+
+  private dropCrosshairMarker(paneIndex: number): void {
+    const marker = this.crosshairMarkers.get(paneIndex);
+    if (!marker) return;
+    const controller = this.panes.get(paneIndex)?.controller;
+    controller?.removeEntity(marker.vert);
+    controller?.forgetIgnoredDrawing(marker.vert);
+    if (marker.horz) {
+      controller?.removeEntity(marker.horz);
+      controller?.forgetIgnoredDrawing(marker.horz);
+    }
+    this.crosshairMarkers.delete(paneIndex);
   }
 
   /**
@@ -913,17 +938,60 @@ class LayoutSyncBus {
    * Creates are serialized: overlapping mouse moves used to leave a column of lines
    * and each create forced the toolbar back to Cross.
    */
-  private applyCrosshairMarkers(sourceIndex: number, time: number): Promise<void> {
-    const run = this.crosshairChain.then(() => this.paintCrosshairMarkers(sourceIndex, time));
+  private applyCrosshairMarkers(sourceIndex: number, time: number, price: number): Promise<void> {
+    const run = this.crosshairChain.then(() => this.paintCrosshairMarkers(sourceIndex, time, price));
     this.crosshairChain = run.catch(() => undefined);
     return run;
   }
 
-  private async paintCrosshairMarkers(_sourceIndex: number, _time: number): Promise<void> {
-    // A locked vertical line was the multipane crosshair. Each mouse move left
-    // another full-height line, and the line followed the unscaled chart.
-    // The pane under the pointer keeps the library crosshair.
-    this.clearCrosshairMarkers();
+  /**
+   * Crosshair sync ON: move one cross on every other pane that shows the same
+   * symbol. Panes with a different symbol keep their own cross.
+   */
+  private async paintCrosshairMarkers(sourceIndex: number, time: number, price: number): Promise<void> {
+    if (!this.flags.crosshair) {
+      this.clearCrosshairMarkers();
+      return;
+    }
+    const sourceSymbol = this.normalizeSymbol(this.symbolOf(sourceIndex));
+    const keep = new Set<number>();
+    for (const { index, controller } of this.panes.values()) {
+      if (index === sourceIndex || index >= this.activeCount || !controller.isReady) continue;
+      const same = sourceSymbol !== "" && this.normalizeSymbol(this.symbolOf(index)) === sourceSymbol;
+      if (!same) {
+        this.dropCrosshairMarker(index);
+        continue;
+      }
+      keep.add(index);
+      const existing = this.crosshairMarkers.get(index);
+      if (existing && controller.moveCrosshairMarker(existing.vert, existing.horz, time, price)) continue;
+      if (existing) this.dropCrosshairMarker(index);
+      const created = await controller.createCrosshairMarker(time, price);
+      if (!this.flags.crosshair) {
+        if (created) {
+          controller.removeEntity(created.vert);
+          controller.forgetIgnoredDrawing(created.vert);
+          if (created.horz) {
+            controller.removeEntity(created.horz);
+            controller.forgetIgnoredDrawing(created.horz);
+          }
+        }
+        this.clearCrosshairMarkers();
+        return;
+      }
+      if (created) this.crosshairMarkers.set(index, created);
+    }
+    for (const index of [...this.crosshairMarkers.keys()]) {
+      if (!keep.has(index)) this.dropCrosshairMarker(index);
+    }
+  }
+
+  private symbolOf(paneIndex: number): string {
+    return (
+      this.paneSymbols.get(paneIndex) ||
+      this.panes.get(paneIndex)?.controller.state.get().symbol ||
+      ""
+    );
   }
 
   private clonePrimarySymbolToNewPanes(fromIndex: number): void {
@@ -1018,11 +1086,12 @@ class LayoutSyncBus {
     eventType: string,
   ): Promise<void> {
     const idKey = String(entityId);
+    const pane = this.panes.get(paneIndex);
+    if (pane?.controller.isIgnoredDrawing(entityId)) return;
     // Do NOT gate on applyingTool — exitDrawingTool / multipane apply often
     // sets it true during create, which previously skipped the Cross reset and
     // left the toolbar stuck on rectangle/trend. Skip mirrors / in-flight sync copies.
     // Path / Text / Note and Forge overlay paints must never oneshot-reset.
-    const pane = this.panes.get(paneIndex);
     const activeTool =
       pane?.controller.selectedLineTool() ?? this.sharedTool ?? this.armedTool;
     const guardChart = pane?.controller.getWidget()?.activeChart() ?? null;
