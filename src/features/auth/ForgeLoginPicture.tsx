@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import Box from "@mui/material/Box";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import { isDevSite } from "@/dev-site";
@@ -287,46 +287,6 @@ function MovingTape({ quotes }: { readonly quotes: readonly (typeof QUOTES)[numb
           </Box>
         ))}
       </Box>
-    </Box>
-  );
-}
-
-function Ticker({ quotes, stacked }: { readonly quotes: readonly (typeof QUOTES)[number][]; readonly stacked: boolean }) {
-  return (
-    <Box dir="ltr" sx={{
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-around",
-      gap: 1,
-      px: stacked ? 1 : 3,
-      py: stacked ? 0.6 : 1,
-      color: "#f4f0ea",
-      fontSize: stacked ? 11 : 13,
-    }}>
-      {quotes.map((quote, index) => (
-        <Box key={quote.id} sx={{ display: "flex", alignItems: "center", gap: 0.75, minWidth: 0, flex: stacked ? 1 : "0 1 auto" }}>
-          {index && !stacked ? <Box sx={{ width: "1px", height: 16, bgcolor: "rgba(232,196,130,0.35)", mr: 1.5 }} /> : null}
-          {index && stacked ? <Box sx={{ width: "1px", alignSelf: "stretch", bgcolor: "rgba(232,196,130,0.28)", mr: 0.5 }} /> : null}
-          <QuoteMark id={quote.id} />
-          <Box sx={{ minWidth: 0, lineHeight: 1.25 }}>
-            {stacked ? (
-              <>
-                <Box sx={{ fontWeight: 750, letterSpacing: "0.04em" }}>{quote.id}</Box>
-                <Box sx={{ display: "flex", gap: 0.4, fontSize: 10, whiteSpace: "nowrap" }}>
-                  <span>{quote.price}</span>
-                  <Box component="span" sx={{ color: "#3ddc84", unicodeBidi: "isolate" }}>▲{quote.change}</Box>
-                </Box>
-              </>
-            ) : (
-              <Box sx={{ display: "flex", alignItems: "baseline", gap: 0.8 }}>
-                <Box component="span" sx={{ fontWeight: 750 }}>{quote.id}</Box>
-                <span>{quote.price}</span>
-                <Box component="span" sx={{ color: "#3ddc84" }}>▲ {quote.change}</Box>
-              </Box>
-            )}
-          </Box>
-        </Box>
-      ))}
     </Box>
   );
 }
@@ -701,10 +661,7 @@ export function ForgeLoginPicture({
     onSubmit(event);
   };
 
-  const quotes = QUOTES.slice(0, 4);
-
   useEffect(() => {
-    if (!mobile) return;
     const html = document.documentElement;
     const body = document.body;
     const prevHtml = html.style.overflow;
@@ -715,7 +672,7 @@ export function ForgeLoginPicture({
       html.style.overflow = prevHtml;
       body.style.overflow = prevBody;
     };
-  }, [mobile]);
+  }, []);
   const footer = [t.about, t.terms, t.privacy, t.help];
 
   const card = signup ? (
@@ -753,15 +710,6 @@ export function ForgeLoginPicture({
     />
   );
 
-  const shell = (scene: ReactNode, column: ReactNode) => (
-    <Box dir={lang === "fa" ? "rtl" : "ltr"} sx={{ height: "100dvh", overflow: "hidden", position: "relative", bgcolor: "#050403", color: "#f4f0ea", fontFamily: '"Segoe UI", Tahoma, "Helvetica Neue", Arial, sans-serif' }}>
-      {scene}
-      <Box sx={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", WebkitOverflowScrolling: "touch", display: "flex", flexDirection: "column" }}>
-        {column}
-      </Box>
-    </Box>
-  );
-
   if (mobile) {
     return (
       <Box dir={lang === "fa" ? "rtl" : "ltr"} sx={{
@@ -797,7 +745,7 @@ export function ForgeLoginPicture({
           display: "flex",
           flexDirection: "column",
         }}>
-          <Box sx={{ flex: "0 0 30%" }} />
+          <Box sx={{ flex: "0 0 36%" }} />
           <Box sx={{ containerType: "inline-size", px: 1, flex: "0 0 auto" }}>
             <Tagline text={t} compact />
           </Box>
@@ -835,42 +783,59 @@ export function ForgeLoginPicture({
     );
   }
 
-  return shell(
-    <Box component="img" src={brandSrc("forge-background-hi.webp")} alt="" sx={{
+  return (
+    <Box dir={lang === "fa" ? "rtl" : "ltr"} sx={{
       position: "fixed",
       inset: 0,
+      height: "100dvh",
       width: "100%",
-      height: "100%",
-      objectFit: "cover",
-      objectPosition: "left center",
-      pointerEvents: "none",
-      userSelect: "none",
-    }} />,
-    <Box component="form" onSubmit={submit} sx={{ flex: 1, display: "flex", flexDirection: "column", minHeight: "100%" }}>
-      <Box sx={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "flex-end", pr: "6vw", pb: "64px" }}>
-        <Box sx={{ width: "min(640px, 42vw)" }}>
-          <Box sx={{ mb: 1 }}>
-            <Tagline text={t} />
-          </Box>
-          {card}
-          {message && !signup ? (
-            <Box sx={{ color: "#ffb4b4", fontSize: 13, textAlign: "center", mt: 1 }}>{message}</Box>
-          ) : null}
-          <Box sx={{ mt: 1.75 }}>
-            <FooterLinks labels={footer} />
-          </Box>
-          {!signup ? (
-            <Box sx={{ textAlign: "center", mt: 0.75 }}>
-              <Box component="button" type="button" onClick={() => { setNotice(null); onMode("signup"); }} sx={{ border: "none", bgcolor: "transparent", color: "#e4b15a", font: "inherit", fontSize: 13, cursor: "pointer" }}>
-                {t.newHere} {t.create}
-              </Box>
+      overflow: "hidden",
+      bgcolor: "#050403",
+      color: "#f4f0ea",
+      fontFamily: '"Segoe UI", Tahoma, "Helvetica Neue", Arial, sans-serif',
+    }}>
+      <Box component="img" src={brandSrc("forge-background-hi.webp")} alt="" sx={{
+        position: "absolute",
+        inset: 0,
+        width: "100%",
+        height: "100%",
+        objectFit: "cover",
+        objectPosition: "left center",
+        pointerEvents: "none",
+        userSelect: "none",
+      }} />
+      <Box component="form" onSubmit={submit} sx={{
+        position: "relative",
+        zIndex: 1,
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        minWidth: 0,
+        overflow: "hidden",
+      }}>
+        <Box sx={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "flex-end", pr: "6vw", pl: 2 }}>
+          <Box sx={{ width: "min(680px, 46vw)", mt: "4vh" }}>
+            <Box sx={{ mb: 1.25 }}>
+              <Tagline text={t} />
             </Box>
-          ) : null}
+            {card}
+            {message && !signup ? (
+              <Box sx={{ color: "#ffb4b4", fontSize: 13, textAlign: "center", mt: 1 }}>{message}</Box>
+            ) : null}
+            <Box sx={{ mt: 1.75 }}>
+              <FooterLinks labels={footer} />
+            </Box>
+            {!signup ? (
+              <Box sx={{ textAlign: "center", mt: 0.75 }}>
+                <Box component="button" type="button" onClick={() => { setNotice(null); onMode("signup"); }} sx={{ border: "none", bgcolor: "transparent", color: "#e4b15a", font: "inherit", fontSize: 13, cursor: "pointer" }}>
+                  {t.newHere} {t.create}
+                </Box>
+              </Box>
+            ) : null}
+          </Box>
         </Box>
+        <MovingTape quotes={QUOTES} />
       </Box>
-      <Box sx={{ borderTop: "1px solid rgba(224,176,90,0.28)", bgcolor: "rgba(0,0,0,0.28)" }}>
-        <Ticker quotes={quotes} stacked={false} />
-      </Box>
-    </Box>,
+    </Box>
   );
 }
