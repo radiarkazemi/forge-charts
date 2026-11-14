@@ -3,6 +3,7 @@ import Box from "@mui/material/Box";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import { isDevSite } from "@/dev-site";
 import { googleClientId, mountGoogleButton } from "./google-sign-in";
+import { fetchTapeQuotes, placeholderTape, type TapeQuote } from "./login-quotes";
 
 function brandSrc(file: string): string {
   const base = import.meta.env.BASE_URL || "/";
@@ -85,16 +86,6 @@ const COPY = {
   },
 } as const;
 
-const QUOTES = [
-  { id: "BTC", price: "$67,843.25", change: "+2.48%" },
-  { id: "XAU", price: "$2,346.80", change: "+1.72%" },
-  { id: "ETH", price: "$3,487.21", change: "+3.12%" },
-  { id: "WTI", price: "$78.32", change: "+1.27%" },
-  { id: "SOL", price: "$178.42", change: "+4.21%" },
-  { id: "XAG", price: "$28.64", change: "+1.09%" },
-  { id: "EUR", price: "$1.0864", change: "+0.18%" },
-  { id: "SPX", price: "$5,248.49", change: "+0.64%" },
-] as const;
 
 function readLanguage(): Lang {
   try {
@@ -257,7 +248,7 @@ function FooterLinks({ labels, compact }: { readonly labels: readonly string[]; 
   );
 }
 
-function DesktopTape({ quotes }: { readonly quotes: readonly (typeof QUOTES)[number][] }) {
+function DesktopTape({ quotes }: { readonly quotes: readonly TapeQuote[] }) {
   const loop = [...quotes, ...quotes];
   return (
     <Box dir="ltr" sx={{
@@ -285,7 +276,9 @@ function DesktopTape({ quotes }: { readonly quotes: readonly (typeof QUOTES)[num
             <Box sx={{ display: "flex", alignItems: "baseline", gap: 0.8, fontSize: 13, whiteSpace: "nowrap" }}>
               <Box component="span" sx={{ fontWeight: 750 }}>{quote.id}</Box>
               <span>{quote.price}</span>
-              <Box component="span" dir="ltr" sx={{ color: "#3ddc84", unicodeBidi: "isolate" }}>▲ {quote.change}</Box>
+              <Box component="span" dir="ltr" sx={{ color: quote.up ? "#3ddc84" : "#ff6b7a", unicodeBidi: "isolate" }}>
+                {quote.change === "—" ? "—" : `${quote.up ? "▲" : "▼"} ${quote.change}`}
+              </Box>
             </Box>
             <Box sx={{ width: "1px", height: 16, bgcolor: "rgba(232,196,130,0.35)", ml: 1.5 }} />
           </Box>
@@ -295,7 +288,7 @@ function DesktopTape({ quotes }: { readonly quotes: readonly (typeof QUOTES)[num
   );
 }
 
-function MovingTape({ quotes }: { readonly quotes: readonly (typeof QUOTES)[number][] }) {
+function MovingTape({ quotes }: { readonly quotes: readonly TapeQuote[] }) {
   const loop = [...quotes, ...quotes];
   return (
     <Box dir="ltr" sx={{
@@ -324,7 +317,9 @@ function MovingTape({ quotes }: { readonly quotes: readonly (typeof QUOTES)[numb
               <Box sx={{ fontSize: 11, fontWeight: 750, letterSpacing: "0.03em" }}>{quote.id}</Box>
               <Box sx={{ display: "flex", gap: 0.45, fontSize: 10, whiteSpace: "nowrap" }}>
                 <span>{quote.price}</span>
-                <Box component="span" dir="ltr" sx={{ color: "#3ddc84", unicodeBidi: "isolate" }}>▲{quote.change}</Box>
+                <Box component="span" dir="ltr" sx={{ color: quote.up ? "#3ddc84" : "#ff6b7a", unicodeBidi: "isolate" }}>
+                  {quote.change === "—" ? "—" : `${quote.up ? "▲" : "▼"}${quote.change}`}
+                </Box>
               </Box>
             </Box>
             <Box sx={{ width: "1px", height: 22, bgcolor: "rgba(232,196,130,0.28)", ml: 0.4 }} />
@@ -752,6 +747,7 @@ export function ForgeLoginPicture({
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [quotes, setQuotes] = useState<TapeQuote[]>(placeholderTape);
   const dev = isDevSite();
   const t = COPY[lang];
   const signup = mode === "signup";
@@ -772,6 +768,24 @@ export function ForgeLoginPicture({
   useEffect(() => {
     document.documentElement.lang = lang === "fa" ? "fa" : "en";
   }, [lang]);
+
+  useEffect(() => {
+    let dead = false;
+    const pull = () => {
+      void fetchTapeQuotes().then((next) => {
+        if (dead) return;
+        setQuotes((prev) => prev.map((row) => next.find((item) => item.id === row.id && item.price !== "—") ?? row));
+      }).catch(() => {
+        /* keep the last real prices */
+      });
+    };
+    pull();
+    const timer = window.setInterval(pull, 20_000);
+    return () => {
+      dead = true;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   const chooseLanguage = (next: Lang) => {
     setLang(next);
@@ -909,7 +923,7 @@ export function ForgeLoginPicture({
           <Box sx={{ containerType: "inline-size", flex: "0 0 auto", py: 0.4 }}>
             <FooterLinks labels={footer} compact />
           </Box>
-          <MovingTape quotes={QUOTES} />
+          <MovingTape quotes={quotes} />
         </Box>
       </Box>
     );
@@ -984,7 +998,7 @@ export function ForgeLoginPicture({
             ) : null}
           </Box>
         </Box>
-        <DesktopTape quotes={QUOTES} />
+        <DesktopTape quotes={quotes} />
       </Box>
     </Box>
   );
