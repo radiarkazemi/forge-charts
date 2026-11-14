@@ -26,6 +26,7 @@ export function sessionDailyOpen(symbol: SymbolInfo, timeSec: number): number {
   const exchange = symbol.exchange.toUpperCase();
   if (
     session.startsWith("2200-2159") ||
+    session.startsWith("1800-1700") ||
     session.startsWith("1700-1700") ||
     session.startsWith("1700-1659")
   ) {
