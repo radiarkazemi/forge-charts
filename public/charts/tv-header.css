@@ -115,13 +115,11 @@ button#header-toolbar-symbol-search {
   max-width: none !important;
 }
 
-/* Study legend rows — truncate long titles; keep Hide, Settings, and Remove visible. */
+/* Study legend rows — truncate long titles; keep buttons in view */
 [data-name="legend"] [data-name="legend-source-item"],
 [data-name="legend"] [class*="sourcesWrapper"] > div {
-  max-width: 100% !important;
-  overflow: visible !important;
-  display: flex !important;
-  align-items: center !important;
+  max-width: min(360px, 48vw) !important;
+  overflow: hidden !important;
 }
 
 [data-name="legend"] [data-name="legend-source-item"] [class*="titlesWrapper"],
@@ -132,41 +130,13 @@ button#header-toolbar-symbol-search {
   white-space: nowrap !important;
 }
 
-[data-name="legend"] [data-name="legend-source-item"] [data-name="actions"],
-[data-name="legend"] [data-name="legend-source-item"] [class*="buttonsWrapper"],
-[data-name="legend"] [data-name="legend-source-item"] [class*="buttons"] {
-  display: flex !important;
-  flex: 0 0 auto !important;
-  width: auto !important;
-  max-width: 132px !important;
-  overflow: visible !important;
+[data-name="legend"] [data-name="legend-source-item"] [class*="buttons"],
+[data-name="legend"] [data-name="legend-source-item"] [class*="button"],
+[data-name="legend"] [data-name="legend-source-item"] [class*="controls"] {
+  flex-shrink: 0 !important;
   opacity: 1 !important;
   visibility: visible !important;
   pointer-events: auto !important;
-}
-
-[data-name="legend"] [data-name="legend-source-item"] button[data-name="legend-show-hide-action"],
-[data-name="legend"] [data-name="legend-source-item"] button[data-name="legend-settings-action"],
-[data-name="legend"] [data-name="legend-source-item"] button[data-name="legend-delete-action"],
-[data-name="legend"] [data-name="legend-source-item"] button[data-name="legend-more-action"] {
-  display: inline-flex !important;
-  flex: 0 0 28px !important;
-  width: 28px !important;
-  height: 28px !important;
-  opacity: 1 !important;
-  visibility: visible !important;
-  pointer-events: auto !important;
-}
-
-.chart-widget__top--themed-dark [data-name="legend-source-item"] button[data-name="legend-show-hide-action"],
-.chart-widget__top--themed-dark [data-name="legend-source-item"] button[data-name="legend-settings-action"],
-.chart-widget__top--themed-dark [data-name="legend-source-item"] button[data-name="legend-delete-action"],
-.chart-widget__top--themed-dark [data-name="legend-source-item"] button[data-name="legend-more-action"],
-.theme-dark [data-name="legend-source-item"] button[data-name="legend-show-hide-action"],
-.theme-dark [data-name="legend-source-item"] button[data-name="legend-settings-action"],
-.theme-dark [data-name="legend-source-item"] button[data-name="legend-delete-action"],
-.theme-dark [data-name="legend-source-item"] button[data-name="legend-more-action"] {
-  color: #d1d4dc !important;
 }
 
 /* Hide native TV Symbol Search when Forge picker is active */

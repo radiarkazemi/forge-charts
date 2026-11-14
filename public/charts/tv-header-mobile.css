@@ -54,59 +54,6 @@
   cursor: pointer !important;
 }
 
-/* Touch has no hover, so the study row never opened Hide / Settings / Remove. */
-[data-name="legend"] [data-name="legend-source-item"] {
-  max-width: 100% !important;
-  overflow: visible !important;
-  display: flex !important;
-  align-items: center !important;
-}
-
-[data-name="legend"] [data-name="legend-source-item"] [class*="titlesWrapper"],
-[data-name="legend"] [data-name="legend-source-item"] [class*="titleWrapper"] {
-  min-width: 0 !important;
-  flex: 1 1 auto !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
-}
-
-[data-name="legend"] [data-name="legend-source-item"] [data-name="actions"],
-[data-name="legend"] [data-name="legend-source-item"] [class*="buttonsWrapper"] {
-  display: flex !important;
-  flex: 0 0 auto !important;
-  width: auto !important;
-  max-width: 132px !important;
-  overflow: visible !important;
-  opacity: 1 !important;
-  visibility: visible !important;
-  pointer-events: auto !important;
-}
-
-[data-name="legend"] [data-name="legend-source-item"] button[data-name="legend-show-hide-action"],
-[data-name="legend"] [data-name="legend-source-item"] button[data-name="legend-settings-action"],
-[data-name="legend"] [data-name="legend-source-item"] button[data-name="legend-delete-action"],
-[data-name="legend"] [data-name="legend-source-item"] button[data-name="legend-more-action"] {
-  display: inline-flex !important;
-  flex: 0 0 28px !important;
-  width: 28px !important;
-  height: 28px !important;
-  opacity: 1 !important;
-  visibility: visible !important;
-  pointer-events: auto !important;
-}
-
-.chart-widget__top--themed-dark [data-name="legend-source-item"] button[data-name="legend-show-hide-action"],
-.chart-widget__top--themed-dark [data-name="legend-source-item"] button[data-name="legend-settings-action"],
-.chart-widget__top--themed-dark [data-name="legend-source-item"] button[data-name="legend-delete-action"],
-.chart-widget__top--themed-dark [data-name="legend-source-item"] button[data-name="legend-more-action"],
-.theme-dark [data-name="legend-source-item"] button[data-name="legend-show-hide-action"],
-.theme-dark [data-name="legend-source-item"] button[data-name="legend-settings-action"],
-.theme-dark [data-name="legend-source-item"] button[data-name="legend-delete-action"],
-.theme-dark [data-name="legend-source-item"] button[data-name="legend-more-action"] {
-  color: #d1d4dc !important;
-}
-
 html,
 body,
 .chart-page {
