@@ -30,9 +30,12 @@
 }
 
 .layout__area--left,
+.tv-floating-toolbar:has([data-name^="FavoriteToolbar"]),
 [data-name="favorite-drawings-toolbar"],
+[data-name^="FavoriteToolbar"],
 [class*="FavoriteDrawingToolbar"],
 [class*="favoriteDrawingToolbar"],
+[class*="favorited-drawings"],
 [class*="favorite-drawings"],
 [class*="favored-tools"] {
   display: none !important;

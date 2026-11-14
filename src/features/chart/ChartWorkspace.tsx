@@ -19,7 +19,7 @@ import {
   type MenuHoleRect,
   type PaneSplitEdges,
 } from "./chart-layout-geometry";
-import { getChartLayoutGrid, MAX_CHART_PANES } from "./chart-layouts";
+import { getChartLayoutGrid, MAX_CHART_PANES, phoneChartLayout } from "./chart-layouts";
 import { layoutSyncBus } from "./layout-sync";
 import { TradingViewChart } from "./TradingViewChart";
 import { mountTvLayersHeader, syncHeaderChromeRetry } from "./tv-layers-header";
@@ -62,8 +62,8 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   const isMobile = useMediaQuery(theme.breakpoints.down("md"), { noSsr: true });
   const { settings, barReplay } = useServices();
   const storedLayout = useStore(settings.settings, (s) => s.chartLayout ?? "s");
-  // A phone shows one chart. The saved multi-pane layout stays for the desktop.
-  const chartLayout = isMobile ? "s" : storedLayout;
+  // Phone: one chart, or the stacked 2 / stacked 3. Side-by-side grids stay on the desktop.
+  const chartLayout = isMobile ? phoneChartLayout(storedLayout) : storedLayout;
   const paneSymbols = useStore(settings.settings, (s) => (Array.isArray(s.paneSymbols) ? s.paneSymbols : []));
   const lastSymbol = useStore(settings.settings, (s) => s.lastSymbol || "XAUUSD");
   const lastInterval = useStore(settings.settings, (s) => s.lastInterval || "15");

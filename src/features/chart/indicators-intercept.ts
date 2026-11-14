@@ -129,6 +129,10 @@ function rowHtml(entry: ForgeIndicatorEntry, q = ""): string {
   </button>`;
 }
 
+function isPhoneChart(doc: Document): boolean {
+  return Boolean(doc.defaultView?.matchMedia("(max-width: 900px)").matches);
+}
+
 function ensureStyles(doc: Document): void {
   if (doc.getElementById(STYLE_ID)) return;
   const style = doc.createElement("style");
@@ -136,18 +140,18 @@ function ensureStyles(doc: Document): void {
   style.textContent = `
 #${ROOT_ID} {
   position: fixed; inset: 0; z-index: 2147483646;
-  display: flex; align-items: stretch; justify-content: center;
+  display: flex; align-items: center; justify-content: center;
   font-family: -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif;
   background: rgba(0,0,0,0.45);
 }
 #${ROOT_ID} .fi-panel {
-  width: min(480px, 100vw); height: 100%; margin: 0 auto;
+  width: min(860px, 94vw); height: min(680px, 86vh);
   background: #fff; color: #131722;
-  border-radius: 0; border: 0;
-  box-shadow: none;
+  border-radius: 8px; border: 1px solid #e0e3eb;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.28);
   display: flex; flex-direction: column; overflow: hidden;
 }
-#${ROOT_ID}.fi-dark .fi-panel { background: #000; color: #f2f2f2; }
+#${ROOT_ID}.fi-dark .fi-panel { background: #1e222d; color: #d1d4dc; border-color: #2a2e39; }
 #${ROOT_ID} .fi-head {
   display: flex; align-items: center; gap: 8px;
   padding: 12px 16px; border-bottom: 1px solid #e0e3eb; flex-shrink: 0;
@@ -159,21 +163,27 @@ function ensureStyles(doc: Document): void {
   width: 32px; height: 32px; border-radius: 6px; font-size: 20px; line-height: 1;
 }
 #${ROOT_ID} .fi-close:hover { background: rgba(120,123,134,0.12); color: inherit; }
-#${ROOT_ID} .fi-body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-#${ROOT_ID} .fi-side { flex: 1; overflow-y: auto; padding: 8px 0 24px; background: transparent; }
+#${ROOT_ID} .fi-body { display: flex; flex: 1; min-height: 0; }
+#${ROOT_ID} .fi-side {
+  width: 220px; flex-shrink: 0; background: #f0f3fa; border-right: 1px solid #e0e3eb;
+  overflow-y: auto; padding: 10px 8px 8px;
+}
+#${ROOT_ID}.fi-dark .fi-side { background: #131722; border-right-color: #2a2e39; }
 #${ROOT_ID} .fi-side-h {
-  padding: 16px 16px 6px; margin: 0; font-size: 11px; font-weight: 600;
-  letter-spacing: 0.8px; color: #8b8b8b; text-transform: uppercase;
+  padding: 4px 8px; margin: 8px 0 4px; font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.6px; color: #787b86; text-transform: uppercase;
 }
 #${ROOT_ID} .fi-nav {
-  width: 100%; display: flex; align-items: center; gap: 14px;
-  border: 0; border-radius: 0; padding: 13px 16px; margin: 0;
-  background: transparent; color: inherit; cursor: pointer; font-size: 16px; font-weight: 500; text-align: left;
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  border: 0; border-radius: 6px; padding: 8px; margin-bottom: 2px;
+  background: transparent; color: inherit; cursor: pointer; font-size: 13px; font-weight: 500; text-align: left;
 }
-#${ROOT_ID} .fi-nav svg { width: 22px; height: 22px; flex: 0 0 22px; }
-#${ROOT_ID} .fi-nav .fi-chev { margin-left: auto; opacity: 0.7; }
+#${ROOT_ID} .fi-nav svg { width: 18px; height: 18px; flex: 0 0 18px; }
+#${ROOT_ID} .fi-nav .fi-chev { display: none; }
+#${ROOT_ID} .fi-nav.is-active { background: rgba(41,98,255,0.14); color: #2962ff; font-weight: 700; }
+#${ROOT_ID}.fi-dark .fi-nav.is-active { background: rgba(41,98,255,0.22); color: #8ab4ff; }
 #${ROOT_ID} .fi-nav:hover { background: rgba(19,23,34,0.04); }
-#${ROOT_ID}.fi-dark .fi-nav:hover { background: rgba(255,255,255,0.06); }
+#${ROOT_ID}.fi-dark .fi-nav:hover { background: rgba(209,212,220,0.06); }
 #${ROOT_ID} .fi-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 #${ROOT_ID} .fi-search-wrap { padding: 12px 16px 8px; flex-shrink: 0; }
 #${ROOT_ID} .fi-search {
@@ -220,6 +230,32 @@ function ensureStyles(doc: Document): void {
 #${ROOT_ID}.fi-dark .fi-full { border-color: #2a2e39; }
 #${ROOT_ID} .fi-full:hover { color: inherit; border-color: #2962ff; }
 #${ROOT_ID} .fi-empty { padding: 32px 16px; text-align: center; color: #787b86; }
+
+/* Phone: category list, then the chosen group. Desktop keeps the two panes. */
+#${ROOT_ID}.fi-phone { align-items: stretch; }
+#${ROOT_ID}.fi-phone .fi-panel {
+  width: 100%; max-width: none; height: 100%; margin: 0;
+  border-radius: 0; border: 0; box-shadow: none;
+}
+#${ROOT_ID}.fi-phone.fi-dark .fi-panel { background: #000; color: #f2f2f2; border-color: transparent; }
+#${ROOT_ID}.fi-phone .fi-body { flex-direction: column; }
+#${ROOT_ID}.fi-phone .fi-side {
+  width: auto; flex: 1; background: transparent; border-right: 0; padding: 8px 0 24px;
+}
+#${ROOT_ID}.fi-phone .fi-side-h {
+  padding: 16px 16px 6px; margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.8px; color: #8b8b8b;
+}
+#${ROOT_ID}.fi-phone .fi-nav {
+  border-radius: 0; padding: 13px 16px; margin: 0; font-size: 16px; gap: 14px;
+}
+#${ROOT_ID}.fi-phone .fi-nav svg { width: 22px; height: 22px; flex-basis: 22px; }
+#${ROOT_ID}.fi-phone .fi-nav .fi-chev { display: block; margin-left: auto; opacity: 0.7; width: 18px; height: 18px; flex-basis: 18px; }
+#${ROOT_ID}.fi-phone .fi-nav.is-active { background: transparent; color: inherit; font-weight: 500; }
+#${ROOT_ID}.fi-phone .fi-search {
+  border-radius: 10px; font-size: 15px; padding: 10px 12px 10px 36px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238b8b8b' stroke-width='2'><circle cx='11' cy='11' r='7'/><path d='m20 20-3.5-3.5'/></svg>");
+  background-repeat: no-repeat; background-position: 12px 50%;
+}
 `;
   (doc.head || doc.documentElement).appendChild(style);
 }
@@ -262,6 +298,28 @@ function homeIcon(id: NavId): string {
       return `<svg ${p}><path d="M6 8h12l-1 11H7L6 8z"/><path d="M9 8V7a3 3 0 0 1 6 0v1"/></svg>`;
   }
 }
+
+const DESKTOP_GROUPS: readonly { heading: string; items: readonly { id: NavId; label: string }[] }[] = [
+  {
+    heading: "PERSONAL",
+    items: [
+      { id: "favorites", label: "Favorites" },
+      { id: "myScripts", label: "My scripts" },
+    ],
+  },
+  {
+    heading: "BUILT-IN",
+    items: [{ id: "technicals", label: "Technicals" }],
+  },
+  {
+    heading: "COMMUNITY",
+    items: [
+      { id: "editorsPicks", label: "Editors' picks" },
+      { id: "top", label: "Top" },
+      { id: "trending", label: "Trending" },
+    ],
+  },
+];
 
 const HOME_GROUPS: readonly { heading: string; items: readonly { id: NavId; label: string }[] }[] = [
   {
@@ -360,6 +418,55 @@ function closeOverlay(doc: Document): void {
   doc.getElementById(ROOT_ID)?.remove();
 }
 
+/** Drop the pane pin and stretch the category list over the whole phone screen. */
+function coverPhoneViewport(doc: Document, root: HTMLElement): void {
+  const view = doc.defaultView;
+  if (!view) return;
+  const place = () => {
+    const width = view.innerWidth;
+    const height = view.innerHeight;
+    if (width < 8 || height < 8) return;
+    root.style.left = "0px";
+    root.style.top = "0px";
+    root.style.width = `${width}px`;
+    root.style.height = `${height}px`;
+    const panel = root.querySelector<HTMLElement>(".fi-panel");
+    if (!panel) return;
+    delete panel.dataset.forgePin;
+    delete panel.dataset.forgePinLock;
+    delete panel.dataset.forgePinScroll;
+    panel.style.removeProperty("--forge-pin-left");
+    panel.style.removeProperty("--forge-pin-top");
+    panel.style.removeProperty("--forge-pin-max-w");
+    panel.style.removeProperty("--forge-pin-max-h");
+    panel.style.setProperty("position", "relative", "important");
+    panel.style.setProperty("left", "0", "important");
+    panel.style.setProperty("top", "0", "important");
+    panel.style.setProperty("width", `${width}px`, "important");
+    panel.style.setProperty("min-width", `${width}px`, "important");
+    panel.style.setProperty("max-width", "none", "important");
+    panel.style.setProperty("height", `${height}px`, "important");
+  };
+  place();
+  view.requestAnimationFrame(place);
+}
+
+function navButtons(groups: typeof DESKTOP_GROUPS, active: NavId | null, chevron: boolean): string {
+  return groups
+    .map(
+      (group) =>
+        `<div class="fi-side-h">${group.heading}</div>` +
+        group.items
+          .map((item) => {
+            const on = item.id === active ? " is-active" : "";
+            const tail = chevron ? CHEV : "";
+            return `<button type="button" class="fi-nav${on}" data-nav="${item.id}">${homeIcon(item.id)}<span>${item.label}</span>${tail}</button>`;
+          })
+          .join(""),
+    )
+    .join("");
+}
+
 function openOverlay(doc: Document, widget: IChartingLibraryWidget): void {
   ensureStyles(doc);
   removeNativeDialogs(doc);
@@ -371,26 +478,23 @@ function openOverlay(doc: Document, widget: IChartingLibraryWidget): void {
     doc.body.appendChild(root);
   }
 
+  const phone = isPhoneChart(doc);
   // Match chart chrome: light chart in screenshots → light panel.
   const dark =
     doc.documentElement.classList.contains("theme-dark") ||
     doc.body.classList.contains("theme-dark") ||
     !!doc.querySelector(".theme-dark");
-  root.className = dark ? "fi-dark" : "";
+  root.className = `${dark ? "fi-dark" : ""} ${phone ? "fi-phone" : ""}`.trim();
+
+  if (!phone) {
+    openDesktopOverlay(doc, widget, root);
+    return;
+  }
 
   let nav: NavId | null = null;
   let query = "";
 
-  const homeHtml = HOME_GROUPS.map(
-    (group) =>
-      `<div class="fi-side-h">${group.heading}</div>` +
-      group.items
-        .map(
-          (item) =>
-            `<button type="button" class="fi-nav" data-nav="${item.id}">${homeIcon(item.id)}<span>${item.label}</span>${CHEV}</button>`,
-        )
-        .join(""),
-  ).join("");
+  const homeHtml = navButtons(HOME_GROUPS, null, true);
 
   const paint = () => {
     const title = root.querySelector(".fi-title");
@@ -471,6 +575,7 @@ function openOverlay(doc: Document, widget: IChartingLibraryWidget): void {
     paint();
     syncBack();
   };
+  coverPhoneViewport(doc, root);
 
   // Also notify React shell (optional parallel UI) — overlay is source of truth.
   try {
@@ -478,6 +583,74 @@ function openOverlay(doc: Document, widget: IChartingLibraryWidget): void {
   } catch {
     /* ignore */
   }
+}
+
+function openDesktopOverlay(doc: Document, widget: IChartingLibraryWidget, root: HTMLElement): void {
+  let nav: NavId = "favorites";
+  let query = "";
+
+  root.innerHTML = `
+    <div class="fi-panel" role="dialog" aria-label="Indicators, metrics, and strategies">
+      <div class="fi-head">
+        <div class="fi-title">Indicators, metrics, and strategies</div>
+        <button type="button" class="fi-close" aria-label="Close">×</button>
+      </div>
+      <div class="fi-body">
+        <div class="fi-side">
+          ${navButtons(DESKTOP_GROUPS, "favorites", false)}
+          <div class="fi-foot"><button type="button" class="fi-full">Full library…</button></div>
+        </div>
+        <div class="fi-main">
+          <div class="fi-search-wrap"><input class="fi-search" type="search" placeholder="Search" /></div>
+          <div class="fi-list"></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const listEl = root.querySelector(".fi-list") as HTMLElement;
+  const searchEl = root.querySelector(".fi-search") as HTMLInputElement;
+  paintList(listEl, nav, query);
+  window.setTimeout(() => searchEl?.focus(), 30);
+
+  root.onclick = (ev) => {
+    const t = ev.target as HTMLElement | null;
+    if (!t) return;
+    if (t === root || t.classList.contains("fi-close")) {
+      closeOverlay(doc);
+      return;
+    }
+    const navBtn = t.closest(".fi-nav") as HTMLElement | null;
+    if (navBtn?.dataset.nav) {
+      nav = navBtn.dataset.nav as NavId;
+      root.querySelectorAll(".fi-nav").forEach((b) => b.classList.remove("is-active"));
+      navBtn.classList.add("is-active");
+      paintList(listEl, nav, query);
+      return;
+    }
+    const row = t.closest(".fi-row") as HTMLElement | null;
+    if (row?.dataset.studyId) {
+      void addStudy(widget, row.dataset.studyId, row.dataset.studyName || row.dataset.studyId);
+      closeOverlay(doc);
+      return;
+    }
+    if (t.classList.contains("fi-full")) {
+      closeOverlay(doc);
+      allowNativeIndicatorsOnce();
+      window.setTimeout(() => {
+        try {
+          widget.activeChart().executeActionById("insertIndicator");
+        } catch {
+          /* ignore */
+        }
+      }, 40);
+    }
+  };
+
+  searchEl.oninput = () => {
+    query = searchEl.value;
+    paintList(listEl, nav, query);
+  };
 }
 
 type ExecFn = (id: string, ...rest: unknown[]) => unknown;

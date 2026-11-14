@@ -1,7 +1,7 @@
 import type { ChartLayoutId, LayoutSyncSettings, UserProfile } from "@/application";
 import { activeProfile, type Settings } from "@/application";
 import type { IChartingLibraryWidget } from "@/infrastructure/tradingview";
-import { CHART_LAYOUT_CHOICES } from "./chart-layouts";
+import { CHART_LAYOUT_CHOICES, PHONE_LAYOUT_IDS } from "./chart-layouts";
 import { activateDealingRange } from "./dealing-range";
 
 /** Faraz / TV-style person silhouette (not first-letter chip). */
@@ -85,8 +85,11 @@ function buildLayoutMenuItems(handlers: HeaderToolbarHandlers) {
     "drawings",
     "indicators",
   ];
+  const choices = handlers.mobile
+    ? CHART_LAYOUT_CHOICES.filter((choice) => PHONE_LAYOUT_IDS.includes(choice.id))
+    : CHART_LAYOUT_CHOICES;
   return [
-    ...CHART_LAYOUT_CHOICES.map((choice) => ({
+    ...choices.map((choice) => ({
       title: choice.title,
       icon: choice.icon,
       onSelect: () => handlers.onSetChartLayout(choice.id),
