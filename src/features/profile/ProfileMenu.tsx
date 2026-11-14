@@ -36,6 +36,10 @@ interface ProfileMenuProps {
   readonly onOpenSubscription: () => void;
   readonly onSignOut: () => void;
   readonly alertCount?: number;
+  readonly onOpenWatchlist?: () => void;
+  readonly onOpenAlerts?: () => void;
+  readonly onOpenIndicators?: () => void;
+  readonly onOpenChartSettings?: () => void;
 }
 
 const COPY = {
@@ -50,6 +54,10 @@ const COPY = {
     language: "Language",
     langValue: "English",
     signOut: "Sign out",
+    watchlist: "Watchlist",
+    alerts: "Alerts",
+    indicators: "Indicators",
+    chartSettings: "Chart settings",
     subscription: "Subscription",
     active: "Selected",
     credit: "Monthly and yearly",
@@ -68,6 +76,10 @@ const COPY = {
     language: "زبان",
     langValue: "فارسی",
     signOut: "خروج از حساب",
+    watchlist: "دیده‌بان",
+    alerts: "هشدارها",
+    indicators: "اندیکاتورها",
+    chartSettings: "تنظیمات نمودار",
     subscription: "اشتراک",
     active: "انتخاب شد",
     credit: "ماهانه و سالانه",
@@ -110,6 +122,10 @@ export function ProfileMenu({
   onOpenSubscription,
   onSignOut,
   alertCount = 0,
+  onOpenWatchlist,
+  onOpenAlerts,
+  onOpenIndicators,
+  onOpenChartSettings,
 }: ProfileMenuProps) {
   const usePos = Boolean(anchorPosition);
   const t = COPY[language];
@@ -296,6 +312,33 @@ export function ProfileMenu({
           <ListItemText primary={t.support} />
         </ListItemButton>
       </List>
+
+      {onOpenWatchlist || onOpenAlerts || onOpenIndicators || onOpenChartSettings ? (
+        <>
+          <Divider sx={{ borderColor: border, my: 0.5 }} />
+          <List dense disablePadding>
+            {(
+              [
+                onOpenWatchlist ? { label: t.watchlist, run: onOpenWatchlist } : null,
+                onOpenAlerts ? { label: t.alerts, run: onOpenAlerts } : null,
+                onOpenIndicators ? { label: t.indicators, run: onOpenIndicators } : null,
+                onOpenChartSettings ? { label: t.chartSettings, run: onOpenChartSettings } : null,
+              ].filter((row) => row !== null) as { label: string; run: () => void }[]
+            ).map((row) => (
+                <ListItemButton
+                  key={row.label}
+                  onClick={() => {
+                    onClose();
+                    row.run();
+                  }}
+                  sx={{ py: 1.1, "&:hover": { bgcolor: hover } }}
+                >
+                  <ListItemText primary={row.label} />
+                </ListItemButton>
+              ))}
+          </List>
+        </>
+      ) : null}
 
       <Divider sx={{ borderColor: border, my: 0.5 }} />
 

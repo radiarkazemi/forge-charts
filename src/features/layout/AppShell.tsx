@@ -31,7 +31,7 @@ interface ProfileAnchorRect {
 
 /**
  * Chart shell matching TradingView Supercharts.
- * Mobile: Faraz top chrome (scrollable symbol + TFs) + bottom tool/app bars.
+ * Mobile: black header with a sideways interval row, and a Date Range strip.
  */
 export function AppShell({ onSignOut }: AppShellProps) {
   const theme = useTheme();
@@ -233,6 +233,10 @@ export function AppShell({ onSignOut }: AppShellProps) {
         }}
         onSignOut={onSignOut}
         alertCount={alertCount}
+        onOpenWatchlist={isMobile ? () => settings.toggleSidePanel("watchlist") : undefined}
+        onOpenAlerts={isMobile ? () => settings.toggleSidePanel("alerts") : undefined}
+        onOpenIndicators={isMobile ? () => chart.openIndicators() : undefined}
+        onOpenChartSettings={isMobile ? () => chart.openChartProperties() : undefined}
       />
       <AlertToaster />
       {subscribeOpen ? (

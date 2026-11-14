@@ -57,23 +57,35 @@
 html,
 body,
 .chart-page {
-  background: #131722 !important;
+  background: #101010 !important;
 }
 
-/* Floating left drawing toolbar — compact pill against the left edge. */
+/* Continuous black drawing rail, full height, same edge as the reference. */
 .layout__area--left {
-  top: 48px !important;
-  bottom: auto !important;
-  height: auto !important;
-  left: 4px !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  height: 100% !important;
+  width: 52px !important;
+  background: #101010 !important;
+  border-right: 1px solid #1a1a1a !important;
 }
 
 .layout__area--left .tv-group,
 .drawingToolbar-g3SlJJk1,
 [class*="drawingToolbar"] {
-  border-radius: 8px !important;
-  overflow: hidden !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) !important;
+  border-radius: 0 !important;
+  overflow: hidden auto !important;
+  box-shadow: none !important;
+  background: #101010 !important;
+  height: 100% !important;
+  width: 52px !important;
+  color: #d1d4dc !important;
+}
+
+.layout__area--left button,
+.layout__area--left [role="button"] {
+  color: #d1d4dc !important;
 }
 
 /* Hide the horizontal “favorite drawings” strip — TV mobile uses the left pill. */
