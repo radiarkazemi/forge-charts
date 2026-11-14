@@ -484,7 +484,7 @@ function ArtCard({
     <Box dir="ltr" sx={{ position: "relative", width: "100%", containerType: "inline-size" }}>
       <Box
         component="img"
-        src={brandSrc(fa ? "forge-signin-fa.png?v=1" : "forge-mobile-v2-form.png")}
+        src={brandSrc(fa ? "forge-signin-fa.png?v=2" : "forge-mobile-v2-form.png")}
         alt=""
         sx={{ width: "100%", height: "auto", display: "block", pointerEvents: "none", userSelect: "none" }}
       />
