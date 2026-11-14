@@ -60,6 +60,9 @@ function isIndicatorsControl(el: Element | null): boolean {
       node.getAttribute("data-tooltip") ||
       ""
     ).trim();
+    if (/template/i.test(title) || /template/i.test(dataName) || node.getAttribute("data-forge-ind-menu") === "1") {
+      return false;
+    }
     const text = (node.textContent || "").replace(/\s+/g, " ").trim().slice(0, 48);
     if (dataName.includes("indicator") || id.includes("indicator")) return true;
     if (/indicators?/i.test(title) && !/template/i.test(title)) return true;

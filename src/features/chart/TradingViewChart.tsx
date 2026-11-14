@@ -28,8 +28,7 @@ import { SessionsDashboard } from "@/features/sessions/SessionsDashboard";
 import { WatermarkOverlay } from "@/features/watermark/WatermarkOverlay";
 import { useWatermarkStudy } from "./useWatermarkStudy";
 import { useTradingViewWidget } from "./useTradingViewWidget";
-import { RADIAR_LAYOUT_NAME } from "@/infrastructure/tradingview";
-
+import { LocalSaveLoadAdapter } from "@/infrastructure/tradingview";
 interface TradingViewChartProps {
   readonly onCreateAlert: () => void;
   readonly onOpenProfile: () => void;
@@ -223,24 +222,26 @@ export function TradingViewChart({
     onCreateAlert,
     onOpenProfile,
     getProfile: () => activeProfile(settings.settings.get()),
-    onSaveNamedLayout: () => {
+    onSaveNamedLayout: (name) => {
       const widget = controller.getWidget();
       if (!widget) return;
       const profile = activeProfile(settings.settings.get());
-      const layoutName = profile.displayName?.trim() || RADIAR_LAYOUT_NAME;
+      const layoutName = name?.trim() || profile.displayName?.trim() || "Layout";
+      const layouts = saveLoadAdapter as LocalSaveLoadAdapter;
+      layouts.setDefaultLayoutName(profile.displayName?.trim() || layoutName);
       try {
-        widget.save((state) => {
-          void saveLoadAdapter.saveChart({
-            name: layoutName,
-            content: typeof state === "string" ? state : JSON.stringify(state),
-            symbol: controller.state.get().symbol || "XAUUSD",
-            resolution: String(controller.state.get().interval || "15") as never,
-            timestamp: Math.round(Date.now() / 1000),
-          });
-          storage.set("forge.tv.autosave.v3", state);
-          storage.set("forge.tv.autosave.v3.bak", state);
-          notifyProfileDirty();
-        });
+        layouts.markExplicitSave();
+        widget.saveChartToServer(
+          () => {
+            widget.save((state) => {
+              storage.set("forge.tv.autosave.v3", state);
+              storage.set("forge.tv.autosave.v3.bak", state);
+              notifyProfileDirty();
+            });
+          },
+          undefined,
+          { chartName: layoutName },
+        );
       } catch {
         /* ignore */
       }

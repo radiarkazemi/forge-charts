@@ -9,6 +9,7 @@ import {
   type IBasicDataFeed,
   type IChartingLibraryWidget,
   type IExternalSaveLoadAdapter,
+  LocalSaveLoadAdapter,
   type ISettingsAdapter,
   type WidgetConstructor,
 } from "@/infrastructure/tradingview";
@@ -28,7 +29,7 @@ import {
 } from "./symbol-search-defaults";
 import { mountIndicatorsIntercept } from "./indicators-intercept";
 import { isChartPaintBusy } from "./study-paint-gate";
-import { DRAWINGS_UPDATED_EVENT } from "@/features/profile-sync";
+import { DEFAULT_FAVORITE_INDICATORS, DRAWINGS_UPDATED_EVENT, USER_SETTINGS_KEY } from "@/features/profile-sync";
 
 export interface TradingViewWidgetDeps {
   readonly controller: ChartController;
@@ -55,7 +56,7 @@ export interface TradingViewWidgetDeps {
   readonly onOpenObjectTree: () => void;
   readonly onOpenProfile: () => void;
   readonly getProfile: () => UserProfile;
-  readonly onSaveNamedLayout?: () => void;
+  readonly onSaveNamedLayout?: (name?: string) => void;
   readonly onEnterBarReplay: () => void;
   readonly onSetChartLayout: (layout: ChartLayoutId) => void;
   readonly onToggleLayoutSync?: (
@@ -175,7 +176,6 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
   const onOpenObjectTree = useEffectEvent(() => deps.onOpenObjectTree());
   const onOpenProfile = useEffectEvent(() => deps.onOpenProfile());
   const getProfile = useEffectEvent(() => deps.getProfile());
-  const onSaveNamedLayout = useEffectEvent(() => deps.onSaveNamedLayout?.());
   const onEnterBarReplay = useEffectEvent(() => deps.onEnterBarReplay());
   const onHeaderReady = useEffectEvent((api: HeaderToolbarApi) => deps.onHeaderReady?.(api));
   const onWidgetReady = useEffectEvent((widget: IChartingLibraryWidget) => deps.onWidgetReady?.(widget));
@@ -244,6 +244,9 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
       // Force TV-matching drawing stars + interval strip before the iframe reads localStorage.
       seedDrawingFavorites();
       seedFavoriteIntervals();
+      if (isPrimary) {
+        (saveLoadAdapter as LocalSaveLoadAdapter).setDefaultLayoutName(getProfile().displayName?.trim() || "Layout");
+      }
       widget = new Widget(
         buildWidgetOptions({
           container,
@@ -519,7 +522,11 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
       if (isPrimary && !hideHeader) {
         void widget.headerReady().then(() => {
           if (cancelled || !widget) return;
-          const api = mountHeaderToolbar(widget, {
+          const chartWidget = widget;
+          const layouts = saveLoadAdapter as LocalSaveLoadAdapter;
+          const displayName = getProfile().displayName?.trim() || "Layout";
+          layouts.setDefaultLayoutName(displayName);
+          const api = mountHeaderToolbar(chartWidget, {
             onCreateAlert,
             onToggleTheme,
             onOpenAlertsPanel,
@@ -532,7 +539,94 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
             getLayoutSync,
             getLastPrice,
             getProfile,
-            onSaveNamedLayout,
+            onSaveNamedLayout: (name) => {
+              const profileName = getProfile().displayName?.trim() || "";
+              const realProfile = /^(radiar|layout|forge|trader|untitled)$/i.test(profileName) ? "" : profileName;
+              if (realProfile) layouts.setDefaultLayoutName(realProfile);
+              const requested = (name || "").trim();
+              const chosen = !requested || /^(layout|untitled|unnamed|radiar|forge)$/i.test(requested)
+                ? realProfile || requested || "Layout"
+                : requested;
+              layouts.markExplicitSave();
+              chartWidget.saveChartToServer(() => notifyProfileDirty?.(), undefined, { chartName: chosen });
+            },
+            onCopyLayout: (name) => {
+              chartWidget.save((state) => {
+                layouts.markExplicitSave();
+                const symbolInterval = chartWidget.symbolInterval();
+                void layouts
+                  .saveChart({
+                    name,
+                    content: JSON.stringify(state),
+                    symbol: symbolInterval.symbol,
+                    resolution: symbolInterval.interval,
+                    timestamp: Math.round(Date.now() / 1000),
+                  })
+                  .then(() => notifyProfileDirty?.());
+              });
+            },
+            onLoadLayout: (id) => {
+              void layouts.getAllCharts().then((charts) => {
+                const chart = charts.find((item) => String(item.id) === String(id));
+                if (!chart) return;
+                const symbol = chart.symbol.includes(":") ? chart.symbol.slice(chart.symbol.lastIndexOf(":") + 1) : chart.symbol;
+                void chartWidget.loadChartFromServer({
+                  id: chart.id,
+                  name: chart.name,
+                  image_url: "",
+                  modified_iso: chart.timestamp,
+                  short_symbol: symbol,
+                  interval: chart.resolution,
+                });
+              });
+            },
+            onDownloadChartData: () => {
+              void chartWidget
+                .activeChart()
+                .exportData({ includeTime: true, includeUserTime: true })
+                .then((exported) => {
+                  const header = exported.schema
+                    .map((field) => ("plotTitle" in field ? field.plotTitle : field.type))
+                    .join(",");
+                  const rows = exported.displayedData?.length
+                    ? exported.displayedData.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+                    : exported.data.map((row) => [...row].join(","));
+                  const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv" });
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement("a");
+                  link.href = url;
+                  link.download = "chart-data.csv";
+                  link.click();
+                  URL.revokeObjectURL(url);
+                })
+                .catch(() => undefined);
+            },
+            getSavedLayouts: () => layouts.getAllCharts(),
+            isAutosaveOn: () => layouts.isAutosaveEnabled(),
+            setAutosaveOn: (on) => layouts.setAutosaveEnabled(on),
+            getFavoriteIndicators: () => {
+              const map = storage.get<Record<string, string> | null>(USER_SETTINGS_KEY, null);
+              const raw = map?.["chart.favoriteIndicators"];
+              if (raw) {
+                try {
+                  const parsed = JSON.parse(raw) as unknown;
+                  if (Array.isArray(parsed) && parsed.length) return parsed.map((item) => String(item));
+                } catch {
+                  /* use defaults */
+                }
+              }
+              return [...DEFAULT_FAVORITE_INDICATORS];
+            },
+            getStudyTemplates: () => layouts.getAllStudyTemplates(),
+            onSaveStudyTemplate: (name) => {
+              const template = chartWidget.activeChart().createStudyTemplate({ saveSymbol: false, saveInterval: false });
+              void layouts.saveStudyTemplate({ name, content: JSON.stringify(template) });
+            },
+            onApplyStudyTemplate: (name) => {
+              void layouts.getStudyTemplateContent({ name }).then((content) => {
+                chartWidget.activeChart().applyStudyTemplate(JSON.parse(content) as object);
+              });
+            },
             themeLabel: initial.theme === "dark" ? "Dark" : "Light",
             alertCount: initial.alertCount,
             compact: false,
