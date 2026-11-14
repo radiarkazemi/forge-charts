@@ -431,8 +431,8 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         }
       });
 
-      // Desktop primary keeps the original CL/Forge header. Mobile uses the bottom shell.
-      if (isPrimary && !hideHeader && !isMobile) {
+      // One library header on desktop and on the phone. The symbol list is wired here.
+      if (isPrimary && !hideHeader) {
         void widget.headerReady().then(() => {
           if (cancelled || !widget) return;
           const api = mountHeaderToolbar(widget, {

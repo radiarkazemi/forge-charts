@@ -12,7 +12,6 @@ import { ProfileDialog } from "@/features/profile/ProfileDialog";
 import { ProfileMenu } from "@/features/profile/ProfileMenu";
 import { activeProfile } from "@/application";
 import { useStore } from "@/shared/hooks/useStore";
-import { MobileBottomBar } from "./MobileBottomBar";
 import { SidePanel } from "./SidePanel";
 import { SideRail } from "./SideRail";
 import { SubscriptionPage } from "@/features/billing/SubscriptionPage";
@@ -30,7 +29,7 @@ interface ProfileAnchorRect {
 
 /**
  * Chart shell matching TradingView Supercharts.
- * Mobile: black header with a sideways interval row, and a Date Range strip.
+ * Phone and desktop share the chart’s own top and bottom bars.
  */
 export function AppShell({ onSignOut }: AppShellProps) {
   const theme = useTheme();
@@ -165,13 +164,6 @@ export function AppShell({ onSignOut }: AppShellProps) {
               </>
             ) : null}
           </Box>
-          {isMobile ? (
-            <MobileBottomBar
-              onCreateAlert={openAlertDialog}
-              onOpenWatchlist={() => settings.toggleSidePanel("watchlist")}
-              onOpenAlerts={() => settings.toggleSidePanel("alerts")}
-            />
-          ) : null}
         </Box>
 
         {desktopPine ? (
