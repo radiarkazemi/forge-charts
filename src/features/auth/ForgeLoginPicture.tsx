@@ -84,6 +84,10 @@ const QUOTES = [
   { id: "XAU", price: "$2,346.80", change: "+1.72%" },
   { id: "ETH", price: "$3,487.21", change: "+3.12%" },
   { id: "WTI", price: "$78.32", change: "+1.27%" },
+  { id: "SOL", price: "$178.42", change: "+4.21%" },
+  { id: "XAG", price: "$28.64", change: "+1.09%" },
+  { id: "EUR", price: "$1.0864", change: "+0.18%" },
+  { id: "SPX", price: "$5,248.49", change: "+0.64%" },
 ] as const;
 
 function readLanguage(): Lang {
@@ -162,6 +166,38 @@ function QuoteMark({ id }: { readonly id: string }) {
       </svg>
     );
   }
+  if (id === "SOL") {
+    return (
+      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
+        <circle cx="12" cy="12" r="10" fill="#9945ff" />
+        <path fill="#fff" d="M7 15.2l8.2-2.2c.5-.1.5-.6 0-.8L7 10.2v1.3l6.4 1.2L7 13.9v1.3zm0-4.4l8.2-2.2c.5-.1.5-.6 0-.8L7 5.8v1.3l6.4 1.2L7 9.5v1.3z" />
+      </svg>
+    );
+  }
+  if (id === "XAG") {
+    return (
+      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
+        <rect x="4" y="8" width="16" height="9" rx="1.5" fill="#c5ccd6" />
+        <rect x="7" y="5.5" width="10" height="3" rx="0.8" fill="#eef2f6" />
+      </svg>
+    );
+  }
+  if (id === "EUR") {
+    return (
+      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
+        <circle cx="12" cy="12" r="10" fill="#3b6ea5" />
+        <path fill="#fff" d="M16 9.2A5 5 0 0 0 8.2 12H7v1.2h1.1A5 5 0 0 0 16 14.8l-1.1-.7A3.6 3.6 0 0 1 9.4 13.2H14v-1.1H9.2A3.6 3.6 0 0 1 14.9 9.9L16 9.2z" />
+      </svg>
+    );
+  }
+  if (id === "SPX") {
+    return (
+      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
+        <circle cx="12" cy="12" r="10" fill="#1f8a4c" />
+        <path fill="#fff" d="M6.5 14.5l3.2-3.4 2.3 2.1 4.2-5.2 1.3 1-5.3 6.6-2.4-2.2-2.2 2.3-1.1-1.2z" />
+      </svg>
+    );
+  }
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
       <path fill="#e39a32" d="M12 2s6 7 6 12a6 6 0 1 1-12 0c0-5 6-12 6-12z" />
@@ -211,6 +247,46 @@ function FooterLinks({ labels, compact }: { readonly labels: readonly string[]; 
           <Box component="span">{label}</Box>
         </Box>
       ))}
+    </Box>
+  );
+}
+
+function MovingTape({ quotes }: { readonly quotes: readonly (typeof QUOTES)[number][] }) {
+  const loop = [...quotes, ...quotes];
+  return (
+    <Box dir="ltr" sx={{
+      overflow: "hidden",
+      width: "100%",
+      maxWidth: "100%",
+      flex: "0 0 auto",
+      borderTop: "1px solid rgba(224,176,90,0.35)",
+      bgcolor: "rgba(0,0,0,0.5)",
+      py: 0.65,
+      "@keyframes forgeTape": {
+        from: { transform: "translateX(0)" },
+        to: { transform: "translateX(-50%)" },
+      },
+    }}>
+      <Box sx={{
+        display: "flex",
+        width: "max-content",
+        animation: "forgeTape 28s linear infinite",
+        "@media (prefers-reduced-motion: reduce)": { animation: "none" },
+      }}>
+        {loop.map((quote, index) => (
+          <Box key={`${quote.id}-${index}`} sx={{ display: "flex", alignItems: "center", gap: 0.7, px: 1.15, flex: "0 0 auto" }}>
+            <QuoteMark id={quote.id} />
+            <Box sx={{ lineHeight: 1.15 }}>
+              <Box sx={{ fontSize: 11, fontWeight: 750, letterSpacing: "0.03em" }}>{quote.id}</Box>
+              <Box sx={{ display: "flex", gap: 0.45, fontSize: 10, whiteSpace: "nowrap" }}>
+                <span>{quote.price}</span>
+                <Box component="span" dir="ltr" sx={{ color: "#3ddc84", unicodeBidi: "isolate" }}>▲{quote.change}</Box>
+              </Box>
+            </Box>
+            <Box sx={{ width: "1px", height: 22, bgcolor: "rgba(232,196,130,0.28)", ml: 0.4 }} />
+          </Box>
+        ))}
+      </Box>
     </Box>
   );
 }
@@ -625,7 +701,21 @@ export function ForgeLoginPicture({
     onSubmit(event);
   };
 
-  const quotes = mobile ? QUOTES.slice(0, 3) : QUOTES;
+  const quotes = QUOTES.slice(0, 4);
+
+  useEffect(() => {
+    if (!mobile) return;
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtml = html.style.overflow;
+    const prevBody = body.style.overflow;
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    return () => {
+      html.style.overflow = prevHtml;
+      body.style.overflow = prevBody;
+    };
+  }, [mobile]);
   const footer = [t.about, t.terms, t.privacy, t.help];
 
   const card = signup ? (
@@ -673,33 +763,75 @@ export function ForgeLoginPicture({
   );
 
   if (mobile) {
-    return shell(
-      null,
-      <Box component="form" onSubmit={submit} sx={{ width: "min(100%, 480px)", mx: "auto", position: "relative", containerType: "inline-size" }}>
-        <Box component="img" src={brandSrc("forge-mobile-v2-background.png")} alt="" sx={{ width: "100%", height: "auto", display: "block", pointerEvents: "none", userSelect: "none" }} />
-        <Box sx={{ position: "absolute", left: 0, right: 0, top: "29.2%", containerType: "inline-size" }}>
-          <Tagline text={t} compact />
-        </Box>
-        <Box sx={{ position: "absolute", top: "32.6%", left: signup ? "6%" : "-7.5%", width: signup ? "88%" : "122%" }}>
-          {card}
-        </Box>
-        {!signup && message ? (
-          <Box sx={{ position: "absolute", left: "8%", right: "8%", top: "84.2%", color: "#ffb4b4", fontSize: "2.6cqw", textAlign: "center" }}>{message}</Box>
-        ) : null}
-        {!signup ? (
-          <Box sx={{ position: "absolute", left: "4%", right: "4%", top: "86.8%", textAlign: "center", fontSize: "2.35cqw", whiteSpace: "nowrap" }}>
-            <Box component="button" type="button" onClick={() => { setNotice(null); onMode("signup"); }} sx={{ border: "none", bgcolor: "transparent", color: "#e4b15a", font: "inherit", fontSize: "inherit", cursor: "pointer" }}>
-              {t.newHere} {t.create}
+    return (
+      <Box dir={lang === "fa" ? "rtl" : "ltr"} sx={{
+        position: "fixed",
+        inset: 0,
+        width: "100%",
+        height: "100dvh",
+        maxWidth: "100%",
+        overflow: "hidden",
+        bgcolor: "#050403",
+        color: "#f4f0ea",
+        fontFamily: '"Segoe UI", Tahoma, "Helvetica Neue", Arial, sans-serif',
+        touchAction: "manipulation",
+      }}>
+        <Box component="img" src={brandSrc("forge-mobile-v2-background.png")} alt="" sx={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+          objectPosition: "center top",
+          pointerEvents: "none",
+          userSelect: "none",
+        }} />
+        <Box component="form" onSubmit={submit} sx={{
+          position: "relative",
+          zIndex: 1,
+          height: "100%",
+          width: "100%",
+          maxWidth: "100%",
+          minWidth: 0,
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+        }}>
+          <Box sx={{ flex: "0 0 22%" }} />
+          <Box sx={{ containerType: "inline-size", px: 1, flex: "0 0 auto" }}>
+            <Tagline text={t} compact />
+          </Box>
+          <Box sx={{
+            flex: "1 1 auto",
+            minHeight: 0,
+            minWidth: 0,
+            width: "100%",
+            overflow: "hidden",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "flex-start",
+            px: signup ? 2 : 0,
+          }}>
+            <Box sx={{ width: signup ? "min(100%, 460px)" : "116%", maxWidth: signup ? 460 : "none" }}>
+              {card}
             </Box>
           </Box>
-        ) : null}
-        <Box sx={{ position: "absolute", left: 0, right: 0, top: "89.2%", containerType: "inline-size" }}>
-          <FooterLinks labels={footer} compact />
+          {message && !signup ? (
+            <Box sx={{ color: "#ffb4b4", fontSize: 12, textAlign: "center", px: 2, flex: "0 0 auto" }}>{message}</Box>
+          ) : null}
+          {!signup ? (
+            <Box sx={{ textAlign: "center", fontSize: 12, flex: "0 0 auto", py: 0.25 }}>
+              <Box component="button" type="button" onClick={() => { setNotice(null); onMode("signup"); }} sx={{ border: "none", bgcolor: "transparent", color: "#e4b15a", font: "inherit", fontSize: "inherit", cursor: "pointer" }}>
+                {t.newHere} {t.create}
+              </Box>
+            </Box>
+          ) : null}
+          <Box sx={{ containerType: "inline-size", flex: "0 0 auto", py: 0.4 }}>
+            <FooterLinks labels={footer} compact />
+          </Box>
+          <MovingTape quotes={QUOTES} />
         </Box>
-        <Box sx={{ position: "absolute", left: 0, right: 0, top: "93%" }}>
-          <Ticker quotes={quotes} stacked />
-        </Box>
-      </Box>,
+      </Box>
     );
   }
 
