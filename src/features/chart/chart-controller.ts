@@ -62,10 +62,37 @@ export interface ChartSyncHooks {
   /** `previous` is the interval before this change (for multi-pane header routing). */
   readonly onIntervalChanged?: (interval: Interval, previous: Interval) => void;
   readonly onVisibleRangeChanged?: (from: number, to: number) => void;
-  readonly onCrosshairMoved?: (time: number) => void;
+  readonly onCrosshairMoved?: (time: number, price: number) => void;
 }
 
 const MAIN_SERIES_ID = "_seriesId";
+
+const CROSSHAIR_LINE = {
+  shape: "vertical_line" as const,
+  lock: true,
+  disableSelection: true,
+  disableSave: true,
+  disableUndo: true,
+  showInObjectsTree: false,
+  zOrder: "top" as const,
+  overrides: {
+    linecolor: "#9598A1",
+    linestyle: 0,
+    linewidth: 1,
+    showLabel: false,
+    showTime: false,
+    transparency: 0,
+  },
+};
+
+const CROSSHAIR_LINE_HORZ = {
+  ...CROSSHAIR_LINE,
+  shape: "horizontal_line" as const,
+  overrides: {
+    ...CROSSHAIR_LINE.overrides,
+    showPrice: false,
+  },
+};
 
 function stripExchange(symbol: string): string {
   const idx = symbol.lastIndexOf(":");
@@ -95,6 +122,9 @@ export class ChartController {
   private mouseDownBridge: ((params: MouseEventParams) => void) | null = null;
   private readonly studyHandlers = new Set<(entityId: EntityId, eventType: string) => void>();
   private studyBridge: ((entityId: EntityId, eventType: string) => void) | null = null;
+  /** Linked-crosshair lines must not count as drawings the user made. */
+  private ignoreDrawingEvents = false;
+  private readonly ignoredDrawingIds = new Set<string>();
 
   constructor(symbol: string, interval: Interval) {
     this.state = createStore<ChartState>({ symbol, interval, ready: false, error: null });
@@ -135,7 +165,8 @@ export class ChartController {
     chart.crossHairMoved().subscribe(null, (params) => {
       this.scheduleCrosshair(params);
       if (typeof params.time === "number" && Number.isFinite(params.time)) {
-        this.syncHooks.onCrosshairMoved?.(params.time);
+        const price = typeof params.price === "number" && Number.isFinite(params.price) ? params.price : Number.NaN;
+        this.syncHooks.onCrosshairMoved?.(params.time, price);
       }
     });
 
@@ -177,6 +208,7 @@ export class ChartController {
     if (!this.oneShotDrawingHandler) {
       this.oneShotDrawingHandler = (id, eventType) => {
         if (eventType !== "create") return;
+        if (this.isIgnoredDrawing(id)) return;
         const chart = this.activeChart();
         if (
           shouldSkipDrawingOneShot({
@@ -840,6 +872,68 @@ export class ChartController {
       /* ignore */
     }
     return snap;
+  }
+
+  /** Drawings created as the linked crosshair — not user drawings. */
+  isIgnoredDrawing(id: EntityId | string): boolean {
+    return this.ignoreDrawingEvents || this.ignoredDrawingIds.has(String(id));
+  }
+
+  /**
+   * One locked cross on another pane: vertical line at the same time, and a
+   * horizontal line at the same price when the price is known.
+   */
+  async createCrosshairMarker(time: number, price: number): Promise<{ vert: EntityId; horz: EntityId | null } | null> {
+    const chart = this.activeChart();
+    if (!chart || !Number.isFinite(time)) return null;
+    this.ignoreDrawingEvents = true;
+    let vert: EntityId | null = null;
+    try {
+      vert = await chart.createShape({ time }, CROSSHAIR_LINE);
+      if (!vert) return null;
+      this.ignoredDrawingIds.add(String(vert));
+      let horz: EntityId | null = null;
+      if (Number.isFinite(price)) {
+        try {
+          horz = await chart.createShape({ time, price }, CROSSHAIR_LINE_HORZ);
+        } catch {
+          horz = null;
+        }
+        if (horz) this.ignoredDrawingIds.add(String(horz));
+      }
+      return { vert, horz };
+    } catch {
+      if (vert) {
+        try {
+          chart.removeEntity(vert, { disableUndo: true });
+        } catch {
+          /* already gone */
+        }
+        this.ignoredDrawingIds.delete(String(vert));
+      }
+      return null;
+    } finally {
+      this.ignoreDrawingEvents = false;
+    }
+  }
+
+  /** Move the linked cross. Returns false when the shape is gone. */
+  moveCrosshairMarker(vert: EntityId, horz: EntityId | null, time: number, price: number): boolean {
+    const chart = this.activeChart();
+    if (!chart || !Number.isFinite(time)) return false;
+    try {
+      chart.getShapeById(vert).setPoints([{ time }]);
+      if (horz && Number.isFinite(price)) {
+        chart.getShapeById(horz).setPoints([{ time, price }]);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  forgetIgnoredDrawing(id: EntityId | string): void {
+    this.ignoredDrawingIds.delete(String(id));
   }
 
   /** Locked vertical line used as a multipane crosshair stand-in. */

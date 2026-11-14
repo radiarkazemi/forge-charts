@@ -131,7 +131,7 @@ export function TradingViewChart({
         layoutSyncBus.notifyInterval(paneIndex, interval);
       },
       onVisibleRangeChanged: (from, to) => layoutSyncBus.notifyVisibleRange(paneIndex, from, to),
-      onCrosshairMoved: (time) => layoutSyncBus.notifyCrosshair(paneIndex, time),
+      onCrosshairMoved: (time, price) => layoutSyncBus.notifyCrosshair(paneIndex, time, price),
     });
     return () => {
       unregister();
