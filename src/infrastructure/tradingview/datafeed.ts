@@ -1,8 +1,8 @@
 import { normalizeTicker, parseInterval, intervalSeconds, isMarketSessionOpen, SYMBOL_TYPE_LABELS, type Bar, type SymbolInfo } from "@/domain";
 import { createStore, type MarketDataService, type Store, type SymbolRepository, type Unsubscribe } from "@/application";
 import { EXCHANGE_PRIORITY } from "@/infrastructure/symbols/static-symbol-repository";
-import { fillSingleHourGaps } from "@/infrastructure/market-data/hour-gaps";
-import { canonicalizeBar, collapseDailyBars } from "@/infrastructure/market-data/session-bars";
+import { presentCandleSeries } from "@/infrastructure/market-data/candle-series";
+import { canonicalizeBar } from "@/infrastructure/market-data/session-bars";
 import {
   appendLive,
   emptyTseSeries,
@@ -549,16 +549,10 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   /* ── internals ─────────────────────────────────────────────────────── */
 
   /**
-   * Fill short missing-candle holes on every book except Tehran equities.
-   * Iran's overnight close is longer than two hours and stays empty.
-   * A weekend is longer than twelve hours and stays empty.
+   * Real candles only. Duplicate timestamps collapse. Empty minutes are not filled.
    */
   private closeBarHoles(symbol: SymbolInfo, resolution: string, bars: readonly Bar[]): Bar[] {
-    const collapsed = collapseDailyBars(symbol, resolution, bars);
-    const exchange = symbol.exchange.toUpperCase();
-    if (exchange === "TSE") return collapsed;
-    const iran = exchange === "IRAN" || exchange === "TGJU";
-    return fillSingleHourGaps(collapsed, barStep(resolution), iran ? 2 * 60 * 60 : 12 * 60 * 60);
+    return presentCandleSeries(symbol, resolution, bars, barStep(resolution));
   }
 
   private tsePackKey(symbol: SymbolInfo, resolution: string): string {
@@ -634,12 +628,12 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       // bars sit on adjacent slots. The cash session stays in the UI label.
       session: tse ? "24x7" : symbol.session,
       // The plotted FX session lists Friday so Thursday's overnight candles
-      // survive. The legend still shows the real week: Sunday 17:00 through
-      // Friday 17:00. Saturday is closed either way.
+      // survive. The legend still shows the real week: Sunday 18:00 through
+      // Friday 17:00. Saturday, and the 17:00–18:00 break, stay closed.
       ...(tse
         ? { session_display: symbol.session }
-        : symbol.session.startsWith("1700-1700")
-          ? { session_display: "1700-1700:12345" }
+        : symbol.session.startsWith("1800-1700")
+          ? { session_display: "1800-1700:12345" }
           : {}),
       timezone: symbol.timezone as Timezone,
       exchange: symbol.exchange,

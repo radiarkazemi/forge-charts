@@ -1,4 +1,6 @@
 import Box from "@mui/material/Box";
+import useMediaQuery from "@mui/material/useMediaQuery";
+import { useTheme } from "@mui/material/styles";
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useServices } from "@/app/use-services";
 import type { ChartLayoutId } from "@/application";
@@ -56,8 +58,12 @@ function releaseOtherChartPointers(root: HTMLElement | null, keepIndex: number):
  * and layer headerless secondary widgets in the remaining slots underneath.
  */
 export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceProps) {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("md"), { noSsr: true });
   const { settings, barReplay } = useServices();
-  const chartLayout = useStore(settings.settings, (s) => s.chartLayout ?? "s");
+  const storedLayout = useStore(settings.settings, (s) => s.chartLayout ?? "s");
+  // A phone shows one chart. The saved multi-pane layout stays for the desktop.
+  const chartLayout = isMobile ? "s" : storedLayout;
   const paneSymbols = useStore(settings.settings, (s) => (Array.isArray(s.paneSymbols) ? s.paneSymbols : []));
   const lastSymbol = useStore(settings.settings, (s) => s.lastSymbol || "XAUUSD");
   const lastInterval = useStore(settings.settings, (s) => s.lastInterval || "15");

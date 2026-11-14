@@ -1,14 +1,14 @@
 /** Shared mobile layout metrics — keep rail / overlays / scrims in sync. */
 export const RAIL_WIDTH = 52;
 export const RAIL_WIDTH_COMPACT = 44;
-/** Faraz-style top row (profile · symbol pill · scrollable TFs). */
-export const MOBILE_TOP_BAR_HEIGHT = 44;
-/** Chart footer (Date Range · session clock), TradingView mobile. */
+/** Near-black top row: profile, symbol, chart type and compare stay put; intervals scroll. */
+export const MOBILE_TOP_BAR_HEIGHT = 40;
+/** Black footer strip: Date Range · session clock. */
 export const MOBILE_CHART_BAR_HEIGHT = 36;
-/** App tab row (watchlist / chart / trade / alerts / menu). */
-export const MOBILE_APP_NAV_HEIGHT = 52;
-/** Total bottom chrome height (chart bar + app nav). */
-export const MOBILE_BOTTOM_BAR_HEIGHT = MOBILE_CHART_BAR_HEIGHT + MOBILE_APP_NAV_HEIGHT;
+/** The chart workspace has no tab row. Destinations live on the profile menu. */
+export const MOBILE_APP_NAV_HEIGHT = 0;
+/** Total bottom chrome height. */
+export const MOBILE_BOTTOM_BAR_HEIGHT = MOBILE_CHART_BAR_HEIGHT;
 export const MOBILE_DOCK_COLLAPSED = 32;
 
 export function railWidth(compact: boolean): number {

@@ -1075,6 +1075,24 @@ export class ChartController {
     return false;
   }
 
+  /** Open the compare / add-symbol dialog on the active chart. */
+  openCompare(): void {
+    try {
+      this.activeChart()?.executeActionById("compareOrAdd");
+    } catch {
+      /* chart not ready */
+    }
+  }
+
+  /** Switch the main series style (candles, line, area, …). */
+  setChartType(type: number): void {
+    try {
+      (this.activeChart() as { setChartType?: (next: number) => void } | null)?.setChartType?.(type);
+    } catch {
+      /* chart not ready */
+    }
+  }
+
   /** Open symbol search dialog. */
   openSymbolSearch(): void {
     // Prefer Forge Faraz-style picker (AppShell listens for this event).

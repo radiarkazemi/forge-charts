@@ -44,14 +44,14 @@ export const SESSION_US_EQUITY = "0930-1600";
  * Spot FX / metals. 17:00 America/New_York → next day 17:00.
  * TradingView day index: 1=Sunday … 6=Friday.
  * Friday has to be a start day too. Without it the library treats the
- * Thursday 17:00 session (it ends Friday afternoon) as outside the week
+ * Thursday session (it ends Friday afternoon) as outside the week
  * and deletes those candles, so gold 1H shows a hole into every weekend.
- * Saturday is not listed, and there is no Saturday tape, so the Friday
- * 16:00 → Sunday 18:00 close stays empty.
- * A fixed 22:00 UTC grid only matches winter, so summer bars (21:00 UTC)
- * and the gold feed (18:00 New York) were drawn a second time beside the real candle.
+ * Saturday is not listed, and there is no Saturday tape.
+ * The feed prints nothing from 17:00 to 18:00 New York. That hour stays
+ * outside the session, so the chart closes up there. No flat candle is
+ * inserted, and no empty slot is reserved.
  */
-export const SESSION_FX = "1700-1700:123456";
+export const SESSION_FX = "1800-1700:123456";
 /**
  * Iran gold / Faraz cash session (exchange TZ Asia/Tehran).
  * 09:00–22:00 every day — overnight is outside session so the chart
@@ -95,6 +95,15 @@ function zonedParts(nowMs: number, timeZone: string): { day: number; hhmm: numbe
 }
 
 /**
+ * 17:00–18:00 America/New_York. The metal and FX feeds print nothing here.
+ * A bar stamped in this hour is not a traded candle.
+ */
+export function isFxDailyBreak(timeSec: number): boolean {
+  const { hhmm } = zonedParts(timeSec * 1000, "America/New_York");
+  return hhmm >= 1700 && hhmm < 1800;
+}
+
+/**
  * Whether the instrument is in a regular trading session right now.
  * Used to freeze live candle creation / avoid inventing bars when the market is closed
  * (TradingView-style: no new candles, countdown stops via session + data_status).
@@ -110,16 +119,24 @@ export function isMarketSessionOpen(symbol: SymbolInfo, nowMs: number = Date.now
         ? "UTC"
         : symbol.timezone || "UTC";
 
-  // FX / metals: 17:00 America/New_York, Sun open → Fri 17:00 close.
-  // 2200-2159 remains for any saved layout that still has the old UTC session.
-  if (session.startsWith("1700-1700") || session.startsWith("1700-1659") || session.startsWith("2200-2159")) {
-    const ny = session.startsWith("1700");
+  // FX / metals: 18:00 America/New_York, Sun open → Fri 17:00 close.
+  // 17:00–18:00 New York is the daily break (no prints). 1700-1700 and
+  // 2200-2159 remain for any saved layout that still has an older session.
+  if (
+    session.startsWith("1800-1700") ||
+    session.startsWith("1700-1700") ||
+    session.startsWith("1700-1659") ||
+    session.startsWith("2200-2159")
+  ) {
+    const ny = !session.startsWith("2200");
     const { day, hhmm } = zonedParts(nowMs, ny ? "America/New_York" : tz === "UTC" ? "UTC" : tz);
     if (day === 6) return false; // Saturday
     const close = ny ? 1700 : 2159;
-    const open = ny ? 1700 : 2200;
+    const open = session.startsWith("1800") ? 1800 : ny ? 1700 : 2200;
     if (day === 5 && hhmm >= close) return false;
     if (day === 0 && hhmm < open) return false;
+    // The daily 17:00–18:00 break is closed on every weekday.
+    if (session.startsWith("1800") && hhmm >= 1700 && hhmm < 1800) return false;
     return true;
   }
 

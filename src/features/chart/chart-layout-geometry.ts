@@ -705,6 +705,12 @@ export function watchPrimaryMenusOpen(
     let best: DOMRect | null = null;
     for (const node of candidates) {
       if (!isHeaderMenu(node)) continue;
+      // Chart settings is moved into its pane once. Until that position is
+      // locked, a full-size dialog would punch a hole that jumps every frame.
+      if (node.getAttribute("role") === "dialog") {
+        const locked = (node as HTMLElement).dataset?.forgePinLock === "1";
+        if (!locked) continue;
+      }
       const r = visibleBox(node, doc);
       if (!r) continue;
       if (!best || r.width * r.height > best.width * best.height) best = r;
@@ -967,6 +973,10 @@ function ensurePinStyle(doc: Document): void {
     [data-forge-pin="1"][data-forge-pin-scroll="1"] {
       overflow: auto !important;
     }
+    [data-forge-pin="1"][data-forge-pin-lock="1"] {
+      max-width: var(--forge-pin-max-w, none) !important;
+      visibility: visible !important;
+    }
   `;
   doc.head.appendChild(style);
 }
@@ -980,13 +990,43 @@ export function mountFloatingChromePin(container: HTMLElement): () => void {
   let stopped = false;
   let timer = 0;
 
+  const isSettingsDialog = (el: HTMLElement): boolean => {
+    if (el.getAttribute("role") !== "dialog") return false;
+    const hint = `${el.getAttribute("data-name") ?? ""} ${el.getAttribute("data-dialog-name") ?? ""} ${el.getAttribute("aria-label") ?? ""}`.toLowerCase();
+    if (/propert|setting/.test(hint)) return true;
+    const rect = el.getBoundingClientRect();
+    return rect.width >= 260 && rect.height >= 180;
+  };
+
   const pinElement = (el: HTMLElement, bounds: DOMRect) => {
     if (el.dataset.forgePin === "drag") return;
+    // Settings stays where it was first placed. Re-reading its box on a timer
+    // fought the chart library and made the window jump back to the middle.
+    if (el.dataset.forgePinLock === "1") return;
     if (el.closest(FAVORITE_TOOLBAR_SELECTOR)) return;
     if (el.closest(".layout__area--left, .layout__area--top")) return;
     if (el.parentElement?.closest(PIN_TARGETS)) return;
     const rect = el.getBoundingClientRect();
     if (rect.width < 8 || rect.height < 8) return;
+    if (isSettingsDialog(el)) {
+      const margin = 8;
+      const maxW = Math.max(40, bounds.width - margin * 2);
+      const maxH = Math.max(40, bounds.height - margin * 2);
+      const width = Math.min(rect.width, maxW);
+      const height = Math.min(rect.height, maxH);
+      const left = bounds.left + Math.max(margin, (bounds.width - width) / 2);
+      const top = bounds.top + Math.max(margin, (bounds.height - height) / 2);
+      el.dataset.forgePin = "1";
+      el.dataset.forgePinLock = "1";
+      el.style.setProperty("--forge-pin-left", `${Math.round(left)}px`);
+      el.style.setProperty("--forge-pin-top", `${Math.round(top)}px`);
+      el.style.setProperty("--forge-pin-max-w", `${Math.round(maxW)}px`);
+      if (rect.height > maxH + 1 || rect.width > maxW + 1) {
+        el.dataset.forgePinScroll = "1";
+        el.style.setProperty("--forge-pin-max-h", `${Math.round(maxH)}px`);
+      }
+      return;
+    }
     const margin = 8;
     const maxW = Math.max(40, bounds.width - margin * 2);
     const maxH = Math.max(40, bounds.height - margin * 2);
@@ -1047,10 +1087,31 @@ export function mountFloatingChromePin(container: HTMLElement): () => void {
   };
 
   apply();
-  timer = window.setInterval(apply, 400);
+  let mo: MutationObserver | null = null;
+  let moDoc: Document | null = null;
+  let debounce = 0;
+  const bind = () => {
+    const doc = container.querySelector("iframe")?.contentDocument;
+    if (!doc?.body || doc === moDoc) return;
+    mo?.disconnect();
+    moDoc = doc;
+    mo = new MutationObserver(() => {
+      if (stopped) return;
+      window.clearTimeout(debounce);
+      debounce = window.setTimeout(apply, 16);
+    });
+    mo.observe(doc.body, { childList: true, subtree: true });
+  };
+  bind();
+  timer = window.setInterval(() => {
+    bind();
+    apply();
+  }, 400);
   return () => {
     stopped = true;
     window.clearInterval(timer);
+    window.clearTimeout(debounce);
+    mo?.disconnect();
   };
 }
 

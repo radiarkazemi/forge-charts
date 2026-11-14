@@ -1,27 +1,16 @@
 /*
- * TradingView mobile chart shell:
- * hide the desktop top toolbar; legend + plot fill the widget;
- * drawing toolbar floats as a compact left pill when Draw is on
- * (starts collapsed — same as the TV mobile app).
+ * Phone chart: the library header is the only top bar.
+ * It scrolls sideways when the interval row is wider than the screen.
  */
 
-.tv-header,
 .layout__area--top,
-[class*="header-chart-panel"] {
-  display: none !important;
-  height: 0 !important;
-  min-height: 0 !important;
-  max-height: 0 !important;
-  overflow: hidden !important;
-  border: none !important;
-  padding: 0 !important;
-  margin: 0 !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
+.tv-header {
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  -webkit-overflow-scrolling: touch;
 }
 
 .layout__area--center {
-  top: 0 !important;
   right: 0 !important;
 }
 
@@ -41,39 +30,57 @@
   font-size: 12px !important;
 }
 
-/* The mobile footer is our Date Range bar. Hide the library’s own strip. */
-.chart-controls-bar,
-.layout__area--bottom .chart-controls-bar {
+/* The chart’s own bottom bar is the only footer.
+   Quote currency stays on the price scale, never over the interval row. */
+.layout__area--top [class*="currency"],
+.layout__area--top [class*="unitButton"],
+.layout__area--top [data-name*="currency"] {
   display: none !important;
-  height: 0 !important;
-  min-height: 0 !important;
-  max-height: 0 !important;
-  overflow: hidden !important;
-  border: none !important;
-  padding: 0 !important;
-  margin: 0 !important;
 }
 
-html,
-body,
-.chart-page {
+[class*="priceScale"] [class*="currency"],
+[class*="price-axis"] [class*="currency"] {
+  position: relative !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 2px !important;
+  max-width: 72px !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+}
+
+[data-name="legend-source-title"] {
+  pointer-events: auto !important;
+  cursor: pointer !important;
+}
+
+/* The library leaves a 4px gutter between the header, the drawing rail, and
+   the plot. That gutter uses the platform color (#ebebeb / #303030), which
+   reads as a frame. The theme class is on <html>. Match the gutter to the pane. */
+html.theme-light {
+  --tv-color-platform-background: #ffffff;
+  --tv-color-pane-background: #ffffff;
+  --themed-color-chart-page-bg: #ffffff;
+}
+
+html.theme-dark {
+  --tv-color-platform-background: #131722;
+  --tv-color-pane-background: #131722;
+  --themed-color-chart-page-bg: #131722;
+}
+
+html.theme-light,
+html.theme-light body,
+html.theme-light .chart-page {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+}
+
+html.theme-dark,
+html.theme-dark body,
+html.theme-dark .chart-page {
   background: #131722 !important;
-}
-
-/* Floating left drawing toolbar — compact pill against the left edge. */
-.layout__area--left {
-  top: 48px !important;
-  bottom: auto !important;
-  height: auto !important;
-  left: 4px !important;
-}
-
-.layout__area--left .tv-group,
-.drawingToolbar-g3SlJJk1,
-[class*="drawingToolbar"] {
-  border-radius: 8px !important;
-  overflow: hidden !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) !important;
+  background-color: #131722 !important;
 }
 
 /* Hide the horizontal “favorite drawings” strip — TV mobile uses the left pill. */

@@ -355,19 +355,39 @@ export function mountHeaderToolbar(
       }),
     );
   };
-  profileBtn.addEventListener("click", openProfileMenu);
-  profileBtn.addEventListener("pointerdown", openProfileMenu);
-
-  // Place profile immediately before Symbol Search (Faraz: avatar → search pill).
-  // Intercept Symbol Search so Forge Faraz-style picker opens instead of the TV dialog.
-  // Intercept Indicators so Forge TV-style indicators list opens instead of native CL.
-  let symInterceptBound: HTMLElement | null = null;
-  let indInterceptBound: HTMLElement | null = null;
-  const openForgeSymbolSearch = (e: Event) => {
+  // Click only, after the press finishes. pointerdown opened the menu and the
+  // same press closed it, so the account menu needed several clicks.
+  profileBtn.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
     if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
-    window.dispatchEvent(new CustomEvent("forge:open-symbol-search"));
+    window.setTimeout(() => openProfileMenu(e), 40);
+  });
+
+  // Place profile immediately before Symbol Search (Faraz: avatar → search pill).
+  // Open the Forge symbol list from the header symbol and the chart legend title.
+  // Click only — a pointerdown opener mounted the dialog under the finger and it closed at once.
+  // Intercept Indicators so Forge TV-style indicators list opens instead of native CL.
+  let indInterceptBound: HTMLElement | null = null;
+  const openForgeSymbolSearch = (e: Event) => {
+    // The click happens inside the chart iframe. `instanceof Element` uses this
+    // window’s Element and misses the iframe node, so the list never opened.
+    const view = (e.currentTarget as Document | null)?.defaultView;
+    const Ctor = view?.Element;
+    const target = e.target;
+    if (!Ctor || !(target instanceof Ctor)) return;
+    // Only the symbol name opens search. A study title must keep its own
+    // Hide / Settings / Remove buttons.
+    const search = target.closest("#header-toolbar-symbol-search");
+    const title = target.closest("[data-name='legend-source-title']");
+    const seriesTitle = title?.closest("[data-name='legend-series-item']");
+    if (!search && !seriesTitle) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent("forge:open-symbol-search"));
+    }, 30);
   };
   const openForgeIndicators = (e: Event) => {
     e.preventDefault();
@@ -382,16 +402,18 @@ export function mountHeaderToolbar(
   };
   const placeProfileNearSearch = () => {
     try {
-      const doc = (widget as unknown as { _iFrame?: HTMLIFrameElement })._iFrame?.contentDocument;
+      const framed = (widget as unknown as { _iFrame?: HTMLIFrameElement })._iFrame;
+      const host = (widget as unknown as { _options?: { container?: HTMLElement } })._options?.container;
+      const nested = host?.querySelector("iframe");
+      const doc =
+        framed?.contentDocument ??
+        (nested instanceof HTMLIFrameElement ? nested.contentDocument : null);
       if (!doc) return;
       const sym = doc.getElementById("header-toolbar-symbol-search");
       sym?.classList.add("forge-symbol-search-pill");
-      if (sym && sym !== symInterceptBound) {
-        symInterceptBound?.removeEventListener("click", openForgeSymbolSearch, true);
-        symInterceptBound?.removeEventListener("pointerdown", openForgeSymbolSearch, true);
-        sym.addEventListener("click", openForgeSymbolSearch, true);
-        sym.addEventListener("pointerdown", openForgeSymbolSearch, true);
-        symInterceptBound = sym;
+      if (doc.documentElement.getAttribute("data-forge-symbol-open") !== "1") {
+        doc.documentElement.setAttribute("data-forge-symbol-open", "1");
+        doc.addEventListener("click", openForgeSymbolSearch, true);
       }
       const indCandidates = Array.from(
         doc.querySelectorAll<HTMLElement>(

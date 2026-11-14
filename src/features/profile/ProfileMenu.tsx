@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import Box from "@mui/material/Box";
 import Divider from "@mui/material/Divider";
 import List from "@mui/material/List";
@@ -36,6 +37,10 @@ interface ProfileMenuProps {
   readonly onOpenSubscription: () => void;
   readonly onSignOut: () => void;
   readonly alertCount?: number;
+  readonly onOpenWatchlist?: () => void;
+  readonly onOpenAlerts?: () => void;
+  readonly onOpenIndicators?: () => void;
+  readonly onOpenChartSettings?: () => void;
 }
 
 const COPY = {
@@ -50,6 +55,10 @@ const COPY = {
     language: "Language",
     langValue: "English",
     signOut: "Sign out",
+    watchlist: "Watchlist",
+    alerts: "Alerts",
+    indicators: "Indicators",
+    chartSettings: "Chart settings",
     subscription: "Subscription",
     active: "Selected",
     credit: "Monthly and yearly",
@@ -68,6 +77,10 @@ const COPY = {
     language: "زبان",
     langValue: "فارسی",
     signOut: "خروج از حساب",
+    watchlist: "دیده‌بان",
+    alerts: "هشدارها",
+    indicators: "اندیکاتورها",
+    chartSettings: "تنظیمات نمودار",
     subscription: "اشتراک",
     active: "انتخاب شد",
     credit: "ماهانه و سالانه",
@@ -110,10 +123,18 @@ export function ProfileMenu({
   onOpenSubscription,
   onSignOut,
   alertCount = 0,
+  onOpenWatchlist,
+  onOpenAlerts,
+  onOpenIndicators,
+  onOpenChartSettings,
 }: ProfileMenuProps) {
   const usePos = Boolean(anchorPosition);
   const t = COPY[language];
   const rtl = language === "fa";
+  const openedAt = useRef(0);
+  useEffect(() => {
+    if (open) openedAt.current = Date.now();
+  }, [open]);
   const plan = readPlanChoice();
   const bg = darkTheme ? "#1e222d" : "#ffffff";
   const fg = darkTheme ? "#d1d4dc" : "#131722";
@@ -128,7 +149,11 @@ export function ProfileMenu({
       anchorPosition={usePos ? (anchorPosition ?? undefined) : undefined}
       anchorEl={usePos ? null : anchorEl}
       open={open}
-      onClose={onClose}
+      onClose={(_event, reason) => {
+        // The click that opens the menu can land on the backdrop in the same press.
+        if (reason === "backdropClick" && Date.now() - openedAt.current < 400) return;
+        onClose();
+      }}
       anchorOrigin={{ vertical: "bottom", horizontal: rtl ? "right" : "left" }}
       transformOrigin={{ vertical: "top", horizontal: rtl ? "right" : "left" }}
       slotProps={{
@@ -296,6 +321,33 @@ export function ProfileMenu({
           <ListItemText primary={t.support} />
         </ListItemButton>
       </List>
+
+      {onOpenWatchlist || onOpenAlerts || onOpenIndicators || onOpenChartSettings ? (
+        <>
+          <Divider sx={{ borderColor: border, my: 0.5 }} />
+          <List dense disablePadding>
+            {(
+              [
+                onOpenWatchlist ? { label: t.watchlist, run: onOpenWatchlist } : null,
+                onOpenAlerts ? { label: t.alerts, run: onOpenAlerts } : null,
+                onOpenIndicators ? { label: t.indicators, run: onOpenIndicators } : null,
+                onOpenChartSettings ? { label: t.chartSettings, run: onOpenChartSettings } : null,
+              ].filter((row) => row !== null) as { label: string; run: () => void }[]
+            ).map((row) => (
+                <ListItemButton
+                  key={row.label}
+                  onClick={() => {
+                    onClose();
+                    row.run();
+                  }}
+                  sx={{ py: 1.1, "&:hover": { bgcolor: hover } }}
+                >
+                  <ListItemText primary={row.label} />
+                </ListItemButton>
+              ))}
+          </List>
+        </>
+      ) : null}
 
       <Divider sx={{ borderColor: border, my: 0.5 }} />
 

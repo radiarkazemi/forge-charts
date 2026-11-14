@@ -12,8 +12,6 @@ import { ProfileDialog } from "@/features/profile/ProfileDialog";
 import { ProfileMenu } from "@/features/profile/ProfileMenu";
 import { activeProfile } from "@/application";
 import { useStore } from "@/shared/hooks/useStore";
-import { MobileBottomBar } from "./MobileBottomBar";
-import { MobileTopBar } from "./MobileTopBar";
 import { SidePanel } from "./SidePanel";
 import { SideRail } from "./SideRail";
 import { SubscriptionPage } from "@/features/billing/SubscriptionPage";
@@ -31,7 +29,7 @@ interface ProfileAnchorRect {
 
 /**
  * Chart shell matching TradingView Supercharts.
- * Mobile: Faraz top chrome (scrollable symbol + TFs) + bottom tool/app bars.
+ * Phone and desktop share the chart’s own top and bottom bars.
  */
 export function AppShell({ onSignOut }: AppShellProps) {
   const theme = useTheme();
@@ -59,18 +57,6 @@ export function AppShell({ onSignOut }: AppShellProps) {
     // Keep chart chrome LTR (TradingView); menus/dialogs set their own `dir`.
     document.documentElement.lang = language === "fa" ? "fa" : "en";
   }, [language]);
-
-  useEffect(() => {
-    if (!isMobile) return;
-    // Phones: reclaim plot area — single pane + no docked side panels.
-    if (settings.settings.get().chartLayout !== "s") {
-      settings.setChartLayout("s");
-    }
-    if (settings.settings.get().sidePanel) {
-      settings.setSidePanel(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: mobile breakpoint only
-  }, [isMobile]);
 
   useEffect(() => {
     const onOpen = (event: Event) => {
@@ -132,7 +118,6 @@ export function AppShell({ onSignOut }: AppShellProps) {
     >
       <Box component="main" sx={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
         <Box sx={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
-          {isMobile ? <MobileTopBar /> : null}
           <Box sx={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0, position: "relative" }}>
             <ChartWorkspace onCreateAlert={openAlertDialog} onOpenProfile={openProfileMenu} />
             {desktopSideDock ? (
@@ -167,13 +152,6 @@ export function AppShell({ onSignOut }: AppShellProps) {
               </>
             ) : null}
           </Box>
-          {isMobile ? (
-            <MobileBottomBar
-              onCreateAlert={openAlertDialog}
-              onOpenWatchlist={() => settings.toggleSidePanel("watchlist")}
-              onOpenAlerts={() => settings.toggleSidePanel("alerts")}
-            />
-          ) : null}
         </Box>
 
         {desktopPine ? (
@@ -233,6 +211,10 @@ export function AppShell({ onSignOut }: AppShellProps) {
         }}
         onSignOut={onSignOut}
         alertCount={alertCount}
+        onOpenWatchlist={isMobile ? () => settings.toggleSidePanel("watchlist") : undefined}
+        onOpenAlerts={isMobile ? () => settings.toggleSidePanel("alerts") : undefined}
+        onOpenIndicators={isMobile ? () => chart.openIndicators() : undefined}
+        onOpenChartSettings={isMobile ? () => chart.openChartProperties() : undefined}
       />
       <AlertToaster />
       {subscribeOpen ? (

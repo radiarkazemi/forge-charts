@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import Avatar from "@mui/material/Avatar";
 import Box from "@mui/material/Box";
 import Dialog from "@mui/material/Dialog";
+import useMediaQuery from "@mui/material/useMediaQuery";
 import IconButton from "@mui/material/IconButton";
 import InputAdornment from "@mui/material/InputAdornment";
 import List from "@mui/material/List";
@@ -140,6 +141,7 @@ export function SymbolSearchDialog({ open, onClose }: SymbolSearchDialogProps) {
   const theme = useStore(settings.settings, (s) => s.theme);
   const dark = theme === "dark";
   const rtl = language === "fa";
+  const phone = useMediaQuery("(max-width:900px)");
   const [query, setQuery] = useState("");
   const [chip, setChip] = useState<ChipId>("all");
   const [remote, setRemote] = useState<SymbolInfo[]>([]);
@@ -264,6 +266,7 @@ export function SymbolSearchDialog({ open, onClose }: SymbolSearchDialogProps) {
     <Dialog
       open={open}
       onClose={onClose}
+      fullScreen={phone}
       fullWidth
       maxWidth="sm"
       dir={rtl ? "rtl" : "ltr"}
@@ -272,10 +275,13 @@ export function SymbolSearchDialog({ open, onClose }: SymbolSearchDialogProps) {
           sx: {
             bgcolor: bg,
             color: fg,
-            borderRadius: "16px",
-            border: `1px solid ${border}`,
+            borderRadius: phone ? 0 : "16px",
+            border: phone ? "none" : `1px solid ${border}`,
             overflow: "hidden",
-            maxHeight: "min(820px, 88vh)",
+            maxHeight: phone ? "100%" : "min(820px, 88vh)",
+            height: phone ? "100%" : undefined,
+            display: "flex",
+            flexDirection: "column",
           },
         },
       }}

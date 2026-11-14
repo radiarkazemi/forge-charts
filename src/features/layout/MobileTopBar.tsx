@@ -1,41 +1,70 @@
 import Box from "@mui/material/Box";
 import ButtonBase from "@mui/material/ButtonBase";
+import Menu from "@mui/material/Menu";
+import MenuItem from "@mui/material/MenuItem";
 import SvgIcon from "@mui/material/SvgIcon";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useServices } from "@/app/use-services";
 import type { Interval } from "@/domain";
 import { useStore } from "@/shared/hooks/useStore";
 import { MOBILE_TOP_BAR_HEIGHT } from "./mobile-chrome";
 
+const CHROME = "#101010";
+const PILL = "#2a2a2a";
+const ACTIVE = "#303030";
+const TEXT = "#ffffff";
+const MUTED = "#c8cdd6";
+
+/** Visible preset matches the reference; the rest sit to the right and scroll into view. */
 const QUICK_IV: ReadonlyArray<{ readonly value: Interval; readonly label: string }> = [
-  { value: "5S", label: "5s" },
   { value: "1", label: "1m" },
   { value: "5", label: "5m" },
   { value: "15", label: "15m" },
   { value: "30", label: "30m" },
   { value: "60", label: "1h" },
+  { value: "120", label: "2h" },
   { value: "240", label: "4h" },
   { value: "1D", label: "D" },
   { value: "1W", label: "W" },
+  { value: "1M", label: "M" },
+  { value: "5S", label: "5s" },
+  { value: "10S", label: "10s" },
+  { value: "15S", label: "15s" },
+  { value: "30S", label: "30s" },
 ];
+
+const CHART_TYPES = [
+  { id: 1, label: "Candles" },
+  { id: 0, label: "Bars" },
+  { id: 2, label: "Line" },
+  { id: 3, label: "Area" },
+  { id: 8, label: "Heikin Ashi" },
+] as const;
 
 function PersonIcon() {
   return (
     <SvgIcon viewBox="0 0 28 28" inheritViewBox sx={{ fontSize: 18 }}>
+      <circle cx="14" cy="10" r="3.4" fill="none" stroke="currentColor" strokeWidth={1.6} />
       <path
-        d="M14 14a4.25 4.25 0 1 0 0-8.5 4.25 4.25 0 0 0 0 8.5Zm0 1.75c-3.6 0-7.25 1.8-7.25 4.25V22h14.5v-2c0-2.45-3.65-4.25-7.25-4.25Z"
-        fill="currentColor"
+        d="M7.2 21.2c.9-3.3 3.3-5 6.8-5s5.9 1.7 6.8 5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.6}
+        strokeLinecap="round"
       />
     </SvgIcon>
   );
 }
 
-function SearchIcon() {
+function CandleIcon() {
   return (
-    <SvgIcon viewBox="0 0 28 28" inheritViewBox sx={{ fontSize: 15, opacity: 0.72, flexShrink: 0 }}>
+    <SvgIcon viewBox="0 0 28 28" inheritViewBox sx={{ fontSize: 20 }}>
       <path
-        d="M12.5 6.5a6 6 0 1 0 3.8 10.65l3.77 3.78 1.41-1.41-3.78-3.77A6 6 0 0 0 12.5 6.5Zm0 2a4 4 0 1 1 0 8 4 4 0 0 1 0-8Z"
-        fill="currentColor"
+        d="M9 6.5v15M9 9.5h2.2v7H6.8v-7H9zM18.5 5v18M18.5 8.5h2.2v9h-4.4v-9h2.2z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        strokeLinejoin="round"
       />
     </SvgIcon>
   );
@@ -44,43 +73,39 @@ function SearchIcon() {
 function PlusIcon() {
   return (
     <SvgIcon viewBox="0 0 28 28" inheritViewBox sx={{ fontSize: 18 }}>
-      <path d="M14 7v14M7 14h14" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" />
+      <circle cx="14" cy="14" r="8.2" fill="none" stroke="currentColor" strokeWidth={1.5} />
+      <path d="M14 10.2v7.6M10.2 14h7.6" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
     </SvgIcon>
   );
 }
 
 /**
- * Faraz-style mobile top chrome: profile · symbol pill · + · scrollable TFs.
+ * Mobile chart header matching the TradingView reference:
+ * profile, symbol, chart type and compare stay fixed; intervals scroll sideways.
  */
 export function MobileTopBar() {
-  const { chart, settings, symbols } = useServices();
+  const { chart, symbols } = useServices();
   const symbol = useStore(chart.state, (s) => s.symbol);
   const interval = useStore(chart.state, (s) => s.interval);
-  const appTheme = useStore(settings.settings, (s) => s.theme);
-  const language = useStore(settings.settings, (s) => s.language);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-
-  const dark = appTheme === "dark";
-  const bg = dark ? "#131722" : "#ffffff";
-  const border = dark ? "#2a2e39" : "rgba(120,123,134,0.22)";
-  const text = dark ? "#d1d4dc" : "#131722";
-  const muted = dark ? "#787b86" : "#6a6d78";
-  const pillBg = dark ? "rgba(120,123,134,0.16)" : "rgba(120,123,134,0.12)";
-  const activeBg = dark ? "rgba(41,98,255,0.22)" : "rgba(41,98,255,0.14)";
-  const active = "#2962FF";
+  const [typeEl, setTypeEl] = useState<HTMLElement | null>(null);
 
   const display = useMemo(() => {
     const bare = symbol.includes(":") ? symbol.slice(symbol.lastIndexOf(":") + 1) : symbol;
     const ex = symbol.includes(":") ? symbol.slice(0, symbol.indexOf(":")).toUpperCase() : "";
-    const info =
-      (ex ? symbols.findByTicker(bare, ex) : undefined) ?? symbols.findByTicker(bare);
+    const info = (ex ? symbols.findByTicker(bare, ex) : undefined) ?? symbols.findByTicker(bare);
     const iran = (info?.exchange ?? ex).toUpperCase() === "IRAN" || (info?.exchange ?? ex).toUpperCase() === "TGJU";
-    // Iran: show Farsi title when available (Faraz legend style).
-    if (iran && info?.name && /[\u0600-\u06FF]/.test(info.name)) {
-      return language === "en" && bare.length <= 10 ? bare : info.name;
-    }
+    if (iran && info?.name && /[\u0600-\u06FF]/.test(info.name)) return info.name;
     return bare.length > 12 ? `${bare.slice(0, 11)}…` : bare;
-  }, [symbol, symbols, language]);
+  }, [symbol, symbols]);
+
+  useEffect(() => {
+    const root = scrollRef.current;
+    const active = root?.querySelector<HTMLElement>("[data-active='1']");
+    if (!root || !active) return;
+    const left = active.offsetLeft - root.clientWidth / 2 + active.clientWidth / 2;
+    root.scrollTo({ left: Math.max(0, left) });
+  }, [interval]);
 
   return (
     <Box
@@ -91,14 +116,16 @@ export function MobileTopBar() {
         height: MOBILE_TOP_BAR_HEIGHT,
         pt: "env(safe-area-inset-top, 0px)",
         minHeight: MOBILE_TOP_BAR_HEIGHT,
-        bgcolor: bg,
-        borderBottom: `1px solid ${border}`,
+        boxSizing: "content-box",
+        bgcolor: CHROME,
         display: "flex",
         alignItems: "center",
-        gap: 0.5,
-        px: 0.75,
+        gap: 0.25,
+        pl: 0.5,
+        pr: 0.25,
         zIndex: 30,
         overflow: "hidden",
+        color: TEXT,
       }}
     >
       <ButtonBase
@@ -115,10 +142,9 @@ export function MobileTopBar() {
           width: 32,
           height: 32,
           borderRadius: "50%",
-          bgcolor: pillBg,
-          color: text,
+          bgcolor: PILL,
+          color: TEXT,
           flexShrink: 0,
-          "&:active": { opacity: 0.85 },
         }}
       >
         <PersonIcon />
@@ -130,29 +156,26 @@ export function MobileTopBar() {
         sx={{
           display: "inline-flex",
           alignItems: "center",
-          gap: 0.6,
-          height: 32,
-          maxWidth: "42%",
-          minWidth: 72,
-          px: 1.25,
+          height: 30,
+          maxWidth: 132,
+          minWidth: 64,
+          px: 1.1,
           borderRadius: "999px",
-          bgcolor: pillBg,
-          color: text,
+          bgcolor: PILL,
+          color: TEXT,
           flex: "0 1 auto",
           overflow: "hidden",
-          "&:active": { opacity: 0.9 },
         }}
       >
-        <SearchIcon />
         <Box
           component="span"
           sx={{
             fontWeight: 700,
             fontSize: 13,
+            letterSpacing: 0.2,
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
-            minWidth: 0,
           }}
         >
           {display}
@@ -160,22 +183,45 @@ export function MobileTopBar() {
       </ButtonBase>
 
       <ButtonBase
-        onClick={() => chart.openSymbolSearch()}
-        aria-label="Add symbol"
-        sx={{
-          width: 30,
-          height: 30,
-          borderRadius: "50%",
-          color: muted,
-          flexShrink: 0,
-          "&:active": { bgcolor: pillBg },
-        }}
+        aria-label="Chart type"
+        onClick={(e) => setTypeEl(e.currentTarget)}
+        sx={{ width: 32, height: 32, borderRadius: "6px", color: TEXT, flexShrink: 0 }}
+      >
+        <CandleIcon />
+      </ButtonBase>
+      <Menu
+        anchorEl={typeEl}
+        open={Boolean(typeEl)}
+        onClose={() => setTypeEl(null)}
+        slotProps={{ paper: { sx: { bgcolor: "#1c1c1c", color: TEXT, minWidth: 160 } } }}
+      >
+        {CHART_TYPES.map((row) => (
+          <MenuItem
+            key={row.id}
+            sx={{ fontSize: 14 }}
+            onClick={() => {
+              chart.setChartType(row.id);
+              setTypeEl(null);
+            }}
+          >
+            {row.label}
+          </MenuItem>
+        ))}
+      </Menu>
+
+      <ButtonBase
+        aria-label="Compare"
+        onClick={() => chart.openCompare()}
+        sx={{ width: 32, height: 32, borderRadius: "50%", color: TEXT, flexShrink: 0 }}
       >
         <PlusIcon />
       </ButtonBase>
 
+      <Box sx={{ width: "1px", height: 18, bgcolor: "#3a3a3a", mx: 0.25, flexShrink: 0 }} />
+
       <Box
         ref={scrollRef}
+        aria-label="Intervals"
         sx={{
           flex: 1,
           minWidth: 0,
@@ -185,9 +231,10 @@ export function MobileTopBar() {
           overflowX: "auto",
           overflowY: "hidden",
           WebkitOverflowScrolling: "touch",
+          touchAction: "pan-x",
+          overscrollBehaviorX: "contain",
           scrollbarWidth: "none",
           "&::-webkit-scrollbar": { display: "none" },
-          maskImage: "linear-gradient(90deg, #000 0%, #000 calc(100% - 18px), transparent 100%)",
         }}
       >
         {QUICK_IV.map((iv) => {
@@ -195,18 +242,18 @@ export function MobileTopBar() {
           return (
             <ButtonBase
               key={iv.value}
+              data-active={on ? "1" : "0"}
               onClick={() => chart.setInterval(iv.value)}
               sx={{
                 flex: "0 0 auto",
-                height: 30,
+                height: 28,
                 minWidth: 36,
                 px: 1,
-                borderRadius: "8px",
-                color: on ? active : text,
-                bgcolor: on ? activeBg : "transparent",
-                fontWeight: 700,
+                borderRadius: "6px",
+                color: on ? TEXT : MUTED,
+                bgcolor: on ? ACTIVE : "transparent",
+                fontWeight: 600,
                 fontSize: 13,
-                "&:active": { opacity: 0.85 },
               }}
             >
               {iv.label}
