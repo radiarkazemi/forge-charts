@@ -30,7 +30,24 @@
   font-size: 12px !important;
 }
 
-/* The chart’s own bottom bar is the only footer. */
+/* The chart’s own bottom bar is the only footer.
+   Quote currency stays on the price scale, never over the interval row. */
+.layout__area--top [class*="currency"],
+.layout__area--top [class*="unitButton"],
+.layout__area--top [data-name*="currency"] {
+  display: none !important;
+}
+
+[class*="priceScale"] [class*="currency"],
+[class*="price-axis"] [class*="currency"] {
+  position: relative !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 2px !important;
+  max-width: 72px !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+}
 
 [data-name="legend-source-title"] {
   pointer-events: auto !important;

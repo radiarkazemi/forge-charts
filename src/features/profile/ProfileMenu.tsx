@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import Box from "@mui/material/Box";
 import Divider from "@mui/material/Divider";
 import List from "@mui/material/List";
@@ -130,6 +131,10 @@ export function ProfileMenu({
   const usePos = Boolean(anchorPosition);
   const t = COPY[language];
   const rtl = language === "fa";
+  const openedAt = useRef(0);
+  useEffect(() => {
+    if (open) openedAt.current = Date.now();
+  }, [open]);
   const plan = readPlanChoice();
   const bg = darkTheme ? "#1e222d" : "#ffffff";
   const fg = darkTheme ? "#d1d4dc" : "#131722";
@@ -144,7 +149,11 @@ export function ProfileMenu({
       anchorPosition={usePos ? (anchorPosition ?? undefined) : undefined}
       anchorEl={usePos ? null : anchorEl}
       open={open}
-      onClose={onClose}
+      onClose={(_event, reason) => {
+        // The click that opens the menu can land on the backdrop in the same press.
+        if (reason === "backdropClick" && Date.now() - openedAt.current < 400) return;
+        onClose();
+      }}
       anchorOrigin={{ vertical: "bottom", horizontal: rtl ? "right" : "left" }}
       transformOrigin={{ vertical: "top", horizontal: rtl ? "right" : "left" }}
       slotProps={{

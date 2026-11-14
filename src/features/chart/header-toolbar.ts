@@ -355,8 +355,14 @@ export function mountHeaderToolbar(
       }),
     );
   };
-  profileBtn.addEventListener("click", openProfileMenu);
-  profileBtn.addEventListener("pointerdown", openProfileMenu);
+  // Click only, after the press finishes. pointerdown opened the menu and the
+  // same press closed it, so the account menu needed several clicks.
+  profileBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+    window.setTimeout(() => openProfileMenu(e), 40);
+  });
 
   // Place profile immediately before Symbol Search (Faraz: avatar → search pill).
   // Open the Forge symbol list from the header symbol and the chart legend title.

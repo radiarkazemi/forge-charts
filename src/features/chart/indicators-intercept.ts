@@ -136,18 +136,18 @@ function ensureStyles(doc: Document): void {
   style.textContent = `
 #${ROOT_ID} {
   position: fixed; inset: 0; z-index: 2147483646;
-  display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: stretch; justify-content: center;
   font-family: -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif;
   background: rgba(0,0,0,0.45);
 }
 #${ROOT_ID} .fi-panel {
-  width: min(860px, 94vw); height: min(680px, 86vh);
+  width: min(480px, 100vw); height: 100%; margin: 0 auto;
   background: #fff; color: #131722;
-  border-radius: 8px; border: 1px solid #e0e3eb;
-  box-shadow: 0 16px 48px rgba(0,0,0,0.28);
+  border-radius: 0; border: 0;
+  box-shadow: none;
   display: flex; flex-direction: column; overflow: hidden;
 }
-#${ROOT_ID}.fi-dark .fi-panel { background: #1e222d; color: #d1d4dc; border-color: #2a2e39; }
+#${ROOT_ID}.fi-dark .fi-panel { background: #000; color: #f2f2f2; }
 #${ROOT_ID} .fi-head {
   display: flex; align-items: center; gap: 8px;
   padding: 12px 16px; border-bottom: 1px solid #e0e3eb; flex-shrink: 0;
@@ -159,32 +159,29 @@ function ensureStyles(doc: Document): void {
   width: 32px; height: 32px; border-radius: 6px; font-size: 20px; line-height: 1;
 }
 #${ROOT_ID} .fi-close:hover { background: rgba(120,123,134,0.12); color: inherit; }
-#${ROOT_ID} .fi-body { display: flex; flex: 1; min-height: 0; }
-#${ROOT_ID} .fi-side {
-  width: 188px; flex-shrink: 0; background: #f0f3fa; border-right: 1px solid #e0e3eb;
-  overflow-y: auto; padding: 10px 8px;
-}
-#${ROOT_ID}.fi-dark .fi-side { background: #131722; border-right-color: #2a2e39; }
+#${ROOT_ID} .fi-body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+#${ROOT_ID} .fi-side { flex: 1; overflow-y: auto; padding: 8px 0 24px; background: transparent; }
 #${ROOT_ID} .fi-side-h {
-  padding: 4px 8px; margin: 8px 0 4px; font-size: 10.5px; font-weight: 700;
-  letter-spacing: 0.6px; color: #787b86; text-transform: uppercase;
+  padding: 16px 16px 6px; margin: 0; font-size: 11px; font-weight: 600;
+  letter-spacing: 0.8px; color: #8b8b8b; text-transform: uppercase;
 }
 #${ROOT_ID} .fi-nav {
-  width: 100%; display: flex; align-items: center; gap: 8px;
-  border: 0; border-radius: 6px; padding: 8px; margin-bottom: 2px;
-  background: transparent; color: inherit; cursor: pointer; font-size: 13px; font-weight: 500; text-align: left;
+  width: 100%; display: flex; align-items: center; gap: 14px;
+  border: 0; border-radius: 0; padding: 13px 16px; margin: 0;
+  background: transparent; color: inherit; cursor: pointer; font-size: 16px; font-weight: 500; text-align: left;
 }
-#${ROOT_ID} .fi-nav.is-active { background: rgba(41,98,255,0.14); color: #2962ff; font-weight: 700; }
-#${ROOT_ID}.fi-dark .fi-nav.is-active { background: rgba(41,98,255,0.22); color: #8ab4ff; }
+#${ROOT_ID} .fi-nav svg { width: 22px; height: 22px; flex: 0 0 22px; }
+#${ROOT_ID} .fi-nav .fi-chev { margin-left: auto; opacity: 0.7; }
 #${ROOT_ID} .fi-nav:hover { background: rgba(19,23,34,0.04); }
-#${ROOT_ID}.fi-dark .fi-nav:hover { background: rgba(209,212,220,0.06); }
+#${ROOT_ID}.fi-dark .fi-nav:hover { background: rgba(255,255,255,0.06); }
 #${ROOT_ID} .fi-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 #${ROOT_ID} .fi-search-wrap { padding: 12px 16px 8px; flex-shrink: 0; }
 #${ROOT_ID} .fi-search {
-  width: 100%; box-sizing: border-box; border-radius: 8px; border: 1px solid #e0e3eb;
-  padding: 10px 12px; font-size: 13px; background: #f7f8fa; color: inherit; outline: none;
+  width: 100%; box-sizing: border-box; border-radius: 10px; border: 1px solid #e0e3eb;
+  padding: 10px 12px 10px 36px; font-size: 15px; background: #f7f8fa url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238b8b8b' stroke-width='2'><circle cx='11' cy='11' r='7'/><path d='m20 20-3.5-3.5'/></svg>") 12px 50% no-repeat;
+  color: inherit; outline: none;
 }
-#${ROOT_ID}.fi-dark .fi-search { background: rgba(120,123,134,0.1); border-color: #2a2e39; color: #d1d4dc; }
+#${ROOT_ID}.fi-dark .fi-search { background-color: #1a1a1a; border-color: #2a2a2a; color: #f2f2f2; }
 #${ROOT_ID} .fi-search:focus { border-color: #2962ff; }
 #${ROOT_ID} .fi-list { flex: 1; overflow-y: auto; padding: 4px 0 12px; }
 #${ROOT_ID} .fi-sec {
@@ -227,7 +224,71 @@ function ensureStyles(doc: Document): void {
   (doc.head || doc.documentElement).appendChild(style);
 }
 
-type NavId = "favorites" | "myScripts" | "technicals" | "editorsPicks" | "top" | "trending";
+type NavId =
+  | "favorites"
+  | "myScripts"
+  | "purchased"
+  | "technicals"
+  | "fundamentals"
+  | "editorsPicks"
+  | "top"
+  | "trending"
+  | "marketplace";
+
+const STUDY_NAVS = new Set<NavId>(["favorites", "myScripts", "technicals", "editorsPicks", "top", "trending"]);
+
+const CHEV = `<svg class="fi-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 6 6 6-6 6"/></svg>`;
+
+function homeIcon(id: NavId): string {
+  const p = `viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"`;
+  switch (id) {
+    case "favorites":
+      return `<svg ${p}><path d="m12 3 2.4 5.2 5.6.7-4.2 3.8 1.1 5.6L12 15.8 7.1 18.3 8.2 12.7 4 8.9l5.6-.7L12 3z"/></svg>`;
+    case "myScripts":
+      return `<svg ${p}><circle cx="12" cy="8" r="3"/><path d="M5 19c1.2-3 3.4-4.5 7-4.5S17.8 16 19 19"/></svg>`;
+    case "purchased":
+      return `<svg ${p}><rect x="4" y="7" width="16" height="12" rx="1.5"/><path d="M8 7V6a4 4 0 0 1 8 0v1"/></svg>`;
+    case "technicals":
+      return `<svg ${p}><path d="M4 16l5-5 3 3 8-8"/><path d="M14 6h6v6"/></svg>`;
+    case "fundamentals":
+      return `<svg ${p}><path d="M5 19V9M10 19V5M15 19v-7M20 19V8"/></svg>`;
+    case "editorsPicks":
+      return `<svg ${p}><path d="M6 4h9a2 2 0 0 1 2 2v14l-6.5-3L4 20V6a2 2 0 0 1 2-2z"/></svg>`;
+    case "top":
+      return `<svg ${p}><path d="M5 19V9M10 19V5M15 19v-7M20 19V8"/></svg>`;
+    case "trending":
+      return `<svg ${p}><path d="M12 3s2 3 2 6a2 2 0 0 1-4 0c0-1 .5-2 1-3-2 1-4 3.5-4 6a5 5 0 0 0 10 0c0-4-3-7-5-9z"/></svg>`;
+    default:
+      return `<svg ${p}><path d="M6 8h12l-1 11H7L6 8z"/><path d="M9 8V7a3 3 0 0 1 6 0v1"/></svg>`;
+  }
+}
+
+const HOME_GROUPS: readonly { heading: string; items: readonly { id: NavId; label: string }[] }[] = [
+  {
+    heading: "PERSONAL",
+    items: [
+      { id: "favorites", label: "Favorites" },
+      { id: "myScripts", label: "My scripts" },
+      { id: "purchased", label: "Purchased" },
+    ],
+  },
+  {
+    heading: "BUILT-IN",
+    items: [
+      { id: "technicals", label: "Technicals" },
+      { id: "fundamentals", label: "Fundamentals" },
+    ],
+  },
+  {
+    heading: "COMMUNITY",
+    items: [
+      { id: "editorsPicks", label: "Editors' picks" },
+      { id: "top", label: "Top" },
+      { id: "trending", label: "Trending" },
+      { id: "marketplace", label: "Marketplace" },
+    ],
+  },
+];
 
 function filterEntries(nav: NavId, q: string): ForgeIndicatorEntry[] {
   const query = q.trim().toLowerCase();
@@ -238,8 +299,8 @@ function filterEntries(nav: NavId, q: string): ForgeIndicatorEntry[] {
     }
     if (nav === "favorites") return e.favorite;
     if (nav === "myScripts") return e.section === "forge";
-    if (nav === "technicals") return true;
-    return true;
+    if (nav === "technicals" || nav === "editorsPicks" || nav === "top" || nav === "trending") return true;
+    return false;
   });
 }
 
@@ -317,78 +378,98 @@ function openOverlay(doc: Document, widget: IChartingLibraryWidget): void {
     !!doc.querySelector(".theme-dark");
   root.className = dark ? "fi-dark" : "";
 
-  let nav: NavId = "favorites";
+  let nav: NavId | null = null;
   let query = "";
 
+  const homeHtml = HOME_GROUPS.map(
+    (group) =>
+      `<div class="fi-side-h">${group.heading}</div>` +
+      group.items
+        .map(
+          (item) =>
+            `<button type="button" class="fi-nav" data-nav="${item.id}">${homeIcon(item.id)}<span>${item.label}</span>${CHEV}</button>`,
+        )
+        .join(""),
+  ).join("");
+
+  const paint = () => {
+    const title = root.querySelector(".fi-title");
+    const body = root.querySelector(".fi-side");
+    if (!title || !body) return;
+    if (query.trim()) {
+      title.textContent = "Indicators, metrics, and strategies";
+      body.innerHTML = `<div class="fi-list"></div>`;
+      paintList(body.querySelector(".fi-list") as HTMLElement, "technicals", query);
+      return;
+    }
+    if (!nav) {
+      title.textContent = "Indicators, metrics, and strategies";
+      body.innerHTML = homeHtml;
+      return;
+    }
+    const label = HOME_GROUPS.flatMap((g) => g.items).find((item) => item.id === nav)?.label ?? "Indicators";
+    title.textContent = label;
+    if (!STUDY_NAVS.has(nav)) {
+      body.innerHTML = `<div class="fi-empty">Nothing here yet</div>`;
+      return;
+    }
+    body.innerHTML = `<div class="fi-list"></div>`;
+    paintList(body.querySelector(".fi-list") as HTMLElement, nav, "");
+  };
+
   root.innerHTML = `
-    <div class="fi-panel" role="dialog" aria-label="Indicators">
+    <div class="fi-panel" role="dialog" aria-label="Indicators, metrics, and strategies">
       <div class="fi-head">
+        <button type="button" class="fi-close fi-back" aria-label="Back" hidden>‹</button>
         <div class="fi-title">Indicators, metrics, and strategies</div>
         <button type="button" class="fi-close" aria-label="Close">×</button>
       </div>
-      <div class="fi-body">
-        <div class="fi-side">
-          <div class="fi-side-h">PERSONAL</div>
-          <button type="button" class="fi-nav is-active" data-nav="favorites">★ Favorites</button>
-          <button type="button" class="fi-nav" data-nav="myScripts">👤 My scripts</button>
-          <div class="fi-side-h">BUILT-IN</div>
-          <button type="button" class="fi-nav" data-nav="technicals">📈 Technicals</button>
-          <div class="fi-side-h">COMMUNITY</div>
-          <button type="button" class="fi-nav" data-nav="editorsPicks">🏅 Editors' picks</button>
-          <button type="button" class="fi-nav" data-nav="top">📊 Top</button>
-          <button type="button" class="fi-nav" data-nav="trending">🔥 Trending</button>
-          <div class="fi-foot"><button type="button" class="fi-full">Full library…</button></div>
-        </div>
-        <div class="fi-main">
-          <div class="fi-search-wrap"><input class="fi-search" type="search" placeholder="Search" /></div>
-          <div class="fi-list"></div>
-        </div>
-      </div>
+      <div class="fi-search-wrap"><input class="fi-search" type="search" placeholder="Search" /></div>
+      <div class="fi-side"></div>
     </div>
   `;
-
-  const listEl = root.querySelector(".fi-list") as HTMLElement;
+  paint();
   const searchEl = root.querySelector(".fi-search") as HTMLInputElement;
-  paintList(listEl, nav, query);
-  window.setTimeout(() => searchEl?.focus(), 30);
+  const backBtn = root.querySelector(".fi-back") as HTMLButtonElement;
+  const syncBack = () => {
+    backBtn.hidden = !nav && !query.trim();
+  };
+  syncBack();
 
   root.onclick = (ev) => {
     const t = ev.target as HTMLElement | null;
     if (!t) return;
-    if (t === root || t.classList.contains("fi-close")) {
+    if (t.classList.contains("fi-back")) {
+      nav = null;
+      query = "";
+      searchEl.value = "";
+      paint();
+      syncBack();
+      return;
+    }
+    if (t === root || (t.classList.contains("fi-close") && !t.classList.contains("fi-back"))) {
       closeOverlay(doc);
       return;
     }
     const navBtn = t.closest(".fi-nav") as HTMLElement | null;
     if (navBtn?.dataset.nav) {
       nav = navBtn.dataset.nav as NavId;
-      root.querySelectorAll(".fi-nav").forEach((b) => b.classList.remove("is-active"));
-      navBtn.classList.add("is-active");
-      paintList(listEl, nav, query);
+      paint();
+      syncBack();
       return;
     }
     const row = t.closest(".fi-row") as HTMLElement | null;
     if (row?.dataset.studyId) {
       void addStudy(widget, row.dataset.studyId, row.dataset.studyName || row.dataset.studyId);
       closeOverlay(doc);
-      return;
-    }
-    if (t.classList.contains("fi-full")) {
-      closeOverlay(doc);
-      allowNativeIndicatorsOnce();
-      window.setTimeout(() => {
-        try {
-          widget.activeChart().executeActionById("insertIndicator");
-        } catch {
-          /* ignore */
-        }
-      }, 40);
     }
   };
 
   searchEl.oninput = () => {
     query = searchEl.value;
-    paintList(listEl, nav, query);
+    if (query.trim()) nav = null;
+    paint();
+    syncBack();
   };
 
   // Also notify React shell (optional parallel UI) — overlay is source of truth.
@@ -449,8 +530,10 @@ export function mountIndicatorsIntercept(widget: IChartingLibraryWidget): () => 
 
   const onPointer = (event: Event) => {
     if (disposed || !forgeReplaceAllowed()) return;
+    const view = attachedDoc?.defaultView;
+    const Ctor = view?.Element;
     const raw = event.target;
-    if (!(raw instanceof Element)) return;
+    if (!Ctor || !(raw instanceof Ctor)) return;
     if (raw.closest?.(`#${ROOT_ID}`)) return;
     if (!isIndicatorsControl(raw)) return;
     event.preventDefault();

@@ -342,7 +342,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
       : baseDisabled;
 
   const customCss = mobile && !secondary
-    ? "/charts/tv-header-mobile.css?v=7"
+    ? "/charts/tv-header-mobile.css?v=8"
     : hideHeader
       ? "/charts/tv-header-secondary.css?v=5"
       : "/charts/tv-header.css?v=2";

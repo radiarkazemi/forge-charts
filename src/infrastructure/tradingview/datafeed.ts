@@ -1,8 +1,8 @@
-import { normalizeTicker, parseInterval, intervalSeconds, isMarketSessionOpen, isFxDailyBreak, SYMBOL_TYPE_LABELS, type Bar, type SymbolInfo } from "@/domain";
+import { normalizeTicker, parseInterval, intervalSeconds, isMarketSessionOpen, SYMBOL_TYPE_LABELS, type Bar, type SymbolInfo } from "@/domain";
 import { createStore, type MarketDataService, type Store, type SymbolRepository, type Unsubscribe } from "@/application";
 import { EXCHANGE_PRIORITY } from "@/infrastructure/symbols/static-symbol-repository";
-import { fillSingleHourGaps } from "@/infrastructure/market-data/hour-gaps";
-import { canonicalizeBar, collapseDailyBars } from "@/infrastructure/market-data/session-bars";
+import { presentCandleSeries } from "@/infrastructure/market-data/candle-series";
+import { canonicalizeBar } from "@/infrastructure/market-data/session-bars";
 import {
   appendLive,
   emptyTseSeries,
@@ -552,16 +552,7 @@ export class TradingViewDatafeed implements IBasicDataFeed {
    * Real candles only. Duplicate timestamps collapse. Empty minutes are not filled.
    */
   private closeBarHoles(symbol: SymbolInfo, resolution: string, bars: readonly Bar[]): Bar[] {
-    const collapsed = collapseDailyBars(symbol, resolution, bars);
-    if (symbol.exchange.toUpperCase() === "TSE") return collapsed;
-    const step = barStep(resolution);
-    const aligned = fillSingleHourGaps(collapsed, step);
-    // Daily bars are stamped at 17:00 New York on purpose. Only intraday
-    // prints inside the 17:00–18:00 break are dropped — that hour has no trades.
-    if (step <= 0 || step >= 86_400) return aligned;
-    const session = (symbol.session || "").toLowerCase();
-    if (!session.startsWith("1800-1700") && !session.startsWith("1700-1700")) return aligned;
-    return aligned.filter((bar) => !isFxDailyBreak(bar.time));
+    return presentCandleSeries(symbol, resolution, bars, barStep(resolution));
   }
 
   private tsePackKey(symbol: SymbolInfo, resolution: string): string {
