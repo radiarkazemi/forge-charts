@@ -54,38 +54,33 @@
   cursor: pointer !important;
 }
 
-html,
-body,
-.chart-page {
-  background: #101010 !important;
+/* The library leaves a 4px gutter between the header, the drawing rail, and
+   the plot. That gutter uses the platform color (#ebebeb / #303030), which
+   reads as a frame. The theme class is on <html>. Match the gutter to the pane. */
+html.theme-light {
+  --tv-color-platform-background: #ffffff;
+  --tv-color-pane-background: #ffffff;
+  --themed-color-chart-page-bg: #ffffff;
 }
 
-/* Drawing rail stops above the chart's own bottom bar. */
-.layout__area--left {
-  top: 0 !important;
-  bottom: 39px !important;
-  left: 0 !important;
-  height: auto !important;
-  width: 52px !important;
-  background: #101010 !important;
-  border-right: 1px solid #1a1a1a !important;
+html.theme-dark {
+  --tv-color-platform-background: #131722;
+  --tv-color-pane-background: #131722;
+  --themed-color-chart-page-bg: #131722;
 }
 
-.layout__area--left .tv-group,
-.drawingToolbar-g3SlJJk1,
-[class*="drawingToolbar"] {
-  border-radius: 0 !important;
-  overflow: hidden auto !important;
-  box-shadow: none !important;
-  background: #101010 !important;
-  height: 100% !important;
-  width: 52px !important;
-  color: #d1d4dc !important;
+html.theme-light,
+html.theme-light body,
+html.theme-light .chart-page {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
 }
 
-.layout__area--left button,
-.layout__area--left [role="button"] {
-  color: #d1d4dc !important;
+html.theme-dark,
+html.theme-dark body,
+html.theme-dark .chart-page {
+  background: #131722 !important;
+  background-color: #131722 !important;
 }
 
 /* Hide the horizontal “favorite drawings” strip — TV mobile uses the left pill. */
