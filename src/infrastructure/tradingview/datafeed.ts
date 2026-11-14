@@ -431,10 +431,7 @@ export class TradingViewDatafeed implements IBasicDataFeed {
           onResult([], { noData: true });
           return;
         }
-        const collapsed = fillSingleHourGaps(
-          collapseDailyBars(symbol, resolution, slice),
-          barStep(resolution),
-        );
+        const collapsed = this.closeBarHoles(symbol, resolution, slice);
         const ready =
           symbol.exchange.toUpperCase() === "TSE"
             ? this.packTseBars(symbol, String(resolution), collapsed, periodParams)
@@ -474,10 +471,7 @@ export class TradingViewDatafeed implements IBasicDataFeed {
         onResult([], { noData: true });
         return;
       }
-      const collapsed = fillSingleHourGaps(
-        collapseDailyBars(symbol, resolution, filtered),
-        barStep(resolution),
-      );
+      const collapsed = this.closeBarHoles(symbol, resolution, filtered);
       const ready =
         symbol.exchange.toUpperCase() === "TSE"
           ? await this.packTseBars(symbol, String(resolution), collapsed, periodParams)
@@ -553,6 +547,19 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   }
 
   /* ── internals ─────────────────────────────────────────────────────── */
+
+  /**
+   * Fill short missing-candle holes on every book except Tehran equities.
+   * Iran's overnight close is longer than two hours and stays empty.
+   * A weekend is longer than twelve hours and stays empty.
+   */
+  private closeBarHoles(symbol: SymbolInfo, resolution: string, bars: readonly Bar[]): Bar[] {
+    const collapsed = collapseDailyBars(symbol, resolution, bars);
+    const exchange = symbol.exchange.toUpperCase();
+    if (exchange === "TSE") return collapsed;
+    const iran = exchange === "IRAN" || exchange === "TGJU";
+    return fillSingleHourGaps(collapsed, barStep(resolution), iran ? 2 * 60 * 60 : 12 * 60 * 60);
+  }
 
   private tsePackKey(symbol: SymbolInfo, resolution: string): string {
     return `${symbol.exchange}:${symbol.ticker}|${resolution}`;
