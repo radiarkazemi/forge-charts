@@ -83,17 +83,14 @@ html.theme-dark .chart-page {
   background-color: #131722 !important;
 }
 
-/* Hide the horizontal “favorite drawings” strip — TV mobile uses the left pill. */
-[class*="drawingToolbarBottom"],
-[class*="favorite-drawings"],
-[class*="favored-tools"],
+/* Favorite drawing tools stay on the phone, above the plot and the time scale. */
+[data-name="favorite-drawings-toolbar"],
 [class*="FavoriteDrawingToolbar"],
-[class*="floating-toolbar"],
-[class*="floatingToolbar"],
-.drawingToolbar-C0LOKuDw,
-div[data-name="favorite-drawings-toolbar"] {
-  display: none !important;
-  height: 0 !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
+[class*="favoriteDrawingToolbar"],
+[class*="favorite-drawings"],
+[class*="favored-tools"] {
+  visibility: visible !important;
+  pointer-events: auto !important;
+  z-index: 40 !important;
+  max-width: calc(100vw - 8px) !important;
 }

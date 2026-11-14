@@ -167,6 +167,30 @@ const GRIDS: Record<ChartLayoutId, ChartLayoutGrid> = {
 
 const AREA_NAMES = ["a", "b", "c", "d"] as const;
 
+/** Phone menu: one chart, or the stacked 2 and stacked 3 from the mobile reference. */
+export const PHONE_LAYOUT_IDS: readonly ChartLayoutId[] = ["s", "2v", "3v"];
+
+/**
+ * A phone is too narrow for side-by-side panes. Two charts stack, three charts
+ * stack, and a saved desktop grid opens as the stacked pair.
+ */
+export function phoneChartLayout(stored: ChartLayoutId): ChartLayoutId {
+  if (
+    stored === "3v" ||
+    stored === "3s" ||
+    stored === "3h" ||
+    stored === "3l" ||
+    stored === "3r" ||
+    stored === "2-1" ||
+    stored === "1-2"
+  ) {
+    return "3v";
+  }
+  if (stored === "2v" || stored === "2h") return "2v";
+  if (stored === "s") return "s";
+  return "2v";
+}
+
 export function getChartLayoutGrid(id: ChartLayoutId): ChartLayoutGrid {
   return GRIDS[id] ?? GRIDS.s;
 }
