@@ -92,6 +92,10 @@ const ENABLED_FEATURES: ChartingLibraryFeatureset[] = [
 const DISABLED_FEATURES: ChartingLibraryFeatureset[] = [
   "popup_hints",
   "symbol_info_price_source",
+  // Forge has its own right rail. The library toolbar is an empty strip
+  // between the price scale and that rail. The featureset is declared on the
+  // trading-platform list; the chart CSS collapses the same strip either way.
+  "hide_right_toolbar" as ChartingLibraryFeatureset,
   // Keep the drawing toolbar visible on first visit (matches TradingView).
   "hide_left_toolbar_by_default",
   // Do not auto-create a Volume pane — user adds it via Indicators if wanted.
@@ -342,10 +346,10 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
       : baseDisabled;
 
   const customCss = mobile && !secondary
-    ? "/charts/tv-header-mobile.css?v=2"
+    ? "/charts/tv-header-mobile.css?v=3"
     : hideHeader
-      ? "/charts/tv-header-secondary.css?v=4"
-      : "/charts/tv-header.css";
+      ? "/charts/tv-header-secondary.css?v=5"
+      : "/charts/tv-header.css?v=2";
 
   return {
     container: input.container,

@@ -16,6 +16,7 @@ import { MobileBottomBar } from "./MobileBottomBar";
 import { MobileTopBar } from "./MobileTopBar";
 import { SidePanel } from "./SidePanel";
 import { SideRail } from "./SideRail";
+import { SubscriptionPage } from "@/features/billing/SubscriptionPage";
 
 interface AppShellProps {
   readonly onSignOut: () => void;
@@ -48,6 +49,7 @@ export function AppShell({ onSignOut }: AppShellProps) {
   const [symbolSearchOpen, setSymbolSearchOpen] = useState(false);
   const [indicatorsOpen, setIndicatorsOpen] = useState(false);
   const [profileMenuPos, setProfileMenuPos] = useState<ProfileAnchorRect | null>(null);
+  const [subscribeOpen, setSubscribeOpen] = useState(false);
 
   useEffect(() => {
     document.title = `${symbol} — Forge Charts`;
@@ -225,10 +227,21 @@ export function AppShell({ onSignOut }: AppShellProps) {
           setProfileMenuPos(null);
           setProfileOpen(true);
         }}
+        onOpenSubscription={() => {
+          setProfileMenuPos(null);
+          setSubscribeOpen(true);
+        }}
         onSignOut={onSignOut}
         alertCount={alertCount}
       />
       <AlertToaster />
+      {subscribeOpen ? (
+        <SubscriptionPage
+          signedIn
+          onBack={() => setSubscribeOpen(false)}
+          onSignIn={() => setSubscribeOpen(false)}
+        />
+      ) : null}
     </Box>
   );
 }
