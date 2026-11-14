@@ -20,6 +20,7 @@ import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import CreditCardOutlinedIcon from "@mui/icons-material/CreditCardOutlined";
 import type { UiLanguage, UserProfile } from "@/application";
 import { isDevSite } from "@/dev-site";
+import { formatPrice, readPlanChoice } from "@/features/billing/plans";
 
 interface ProfileMenuProps {
   readonly anchorPosition?: { top: number; left: number } | null;
@@ -32,6 +33,7 @@ interface ProfileMenuProps {
   readonly onToggleTheme: () => void;
   readonly onCycleLanguage: () => void;
   readonly onOpenProfile: () => void;
+  readonly onOpenSubscription: () => void;
   readonly onSignOut: () => void;
   readonly alertCount?: number;
 }
@@ -48,9 +50,12 @@ const COPY = {
     language: "Language",
     langValue: "English",
     signOut: "Sign out",
-    subscription: "Subscription status",
-    active: "Active",
-    credit: "Open access",
+    subscription: "Subscription",
+    active: "Selected",
+    credit: "Monthly and yearly",
+    month: "Monthly",
+    year: "Yearly",
+    plans: "Plans",
   },
   fa: {
     plan: "فورج پایه",
@@ -63,9 +68,12 @@ const COPY = {
     language: "زبان",
     langValue: "فارسی",
     signOut: "خروج از حساب",
-    subscription: "وضعیت اشتراک",
-    active: "فعال",
-    credit: "دسترسی آزاد",
+    subscription: "اشتراک",
+    active: "انتخاب شد",
+    credit: "ماهانه و سالانه",
+    month: "ماهانه",
+    year: "سالانه",
+    plans: "طرح‌ها",
   },
 } as const;
 
@@ -99,12 +107,14 @@ export function ProfileMenu({
   onToggleTheme,
   onCycleLanguage,
   onOpenProfile,
+  onOpenSubscription,
   onSignOut,
   alertCount = 0,
 }: ProfileMenuProps) {
   const usePos = Boolean(anchorPosition);
   const t = COPY[language];
   const rtl = language === "fa";
+  const plan = readPlanChoice();
   const bg = darkTheme ? "#1e222d" : "#ffffff";
   const fg = darkTheme ? "#d1d4dc" : "#131722";
   const muted = darkTheme ? "#787b86" : "#6a6d78";
@@ -165,7 +175,7 @@ export function ProfileMenu({
       <Box
         onClick={() => {
           onClose();
-          onOpenProfile();
+          onOpenSubscription();
         }}
         sx={{
           mx: 1.5,
@@ -205,16 +215,18 @@ export function ProfileMenu({
                 px: 0.75,
                 py: 0.1,
                 borderRadius: 999,
-                bgcolor: "rgba(8,153,129,0.15)",
-                color: "#089981",
+                bgcolor: plan ? "rgba(8,153,129,0.15)" : "rgba(240,195,106,0.16)",
+                color: plan ? "#089981" : "#c9a15a",
                 fontSize: 11,
                 fontWeight: 700,
               }}
             >
-              {t.active}
+              {plan ? t.active : t.plans}
             </Box>
           </Box>
-          <Typography sx={{ color: muted, fontSize: 11, mt: 0.2 }}>{t.credit}</Typography>
+          <Typography sx={{ color: muted, fontSize: 11, mt: 0.2 }}>
+            {plan ? `${plan.plan === "month" ? t.month : t.year} · ${formatPrice(plan.plan, plan.currency, rtl)}` : t.credit}
+          </Typography>
         </Box>
         <ChevronRightIcon
           fontSize="small"

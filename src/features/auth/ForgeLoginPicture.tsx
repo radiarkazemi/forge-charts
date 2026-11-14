@@ -58,6 +58,7 @@ const COPY = {
     terms: "Terms",
     privacy: "Privacy Policy",
     help: "Help",
+    subscribe: "Subscribe",
     newHere: "New to Forge?",
     haveAccount: "Already on Forge?",
     switchSign: "Sign in",
@@ -81,6 +82,7 @@ const COPY = {
     terms: "قوانین",
     privacy: "حریم خصوصی",
     help: "راهنما",
+    subscribe: "اشتراک",
     newHere: "تازه‌وارد فورج هستید؟",
     haveAccount: "حساب دارید؟",
     switchSign: "ورود",
@@ -232,10 +234,12 @@ function FooterLinks({
   items,
   compact,
   onOpen,
+  subscribeLabel,
 }: {
   readonly items: readonly { id: InfoPageId; label: string }[];
   readonly compact?: boolean;
   readonly onOpen: (page: InfoPageId) => void;
+  readonly subscribeLabel: string;
 }) {
   return (
     <Box dir="ltr" sx={{
@@ -262,6 +266,23 @@ function FooterLinks({
           }}>{item.label}</Box>
         </Box>
       ))}
+      <Box sx={{ display: "flex", alignItems: "center", gap: compact ? "1.6cqw" : 1.25 }}>
+        <Box sx={{ opacity: 0.55 }}>|</Box>
+        <Box component="button" type="button" onClick={() => {
+          const url = new URL(window.location.href);
+          url.searchParams.set("view", "subscribe");
+          window.location.assign(`${url.pathname}${url.search}`);
+        }} sx={{
+          p: 0,
+          border: "none",
+          bgcolor: "transparent",
+          color: "#f0c36a",
+          font: "inherit",
+          fontSize: "inherit",
+          fontWeight: 700,
+          cursor: "pointer",
+        }}>{subscribeLabel}</Box>
+      </Box>
     </Box>
   );
 }
@@ -957,7 +978,7 @@ export function ForgeLoginPicture({
             </Box>
           ) : null}
           <Box sx={{ containerType: "inline-size", flex: "0 0 auto", py: 0.4 }}>
-            <FooterLinks items={footer} compact onOpen={setInfoPage} />
+            <FooterLinks items={footer} compact onOpen={setInfoPage} subscribeLabel={t.subscribe} />
           </Box>
           <MovingTape quotes={quotes} />
         </Box>
@@ -1023,7 +1044,7 @@ export function ForgeLoginPicture({
               <Box sx={{ color: "#ffb4b4", fontSize: 13, textAlign: "center", mt: 1 }}>{message}</Box>
             ) : null}
             <Box sx={{ mt: 1.75 }}>
-              <FooterLinks items={footer} onOpen={setInfoPage} />
+              <FooterLinks items={footer} onOpen={setInfoPage} subscribeLabel={t.subscribe} />
             </Box>
             {!signup ? (
               <Box sx={{ textAlign: "center", mt: 0.75 }}>

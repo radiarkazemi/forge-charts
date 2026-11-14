@@ -24,6 +24,7 @@ import { AppThemeProvider } from "./AppThemeProvider";
 import { createServices, type Services } from "./container";
 import { isDevSite } from "../dev-site";
 import { DevLanding } from "@/features/auth/DevLanding";
+import { SubscriptionPage } from "@/features/billing/SubscriptionPage";
 import { ServicesProvider } from "./ServicesProvider";
 
 function buildSessionServices(session: AuthSession): Services {
@@ -209,6 +210,27 @@ export function App() {
 
   if (devSite && view === "landing") {
     return <DevLanding signedIn={Boolean(session && services)} />;
+  }
+
+  if (view === "subscribe" && !(needsSafetyBoot && session)) {
+    const signedIn = Boolean(session && services);
+    const go = (next: string | null) => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("view");
+      if (next) url.searchParams.set("view", next);
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+      setView(next);
+    };
+    return (
+      <ThemeProvider theme={gateTheme}>
+        <CssBaseline />
+        <SubscriptionPage
+          signedIn={signedIn}
+          onBack={() => go(signedIn ? null : devSite ? "login" : null)}
+          onSignIn={() => go("login")}
+        />
+      </ThemeProvider>
+    );
   }
 
   if (needsSafetyBoot && session && view !== "login") {
