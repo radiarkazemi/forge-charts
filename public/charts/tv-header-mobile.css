@@ -83,14 +83,16 @@ html.theme-dark .chart-page {
   background-color: #131722 !important;
 }
 
-/* Favorite drawing tools stay on the phone, above the plot and the time scale. */
+/* Favorite drawing tools stay on the phone. Do not fix their width: the
+   library grows the bar when a tool is starred or its color changes. */
+.tv-floating-toolbar:has([data-name^="FavoriteToolbar"]),
 [data-name="favorite-drawings-toolbar"],
 [class*="FavoriteDrawingToolbar"],
 [class*="favoriteDrawingToolbar"],
+[class*="favorited-drawings"],
 [class*="favorite-drawings"],
 [class*="favored-tools"] {
   visibility: visible !important;
   pointer-events: auto !important;
   z-index: 40 !important;
-  max-width: calc(100vw - 8px) !important;
 }

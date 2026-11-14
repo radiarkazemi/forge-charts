@@ -927,9 +927,11 @@ const PIN_STYLE_ID = "forge-floating-pin";
 
 const FAVORITE_TOOLBAR_SELECTOR = [
   '[data-name="favorite-drawings-toolbar"]',
+  '[data-name^="FavoriteToolbar"]',
   '[data-forge-fav="1"]',
   '[class*="FavoriteDrawingToolbar"]',
   '[class*="favoriteDrawingToolbar"]',
+  '[class*="favorited-drawings"]',
   '[class*="favorite-drawings"]',
   '[class*="favored-tools"]',
 ].join(",");
@@ -998,7 +1000,33 @@ export function mountFloatingChromePin(container: HTMLElement): () => void {
     return rect.width >= 260 && rect.height >= 180;
   };
 
+  const releasePin = (el: HTMLElement) => {
+    if (el.dataset.forgePin !== "1" && el.dataset.forgePin !== "drag" && !el.style.getPropertyValue("--forge-pin-left")) {
+      return;
+    }
+    delete el.dataset.forgePin;
+    delete el.dataset.forgePinLock;
+    delete el.dataset.forgePinScroll;
+    el.style.removeProperty("--forge-pin-left");
+    el.style.removeProperty("--forge-pin-top");
+    el.style.removeProperty("--forge-pin-max-h");
+    el.style.removeProperty("--forge-pin-max-w");
+  };
+
+  // The chart library rebuilds these bars when a tool's color, line style, or
+  // favorite list changes. A fixed left/top keeps the old width, so the new
+  // button stays off-screen until a refresh.
+  const libraryOwnsToolbar = (el: HTMLElement): boolean => {
+    if (!el.classList.contains("tv-floating-toolbar")) return false;
+    if (el.querySelector(FAVORITE_TOOLBAR_SELECTOR)) return true;
+    return window.matchMedia("(max-width: 900px)").matches;
+  };
+
   const pinElement = (el: HTMLElement, bounds: DOMRect) => {
+    if (libraryOwnsToolbar(el)) {
+      releasePin(el);
+      return;
+    }
     if (el.dataset.forgePin === "drag") return;
     // Settings stays where it was first placed. Re-reading its box on a timer
     // fought the chart library and made the window jump back to the middle.
@@ -1234,6 +1262,9 @@ function favoriteToolbarVisible(el: HTMLElement): boolean {
 }
 
 function findFavoriteToolbar(doc: Document): HTMLElement | null {
+  const liveButton = doc.querySelector<HTMLElement>("[data-name^='FavoriteToolbar']");
+  const liveBar = liveButton?.closest<HTMLElement>(".tv-floating-toolbar");
+  if (liveBar && favoriteToolbarVisible(liveBar)) return liveBar;
   const named = doc.querySelector<HTMLElement>('[data-name="favorite-drawings-toolbar"]');
   if (named && favoriteToolbarVisible(named)) return named;
   const marked = doc.querySelector<HTMLElement>("[data-forge-fav='1']");
@@ -1270,6 +1301,9 @@ export function mountFavoriteToolbar(container: HTMLElement): () => void {
     if (!doc?.body) return;
     const bar = findFavoriteToolbar(doc);
     if (!bar || bar.dataset.forgeFavDrag === "1") return;
+    // The library bar is draggable and rebuilds when favorites or tool style
+    // change. Fixing its left/top left a new tool or a new color off-screen.
+    if (bar.classList.contains("tv-floating-toolbar")) return;
     if (bar.parentElement !== doc.body) doc.body.appendChild(bar);
     if (bar.dataset.forgeFav === "1") {
       ensureFavoriteGrip(bar);
