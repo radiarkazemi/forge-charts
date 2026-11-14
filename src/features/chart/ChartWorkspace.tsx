@@ -5,12 +5,13 @@ import type { ChartLayoutId } from "@/application";
 import { useStore } from "@/shared/hooks/useStore";
 import { BarReplayToolbar } from "./bar-replay/BarReplayToolbar";
 import {
-  clipPathExcludingHole,
+  clipPathExcludingHoles,
   defaultSplitEdges,
   mountFullWidthNavbar,
   paneRectInWorkspace,
   RESIZABLE_LAYOUTS,
   sanitizeSplitEdges,
+  watchFavoriteToolbar,
   watchPrimaryMenusOpen,
   type ChromeInsets,
   type MenuHoleRect,
@@ -77,6 +78,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
    */
   const [menusOpen, setMenusOpen] = useState(false);
   const [menuHole, setMenuHole] = useState<MenuHoleRect | null>(null);
+  const [favHole, setFavHole] = useState<MenuHoleRect | null>(null);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const primaryHostRef = useRef<HTMLDivElement | null>(null);
   const layoutRef = useRef<ChartLayoutId>(layoutId);
@@ -253,6 +255,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
     if (!multi) {
       setMenusOpen(false);
       setMenuHole(null);
+      setFavHole(null);
       return;
     }
     const host = primaryHostRef.current;
@@ -270,6 +273,27 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
         top: state.hole.top - wr.top,
         width: state.hole.width,
         height: state.hole.height,
+      });
+    });
+  }, [multi, chartLayout]);
+
+  // The one favorite-tools bar can sit on any pane. Keep a hole under it so
+  // the pane drawn above the main iframe does not cover the bar.
+  useEffect(() => {
+    if (!multi) return;
+    const host = primaryHostRef.current;
+    if (!host) return;
+    return watchFavoriteToolbar(host, (hole) => {
+      const wr = workspaceRef.current?.getBoundingClientRect();
+      if (!hole || !wr) {
+        setFavHole(hole);
+        return;
+      }
+      setFavHole({
+        left: hole.left - wr.left,
+        top: hole.top - wr.top,
+        width: hole.width,
+        height: hole.height,
       });
     });
   }, [multi, chartLayout]);
@@ -398,11 +422,12 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
         const shown = Boolean(visible && rect && rect.width >= 8 && rect.height >= 8);
         const isActive = shown && activePane === index;
         const symbol = paneSymbols[index] ?? lastSymbol;
+        const holes = [menusOpen ? menuHole : null, favHole];
         const holeClip =
-          shown && rect && menusOpen
-            ? clipPathExcludingHole(
+          shown && rect
+            ? clipPathExcludingHoles(
                 { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-                menuHole,
+                holes,
               )
             : undefined;
         return (
