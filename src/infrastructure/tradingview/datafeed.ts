@@ -549,16 +549,12 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   /* ── internals ─────────────────────────────────────────────────────── */
 
   /**
-   * Fill short missing-candle holes on every book except Tehran equities.
-   * Iran's overnight close is longer than two hours and stays empty.
-   * A weekend is longer than twelve hours and stays empty.
+   * Real candles only. Duplicate timestamps collapse. Empty minutes are not filled.
    */
   private closeBarHoles(symbol: SymbolInfo, resolution: string, bars: readonly Bar[]): Bar[] {
     const collapsed = collapseDailyBars(symbol, resolution, bars);
-    const exchange = symbol.exchange.toUpperCase();
-    if (exchange === "TSE") return collapsed;
-    const iran = exchange === "IRAN" || exchange === "TGJU";
-    return fillSingleHourGaps(collapsed, barStep(resolution), iran ? 2 * 60 * 60 : 12 * 60 * 60);
+    if (symbol.exchange.toUpperCase() === "TSE") return collapsed;
+    return fillSingleHourGaps(collapsed, barStep(resolution));
   }
 
   private tsePackKey(symbol: SymbolInfo, resolution: string): string {

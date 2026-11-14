@@ -325,8 +325,8 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
   const tokens = TOKENS[input.theme];
   const mobile = Boolean(input.isMobile);
   const secondary = Boolean(input.secondaryPane);
-  // Phones: TradingView-mobile shell — no desktop top toolbar (bottom bar owns chrome).
-  const hideHeader = Boolean(input.hideHeader) || secondary || (mobile && !secondary);
+  // One chart navbar. Phones use the library header; a second bar covered it.
+  const hideHeader = Boolean(input.hideHeader) || secondary;
 
   const enabled = ENABLED_FEATURES.filter((f) => {
     if (hideHeader && HEADER_FEATURES.includes(f)) return false;
@@ -346,7 +346,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
       : baseDisabled;
 
   const customCss = mobile && !secondary
-    ? "/charts/tv-header-mobile.css?v=4"
+    ? "/charts/tv-header-mobile.css?v=5"
     : hideHeader
       ? "/charts/tv-header-secondary.css?v=5"
       : "/charts/tv-header.css?v=2";
