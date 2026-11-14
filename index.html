@@ -15,32 +15,7 @@
       Many IR networks block Google; preconnect+stylesheet stalls boot for those
       users while VPN users (and this agent) see a healthy chart.
       UI falls back to Trebuchet / system sans from theme tokens.
-      reCAPTCHA uses recaptcha.net (not google.com) and only when signed out,
-      as an async script with no preconnect.
     -->
-    <script>
-      (function () {
-        function signedIn() {
-          try {
-            if (new URLSearchParams(location.search).get("view") === "login") return false;
-            var keys = ["forge.auth.session.v1", "forge.dev.forge.auth.session.v1"];
-            for (var i = 0; i < keys.length; i++) {
-              var raw = localStorage.getItem(keys[i]);
-              if (!raw || raw.indexOf("userId") === -1) continue;
-              if (sessionStorage.getItem("forge.auth.signedOut.v1") === "1") return false;
-              if (sessionStorage.getItem("forge.dev.forge.auth.signedOut.v1") === "1") return false;
-              return true;
-            }
-          } catch (e) {}
-          return false;
-        }
-        if (signedIn()) return;
-        var script = document.createElement("script");
-        script.async = true;
-        script.src = "https://www.recaptcha.net/recaptcha/api.js?render=explicit";
-        document.head.appendChild(script);
-      })();
-    </script>
     <script>
       // Surface hashed-bundle load failures (stale cache / mid-deploy 404) instead of a blank page.
       window.addEventListener(

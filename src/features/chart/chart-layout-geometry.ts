@@ -642,6 +642,9 @@ export function watchPrimaryMenusOpen(
   let boundDoc: Document | null = null;
 
   const isDrawingChrome = (el: Element): boolean => {
+    // Pinned favorite tools, edit bars, and settings stay clickable when a
+    // pane edge crosses them. The left-toolbar flyout does not punch a hole.
+    if (el.closest("[data-forge-pin='1'], [data-name='favorite-drawings-toolbar']")) return false;
     if (el.closest(".layout__area--left")) return true;
     if (
       el.closest(
@@ -765,25 +768,42 @@ export function watchPrimaryMenusOpen(
   };
 }
 
-/** CSS clip-path that keeps a layer visible except for a rectangular hole. */
-export function clipPathExcludingHole(
-  layer: { left: number; top: number; width: number; height: number },
-  hole: MenuHoleRect | null,
-): string | undefined {
-  if (!hole || layer.width < 8 || layer.height < 8) return undefined;
+type LayerBox = { left: number; top: number; width: number; height: number };
+
+function holeRing(layer: LayerBox, hole: MenuHoleRect): string | null {
   const hl = hole.left - layer.left;
   const ht = hole.top - layer.top;
   const hr = hl + hole.width;
   const hb = ht + hole.height;
-  // No overlap — nothing to punch.
-  if (hr <= 0 || hb <= 0 || hl >= layer.width || ht >= layer.height) return undefined;
+  if (hr <= 0 || hb <= 0 || hl >= layer.width || ht >= layer.height) return null;
   const l = Math.max(0, hl);
   const t = Math.max(0, ht);
   const r = Math.min(layer.width, hr);
   const b = Math.min(layer.height, hb);
-  if (r - l < 4 || b - t < 4) return undefined;
-  // evenodd: outer ring minus inner hole (coords relative to the layer box).
-  return `polygon(evenodd, 0px 0px, ${layer.width}px 0px, ${layer.width}px ${layer.height}px, 0px ${layer.height}px, 0px 0px, ${l}px ${t}px, ${l}px ${b}px, ${r}px ${b}px, ${r}px ${t}px, ${l}px ${t}px)`;
+  if (r - l < 4 || b - t < 4) return null;
+  return `${l}px ${t}px, ${l}px ${b}px, ${r}px ${b}px, ${r}px ${t}px, ${l}px ${t}px`;
+}
+
+/**
+ * CSS clip-path that keeps a layer visible except for rectangular holes.
+ * Coords are workspace-local. Holes that miss the layer are skipped.
+ */
+export function clipPathExcludingHoles(
+  layer: LayerBox,
+  holes: readonly (MenuHoleRect | null | undefined)[],
+): string | undefined {
+  if (layer.width < 8 || layer.height < 8) return undefined;
+  const rings = holes
+    .map((hole) => (hole ? holeRing(layer, hole) : null))
+    .filter((ring): ring is string => Boolean(ring));
+  if (rings.length === 0) return undefined;
+  const outer = `0px 0px, ${layer.width}px 0px, ${layer.width}px ${layer.height}px, 0px ${layer.height}px, 0px 0px`;
+  return `polygon(evenodd, ${outer}, ${rings.join(", ")})`;
+}
+
+/** CSS clip-path that keeps a layer visible except for one rectangular hole. */
+export function clipPathExcludingHole(layer: LayerBox, hole: MenuHoleRect | null): string | undefined {
+  return clipPathExcludingHoles(layer, [hole]);
 }
 
 /**
@@ -894,5 +914,369 @@ export function mountPrimaryLayoutClip(
     // Tear-down while switching to single-pane must drop the clip immediately
     // (the replacement mount may start with lastLayout=null and layout "s").
     if (getLayout() === "s") clearPrimaryLayoutClip(container);
+  };
+}
+
+const PIN_STYLE_ID = "forge-floating-pin";
+
+const FAVORITE_TOOLBAR_SELECTOR = [
+  '[data-name="favorite-drawings-toolbar"]',
+  '[data-forge-fav="1"]',
+  '[class*="FavoriteDrawingToolbar"]',
+  '[class*="favoriteDrawingToolbar"]',
+  '[class*="favorite-drawings"]',
+  '[class*="favored-tools"]',
+].join(",");
+
+const PIN_TARGETS = [
+  '[class*="floatingToolbar"]',
+  '[class*="floating-toolbar"]',
+  '[role="dialog"]',
+  '[data-name="indicators-dialog"]',
+  '[data-name="symbol-search-items-dialog"]',
+].join(",");
+
+function plotBounds(doc: Document): DOMRect | null {
+  const center = doc.querySelector(".layout__area--center");
+  if (center) {
+    const rect = center.getBoundingClientRect();
+    if (rect.width > 16 && rect.height > 16) return rect;
+  }
+  const width = doc.documentElement.clientWidth;
+  const height = doc.documentElement.clientHeight;
+  if (width < 16 || height < 16) return null;
+  return new DOMRect(0, 0, width, height);
+}
+
+function ensurePinStyle(doc: Document): void {
+  if (doc.getElementById(PIN_STYLE_ID)) return;
+  const style = doc.createElement("style");
+  style.id = PIN_STYLE_ID;
+  style.textContent = `
+    [data-forge-pin="1"] {
+      position: fixed !important;
+      left: var(--forge-pin-left) !important;
+      top: var(--forge-pin-top) !important;
+      right: auto !important;
+      bottom: auto !important;
+      transform: none !important;
+      margin: 0 !important;
+      z-index: 400 !important;
+      max-height: var(--forge-pin-max-h, none) !important;
+    }
+    [data-forge-pin="1"][data-forge-pin-scroll="1"] {
+      overflow: auto !important;
+    }
+  `;
+  doc.head.appendChild(style);
+}
+
+/**
+ * Keep the selected-tool edit bar and settings dialogs inside the pane
+ * that owns them. The favorite-tools bar is not pinned: it is one bar
+ * the user drags across every pane.
+ */
+export function mountFloatingChromePin(container: HTMLElement): () => void {
+  let stopped = false;
+  let timer = 0;
+
+  const pinElement = (el: HTMLElement, bounds: DOMRect) => {
+    if (el.dataset.forgePin === "drag") return;
+    if (el.closest(FAVORITE_TOOLBAR_SELECTOR)) return;
+    if (el.closest(".layout__area--left, .layout__area--top")) return;
+    if (el.parentElement?.closest(PIN_TARGETS)) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 8 || rect.height < 8) return;
+    const margin = 8;
+    const maxW = Math.max(40, bounds.width - margin * 2);
+    const maxH = Math.max(40, bounds.height - margin * 2);
+    let left = rect.left;
+    let top = rect.top;
+    const tooWide = rect.width > maxW + 1;
+    const tooTall = rect.height > maxH + 1;
+    if (tooWide) left = bounds.left + margin;
+    else if (rect.left < bounds.left + margin) left = bounds.left + margin;
+    else if (rect.right > bounds.right - margin) left = bounds.right - margin - rect.width;
+    if (tooTall) top = bounds.top + margin;
+    else if (rect.top < bounds.top + margin) top = bounds.top + margin;
+    else if (rect.bottom > bounds.bottom - margin) top = bounds.bottom - margin - rect.height;
+    const outside = Math.abs(left - rect.left) > 1 || Math.abs(top - rect.top) > 1 || tooTall;
+    if (!outside && el.dataset.forgePin !== "1") return;
+    if (!el.dataset.forgePinBound) {
+      el.dataset.forgePinBound = "1";
+      el.addEventListener("pointerdown", () => {
+        el.dataset.forgePin = "drag";
+      });
+      const endDrag = () => {
+        if (el.dataset.forgePin === "drag") delete el.dataset.forgePin;
+      };
+      el.addEventListener("pointerup", endDrag);
+      el.addEventListener("pointercancel", endDrag);
+    }
+    el.dataset.forgePin = "1";
+    el.style.setProperty("--forge-pin-left", `${Math.round(left)}px`);
+    el.style.setProperty("--forge-pin-top", `${Math.round(top)}px`);
+    if (tooTall) {
+      el.dataset.forgePinScroll = "1";
+      el.style.setProperty("--forge-pin-max-h", `${Math.round(maxH)}px`);
+    } else {
+      delete el.dataset.forgePinScroll;
+      el.style.removeProperty("--forge-pin-max-h");
+    }
+  };
+
+  const apply = () => {
+    if (stopped) return;
+    const doc = container.querySelector("iframe")?.contentDocument;
+    if (!doc?.body) return;
+    const bounds = plotBounds(doc);
+    if (!bounds) return;
+    ensurePinStyle(doc);
+    if (!doc.documentElement.dataset.forgePinDoc) {
+      doc.documentElement.dataset.forgePinDoc = "1";
+      doc.addEventListener("pointerup", () => {
+        for (const node of doc.querySelectorAll<HTMLElement>("[data-forge-pin='drag']")) {
+          delete node.dataset.forgePin;
+        }
+      });
+    }
+    for (const node of doc.querySelectorAll<HTMLElement>(PIN_TARGETS)) {
+      if (node.closest(FAVORITE_TOOLBAR_SELECTOR)) continue;
+      pinElement(node, bounds);
+    }
+  };
+
+  apply();
+  timer = window.setInterval(apply, 400);
+  return () => {
+    stopped = true;
+    window.clearInterval(timer);
+  };
+}
+
+const FAV_POS_KEY = "forge.favToolbar.pos";
+
+function readFavoritePos(): { left: number; top: number } | null {
+  try {
+    const raw = sessionStorage.getItem(FAV_POS_KEY);
+    if (!raw) return null;
+    const pos = JSON.parse(raw) as { left?: unknown; top?: unknown };
+    if (typeof pos.left !== "number" || typeof pos.top !== "number") return null;
+    if (!Number.isFinite(pos.left) || !Number.isFinite(pos.top)) return null;
+    return { left: pos.left, top: pos.top };
+  } catch {
+    return null;
+  }
+}
+
+function writeFavoritePos(left: number, top: number): void {
+  try {
+    sessionStorage.setItem(FAV_POS_KEY, JSON.stringify({ left, top }));
+  } catch {
+    /* private mode */
+  }
+}
+
+function placeFavoriteBar(el: HTMLElement, left: number, top: number): void {
+  const doc = el.ownerDocument;
+  const width = el.offsetWidth || el.getBoundingClientRect().width;
+  const height = el.offsetHeight || el.getBoundingClientRect().height;
+  const maxL = Math.max(0, doc.documentElement.clientWidth - width);
+  const maxT = Math.max(0, doc.documentElement.clientHeight - height);
+  const l = Math.round(Math.min(maxL, Math.max(0, left)));
+  const t = Math.round(Math.min(maxT, Math.max(0, top)));
+  el.style.setProperty("position", "fixed", "important");
+  el.style.setProperty("left", `${l}px`, "important");
+  el.style.setProperty("top", `${t}px`, "important");
+  el.style.setProperty("right", "auto", "important");
+  el.style.setProperty("bottom", "auto", "important");
+  el.style.setProperty("transform", "none", "important");
+  el.style.setProperty("margin", "0", "important");
+  el.style.setProperty("z-index", "500", "important");
+  el.style.setProperty("pointer-events", "auto", "important");
+}
+
+function isFavoriteToolButton(target: Element): boolean {
+  return Boolean(target.closest("button, [role='button'], a, input, textarea, select"));
+}
+
+function bindFavoriteDrag(bar: HTMLElement): void {
+  if (bar.dataset.forgeFavDragBound === "1") return;
+  bar.dataset.forgeFavDragBound = "1";
+  bar.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (event.button !== 0) return;
+      const target = event.target;
+      if (!(target instanceof Element) || isFavoriteToolButton(target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const origin = bar.getBoundingClientRect();
+      const startX = event.clientX;
+      const startY = event.clientY;
+      bar.dataset.forgeFavDrag = "1";
+      const move = (ev: PointerEvent) => {
+        placeFavoriteBar(bar, origin.left + ev.clientX - startX, origin.top + ev.clientY - startY);
+      };
+      const end = () => {
+        bar.ownerDocument.removeEventListener("pointermove", move, true);
+        bar.ownerDocument.removeEventListener("pointerup", end, true);
+        bar.ownerDocument.removeEventListener("pointercancel", end, true);
+        delete bar.dataset.forgeFavDrag;
+        const placed = bar.getBoundingClientRect();
+        writeFavoritePos(placed.left, placed.top);
+      };
+      bar.ownerDocument.addEventListener("pointermove", move, true);
+      bar.ownerDocument.addEventListener("pointerup", end, true);
+      bar.ownerDocument.addEventListener("pointercancel", end, true);
+      try {
+        bar.setPointerCapture(event.pointerId);
+      } catch {
+        /* capture can fail if the pointer already ended */
+      }
+    },
+    true,
+  );
+}
+
+function ensureFavoriteGrip(bar: HTMLElement): void {
+  if (!bar.querySelector("[data-forge-fav-grip='1']")) {
+    const grip = bar.ownerDocument.createElement("div");
+    grip.dataset.forgeFavGrip = "1";
+    grip.title = "Move favorite tools";
+    grip.setAttribute("aria-label", "Move favorite tools");
+    const display = bar.ownerDocument.defaultView?.getComputedStyle(bar).display ?? "";
+    if (display.includes("flex")) {
+      grip.style.cssText =
+        "flex:0 0 14px;width:14px;align-self:stretch;cursor:grab;touch-action:none;display:flex;align-items:center;justify-content:center;";
+      bar.prepend(grip);
+    } else {
+      bar.style.setProperty("padding-left", "14px", "important");
+      grip.style.cssText =
+        "position:absolute;left:0;top:0;bottom:0;width:14px;cursor:grab;touch-action:none;display:flex;align-items:center;justify-content:center;";
+      bar.appendChild(grip);
+    }
+    grip.style.background =
+      "radial-gradient(circle, currentColor 1px, transparent 1.4px) 50% 30% / 4px 5px repeat-y";
+    grip.style.opacity = "0.7";
+  }
+  bindFavoriteDrag(bar);
+}
+
+function favoriteToolbarVisible(el: HTMLElement): boolean {
+  const style = el.ownerDocument.defaultView?.getComputedStyle(el);
+  if (!style || style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) {
+    return false;
+  }
+  const rect = el.getBoundingClientRect();
+  return rect.width >= 8 && rect.height >= 8;
+}
+
+function findFavoriteToolbar(doc: Document): HTMLElement | null {
+  const named = doc.querySelector<HTMLElement>('[data-name="favorite-drawings-toolbar"]');
+  if (named && favoriteToolbarVisible(named)) return named;
+  const marked = doc.querySelector<HTMLElement>("[data-forge-fav='1']");
+  if (marked && favoriteToolbarVisible(marked)) return marked;
+  let best: HTMLElement | null = null;
+  let bestArea = 0;
+  const nodes = doc.querySelectorAll<HTMLElement>(
+    '[class*="FavoriteDrawingToolbar"], [class*="favoriteDrawingToolbar"], [class*="favorite-drawings"], [class*="favored-tools"]',
+  );
+  for (const node of nodes) {
+    if (node.dataset.forgeFavGrip === "1") continue;
+    if (!favoriteToolbarVisible(node)) continue;
+    const rect = node.getBoundingClientRect();
+    const area = rect.width * rect.height;
+    if (area > bestArea) {
+      best = node;
+      bestArea = area;
+    }
+  }
+  return best;
+}
+
+/**
+ * One favorite-tools bar, on the main chart. Lift it out of the pane so it
+ * can be dragged onto any panel. Tool buttons stay clicks; the grip moves it.
+ */
+export function mountFavoriteToolbar(container: HTMLElement): () => void {
+  let stopped = false;
+  let timer = 0;
+
+  const apply = () => {
+    if (stopped) return;
+    const doc = container.querySelector("iframe")?.contentDocument;
+    if (!doc?.body) return;
+    const bar = findFavoriteToolbar(doc);
+    if (!bar || bar.dataset.forgeFavDrag === "1") return;
+    if (bar.parentElement !== doc.body) doc.body.appendChild(bar);
+    if (bar.dataset.forgeFav === "1") {
+      ensureFavoriteGrip(bar);
+      if (!bar.style.left || bar.style.position !== "fixed") {
+        const saved = readFavoritePos();
+        const rect = bar.getBoundingClientRect();
+        placeFavoriteBar(bar, saved?.left ?? rect.left, saved?.top ?? rect.top);
+      }
+      return;
+    }
+    bar.dataset.forgeFav = "1";
+    const rect = bar.getBoundingClientRect();
+    const saved = readFavoritePos();
+    placeFavoriteBar(bar, saved?.left ?? rect.left, saved?.top ?? rect.top);
+    ensureFavoriteGrip(bar);
+  };
+
+  apply();
+  timer = window.setInterval(apply, 100);
+  return () => {
+    stopped = true;
+    window.clearInterval(timer);
+  };
+}
+
+/**
+ * Follow the favorite-tools bar and report a viewport hole so panes drawn
+ * above the main iframe do not cover it.
+ */
+export function watchFavoriteToolbar(
+  container: HTMLElement,
+  onChange: (hole: MenuHoleRect | null) => void,
+): () => void {
+  let stopped = false;
+  let timer = 0;
+  let lastKey = "";
+
+  const check = () => {
+    if (stopped) return;
+    const iframe = container.querySelector("iframe");
+    const doc = iframe?.contentDocument;
+    const bar = doc ? findFavoriteToolbar(doc) : null;
+    if (!iframe || !bar) {
+      if (lastKey !== "0") {
+        lastKey = "0";
+        onChange(null);
+      }
+      return;
+    }
+    const rect = bar.getBoundingClientRect();
+    const frame = iframe.getBoundingClientRect();
+    const pad = 8;
+    const hole: MenuHoleRect = {
+      left: Math.round(frame.left + rect.left - pad),
+      top: Math.round(frame.top + rect.top - pad),
+      width: Math.round(rect.width + pad * 2),
+      height: Math.round(rect.height + pad * 2),
+    };
+    const key = `${hole.left}:${hole.top}:${hole.width}:${hole.height}`;
+    if (key === lastKey) return;
+    lastKey = key;
+    onChange(hole);
+  };
+
+  check();
+  timer = window.setInterval(check, 50);
+  return () => {
+    stopped = true;
+    window.clearInterval(timer);
   };
 }

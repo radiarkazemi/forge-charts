@@ -120,6 +120,8 @@ const SECONDARY_DISABLED: ChartingLibraryFeatureset[] = [
   ...DISABLED_FEATURES,
   ...HEADER_FEATURES,
   // Keep bottom time-axis / rangeframes on each layer (matches TV multi-chart).
+  // One favorite-tools bar lives on the main chart and can be dragged onto
+  // any pane. Secondary panes do not grow their own strip.
   "left_toolbar",
   "side_toolbar_in_fullscreen_mode",
 ];
@@ -342,7 +344,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
   const customCss = mobile && !secondary
     ? "/charts/tv-header-mobile.css?v=2"
     : hideHeader
-      ? "/charts/tv-header-secondary.css"
+      ? "/charts/tv-header-secondary.css?v=4"
       : "/charts/tv-header.css";
 
   return {

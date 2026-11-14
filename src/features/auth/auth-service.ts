@@ -40,6 +40,13 @@ const OWNER_DISPLAY = "Radiar";
 const OWNER_PASSWORD_HASH =
   "pbkdf2$120000$JomrF2F0EQ+29BSwT0rNkw==$UWehN8xXdjBPS9e0DQOyyF1LBhtvZqzyqxV6xTNcFMQ=";
 
+/** Team sign-in. The password is stored only as a PBKDF2 hash. */
+const TEAM_ID = "team-forge-dev";
+const TEAM_USERNAME = "forge-dev";
+const TEAM_DISPLAY = "Forge";
+const TEAM_PASSWORD_HASH =
+  "pbkdf2$120000$2NgSkTqyrfGI1rSw7v9aVQ==$mJ/TXM/+B4A87ecNujkL5mmtrm05gyxP/sG8U+nmon0=";
+
 export interface AuthUserPublic {
   readonly id: string;
   readonly username: string;
@@ -114,6 +121,7 @@ export class AuthService {
     try {
       this.migrateSafetyOutOfRegistry();
       this.ensureOwnerAccount();
+      this.ensureTeamAccount();
     } catch {
       /* private mode / blocked storage — login will surface a clear error */
     }
@@ -338,6 +346,66 @@ export class AuthService {
     return this.startSession(user);
   }
 
+  /**
+   * Sign in with a Google profile that was already verified against Google.
+   * New emails become accounts and still go through the safety page.
+   * The Google subject is the sync secret (stable on every device, never a password).
+   */
+  signInWithGoogle(profile: {
+    email: string;
+    name: string;
+    sub: string;
+  }):
+    | { readonly kind: "session"; readonly session: AuthSession; readonly syncSecret: string }
+    | { readonly kind: "pending"; readonly pending: PendingSignup; readonly syncSecret: string } {
+    assertCryptoAvailable();
+    const username = normalizeUsername(profile.email);
+    const sub = profile.sub.trim();
+    if (!isEmail(username) || sub.length < 4) {
+      throw new Error("Google could not confirm this sign-in.");
+    }
+    const marker = `google$${sub}`;
+    const users = this.users();
+    const existing = users.find((u) => u.username === username);
+    if (existing) {
+      if (!existing.passwordHash.startsWith("google$")) {
+        throw new Error("This email already has a password. Sign in with email and password.");
+      }
+      if (existing.passwordHash !== marker) {
+        throw new Error("This email is linked to a different Google account.");
+      }
+      this.storage.remove(SESSION_KEY);
+      return { kind: "session", session: this.startSession(existing), syncSecret: sub };
+    }
+    const displayName = (profile.name.trim() || username.split("@")[0] || username).slice(0, 48);
+    const record: AuthUserRecord = {
+      id: newId(),
+      username,
+      displayName,
+      createdAt: Date.now(),
+      passwordHash: marker,
+      safetyComplete: false,
+    };
+    this.writeUsers([...users, record]);
+    const saved = this.users().find((u) => u.id === record.id);
+    if (!saved) {
+      throw new Error(
+        "Could not save your account. Disable private mode / allow site storage, then try again.",
+      );
+    }
+    this.storage.remove(SESSION_KEY);
+    return {
+      kind: "pending",
+      pending: {
+        userId: saved.id,
+        username: saved.username,
+        displayName: saved.displayName,
+        password: sub,
+      },
+      syncSecret: sub,
+    };
+  }
+
   logout(): void {
     sessionSignedOut(true);
     this.storage.set(SIGNED_OUT_KEY, Date.now());
@@ -487,6 +555,45 @@ export class AuthService {
     }
     this.writeUsers([...users, owner]);
     this.writeSafetyScoped(OWNER_ID, ownerSafety);
+  }
+
+  /** Built-in team login. Accepts the username even though it is not an email. */
+  private ensureTeamAccount(): void {
+    const users = this.users();
+    const safety: SafetyAuthorizationProfile = {
+      fullName: TEAM_DISPLAY,
+      phone: "",
+      nationalId: "",
+      country: "Iran",
+      acceptedTerms: true,
+      acceptedRisk: true,
+      completedAt: 1,
+    };
+    const account: AuthUserRecord = {
+      id: TEAM_ID,
+      username: TEAM_USERNAME,
+      displayName: TEAM_DISPLAY,
+      createdAt: Date.now(),
+      passwordHash: TEAM_PASSWORD_HASH,
+      safetyComplete: true,
+    };
+    const byName = users.findIndex((u) => u.username === TEAM_USERNAME);
+    if (byName >= 0) {
+      const prev = users[byName]!;
+      const next = [...users];
+      next[byName] = {
+        ...account,
+        id: prev.id,
+        createdAt: prev.createdAt || account.createdAt,
+        displayName: prev.displayName || account.displayName,
+        safetyComplete: true,
+      };
+      this.writeUsers(next);
+      if (!this.readSafetyScoped(prev.id)) this.writeSafetyScoped(prev.id, safety);
+      return;
+    }
+    this.writeUsers([...users, account]);
+    this.writeSafetyScoped(TEAM_ID, safety);
   }
 
   private startSession(user: AuthUserRecord): AuthSession {

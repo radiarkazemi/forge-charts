@@ -7,6 +7,7 @@ import {
   type ProfileSyncCredentials,
 } from "@/features/profile-sync";
 import type { AuthService, AuthSession, PendingSignup } from "./auth-service";
+import { verifyGoogleIdToken } from "./google-sign-in";
 import { SafetyAuthorizationPage } from "./SafetyAuthorizationPage";
 import type { SafetyAuthorizationProfile } from "./safety-profile";
 
@@ -83,6 +84,36 @@ export function AuthGate({ auth, onAuthenticated }: AuthGateProps) {
     }
   };
 
+  const submitGoogle = async (idToken: string) => {
+    setError(null);
+    setBusy(true);
+    try {
+      clearSyncCredentials();
+      const profile = await verifyGoogleIdToken(idToken);
+      const result = auth.signInWithGoogle(profile);
+      if (result.kind === "pending") {
+        setPendingSignup(result.pending);
+        setPendingLogin(null);
+        setUsername(result.pending.username);
+        setDisplayName(result.pending.displayName);
+        setPhase("safety");
+        setBusy(false);
+        return;
+      }
+      if (auth.needsSafety(result.session.userId)) {
+        setPendingLogin({ session: result.session, password: result.syncSecret });
+        setPendingSignup(null);
+        setPhase("safety");
+        setBusy(false);
+        return;
+      }
+      await finishAuth(result.session, result.syncSecret);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+      setBusy(false);
+    }
+  };
+
   const completeSafety = async (profile: SafetyAuthorizationProfile) => {
     setError(null);
     setBusy(true);
@@ -146,6 +177,7 @@ export function AuthGate({ auth, onAuthenticated }: AuthGateProps) {
       onConfirm={setConfirm}
       onDisplayName={setDisplayName}
       onSubmit={(e) => void submitCredentials(e)}
+      onGoogleCredential={(idToken) => void submitGoogle(idToken)}
     />
   );
 }
