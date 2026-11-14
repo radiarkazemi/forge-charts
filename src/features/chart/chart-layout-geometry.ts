@@ -642,6 +642,9 @@ export function watchPrimaryMenusOpen(
   let boundDoc: Document | null = null;
 
   const isDrawingChrome = (el: Element): boolean => {
+    // Pinned favorite tools, edit bars, and settings stay clickable when a
+    // pane edge crosses them. The left-toolbar flyout does not punch a hole.
+    if (el.closest("[data-forge-pin='1'], [data-name='favorite-drawings-toolbar']")) return false;
     if (el.closest(".layout__area--left")) return true;
     if (
       el.closest(
@@ -894,5 +897,132 @@ export function mountPrimaryLayoutClip(
     // Tear-down while switching to single-pane must drop the clip immediately
     // (the replacement mount may start with lastLayout=null and layout "s").
     if (getLayout() === "s") clearPrimaryLayoutClip(container);
+  };
+}
+
+const PIN_STYLE_ID = "forge-floating-pin";
+
+const PIN_TARGETS = [
+  '[data-name="favorite-drawings-toolbar"]',
+  '[class*="floatingToolbar"]',
+  '[class*="floating-toolbar"]',
+  '[role="dialog"]',
+  '[data-name="indicators-dialog"]',
+  '[data-name="symbol-search-items-dialog"]',
+].join(",");
+
+function plotBounds(doc: Document): DOMRect | null {
+  const center = doc.querySelector(".layout__area--center");
+  if (center) {
+    const rect = center.getBoundingClientRect();
+    if (rect.width > 16 && rect.height > 16) return rect;
+  }
+  const width = doc.documentElement.clientWidth;
+  const height = doc.documentElement.clientHeight;
+  if (width < 16 || height < 16) return null;
+  return new DOMRect(0, 0, width, height);
+}
+
+function ensurePinStyle(doc: Document): void {
+  if (doc.getElementById(PIN_STYLE_ID)) return;
+  const style = doc.createElement("style");
+  style.id = PIN_STYLE_ID;
+  style.textContent = `
+    [data-forge-pin="1"] {
+      position: fixed !important;
+      left: var(--forge-pin-left) !important;
+      top: var(--forge-pin-top) !important;
+      right: auto !important;
+      bottom: auto !important;
+      transform: none !important;
+      margin: 0 !important;
+      z-index: 400 !important;
+      max-height: var(--forge-pin-max-h, none) !important;
+    }
+    [data-forge-pin="1"][data-forge-pin-scroll="1"] {
+      overflow: auto !important;
+    }
+  `;
+  doc.head.appendChild(style);
+}
+
+/**
+ * Keep favorite tools, the selected-tool edit bar, and settings dialogs
+ * inside the pane that owns them. The main chart's iframe is the full
+ * window, so an unpinned bar lands under the other panes.
+ */
+export function mountFloatingChromePin(container: HTMLElement): () => void {
+  let stopped = false;
+  let timer = 0;
+
+  const pinElement = (el: HTMLElement, bounds: DOMRect) => {
+    if (el.dataset.forgePin === "drag") return;
+    if (el.closest(".layout__area--left, .layout__area--top")) return;
+    if (el.parentElement?.closest(PIN_TARGETS)) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 8 || rect.height < 8) return;
+    const margin = 8;
+    const maxW = Math.max(40, bounds.width - margin * 2);
+    const maxH = Math.max(40, bounds.height - margin * 2);
+    let left = rect.left;
+    let top = rect.top;
+    const tooWide = rect.width > maxW + 1;
+    const tooTall = rect.height > maxH + 1;
+    if (tooWide) left = bounds.left + margin;
+    else if (rect.left < bounds.left + margin) left = bounds.left + margin;
+    else if (rect.right > bounds.right - margin) left = bounds.right - margin - rect.width;
+    if (tooTall) top = bounds.top + margin;
+    else if (rect.top < bounds.top + margin) top = bounds.top + margin;
+    else if (rect.bottom > bounds.bottom - margin) top = bounds.bottom - margin - rect.height;
+    const outside = Math.abs(left - rect.left) > 1 || Math.abs(top - rect.top) > 1 || tooTall;
+    if (!outside && el.dataset.forgePin !== "1") return;
+    if (!el.dataset.forgePinBound) {
+      el.dataset.forgePinBound = "1";
+      el.addEventListener("pointerdown", () => {
+        el.dataset.forgePin = "drag";
+      });
+      const endDrag = () => {
+        if (el.dataset.forgePin === "drag") delete el.dataset.forgePin;
+      };
+      el.addEventListener("pointerup", endDrag);
+      el.addEventListener("pointercancel", endDrag);
+    }
+    el.dataset.forgePin = "1";
+    el.style.setProperty("--forge-pin-left", `${Math.round(left)}px`);
+    el.style.setProperty("--forge-pin-top", `${Math.round(top)}px`);
+    if (tooTall) {
+      el.dataset.forgePinScroll = "1";
+      el.style.setProperty("--forge-pin-max-h", `${Math.round(maxH)}px`);
+    } else {
+      delete el.dataset.forgePinScroll;
+      el.style.removeProperty("--forge-pin-max-h");
+    }
+  };
+
+  const apply = () => {
+    if (stopped) return;
+    const doc = container.querySelector("iframe")?.contentDocument;
+    if (!doc?.body) return;
+    const bounds = plotBounds(doc);
+    if (!bounds) return;
+    ensurePinStyle(doc);
+    if (!doc.documentElement.dataset.forgePinDoc) {
+      doc.documentElement.dataset.forgePinDoc = "1";
+      doc.addEventListener("pointerup", () => {
+        for (const node of doc.querySelectorAll<HTMLElement>("[data-forge-pin='drag']")) {
+          delete node.dataset.forgePin;
+        }
+      });
+    }
+    for (const node of doc.querySelectorAll<HTMLElement>(PIN_TARGETS)) {
+      pinElement(node, bounds);
+    }
+  };
+
+  apply();
+  timer = window.setInterval(apply, 400);
+  return () => {
+    stopped = true;
+    window.clearInterval(timer);
   };
 }

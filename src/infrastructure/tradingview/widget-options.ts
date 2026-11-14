@@ -120,7 +120,8 @@ const SECONDARY_DISABLED: ChartingLibraryFeatureset[] = [
   ...DISABLED_FEATURES,
   ...HEADER_FEATURES,
   // Keep bottom time-axis / rangeframes on each layer (matches TV multi-chart).
-  "left_toolbar",
+  // The vertical drawing bar stays on the original chart. Each pane still
+  // gets its own favorite-tools strip; the vertical bar is hidden in CSS.
   "side_toolbar_in_fullscreen_mode",
 ];
 
@@ -324,7 +325,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
 
   const enabled = ENABLED_FEATURES.filter((f) => {
     if (hideHeader && HEADER_FEATURES.includes(f)) return false;
-    if (secondary && (f === "left_toolbar" || f === "side_toolbar_in_fullscreen_mode")) return false;
+    if (secondary && f === "side_toolbar_in_fullscreen_mode") return false;
     return true;
   });
 
@@ -342,7 +343,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
   const customCss = mobile && !secondary
     ? "/charts/tv-header-mobile.css?v=2"
     : hideHeader
-      ? "/charts/tv-header-secondary.css"
+      ? "/charts/tv-header-secondary.css?v=3"
       : "/charts/tv-header.css";
 
   return {

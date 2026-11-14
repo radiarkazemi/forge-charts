@@ -20,6 +20,7 @@ import {
 } from "./dealing-range";
 import { mountPositionToolIconPatcher } from "./position-tool-icons";
 import { mountHeaderToolbar, type HeaderToolbarApi } from "./header-toolbar";
+import { mountFloatingChromePin } from "./chart-layout-geometry";
 import { mountForgeChartLogo } from "./forge-chart-logo";
 import {
   mountSymbolSearchExchangeReset,
@@ -225,6 +226,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
     let unmountSymbolSearchReset: (() => void) | null = null;
     let unmountIndicatorsIntercept: (() => void) | null = null;
     let unmountForgeLogo: (() => void) | null = null;
+    let unmountFloatingPin: (() => void) | null = null;
     const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches;
     const autosaveKey = isPrimary ? AUTOSAVE_KEY : `${AUTOSAVE_KEY}.pane.${paneIndex}`;
 
@@ -284,6 +286,8 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         // Bottom-left Forge mark inside the chart pane (TV / Faraz logo slot).
         unmountForgeLogo?.();
         unmountForgeLogo = mountForgeChartLogo(widget);
+        unmountFloatingPin?.();
+        unmountFloatingPin = mountFloatingChromePin(container);
         // Always route Indicators button / insertIndicator → Forge TV-style dialog.
         unmountIndicatorsIntercept?.();
         unmountIndicatorsIntercept = mountIndicatorsIntercept(widget);
@@ -484,6 +488,8 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
       unmountIndicatorsIntercept = null;
       unmountForgeLogo?.();
       unmountForgeLogo = null;
+      unmountFloatingPin?.();
+      unmountFloatingPin = null;
       try {
         (widget as unknown as { __forgePersistLeave?: () => void } | null)?.__forgePersistLeave?.();
       } catch {
