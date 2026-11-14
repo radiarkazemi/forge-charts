@@ -548,7 +548,6 @@ function ArtCard({
         placeholder={t.password}
         type={showPassword ? "text" : "password"}
         required
-        minLength={6}
         value={password}
         autoComplete="current-password"
         onChange={(event) => onPassword(event.target.value)}
@@ -740,8 +739,8 @@ function SignupCard({
       </Box>
       <Box component="input" aria-label={t.name} placeholder={t.name} value={displayName} onChange={(event) => onDisplayName(event.target.value)} dir="ltr" sx={{ ...hole, top: "36.06%" }} />
       <Box component="input" aria-label={t.email} placeholder={t.email} type="email" required value={username} autoComplete="username" onChange={(event) => onUsername(event.target.value)} dir="ltr" sx={{ ...hole, top: "44.08%" }} />
-      <Box component="input" aria-label={t.password} placeholder={t.password} type="password" required minLength={6} value={password} autoComplete="new-password" onChange={(event) => onPassword(event.target.value)} dir="ltr" sx={{ ...hole, top: "52.09%" }} />
-      <Box component="input" aria-label={t.confirm} placeholder={t.confirm} type="password" required minLength={6} value={confirm} autoComplete="new-password" onChange={(event) => onConfirm(event.target.value)} dir="ltr" sx={{ ...hole, top: "60.10%" }} />
+      <Box component="input" aria-label={t.password} placeholder={t.password} type="password" required minLength={15} maxLength={128} value={password} autoComplete="new-password" onChange={(event) => onPassword(event.target.value)} dir="ltr" sx={{ ...hole, top: "52.09%" }} />
+      <Box component="input" aria-label={t.confirm} placeholder={t.confirm} type="password" required minLength={15} maxLength={128} value={confirm} autoComplete="new-password" onChange={(event) => onConfirm(event.target.value)} dir="ltr" sx={{ ...hole, top: "60.10%" }} />
       {error ? (
         <Box sx={{ position: "absolute", left: "16%", width: "68%", top: "66.2%", color: "#ffb4b4", fontSize: "1.8cqw", textAlign: "center", lineHeight: 1.1 }}>{error}</Box>
       ) : null}

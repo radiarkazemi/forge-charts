@@ -1,6 +1,53 @@
-/** PBKDF2-SHA256 password hashing (Web Crypto). */
+/**
+ * PBKDF2-SHA256 password hashing (Web Crypto).
+ * New hashes use the current iteration count. Older hashes still verify,
+ * and a successful login replaces them.
+ */
 
-const ITERATIONS = 120_000;
+const ITERATIONS = 600_000;
+export const MIN_NEW_PASSWORD = 15;
+export const MAX_PASSWORD = 128;
+
+const COMMON_PASSWORDS = new Set([
+  "password",
+  "password1",
+  "password123",
+  "password1234",
+  "password12345",
+  "123456789012345",
+  "1234567890123456",
+  "qwertyuiopasdfg",
+  "qwertyuiopasdfgh",
+  "changeme1234567",
+  "letmeinletmein1",
+  "iloveyouiloveyou",
+  "adminadminadmin",
+  "welcomewelcome1",
+  "forgechartforge",
+  "forgechart12345",
+]);
+
+/** Reject short, huge, repeated, or widely used passwords. No character-class rules. */
+export function passwordPolicyError(password: string): string | null {
+  if (password.length < MIN_NEW_PASSWORD) {
+    return `Password must be at least ${MIN_NEW_PASSWORD} characters.`;
+  }
+  if (password.length > MAX_PASSWORD) {
+    return `Password must be at most ${MAX_PASSWORD} characters.`;
+  }
+  if (/^(.)\1+$/.test(password) || COMMON_PASSWORDS.has(password.toLowerCase())) {
+    return "Choose a password that is not a common password.";
+  }
+  return null;
+}
+
+export function passwordNeedsUpgrade(stored: string): boolean {
+  const parts = stored.split("$");
+  if (parts[0] !== "pbkdf2" || parts.length !== 4) return false;
+  const iterations = Number(parts[1]);
+  return !Number.isFinite(iterations) || iterations < ITERATIONS;
+}
+
 const SALT_BYTES = 16;
 const KEY_BYTES = 32;
 

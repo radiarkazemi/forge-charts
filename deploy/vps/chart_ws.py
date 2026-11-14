@@ -767,6 +767,38 @@ async def http_health(_: web.Request) -> web.Response:
         return web.json_response({"status": "error", "detail": str(exc)}, status=503)
 
 
+def _browser_host(value: str) -> str:
+    value = value.strip().lower()
+    if "://" in value:
+        value = value.split("://", 1)[1]
+    value = value.split("/", 1)[0]
+    if value.startswith("[") and "]" in value:
+        return value.split("]", 1)[0] + "]"
+    return value.split(":")[0]
+
+
+def _ws_origin_allowed(origin: str | None, request_host: str | None) -> bool:
+    if not origin:
+        return True
+    host = _browser_host(origin)
+    if host in {"forgechart.ir", "www.forgechart.ir", "localhost", "127.0.0.1"}:
+        return True
+    return bool(request_host) and host == _browser_host(request_host)
+
+
+def _ws_process_request(path, request_headers):
+    origin = None
+    host = None
+    if request_headers is not None:
+        getter = getattr(request_headers, "get", None)
+        if callable(getter):
+            origin = getter("Origin") or getter("origin")
+            host = getter("Host") or getter("host")
+    if _ws_origin_allowed(origin, host):
+        return None
+    return (403, [("Content-Type", "text/plain")], b"origin not allowed\n")
+
+
 async def http_history(request: web.Request) -> web.Response:
     symbol = normalize_symbol(str(request.query.get("symbol") or ""))
     # Prefer explicit timeframe+group; else derive from TV `interval`.
@@ -814,7 +846,15 @@ async def http_history(request: web.Request) -> web.Response:
         content_type="application/json",
         headers={
             "Cache-Control": "public, max-age=10",
-            "Access-Control-Allow-Origin": "*",
+            **(
+                {
+                    "Access-Control-Allow-Origin": request.headers.get("Origin", ""),
+                    "Vary": "Origin",
+                }
+                if _ws_origin_allowed(request.headers.get("Origin"), request.headers.get("Host"))
+                and request.headers.get("Origin")
+                else {}
+            ),
         },
     )
 
@@ -838,7 +878,15 @@ async def main() -> None:
     hub.ping()
     http_runner = await start_http()
     asyncio.create_task(broadcaster())
-    async with websockets.serve(handle, HOST, PORT, ping_interval=20, ping_timeout=20, max_size=8 * 1024 * 1024):
+    async with websockets.serve(
+        handle,
+        HOST,
+        PORT,
+        ping_interval=20,
+        ping_timeout=20,
+        max_size=8 * 1024 * 1024,
+        process_request=_ws_process_request,
+    ):
         LOG.info("chart WS on ws://%s:%s (derived TF aggregation on)", HOST, PORT)
         await asyncio.Future()
     await http_runner.cleanup()
