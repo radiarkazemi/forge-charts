@@ -28,6 +28,7 @@ import {
 } from "./symbol-search-defaults";
 import { mountIndicatorsIntercept } from "./indicators-intercept";
 import { isChartPaintBusy } from "./study-paint-gate";
+import { DRAWINGS_UPDATED_EVENT } from "@/features/profile-sync";
 
 export interface TradingViewWidgetDeps {
   readonly controller: ChartController;
@@ -393,9 +394,48 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
 
           widget.subscribe("onAutoSaveNeeded", schedulePersist);
           // Coalesce — do NOT save synchronously on every study/drawing tick.
+          let drawingSyncTimer: number | undefined;
+          let ignoreDrawingsUntil = 0;
+          const syncDrawingsNow = () => {
+            if (cancelled || !widget || Date.now() < ignoreDrawingsUntil) return;
+            try {
+              const drawn = widget.activeChart().getLineToolsState();
+              void saveLoadAdapter.saveLineToolsAndGroups(undefined, "1", drawn);
+            } catch {
+              /* separate drawing storage is not available on this library build */
+            }
+          };
+          const paintRemoteDrawings = () => {
+            if (cancelled || !widget) return;
+            ignoreDrawingsUntil = Date.now() + 1_500;
+            const chart = widget.activeChart();
+            let symbol = "";
+            try {
+              const ext = chart.symbolExt();
+              symbol = ext?.ticker || chart.symbol();
+            } catch {
+              symbol = "";
+            }
+            void saveLoadAdapter
+              .loadLineToolsAndGroups(undefined, "1", "mainSeriesLineTools", { symbol })
+              .then((state) => {
+                if (cancelled || !widget || !state?.sources) return;
+                ignoreDrawingsUntil = Date.now() + 1_500;
+                return chart.applyLineToolsState(state as never);
+              })
+              .catch(() => {
+                /* the chart keeps the lines it already has */
+              });
+          };
+          window.addEventListener(DRAWINGS_UPDATED_EVENT, paintRemoteDrawings);
           try {
             widget.subscribe("study_event", schedulePersist as never);
-            widget.subscribe("drawing_event", schedulePersist as never);
+            widget.subscribe("drawing_event", (() => {
+              if (Date.now() < ignoreDrawingsUntil) return;
+              schedulePersist();
+              window.clearTimeout(drawingSyncTimer);
+              drawingSyncTimer = window.setTimeout(syncDrawingsNow, 350);
+            }) as never);
             widget.subscribe("study_properties_changed", schedulePersist as never);
           } catch {
             /* older CL builds */
@@ -409,6 +449,8 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
           document.addEventListener("visibilitychange", onVisibility);
           (widget as unknown as { __forgePersistLeave?: () => void }).__forgePersistLeave = () => {
             window.clearTimeout(persistTimer);
+            window.clearTimeout(drawingSyncTimer);
+            window.removeEventListener(DRAWINGS_UPDATED_EVENT, paintRemoteDrawings);
             window.removeEventListener("pagehide", onLeave);
             window.removeEventListener("beforeunload", onLeave);
             document.removeEventListener("visibilitychange", onVisibility);

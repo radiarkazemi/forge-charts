@@ -3,6 +3,7 @@
  */
 
 import type { KeyValueStorage } from "@/application";
+import { mergeLineToolStores } from "@/infrastructure/tradingview/local-save-load-adapter";
 import {
   applyProfilePayload,
   collectProfilePayload,
@@ -251,40 +252,72 @@ export async function pullProfileIfNewer(
 
 /** Debounced background push after local chart/settings changes. */
 export function createProfileSyncPusher(storage: KeyValueStorage): {
-  readonly notifyLocalChange: () => void;
+  readonly notifyLocalChange: (delayMs?: number) => void;
   readonly dispose: () => void;
 } {
   let timer: number | undefined;
   let disposed = false;
+  let flushing = false;
+  let queued = false;
 
   const flush = () => {
     if (disposed) return;
-    const creds = readSyncCredentials();
-    if (!creds) return;
-    const at = touchLocalStamp(storage);
-    void pushRemote(creds, storage, at).then((result) => {
-      if (result.conflict?.payload && result.conflict.updatedAt > at) {
-        const before = JSON.stringify(storage.get("forge.tv.lineTools", null));
-        applyProfilePayload(storage, result.conflict.payload);
-        touchLocalStamp(storage, result.conflict.updatedAt);
-        const after = JSON.stringify(storage.get("forge.tv.lineTools", null));
-        if (before !== after) {
-          window.dispatchEvent(new CustomEvent(DRAWINGS_UPDATED_EVENT));
+    if (flushing) {
+      queued = true;
+      return;
+    }
+    flushing = true;
+    void (async () => {
+      try {
+        const creds = readSyncCredentials();
+        if (!creds) return;
+        let remote: RemoteProfile | null = null;
+        try {
+          remote = await fetchRemote(creds);
+        } catch {
+          remote = null;
         }
-      } else if (result.ok) {
-        touchLocalStamp(storage, result.updatedAt);
+        // Keep the other device's trendline. A newer phone save must not wipe it.
+        const remoteTools = remote?.payload?.keys?.["forge.tv.lineTools"];
+        if (remoteTools !== undefined) {
+          storage.set(
+            "forge.tv.lineTools",
+            mergeLineToolStores(storage.get("forge.tv.lineTools", {}), remoteTools),
+          );
+        }
+        const at = Math.max(Date.now(), (remote?.updatedAt ?? 0) + 1);
+        const result = await pushRemote(creds, storage, at);
+        if (result.conflict?.payload) {
+          const before = JSON.stringify(storage.get("forge.tv.lineTools", null));
+          applyProfilePayload(storage, result.conflict.payload);
+          const again = await pushRemote(creds, storage, (result.conflict.updatedAt || 0) + 1);
+          touchLocalStamp(storage, again.ok ? again.updatedAt : result.conflict.updatedAt);
+          const after = JSON.stringify(storage.get("forge.tv.lineTools", null));
+          if (before !== after) window.dispatchEvent(new CustomEvent(DRAWINGS_UPDATED_EVENT));
+        } else if (result.ok) {
+          touchLocalStamp(storage, result.updatedAt);
+        }
+      } catch {
+        /* offline */
+      } finally {
+        flushing = false;
+        if (queued && !disposed) {
+          queued = false;
+          notifySoon(400);
+        }
       }
-    }).catch(() => {
-      /* offline */
-    });
+    })();
+  };
+
+  const notifySoon = (delayMs: number) => {
+    if (disposed) return;
+    window.clearTimeout(timer);
+    timer = window.setTimeout(flush, delayMs);
   };
 
   return {
-    notifyLocalChange() {
-      if (disposed) return;
-      window.clearTimeout(timer);
-      // Longer debounce — avoids sync storms while indicators / replay paint.
-      timer = window.setTimeout(flush, 6_000);
+    notifyLocalChange(delayMs = 6_000) {
+      notifySoon(delayMs);
     },
     dispose() {
       disposed = true;

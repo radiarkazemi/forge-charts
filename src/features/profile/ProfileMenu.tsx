@@ -192,7 +192,7 @@ export function ProfileMenu({
             {profile.displayName}
           </Typography>
           <Typography sx={{ color: muted, fontSize: 11.5, mt: 0.35 }} noWrap>
-            {formatNow(language)}
+            {profile.username?.includes("@") ? profile.username : profile.username ? `@${profile.username}` : formatNow(language)}
           </Typography>
         </Box>
       </Box>

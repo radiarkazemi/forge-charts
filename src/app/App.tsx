@@ -39,17 +39,15 @@ function buildSessionServices(session: AuthSession): Services {
   try {
     const snap = services.settings.settings.get();
     const active = activeProfile(snap);
-    if (
-      active.username !== session.username ||
-      (session.displayName && active.displayName !== session.displayName)
-    ) {
+    // The email is the account. Keep a name that was already saved for it;
+    // a phone with a different label must not replace the shared one on boot.
+    if (active.username !== session.username || !active.displayName) {
+      const displayName = active.displayName || session.displayName;
       services.settings.upsertProfile({
         ...active,
         username: session.username,
-        displayName: session.displayName || active.displayName,
-        avatarInitial: (session.displayName || session.username || "U")
-          .slice(0, 1)
-          .toUpperCase(),
+        displayName,
+        avatarInitial: (displayName || session.username || "U").slice(0, 1).toUpperCase(),
       });
     }
   } catch {
@@ -140,7 +138,14 @@ export function App() {
     }
     void (async () => {
       try {
-        await syncProfileOnLogin(built!.storage, creds);
+        const result = await syncProfileOnLogin(built!.storage, creds);
+        if (result.appliedRemote && built) {
+          built.dispose();
+          built = buildSessionServices(existing);
+        }
+        const shared = activeProfile(built!.settings.settings.get());
+        const renamed = auth.adoptSharedName(shared.displayName);
+        if (renamed) setSession(renamed);
       } catch {
         /* offline — open the local chart */
       }
@@ -160,14 +165,6 @@ export function App() {
     const current = services;
     if (!current) return;
     let pulling = false;
-    const reloadChart = () => {
-      const existing = auth.getSession();
-      if (!existing || servicesRef.current !== current) return;
-      current.dispose();
-      const rebuilt = buildSessionServices(existing);
-      servicesRef.current = rebuilt;
-      setServices(rebuilt);
-    };
     const pull = async () => {
       if (pulling || document.visibilityState === "hidden") return;
       const creds = readSyncCredentials();
@@ -175,8 +172,9 @@ export function App() {
       pulling = true;
       try {
         const result = await pullProfileIfNewer(current.storage, creds);
-        if (!result.appliedRemote) return;
-        reloadChart();
+        if (!result.appliedRemote || servicesRef.current !== current) return;
+        // The chart is already open. Ask it to paint the new line; don't send the user through login.
+        window.dispatchEvent(new CustomEvent(DRAWINGS_UPDATED_EVENT));
       } catch {
         /* offline */
       } finally {
@@ -186,14 +184,11 @@ export function App() {
     const onVisible = () => {
       if (document.visibilityState === "visible") void pull();
     };
-    const onDrawings = () => reloadChart();
     document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener(DRAWINGS_UPDATED_EVENT, onDrawings);
-    const timer = window.setInterval(() => void pull(), 12_000);
+    const timer = window.setInterval(() => void pull(), 1_500);
     void pull();
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener(DRAWINGS_UPDATED_EVENT, onDrawings);
       window.clearInterval(timer);
     };
   }, [services, auth]);
@@ -209,6 +204,9 @@ export function App() {
         built.dispose();
         built = buildSessionServices(next);
       }
+      const shared = activeProfile(built.settings.settings.get());
+      const renamed = auth.adoptSharedName(shared.displayName);
+      if (renamed) next = renamed;
     } catch {
       /* offline — local chart still works */
     }
@@ -218,7 +216,7 @@ export function App() {
     clearPageView();
     setView(null);
     setSession(next);
-  }, []);
+  }, [auth]);
 
   const completeBootSafety = useCallback(
     async (profile: SafetyAuthorizationProfile) => {
