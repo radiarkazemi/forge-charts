@@ -1110,6 +1110,12 @@ export function mountFloatingChromePin(container: HTMLElement): () => void {
     }
     for (const node of doc.querySelectorAll<HTMLElement>(PIN_TARGETS)) {
       if (node.closest(FAVORITE_TOOLBAR_SELECTOR)) continue;
+      // Our indicator window sizes itself: a centered two-pane dialog on
+      // desktop, and a full-screen category list on the phone.
+      if (node.closest("#forge-indicators-overlay")) {
+        releasePin(node);
+        continue;
+      }
       pinElement(node, bounds);
     }
   };
