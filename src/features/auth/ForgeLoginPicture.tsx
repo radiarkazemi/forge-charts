@@ -652,12 +652,12 @@ function SignupCard({
 }) {
   const hole = {
     ...holeInput,
-    left: "16.06%",
-    width: "67.3%",
-    height: "6.45%",
-    borderRadius: "1.55cqw",
-    padding: "0 1.4cqw",
-    background: "#121110",
+    left: "17.08%",
+    width: "65.55%",
+    height: "4.70%",
+    borderRadius: "1.8cqw",
+    padding: "0 1.2cqw",
+    background: "transparent",
   };
   return (
     <Box dir="ltr" sx={{ position: "relative", width: "100%", containerType: "inline-size" }}>
@@ -706,15 +706,15 @@ function SignupCard({
           </Box>
         ))}
       </Box>
-      <Box component="input" aria-label={t.name} placeholder={t.name} value={displayName} onChange={(event) => onDisplayName(event.target.value)} dir="ltr" sx={{ ...hole, top: "34.49%" }} />
-      <Box component="input" aria-label={t.email} placeholder={t.email} type="email" required value={username} autoComplete="username" onChange={(event) => onUsername(event.target.value)} dir="ltr" sx={{ ...hole, top: "43.12%" }} />
-      <Box component="input" aria-label={t.password} placeholder={t.password} type="password" required minLength={6} value={password} autoComplete="new-password" onChange={(event) => onPassword(event.target.value)} dir="ltr" sx={{ ...hole, top: "51.74%" }} />
-      <Box component="input" aria-label={t.confirm} placeholder={t.confirm} type="password" required minLength={6} value={confirm} autoComplete="new-password" onChange={(event) => onConfirm(event.target.value)} dir="ltr" sx={{ ...hole, top: "60.37%" }} />
+      <Box component="input" aria-label={t.name} placeholder={t.name} value={displayName} onChange={(event) => onDisplayName(event.target.value)} dir="ltr" sx={{ ...hole, top: "36.06%" }} />
+      <Box component="input" aria-label={t.email} placeholder={t.email} type="email" required value={username} autoComplete="username" onChange={(event) => onUsername(event.target.value)} dir="ltr" sx={{ ...hole, top: "44.08%" }} />
+      <Box component="input" aria-label={t.password} placeholder={t.password} type="password" required minLength={6} value={password} autoComplete="new-password" onChange={(event) => onPassword(event.target.value)} dir="ltr" sx={{ ...hole, top: "52.09%" }} />
+      <Box component="input" aria-label={t.confirm} placeholder={t.confirm} type="password" required minLength={6} value={confirm} autoComplete="new-password" onChange={(event) => onConfirm(event.target.value)} dir="ltr" sx={{ ...hole, top: "60.10%" }} />
       {error ? (
-        <Box sx={{ position: "absolute", left: "16%", width: "68%", top: "80.4%", color: "#ffb4b4", fontSize: "2cqw", textAlign: "center", lineHeight: 1.2 }}>{error}</Box>
+        <Box sx={{ position: "absolute", left: "16%", width: "68%", top: "66.2%", color: "#ffb4b4", fontSize: "1.8cqw", textAlign: "center", lineHeight: 1.1 }}>{error}</Box>
       ) : null}
       <Box component="button" type="submit" disabled={busy} sx={{
-        ...hitStyle({ left: "15.33%", top: "68.9%", width: "68.61%", height: "10.02%" }),
+        ...hitStyle({ left: "16.2%", top: "68.8%", width: "67.5%", height: "10.2%" }),
         cursor: busy ? "progress" : "pointer",
         color: "#1a1208",
         fontWeight: 800,
@@ -725,7 +725,7 @@ function SignupCard({
         position: "absolute",
         left: "12%",
         width: "76%",
-        top: "83.6%",
+        top: "82.6%",
         height: "5%",
         display: "flex",
         alignItems: "center",
@@ -941,7 +941,6 @@ export function ForgeLoginPicture({
             display: "flex",
             justifyContent: "center",
             alignItems: "flex-start",
-            px: signup ? 2 : 0,
           }}>
             <Box sx={{ width: "116%" }}>
               {card}
