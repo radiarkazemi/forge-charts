@@ -93,6 +93,12 @@ function isSymbolSearchButton(btn: HTMLElement): boolean {
   return title === "Symbol Search";
 }
 
+function isHeaderSettingsButton(btn: HTMLElement): boolean {
+  if (!btn.closest(".layout__area--top, .tv-header")) return false;
+  const title = (btn.getAttribute("title") || btn.getAttribute("aria-label") || "").trim();
+  return title === "Settings" || title === "Chart settings";
+}
+
 function isIndicatorsButton(btn: HTMLElement): boolean {
   if (btn.getAttribute("data-name") === "open-indicators-dialog") return true;
   const title = (btn.getAttribute("title") || "").trim();
@@ -196,10 +202,22 @@ export function mountTvLayersHeader(container: HTMLElement): () => void {
   const onPointer = (event: Event) => {
     if (disposed || !shouldRoute()) return;
 
+    // The chart iframe is another document. Parent `Element` does not match its nodes.
+    const view = (event as UIEvent).view as (Window & {
+      Element: typeof Element;
+      HTMLElement: typeof HTMLElement;
+    }) | null;
     const raw = event.target;
-    if (!(raw instanceof Element)) return;
+    if (!view || !raw || !(raw instanceof view.Element)) return;
     const btn = raw.closest("button");
-    if (!btn || !(btn instanceof HTMLElement)) return;
+    if (!(btn instanceof view.HTMLElement)) return;
+
+    if (isHeaderSettingsButton(btn)) {
+      stop(event);
+      if (!once("settings")) return;
+      layoutSyncBus.openChartPropertiesOnActive();
+      return;
+    }
 
     // Prefer last plot click (TV active chart), not a stolen header focus.
     const target = layoutSyncBus.getHeaderTargetPane();
