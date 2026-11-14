@@ -813,9 +813,9 @@ export function ForgeLoginPicture({
         minWidth: 0,
         overflow: "hidden",
       }}>
-        <Box sx={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "flex-end", pr: "6vw", pl: 2 }}>
-          <Box sx={{ width: "min(680px, 46vw)", mt: "4vh" }}>
-            <Box sx={{ mb: 1.25 }}>
+        <Box sx={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "flex-end", pr: "6vw", pb: "8px" }}>
+          <Box sx={{ width: "min(640px, 42vw)" }}>
+            <Box sx={{ mb: 1 }}>
               <Tagline text={t} />
             </Box>
             {card}
@@ -834,7 +834,28 @@ export function ForgeLoginPicture({
             ) : null}
           </Box>
         </Box>
-        <MovingTape quotes={QUOTES} />
+        <Box dir="ltr" sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-around",
+          gap: 2,
+          px: 3,
+          py: 1.1,
+          borderTop: "1px solid rgba(224,176,90,0.28)",
+          bgcolor: "rgba(0,0,0,0.28)",
+        }}>
+          {QUOTES.slice(0, 4).map((quote, index) => (
+            <Box key={quote.id} sx={{ display: "flex", alignItems: "center", gap: 0.8 }}>
+              {index ? <Box sx={{ width: "1px", height: 16, bgcolor: "rgba(232,196,130,0.35)", mr: 1.5 }} /> : null}
+              <QuoteMark id={quote.id} />
+              <Box sx={{ display: "flex", alignItems: "baseline", gap: 0.8, fontSize: 13 }}>
+                <Box component="span" sx={{ fontWeight: 750 }}>{quote.id}</Box>
+                <span>{quote.price}</span>
+                <Box component="span" sx={{ color: "#3ddc84" }}>▲ {quote.change}</Box>
+              </Box>
+            </Box>
+          ))}
+        </Box>
       </Box>
     </Box>
   );
