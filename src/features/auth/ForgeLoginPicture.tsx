@@ -73,7 +73,7 @@ const COPY = {
     forgotNote: "بازیابی رمز هنوز آماده نیست. از رمز همین حساب استفاده کنید.",
     signIn: "ورود",
     create: "ساخت حساب",
-    google: "ادامه با گوگل",
+    google: "Continue with Google",
     googleNote: "ورود با گوگل هنوز آماده نیست. از ایمیل و رمز استفاده کنید.",
     about: "درباره ما",
     terms: "قوانین",
@@ -213,9 +213,9 @@ function QuoteMark({ id }: { readonly id: string }) {
 
 type CopyText = (typeof COPY)[Lang];
 
-function Tagline({ text, compact }: { readonly text: CopyText; readonly compact?: boolean }) {
+function Tagline({ text, compact, dir = "ltr" }: { readonly text: CopyText; readonly compact?: boolean; readonly dir?: "ltr" | "rtl" }) {
   return (
-    <Box sx={{
+    <Box dir={dir} sx={{
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
@@ -601,23 +601,7 @@ function ArtCard({
       >
         {fa || busy ? `${busy ? "…" : t.signIn} →` : ""}
       </Box>
-      <GoogleHit label={t.google} onUnavailable={onGoogle} onCredential={onGoogleCredential} />
-      {fa ? (
-        <Box sx={{
-          position: "absolute",
-          left: "40%",
-          top: "83.4%",
-          width: "30%",
-          height: "3.8%",
-          bgcolor: "#0c0b09",
-          color: "#f3f0ea",
-          fontSize: "2.15cqw",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          pointerEvents: "none",
-        }}>{t.google}</Box>
-      ) : null}
+      <GoogleHit label="Continue with Google" onUnavailable={onGoogle} onCredential={onGoogleCredential} />
     </Box>
   );
 }
@@ -653,27 +637,20 @@ function SignupCard({
   readonly onConfirm: (value: string) => void;
   readonly onSignIn: () => void;
 }) {
-  const field = {
-    flex: "1 1 0",
-    minHeight: 0,
-    width: "100%",
-    boxSizing: "border-box" as const,
-    borderRadius: "999px",
-    border: "1px solid rgba(214,196,170,0.48)",
-    bgcolor: "#12100e",
-    color: "#f6f3ee",
-    px: "3.4cqw",
-    font: "inherit",
-    fontSize: "2.35cqw",
-    outline: "none",
-    "&:focus": { borderColor: "rgba(232,196,130,0.95)" },
-    "&::placeholder": { color: "#cfc8be" },
+  const hole = {
+    ...holeInput,
+    left: "16.06%",
+    width: "67.3%",
+    height: "6.45%",
+    borderRadius: "1.55cqw",
+    padding: "0 1.4cqw",
+    background: "#121110",
   };
   return (
     <Box dir="ltr" sx={{ position: "relative", width: "100%", containerType: "inline-size" }}>
       <Box
         component="img"
-        src={brandSrc("forge-mobile-v2-form.png")}
+        src={brandSrc("forge-signup-form.png")}
         alt=""
         sx={{ width: "100%", height: "auto", display: "block", pointerEvents: "none", userSelect: "none" }}
       />
@@ -716,48 +693,33 @@ function SignupCard({
           </Box>
         ))}
       </Box>
+      <Box component="input" aria-label={t.name} placeholder={t.name} value={displayName} onChange={(event) => onDisplayName(event.target.value)} dir="ltr" sx={{ ...hole, top: "34.49%" }} />
+      <Box component="input" aria-label={t.email} placeholder={t.email} type="email" required value={username} autoComplete="username" onChange={(event) => onUsername(event.target.value)} dir="ltr" sx={{ ...hole, top: "43.12%" }} />
+      <Box component="input" aria-label={t.password} placeholder={t.password} type="password" required minLength={6} value={password} autoComplete="new-password" onChange={(event) => onPassword(event.target.value)} dir="ltr" sx={{ ...hole, top: "51.74%" }} />
+      <Box component="input" aria-label={t.confirm} placeholder={t.confirm} type="password" required minLength={6} value={confirm} autoComplete="new-password" onChange={(event) => onConfirm(event.target.value)} dir="ltr" sx={{ ...hole, top: "60.37%" }} />
+      {error ? (
+        <Box sx={{ position: "absolute", left: "16%", width: "68%", top: "80.4%", color: "#ffb4b4", fontSize: "2cqw", textAlign: "center", lineHeight: 1.2 }}>{error}</Box>
+      ) : null}
+      <Box component="button" type="submit" disabled={busy} sx={{
+        ...hitStyle({ left: "15.33%", top: "68.9%", width: "68.61%", height: "10.02%" }),
+        cursor: busy ? "progress" : "pointer",
+        color: "#1a1208",
+        fontWeight: 800,
+        fontSize: "3cqw",
+        background: "transparent",
+      }}>{busy ? "…" : `${t.create} →`}</Box>
       <Box sx={{
         position: "absolute",
-        left: "14%",
-        width: "72%",
-        top: "30%",
-        height: "50%",
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "space-between",
-        gap: "1.6cqw",
-        bgcolor: "#0c0b09",
-      }}>
-        <Box component="input" aria-label={t.name} placeholder={t.name} value={displayName} onChange={(event) => onDisplayName(event.target.value)} sx={field} />
-        <Box component="input" aria-label={t.email} placeholder={t.email} type="email" required value={username} autoComplete="username" onChange={(event) => onUsername(event.target.value)} sx={field} />
-        <Box component="input" aria-label={t.password} placeholder={t.password} type="password" required minLength={6} value={password} autoComplete="new-password" onChange={(event) => onPassword(event.target.value)} sx={field} />
-        <Box component="input" aria-label={t.confirm} placeholder={t.confirm} type="password" required minLength={6} value={confirm} autoComplete="new-password" onChange={(event) => onConfirm(event.target.value)} sx={field} />
-        {error ? <Box sx={{ color: "#ffb4b4", fontSize: "2cqw", textAlign: "center", lineHeight: 1.25, flex: "0 0 auto" }}>{error}</Box> : null}
-        <Box component="button" type="submit" disabled={busy} sx={{
-          flex: "1.05 1 0",
-          minHeight: 0,
-          border: "none",
-          borderRadius: "999px",
-          cursor: busy ? "progress" : "pointer",
-          color: "#1a1208",
-          font: "inherit",
-          fontWeight: 750,
-          fontSize: "2.7cqw",
-          background: "linear-gradient(180deg, #f8e7b0 0%, #f6d98a 42%, #e7a84a 100%)",
-        }}>{busy ? "…" : `${t.create} →`}</Box>
-      </Box>
-      <Box sx={{
-        position: "absolute",
-        left: "14%",
-        width: "72%",
-        top: "79.4%",
-        height: "10.2%",
-        bgcolor: "#0c0b09",
+        left: "12%",
+        width: "76%",
+        top: "83.6%",
+        height: "5%",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         color: "#d9d3cb",
         fontSize: "2.15cqw",
+        background: "transparent",
       }}>
         {t.haveAccount}{" "}
         <Box component="button" type="button" onClick={onSignIn} sx={{ p: 0, ml: "0.4cqw", border: "none", bgcolor: "transparent", color: "#e4b15a", font: "inherit", fontWeight: 700, cursor: "pointer" }}>
@@ -882,7 +844,7 @@ export function ForgeLoginPicture({
 
   if (mobile) {
     return (
-      <Box dir={lang === "fa" ? "rtl" : "ltr"} sx={{
+      <Box dir="ltr" sx={{
         position: "fixed",
         inset: 0,
         width: "100%",
@@ -917,7 +879,7 @@ export function ForgeLoginPicture({
         }}>
           <Box sx={{ flex: "0 0 36%" }} />
           <Box sx={{ containerType: "inline-size", px: 1, flex: "0 0 auto" }}>
-            <Tagline text={t} compact />
+            <Tagline text={t} compact dir={lang === "fa" ? "rtl" : "ltr"} />
           </Box>
           <Box sx={{
             flex: "1 1 auto",
@@ -954,7 +916,7 @@ export function ForgeLoginPicture({
   }
 
   return (
-    <Box dir={lang === "fa" ? "rtl" : "ltr"} sx={{
+    <Box dir="ltr" sx={{
       position: "fixed",
       inset: 0,
       height: "100dvh",
@@ -1004,7 +966,7 @@ export function ForgeLoginPicture({
         <Box sx={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "flex-end", pr: "6vw", pb: "8px" }}>
           <Box sx={{ width: "min(640px, 42vw)" }}>
             <Box sx={{ mb: 1 }}>
-              <Tagline text={t} />
+              <Tagline text={t} dir={lang === "fa" ? "rtl" : "ltr"} />
             </Box>
             {card}
             {message && !signup ? (
