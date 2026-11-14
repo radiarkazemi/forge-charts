@@ -3281,7 +3281,29 @@ async def iran_gold_quote(request: web.Request) -> web.Response:
     )
 
 
+def _browser_host(value: str) -> str:
+    value = value.strip().lower()
+    if "://" in value:
+        value = value.split("://", 1)[1]
+    value = value.split("/", 1)[0]
+    if value.startswith("[") and "]" in value:
+        return value.split("]", 1)[0] + "]"
+    return value.split(":")[0]
+
+
+def _ws_origin_allowed(origin: str | None, request_host: str | None) -> bool:
+    """Browsers on the chart site, or the same host the page was opened on."""
+    if not origin:
+        return True
+    host = _browser_host(origin)
+    if host in {"forgechart.ir", "www.forgechart.ir", "localhost", "127.0.0.1"}:
+        return True
+    return bool(request_host) and host == _browser_host(request_host)
+
+
 async def ws_handler(request: web.Request) -> web.WebSocketResponse:
+    if not _ws_origin_allowed(request.headers.get("Origin"), request.headers.get("Host")):
+        raise web.HTTPForbidden(text="origin not allowed")
     ws = web.WebSocketResponse(heartbeat=20)
     await ws.prepare(request)
     subscribed: set[str] = set()

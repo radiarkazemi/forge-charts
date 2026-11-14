@@ -1,5 +1,5 @@
 import type { KeyValueStorage } from "@/application";
-import { hashPassword, verifyPassword } from "./password";
+import { hashPassword, passwordNeedsUpgrade, passwordPolicyError, verifyPassword } from "./password";
 import {
   isSafetyProfileComplete,
   type SafetyAuthorizationProfile,
@@ -206,13 +206,9 @@ export class AuthService {
       throw new Error("Enter a valid email address (example: you@email.com).");
     }
     if (username.length < 5) throw new Error("Email must be at least 5 characters.");
-    if (password.length < 6) throw new Error("Password must be at least 6 characters.");
-    const users = this.users();
-    if (users.some((u) => u.username === username)) {
-      throw new Error("That email is already registered. Log in instead.");
-    }
-    const displayName =
-      (input.displayName?.trim() || username.split("@")[0] || username).slice(0, 48) || username;
+    const policy = passwordPolicyError(password);
+    if (policy) throw new Error(policy);
+    // Hash before the duplicate check so a taken email is not faster to reject.
     let passwordHash: string;
     try {
       passwordHash = await hashPassword(password);
@@ -221,6 +217,12 @@ export class AuthService {
         "Could not secure your password in this browser. Use HTTPS / another browser and try again.",
       );
     }
+    const users = this.users();
+    if (users.some((u) => u.username === username)) {
+      throw new Error("Could not create that account. If you already have one, sign in.");
+    }
+    const displayName =
+      (input.displayName?.trim() || username.split("@")[0] || username).slice(0, 48) || username;
     const record: AuthUserRecord = {
       id: newId(),
       username,
@@ -341,6 +343,16 @@ export class AuthService {
       );
     }
     if (!ok) throw new Error("Invalid email or password.");
+    if (passwordNeedsUpgrade(user.passwordHash)) {
+      try {
+        const passwordHash = await hashPassword(password);
+        this.writeUsers(
+          this.users().map((item) => (item.id === user.id ? { ...item, passwordHash } : item)),
+        );
+      } catch {
+        /* keep the older hash; login still succeeded */
+      }
+    }
     // Replace any previous session so the prior account’s UI state cannot linger.
     this.storage.remove(SESSION_KEY);
     return this.startSession(user);

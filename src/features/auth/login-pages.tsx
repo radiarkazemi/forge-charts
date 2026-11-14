@@ -130,7 +130,7 @@ const PAGES: Record<Lang, Record<InfoPageId, PageCopy>> = {
         {
           heading: "Create an account",
           paragraphs: [
-            "On the sign-in screen choose New to Forge, then Create account. Enter your name, email, and a password of at least 6 characters, and enter the password again. Then complete the safety step with your name and country and accept the terms and the risk notice. The charts open after that.",
+            "On the sign-in screen choose New to Forge, then Create account. Enter your name, email, and a password of at least 15 characters, and enter the password again. Then complete the safety step with your name and country and accept the terms and the risk notice. The charts open after that.",
           ],
         },
         {
@@ -267,7 +267,7 @@ const PAGES: Record<Lang, Record<InfoPageId, PageCopy>> = {
         {
           heading: "ساخت حساب",
           paragraphs: [
-            "در صفحه ورود «تازه‌وارد فورج هستید» و سپس ساخت حساب را بزنید. نام، ایمیل و رمز حداقل ۶ نویسه را وارد کنید و رمز را دوباره بنویسید. بعد در مرحله ایمنی نام و کشور را کامل کنید و قوانین و هشدار ریسک را بپذیرید. نمودار بعد از آن باز می‌شود.",
+            "در صفحه ورود «تازه‌وارد فورج هستید» و سپس ساخت حساب را بزنید. نام، ایمیل و رمز حداقل ۱۵ نویسه را وارد کنید و رمز را دوباره بنویسید. بعد در مرحله ایمنی نام و کشور را کامل کنید و قوانین و هشدار ریسک را بپذیرید. نمودار بعد از آن باز می‌شود.",
           ],
         },
         {
