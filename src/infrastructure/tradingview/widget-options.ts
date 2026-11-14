@@ -335,18 +335,14 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
   });
 
   const baseDisabled = secondary ? SECONDARY_DISABLED : hideHeader ? NO_HEADER_DISABLED : DISABLED_FEATURES;
-  // Mobile: drawing toolbar starts collapsed. The Date Range footer is our bar,
-  // so the library timeframe strip stays off (it does not match the mobile layout).
+  // The chart's own bottom bar is the date-range footer on every screen.
   const disabled =
     mobile && !secondary
-      ? [
-          ...baseDisabled.filter((f) => f !== "hide_left_toolbar_by_default"),
-          "timeframes_toolbar" as ChartingLibraryFeatureset,
-        ]
+      ? baseDisabled.filter((f) => f !== "hide_left_toolbar_by_default")
       : baseDisabled;
 
   const customCss = mobile && !secondary
-    ? "/charts/tv-header-mobile.css?v=6"
+    ? "/charts/tv-header-mobile.css?v=7"
     : hideHeader
       ? "/charts/tv-header-secondary.css?v=5"
       : "/charts/tv-header.css?v=2";

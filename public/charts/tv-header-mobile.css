@@ -43,12 +43,12 @@ body,
   background: #101010 !important;
 }
 
-/* Continuous black drawing rail, full height, same edge as the reference. */
+/* Drawing rail stops above the chart's own bottom bar. */
 .layout__area--left {
   top: 0 !important;
-  bottom: 0 !important;
+  bottom: 39px !important;
   left: 0 !important;
-  height: 100% !important;
+  height: auto !important;
   width: 52px !important;
   background: #101010 !important;
   border-right: 1px solid #1a1a1a !important;

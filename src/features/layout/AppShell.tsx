@@ -59,18 +59,6 @@ export function AppShell({ onSignOut }: AppShellProps) {
   }, [language]);
 
   useEffect(() => {
-    if (!isMobile) return;
-    // Phones: reclaim plot area — single pane + no docked side panels.
-    if (settings.settings.get().chartLayout !== "s") {
-      settings.setChartLayout("s");
-    }
-    if (settings.settings.get().sidePanel) {
-      settings.setSidePanel(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: mobile breakpoint only
-  }, [isMobile]);
-
-  useEffect(() => {
     const onOpen = (event: Event) => {
       const detail = (event as CustomEvent<Partial<ProfileAnchorRect>>).detail;
       if (
