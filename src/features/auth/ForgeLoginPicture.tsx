@@ -4,6 +4,7 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 import { isDevSite } from "@/dev-site";
 import { googleClientId, mountGoogleButton } from "./google-sign-in";
 import { fetchTapeQuotes, placeholderTape, type TapeQuote } from "./login-quotes";
+import { LoginInfoPage, type InfoPageId } from "./login-pages";
 
 function brandSrc(file: string): string {
   const base = import.meta.env.BASE_URL || "/";
@@ -227,7 +228,15 @@ function Tagline({ text, compact, dir = "ltr" }: { readonly text: CopyText; read
   );
 }
 
-function FooterLinks({ labels, compact }: { readonly labels: readonly string[]; readonly compact?: boolean }) {
+function FooterLinks({
+  items,
+  compact,
+  onOpen,
+}: {
+  readonly items: readonly { id: InfoPageId; label: string }[];
+  readonly compact?: boolean;
+  readonly onOpen: (page: InfoPageId) => void;
+}) {
   return (
     <Box dir="ltr" sx={{
       display: "flex",
@@ -238,10 +247,19 @@ function FooterLinks({ labels, compact }: { readonly labels: readonly string[]; 
       fontSize: compact ? "2.35cqw" : 13,
       whiteSpace: "nowrap",
     }}>
-      {labels.map((label, index) => (
-        <Box key={label} sx={{ display: "flex", alignItems: "center", gap: compact ? "1.6cqw" : 1.25 }}>
+      {items.map((item, index) => (
+        <Box key={item.id} sx={{ display: "flex", alignItems: "center", gap: compact ? "1.6cqw" : 1.25 }}>
           {index ? <Box sx={{ opacity: 0.55 }}>|</Box> : null}
-          <Box component="span">{label}</Box>
+          <Box component="button" type="button" onClick={() => onOpen(item.id)} sx={{
+            p: 0,
+            border: "none",
+            bgcolor: "transparent",
+            color: "inherit",
+            font: "inherit",
+            fontSize: "inherit",
+            cursor: "pointer",
+            "&:hover": { color: "#f0c36a" },
+          }}>{item.label}</Box>
         </Box>
       ))}
     </Box>
@@ -748,6 +766,7 @@ export function ForgeLoginPicture({
   const [remember, setRemember] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [quotes, setQuotes] = useState<TapeQuote[]>(placeholderTape);
+  const [infoPage, setInfoPage] = useState<InfoPageId | null>(null);
   const dev = isDevSite();
   const t = COPY[lang];
   const signup = mode === "signup";
@@ -816,7 +835,25 @@ export function ForgeLoginPicture({
       body.style.overflow = prevBody;
     };
   }, []);
-  const footer = [t.about, t.terms, t.privacy, t.help];
+  const footer = [
+    { id: "about" as const, label: t.about },
+    { id: "terms" as const, label: t.terms },
+    { id: "privacy" as const, label: t.privacy },
+    { id: "help" as const, label: t.help },
+  ];
+
+  if (infoPage) {
+    return (
+      <LoginInfoPage
+        page={infoPage}
+        lang={lang}
+        home={homeHref()}
+        onBack={() => setInfoPage(null)}
+        onOpen={setInfoPage}
+        labels={footer}
+      />
+    );
+  }
 
   const card = signup ? (
     <SignupCard
@@ -921,7 +958,7 @@ export function ForgeLoginPicture({
             </Box>
           ) : null}
           <Box sx={{ containerType: "inline-size", flex: "0 0 auto", py: 0.4 }}>
-            <FooterLinks labels={footer} compact />
+            <FooterLinks items={footer} compact onOpen={setInfoPage} />
           </Box>
           <MovingTape quotes={quotes} />
         </Box>
@@ -987,7 +1024,7 @@ export function ForgeLoginPicture({
               <Box sx={{ color: "#ffb4b4", fontSize: 13, textAlign: "center", mt: 1 }}>{message}</Box>
             ) : null}
             <Box sx={{ mt: 1.75 }}>
-              <FooterLinks labels={footer} />
+              <FooterLinks items={footer} onOpen={setInfoPage} />
             </Box>
             {!signup ? (
               <Box sx={{ textAlign: "center", mt: 0.75 }}>
