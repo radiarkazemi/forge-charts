@@ -40,6 +40,13 @@ const OWNER_DISPLAY = "Radiar";
 const OWNER_PASSWORD_HASH =
   "pbkdf2$120000$JomrF2F0EQ+29BSwT0rNkw==$UWehN8xXdjBPS9e0DQOyyF1LBhtvZqzyqxV6xTNcFMQ=";
 
+/** Team sign-in. The password is stored only as a PBKDF2 hash. */
+const TEAM_ID = "team-forge-dev";
+const TEAM_USERNAME = "forge-dev";
+const TEAM_DISPLAY = "Forge";
+const TEAM_PASSWORD_HASH =
+  "pbkdf2$120000$2NgSkTqyrfGI1rSw7v9aVQ==$mJ/TXM/+B4A87ecNujkL5mmtrm05gyxP/sG8U+nmon0=";
+
 export interface AuthUserPublic {
   readonly id: string;
   readonly username: string;
@@ -114,6 +121,7 @@ export class AuthService {
     try {
       this.migrateSafetyOutOfRegistry();
       this.ensureOwnerAccount();
+      this.ensureTeamAccount();
     } catch {
       /* private mode / blocked storage — login will surface a clear error */
     }
@@ -547,6 +555,45 @@ export class AuthService {
     }
     this.writeUsers([...users, owner]);
     this.writeSafetyScoped(OWNER_ID, ownerSafety);
+  }
+
+  /** Built-in team login. Accepts the username even though it is not an email. */
+  private ensureTeamAccount(): void {
+    const users = this.users();
+    const safety: SafetyAuthorizationProfile = {
+      fullName: TEAM_DISPLAY,
+      phone: "",
+      nationalId: "",
+      country: "Iran",
+      acceptedTerms: true,
+      acceptedRisk: true,
+      completedAt: 1,
+    };
+    const account: AuthUserRecord = {
+      id: TEAM_ID,
+      username: TEAM_USERNAME,
+      displayName: TEAM_DISPLAY,
+      createdAt: Date.now(),
+      passwordHash: TEAM_PASSWORD_HASH,
+      safetyComplete: true,
+    };
+    const byName = users.findIndex((u) => u.username === TEAM_USERNAME);
+    if (byName >= 0) {
+      const prev = users[byName]!;
+      const next = [...users];
+      next[byName] = {
+        ...account,
+        id: prev.id,
+        createdAt: prev.createdAt || account.createdAt,
+        displayName: prev.displayName || account.displayName,
+        safetyComplete: true,
+      };
+      this.writeUsers(next);
+      if (!this.readSafetyScoped(prev.id)) this.writeSafetyScoped(prev.id, safety);
+      return;
+    }
+    this.writeUsers([...users, account]);
+    this.writeSafetyScoped(TEAM_ID, safety);
   }
 
   private startSession(user: AuthUserRecord): AuthSession {

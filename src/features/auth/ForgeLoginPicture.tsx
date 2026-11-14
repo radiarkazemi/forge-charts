@@ -513,7 +513,7 @@ function ArtCard({
         component="input"
         aria-label={t.email}
         placeholder={t.email}
-        type="email"
+        type="text"
         required
         value={username}
         autoComplete="username"
