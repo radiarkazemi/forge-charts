@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CssBaseline from "@mui/material/CssBaseline";
 import { ThemeProvider } from "@mui/material/styles";
 import {
@@ -17,6 +17,8 @@ import {
   clearSyncCredentials,
   readSyncCredentials,
   storeSyncCredentials,
+  DRAWINGS_UPDATED_EVENT,
+  pullProfileIfNewer,
   syncProfileOnLogin,
   type ProfileSyncCredentials,
 } from "@/features/profile-sync";
@@ -105,28 +107,96 @@ export function App() {
   });
   const [view, setView] = useState<string | null>(() => pageView());
   const servicesRef = useRef<Services | null>(null);
-  const [services, setServices] = useState<Services | null>(() => {
-    // The site root sends people to ?view=login. Keep that page on the form.
-    if (pageView() === "login") return null;
-    const existing = resumeSession(auth);
-    if (!existing || auth.needsSafety(existing.userId)) return null;
-    const built = buildSessionServices(existing);
-    servicesRef.current = built;
-    // Resume cloud sync if this tab still has sessionStorage credentials.
-    const creds = readSyncCredentials();
-    if (creds) {
-      void syncProfileOnLogin(built.storage, creds).then((result) => {
-        if (!result.appliedRemote) return;
-        // Remote won — rebuild services so chart mounts with synced autosave.
-        servicesRef.current?.dispose();
-        const rebuilt = buildSessionServices(existing);
-        servicesRef.current = rebuilt;
-        setServices(rebuilt);
-      });
-    }
-    return built;
-  });
+  const [services, setServices] = useState<Services | null>(null);
+  const [bootDone, setBootDone] = useState(false);
   const gateTheme = useMemo(() => createAppTheme("dark"), []);
+
+  // Pull the account before the chart mounts, so a trendline saved on the
+  // computer is already here when the phone opens the same symbol.
+  useEffect(() => {
+    let cancelled = false;
+    let built: Services | null = null;
+    const existing = auth.getSession();
+    if (pageView() === "login" || !existing || auth.needsSafety(existing.userId)) {
+      setBootDone(true);
+      return;
+    }
+    built = buildSessionServices(existing);
+    const creds = readSyncCredentials();
+    const finish = () => {
+      if (cancelled || !built) {
+        built?.dispose();
+        return;
+      }
+      servicesRef.current = built;
+      setServices(built);
+      setBootDone(true);
+    };
+    if (!creds) {
+      finish();
+      return () => {
+        cancelled = true;
+      };
+    }
+    void (async () => {
+      try {
+        await syncProfileOnLogin(built!.storage, creds);
+      } catch {
+        /* offline — open the local chart */
+      }
+      finish();
+    })();
+    return () => {
+      cancelled = true;
+      built?.dispose();
+      if (servicesRef.current === built) {
+        servicesRef.current = null;
+        setServices(null);
+      }
+    };
+  }, [auth]);
+
+  useEffect(() => {
+    const current = services;
+    if (!current) return;
+    let pulling = false;
+    const reloadChart = () => {
+      const existing = auth.getSession();
+      if (!existing || servicesRef.current !== current) return;
+      current.dispose();
+      const rebuilt = buildSessionServices(existing);
+      servicesRef.current = rebuilt;
+      setServices(rebuilt);
+    };
+    const pull = async () => {
+      if (pulling || document.visibilityState === "hidden") return;
+      const creds = readSyncCredentials();
+      if (!creds) return;
+      pulling = true;
+      try {
+        const result = await pullProfileIfNewer(current.storage, creds);
+        if (!result.appliedRemote) return;
+        reloadChart();
+      } catch {
+        /* offline */
+      } finally {
+        pulling = false;
+      }
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void pull();
+    };
+    const onDrawings = () => reloadChart();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener(DRAWINGS_UPDATED_EVENT, onDrawings);
+    const timer = window.setInterval(() => void pull(), 12_000);
+    void pull();
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener(DRAWINGS_UPDATED_EVENT, onDrawings);
+      window.clearInterval(timer);
+    };
+  }, [services, auth]);
 
   const enter = useCallback(async (next: AuthSession, syncCreds: ProfileSyncCredentials) => {
     storeSyncCredentials(syncCreds);
@@ -248,6 +318,14 @@ export function App() {
             signOut();
           }}
         />
+      </ThemeProvider>
+    );
+  }
+
+  if (session && !needsSafetyBoot && view !== "login" && !bootDone) {
+    return (
+      <ThemeProvider theme={gateTheme}>
+        <CssBaseline />
       </ThemeProvider>
     );
   }

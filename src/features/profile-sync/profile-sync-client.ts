@@ -13,6 +13,11 @@ import {
 
 const SYNC_KEY_SESSION = "forge.profile.syncKey.v1";
 const ACCOUNT_KEY_SESSION = "forge.profile.accountKey.v1";
+const CREDS_LOCAL = "forge.profile.syncCreds.v1";
+const SIGNED_OUT_KEY = "forge.auth.signedOut.v1";
+
+/** Fired when a cloud conflict merged drawings into this browser. The chart remounts. */
+export const DRAWINGS_UPDATED_EVENT = "forge:drawings-updated";
 
 export interface ProfileSyncCredentials {
   readonly accountKey: string;
@@ -24,6 +29,20 @@ function apiBase(): string {
   return "/api/forge-profile";
 }
 
+function rememberCreds(creds: ProfileSyncCredentials | null): void {
+  try {
+    if (!creds) localStorage.removeItem(CREDS_LOCAL);
+    else localStorage.setItem(CREDS_LOCAL, JSON.stringify(creds));
+  } catch {
+    /* private mode */
+  }
+}
+
+function validCreds(syncKey: string, accountKey: string): ProfileSyncCredentials | null {
+  if (syncKey.length === 64 && accountKey.length === 64) return { syncKey, accountKey };
+  return null;
+}
+
 export function storeSyncCredentials(creds: ProfileSyncCredentials): void {
   try {
     sessionStorage.setItem(SYNC_KEY_SESSION, creds.syncKey);
@@ -31,6 +50,8 @@ export function storeSyncCredentials(creds: ProfileSyncCredentials): void {
   } catch {
     /* private mode */
   }
+  // Survive a closed phone browser. The password itself is never stored.
+  rememberCreds(creds);
 }
 
 export function clearSyncCredentials(): void {
@@ -40,19 +61,44 @@ export function clearSyncCredentials(): void {
   } catch {
     /* ignore */
   }
+  rememberCreds(null);
 }
 
 export function readSyncCredentials(): ProfileSyncCredentials | null {
   try {
-    const syncKey = sessionStorage.getItem(SYNC_KEY_SESSION) || "";
-    const accountKey = sessionStorage.getItem(ACCOUNT_KEY_SESSION) || "";
-    if (syncKey.length === 64 && accountKey.length === 64) {
-      return { syncKey, accountKey };
+    if (sessionStorage.getItem(SIGNED_OUT_KEY) === "1") return null;
+  } catch {
+    /* ignore */
+  }
+  try {
+    const fromSession = validCreds(
+      sessionStorage.getItem(SYNC_KEY_SESSION) || "",
+      sessionStorage.getItem(ACCOUNT_KEY_SESSION) || "",
+    );
+    if (fromSession) {
+      // A refresh keeps the tab key. Copy it so the next closed browser can still sync.
+      rememberCreds(fromSession);
+      return fromSession;
     }
   } catch {
     /* ignore */
   }
-  return null;
+  try {
+    const raw = localStorage.getItem(CREDS_LOCAL);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ProfileSyncCredentials>;
+    const creds = validCreds(parsed.syncKey || "", parsed.accountKey || "");
+    if (!creds) return null;
+    try {
+      sessionStorage.setItem(SYNC_KEY_SESSION, creds.syncKey);
+      sessionStorage.setItem(ACCOUNT_KEY_SESSION, creds.accountKey);
+    } catch {
+      /* ignore */
+    }
+    return creds;
+  } catch {
+    return null;
+  }
 }
 
 interface RemoteProfile {
@@ -145,8 +191,19 @@ export async function syncProfileOnLogin(
   );
 
   if (remote.payload && remote.updatedAt > localAt) {
+    const remoteTools = JSON.stringify(remote.payload.keys?.["forge.tv.lineTools"] ?? null);
     applyProfilePayload(storage, remote.payload);
     touchLocalStamp(storage, remote.updatedAt);
+    // This device had a trendline the other one did not. Publish the union.
+    const merged = JSON.stringify(storage.get("forge.tv.lineTools", null));
+    if (merged !== remoteTools) {
+      try {
+        const result = await pushRemote(creds, storage, remote.updatedAt + 1);
+        if (result.ok) touchLocalStamp(storage, result.updatedAt);
+      } catch {
+        /* offline */
+      }
+    }
     return { appliedRemote: true };
   }
 
@@ -168,6 +225,30 @@ export async function syncProfileOnLogin(
   return { appliedRemote: false };
 }
 
+/**
+ * Pull the account when another device saved more recently.
+ * Does not push, so an open chart does not overwrite the other device's trendline.
+ */
+export async function pullProfileIfNewer(
+  storage: KeyValueStorage,
+  creds: ProfileSyncCredentials,
+): Promise<{ appliedRemote: boolean }> {
+  let remote: RemoteProfile | null = null;
+  try {
+    remote = await fetchRemote(creds);
+  } catch {
+    return { appliedRemote: false };
+  }
+  if (!remote?.payload || !(remote.updatedAt > readLocalStamp(storage))) {
+    return { appliedRemote: false };
+  }
+  const before = JSON.stringify(storage.get("forge.tv.lineTools", null));
+  applyProfilePayload(storage, remote.payload);
+  touchLocalStamp(storage, remote.updatedAt);
+  const after = JSON.stringify(storage.get("forge.tv.lineTools", null));
+  return { appliedRemote: before !== after };
+}
+
 /** Debounced background push after local chart/settings changes. */
 export function createProfileSyncPusher(storage: KeyValueStorage): {
   readonly notifyLocalChange: () => void;
@@ -183,9 +264,13 @@ export function createProfileSyncPusher(storage: KeyValueStorage): {
     const at = touchLocalStamp(storage);
     void pushRemote(creds, storage, at).then((result) => {
       if (result.conflict?.payload && result.conflict.updatedAt > at) {
-        // Remote won — apply quietly; next reload picks it up fully.
+        const before = JSON.stringify(storage.get("forge.tv.lineTools", null));
         applyProfilePayload(storage, result.conflict.payload);
         touchLocalStamp(storage, result.conflict.updatedAt);
+        const after = JSON.stringify(storage.get("forge.tv.lineTools", null));
+        if (before !== after) {
+          window.dispatchEvent(new CustomEvent(DRAWINGS_UPDATED_EVENT));
+        }
       } else if (result.ok) {
         touchLocalStamp(storage, result.updatedAt);
       }

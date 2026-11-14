@@ -3,6 +3,7 @@
  */
 
 import type { KeyValueStorage } from "@/application";
+import { mergeLineToolStores } from "@/infrastructure/tradingview/local-save-load-adapter";
 import { USER_SETTINGS_KEY, readUserSettings, writeUserSettings } from "./settings-adapter";
 
 export const PROFILE_BLOB_KEYS = [
@@ -76,6 +77,11 @@ export function applyProfilePayload(
       continue;
     }
     try {
+      if (key === "forge.tv.lineTools") {
+        // Union with this device so a phone trendline is not dropped by a newer computer save.
+        storage.set(key, mergeLineToolStores(storage.get(key, {}), value));
+        continue;
+      }
       storage.set(key, value);
     } catch {
       /* ignore */

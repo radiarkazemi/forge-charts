@@ -81,6 +81,8 @@ const ENABLED_FEATURES: ChartingLibraryFeatureset[] = [
   "show_interval_dialog_on_key_press",
   "legend_widget",
   "edit_buttons_in_legend",
+  // Drawings follow the symbol (and its broker), not one device's chart layout.
+  "saveload_separate_drawings_storage",
   "always_show_legend_values_on_mobile",
   "show_zoom_and_move_buttons_on_touch",
   // Candle close countdown on the price scale (intraday resolutions).

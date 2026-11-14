@@ -349,20 +349,23 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
                 persistTimer = window.setTimeout(flushPersist, 600);
                 return;
               }
-              widget?.save((state) => {
-                if (!state || typeof state !== "object") return;
-                // Refuse to persist a hollow layout (no panes / charts) — protects
-                // study templates and drawings when history temporarily returns noData.
-                const charts = (state as { charts?: unknown }).charts;
-                if (Array.isArray(charts) && charts.length === 0) return;
-                storage.set(autosaveKey, state);
-                try {
-                  storage.set(AUTOSAVE_BAK_KEY, state);
-                } catch {
-                  /* ignore */
-                }
-                notifyProfileDirty?.();
-              });
+              widget?.save(
+                (state) => {
+                  if (!state || typeof state !== "object") return;
+                  // Refuse to persist a hollow layout (no panes / charts) — protects
+                  // study templates and drawings when history temporarily returns noData.
+                  const charts = (state as { charts?: unknown }).charts;
+                  if (Array.isArray(charts) && charts.length === 0) return;
+                  storage.set(autosaveKey, state);
+                  try {
+                    storage.set(AUTOSAVE_BAK_KEY, state);
+                  } catch {
+                    /* ignore */
+                  }
+                  notifyProfileDirty?.();
+                },
+                storage.get("forge.tv.drawingsSeparate.v1", null) ? { includeDrawings: false } : undefined,
+              );
             } catch {
               /* ignore */
             }
@@ -412,6 +415,45 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
           };
           // Baseline snapshot after ready (still deferred so first paint stays smooth).
           window.setTimeout(schedulePersist, 1_200);
+          // Move drawings out of this device's layout and onto the symbol, so the
+          // other device can load the same trendline for the same broker.
+          const migrateTimer = window.setTimeout(() => {
+            if (cancelled || !widget) return;
+            const flag = "forge.tv.drawingsSeparate.v1";
+            if (storage.get(flag, null)) return;
+            try {
+              const chartApi = widget.activeChart();
+              const drawn = chartApi.getLineToolsState();
+              const count = drawn.sources
+                ? [...drawn.sources.values()].filter((entry) => entry != null).length
+                : 0;
+              if (count === 0) return;
+              void saveLoadAdapter.saveLineToolsAndGroups(undefined, "1", drawn).then(() => {
+                if (cancelled || !widget) return;
+                widget.save(
+                  (state) => {
+                    if (!state || typeof state !== "object") return;
+                    storage.set(autosaveKey, state);
+                    try {
+                      storage.set(AUTOSAVE_BAK_KEY, state);
+                    } catch {
+                      /* ignore */
+                    }
+                    storage.set(flag, 1);
+                    notifyProfileDirty?.();
+                  },
+                  { includeDrawings: false },
+                );
+              });
+            } catch {
+              /* separate drawing storage is not available on this library build */
+            }
+          }, 2_000);
+          const prevLeave = (widget as unknown as { __forgePersistLeave?: () => void }).__forgePersistLeave;
+          (widget as unknown as { __forgePersistLeave?: () => void }).__forgePersistLeave = () => {
+            window.clearTimeout(migrateTimer);
+            prevLeave?.();
+          };
         }
         try {
           widget
@@ -503,7 +545,10 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
       // Flush latest chart state before tearing down (layout switches / HMR).
       if (isPrimary && widget) {
         try {
-          widget.save((state) => storage.set(autosaveKey, state));
+          widget.save(
+            (state) => storage.set(autosaveKey, state),
+            storage.get("forge.tv.drawingsSeparate.v1", null) ? { includeDrawings: false } : undefined,
+          );
         } catch {
           /* ignore */
         }
@@ -540,7 +585,10 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         const widget = controller.getWidget();
         if (widget) {
           const key = isPrimary ? AUTOSAVE_KEY : `${AUTOSAVE_KEY}.pane.${paneIndex}`;
-          widget.save((state) => storage.set(key, state));
+          widget.save(
+            (state) => storage.set(key, state),
+            storage.get("forge.tv.drawingsSeparate.v1", null) ? { includeDrawings: false } : undefined,
+          );
         }
       } catch {
         /* ignore */

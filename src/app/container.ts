@@ -107,6 +107,7 @@ export function createServices(
   const profilePusher = createProfileSyncPusher(storage);
   disposers.push(() => profilePusher.dispose());
   const notifyProfileDirty = () => profilePusher.notifyLocalChange();
+  saveLoadAdapter.setOnChange(notifyProfileDirty);
   const settingsAdapter = createSettingsAdapter(storage, notifyProfileDirty);
 
   // Quotes feed alert evaluation.
