@@ -25,6 +25,7 @@ import {
 import { AppThemeProvider } from "./AppThemeProvider";
 import { createServices, type Services } from "./container";
 import { isDevSite } from "../dev-site";
+import { isPlaceholderAccountName } from "@/features/profile/account-label";
 import { DevLanding } from "@/features/auth/DevLanding";
 import { SubscriptionPage } from "@/features/billing/SubscriptionPage";
 import { ServicesProvider } from "./ServicesProvider";
@@ -41,13 +42,20 @@ function buildSessionServices(session: AuthSession): Services {
     const active = activeProfile(snap);
     // The email is the account. Keep a name that was already saved for it;
     // a phone with a different label must not replace the shared one on boot.
-    if (active.username !== session.username || !active.displayName) {
-      const displayName = active.displayName || session.displayName;
+    const sessionUser = session.username.trim().toLowerCase();
+    const localPart = sessionUser.split("@")[0] ?? "";
+    const storedUser = active.username.trim().toLowerCase();
+    const belongs = storedUser === sessionUser || (localPart.length > 0 && storedUser === localPart);
+    const storedName = active.displayName.trim();
+    const sessionName = session.displayName.trim();
+    // A copied Radiar / @iradiar profile must not stay on someone else's account.
+    if (!belongs || !storedName || (isPlaceholderAccountName(storedName) && sessionName && storedName.toLowerCase() !== sessionName.toLowerCase())) {
+      const displayName = sessionName || storedName || "Account";
       services.settings.upsertProfile({
         ...active,
         username: session.username,
         displayName,
-        avatarInitial: (displayName || session.username || "U").slice(0, 1).toUpperCase(),
+        avatarInitial: displayName.slice(0, 1).toUpperCase() || "U",
       });
     }
   } catch {
@@ -144,8 +152,10 @@ export function App() {
           built = buildSessionServices(existing);
         }
         const shared = activeProfile(built!.settings.settings.get());
-        const renamed = auth.adoptSharedName(shared.displayName);
-        if (renamed) setSession(renamed);
+        if (!isPlaceholderAccountName(shared.displayName)) {
+          const renamed = auth.adoptSharedName(shared.displayName);
+          if (renamed) setSession(renamed);
+        }
       } catch {
         /* offline — open the local chart */
       }
@@ -205,8 +215,10 @@ export function App() {
         built = buildSessionServices(next);
       }
       const shared = activeProfile(built.settings.settings.get());
-      const renamed = auth.adoptSharedName(shared.displayName);
-      if (renamed) next = renamed;
+      if (!isPlaceholderAccountName(shared.displayName)) {
+        const renamed = auth.adoptSharedName(shared.displayName);
+        if (renamed) next = renamed;
+      }
     } catch {
       /* offline — local chart still works */
     }
@@ -345,7 +357,15 @@ export function App() {
   return (
     <ServicesProvider services={services}>
       <AppThemeProvider>
-        <AppShell onSignOut={signOut} />
+        <AppShell
+          onSignOut={signOut}
+          account={{
+            userId: session.userId,
+            displayName: session.displayName,
+            username: session.username,
+            safetyName: auth.getSafetyProfile(session.userId)?.fullName ?? "",
+          }}
+        />
       </AppThemeProvider>
     </ServicesProvider>
   );

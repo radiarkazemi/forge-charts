@@ -15,9 +15,11 @@ import { useStore } from "@/shared/hooks/useStore";
 import { SidePanel } from "./SidePanel";
 import { SideRail } from "./SideRail";
 import { SubscriptionPage } from "@/features/billing/SubscriptionPage";
+import type { SignedInAccount } from "@/features/profile/account-label";
 
 interface AppShellProps {
   readonly onSignOut: () => void;
+  readonly account: SignedInAccount;
 }
 
 interface ProfileAnchorRect {
@@ -31,7 +33,7 @@ interface ProfileAnchorRect {
  * Chart shell matching TradingView Supercharts.
  * Phone and desktop share the chart’s own top and bottom bars.
  */
-export function AppShell({ onSignOut }: AppShellProps) {
+export function AppShell({ onSignOut, account }: AppShellProps) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const { settings, chart, alerts } = useServices();
@@ -197,6 +199,7 @@ export function AppShell({ onSignOut }: AppShellProps) {
         open={Boolean(profileMenuPos)}
         onClose={() => setProfileMenuPos(null)}
         profile={profile}
+        account={account}
         darkTheme={appTheme === "dark"}
         language={language}
         onToggleTheme={() => settings.toggleTheme()}

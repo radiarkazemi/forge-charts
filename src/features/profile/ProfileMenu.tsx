@@ -22,6 +22,7 @@ import CreditCardOutlinedIcon from "@mui/icons-material/CreditCardOutlined";
 import type { UiLanguage, UserProfile } from "@/application";
 import { isDevSite } from "@/dev-site";
 import { formatPrice, readPlanChoice } from "@/features/billing/plans";
+import { menuAccountLabel, type SignedInAccount } from "./account-label";
 
 interface ProfileMenuProps {
   readonly anchorPosition?: { top: number; left: number } | null;
@@ -29,6 +30,7 @@ interface ProfileMenuProps {
   readonly open: boolean;
   readonly onClose: () => void;
   readonly profile: UserProfile;
+  readonly account: SignedInAccount;
   readonly darkTheme: boolean;
   readonly language: UiLanguage;
   readonly onToggleTheme: () => void;
@@ -115,6 +117,7 @@ export function ProfileMenu({
   open,
   onClose,
   profile,
+  account,
   darkTheme,
   language,
   onToggleTheme,
@@ -136,6 +139,7 @@ export function ProfileMenu({
     if (open) openedAt.current = Date.now();
   }, [open]);
   const plan = readPlanChoice();
+  const who = menuAccountLabel(account, profile);
   const bg = darkTheme ? "#1e222d" : "#ffffff";
   const fg = darkTheme ? "#d1d4dc" : "#131722";
   const muted = darkTheme ? "#787b86" : "#6a6d78";
@@ -160,7 +164,7 @@ export function ProfileMenu({
         paper: {
           dir: rtl ? "rtl" : "ltr",
           sx: {
-            width: 320,
+            width: "min(320px, calc(100vw - 16px))",
             bgcolor: bg,
             color: fg,
             border: `1px solid ${border}`,
@@ -169,7 +173,10 @@ export function ProfileMenu({
             boxShadow: darkTheme
               ? "0 12px 40px rgba(0,0,0,0.45)"
               : "0 12px 32px rgba(15,20,30,0.14)",
-            overflow: "hidden",
+            maxHeight: "calc(100dvh - 12px)",
+            overflowX: "hidden",
+            overflowY: "auto",
+            WebkitOverflowScrolling: "touch",
           },
         },
       }}
@@ -185,14 +192,14 @@ export function ProfileMenu({
             fontSize: 16,
           }}
         >
-          {profile.avatarInitial || profile.displayName.slice(0, 1).toUpperCase()}
+          {who.initial}
         </Avatar>
         <Box sx={{ minWidth: 0, flex: 1 }}>
           <Typography sx={{ fontWeight: 700, fontSize: 15, lineHeight: 1.2 }} noWrap>
-            {profile.displayName}
+            {who.displayName}
           </Typography>
           <Typography sx={{ color: muted, fontSize: 11.5, mt: 0.35 }} noWrap>
-            {profile.username?.includes("@") ? profile.username : profile.username ? `@${profile.username}` : formatNow(language)}
+            {who.handle || formatNow(language)}
           </Typography>
         </Box>
       </Box>
