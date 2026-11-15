@@ -95,12 +95,12 @@ const NAV_GROUPS: Record<
 
 const SECTION_LABEL: Record<UiLanguage, Record<"myScripts" | "technicals" | "community", string>> = {
   en: {
-    myScripts: "MY SCRIPTS",
+    myScripts: "FORGE VIP",
     technicals: "TECHNICALS",
     community: "COMMUNITY",
   },
   fa: {
-    myScripts: "اسکریپت‌های من",
+    myScripts: "فورج VIP",
     technicals: "تکنیکال",
     community: "انجمن",
   },

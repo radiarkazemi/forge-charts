@@ -81,6 +81,7 @@ export const HTF_CANDLES_STUDY_DEFAULTS = {
   showLabels: HTF_CANDLES_DEFAULTS.showLabels,
   showTimer: HTF_CANDLES_DEFAULTS.showTimer,
   showHtfName: HTF_CANDLES_DEFAULTS.showHtfName,
+  candleTime: HTF_CANDLES_DEFAULTS.showInterval,
   dailyOpenMode: HTF_CANDLES_DEFAULTS.dailyOpenMode,
   timezoneOffset: HTF_CANDLES_DEFAULTS.timezoneOffset,
 } as const;
@@ -167,7 +168,7 @@ export function createHtfCandlesIndicator(PineJS: {
       id: HTF_CANDLES_STUDY_ID as never,
       name: HTF_CANDLES_STUDY_NAME,
       description: HTF_CANDLES_STUDY_NAME,
-      shortDescription: "Fadi HTF Candles (6 TF)",
+      shortDescription: "HTF candles · FVG · volume imbalance",
       isCustomIndicator: true,
       is_price_study: true,
       linkedToSeries: true,
@@ -245,6 +246,12 @@ export function createHtfCandlesIndicator(PineJS: {
           id: "showHtfName",
           name: "Label · HTF name",
           defval: HTF_CANDLES_STUDY_DEFAULTS.showHtfName,
+          type: "bool",
+        },
+        {
+          id: "candleTime",
+          name: "Label · Interval value",
+          defval: HTF_CANDLES_STUDY_DEFAULTS.candleTime,
           type: "bool",
         },
         {

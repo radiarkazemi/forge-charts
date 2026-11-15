@@ -404,8 +404,8 @@ export function SymbolSearchDialog({ open, onClose }: SymbolSearchDialogProps) {
           const sub =
             s.exchange.toUpperCase() === "IRAN"
               ? language === "fa"
-                ? `${s.ticker} — محاسبه اختصاصی فورج`
-                : `${s.ticker} — Faraz`
+                ? `${s.ticker} — فورج پلاس`
+                : `${s.ticker} — Forge Plus`
               : `${s.exchange} — ${s.name}`;
           return (
             <ListItemButton

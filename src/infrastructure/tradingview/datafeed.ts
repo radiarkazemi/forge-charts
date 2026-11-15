@@ -618,7 +618,7 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       ticker: `${symbol.exchange}:${symbol.ticker}`,
       description: iran ? symbol.ticker : tse ? (adjusted ? "تعدیل‌شده" : "تعدیل‌نشده") : symbol.name,
       ...(iran
-        ? { listed_exchange: "Faraz" }
+        ? { listed_exchange: "Forge Plus" }
         : tse
           ? { listed_exchange: "TSETMC" }
           : { listed_exchange: symbol.exchange }),

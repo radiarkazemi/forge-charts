@@ -35,6 +35,17 @@ function isVerticalSplit(layout: ChartLayoutId): boolean {
   return layout === "2h" || layout === "3h" || layout === "4h";
 }
 
+function isFullscreenButton(target: EventTarget | null): boolean {
+  const node = target as Element | null;
+  if (!node || typeof node.closest !== "function") return false;
+  const button = node.closest("button, [role='button']");
+  if (!button) return false;
+  const id = button.id || "";
+  const name = button.getAttribute("data-name") || "";
+  const label = `${button.getAttribute("aria-label") || ""} ${button.getAttribute("title") || ""} ${button.getAttribute("data-tooltip") || ""}`;
+  return id === "header-toolbar-fullscreen" || name === "header-toolbar-fullscreen" || /full\s*screen/i.test(label);
+}
+
 /** Drop a stuck crosshair in every pane except `keepIndex` (-1 clears all). */
 function releaseOtherChartPointers(root: HTMLElement | null, keepIndex: number): void {
   if (!root) return;
@@ -42,12 +53,20 @@ function releaseOtherChartPointers(root: HTMLElement | null, keepIndex: number):
   iframes.forEach((iframe, index) => {
     if (index === keepIndex) return;
     const doc = iframe.contentDocument;
-    const target = doc?.querySelector(".chart-container") ?? doc?.body;
-    if (!target) return;
-    const gone = new MouseEvent("mouseleave", { bubbles: true, clientX: -1, clientY: -1 });
-    target.dispatchEvent(gone);
-    target.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, clientX: -1, clientY: -1 }));
+    if (!doc) return;
+    const nodes = doc.querySelectorAll(
+      ".chart-gui-wrapper, .chart-container, .chart-markup-table, .pane, canvas, body",
+    );
+    nodes.forEach((target) => {
+      for (const type of ["pointerleave", "pointerout", "pointercancel", "mouseleave", "mouseout"]) {
+        target.dispatchEvent(new Event(type, { bubbles: true }));
+      }
+      target.dispatchEvent(
+        new MouseEvent("mousemove", { bubbles: true, clientX: -10000, clientY: -10000 }),
+      );
+    });
   });
+  layoutSyncBus.releaseCrosshair(keepIndex);
 }
 
 /**
@@ -85,16 +104,23 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   const [menusOpen, setMenusOpen] = useState(false);
   const [menuHole, setMenuHole] = useState<MenuHoleRect | null>(null);
   const [favHole, setFavHole] = useState<MenuHoleRect | null>(null);
+  /** One chart filling the workspace. Null is the multi-pane grid. */
+  const [maximizedPane, setMaximizedPane] = useState<number | null>(null);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const primaryHostRef = useRef<HTMLDivElement | null>(null);
   const layoutRef = useRef<ChartLayoutId>(layoutId);
   const splitEdgesRef = useRef<PaneSplitEdges>(splitEdges);
+  const activePaneRef = useRef(0);
+  const maximizedPaneRef = useRef<number | null>(null);
   layoutRef.current = layoutId;
   splitEdgesRef.current = splitEdges;
+  activePaneRef.current = activePane;
+  maximizedPaneRef.current = maximizedPane;
 
   // Reset dividers when the layout shape changes.
   useEffect(() => {
     setSplitEdges(defaultSplitEdges(layoutId));
+    setMaximizedPane(null);
   }, [layoutId]);
 
   useEffect(() => {
@@ -161,15 +187,15 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   }, []);
 
   /**
-   * CL’s header fullscreen targets the primary iframe only — multipane secondaries
-   * then sit outside the fullscreen element and paint white. Promote fullscreen to
-   * the whole workspace so every pane stays sized and visible.
+   * The header fullscreen button asks the library to fullscreen the primary iframe.
+   * In a multi-chart layout that request is cancelled at once, so the chart snaps
+   * back. Keep the chosen chart large inside the workspace instead, and let the
+   * same button restore the grid.
    */
   useEffect(() => {
     const workspace = workspaceRef.current;
     if (!workspace) return;
 
-    let promoting = false;
     const reflow = () => {
       const measure = () => {
         setWorkspaceSize({
@@ -187,52 +213,147 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
 
     const onFsChange = () => {
       const fsEl = document.fullscreenElement;
-      if (!fsEl) {
-        reflow();
-        return;
-      }
-      // Already the workspace — just reflow after size settles.
-      if (fsEl === workspace) {
-        reflow();
-        return;
-      }
-      // Primary (or any) iframe went fullscreen while multipane — lift to workspace.
-      if (multi && workspace.contains(fsEl) && fsEl !== workspace && !promoting) {
-        promoting = true;
-        const req =
-          workspace.requestFullscreen?.bind(workspace) ??
-          (
-            workspace as HTMLElement & {
-              webkitRequestFullscreen?: () => Promise<void> | void;
-            }
-          ).webkitRequestFullscreen?.bind(workspace);
-        void document
-          .exitFullscreen()
-          .catch(() => undefined)
-          .then(() => {
-            try {
-              return req?.();
-            } catch {
-              return undefined;
-            }
-          })
-          .finally(() => {
-            promoting = false;
-            reflow();
-          });
+      // Never turn a cancelled browser fullscreen into another maximize.
+      // That second write is why one press took three clicks to undo.
+      if (multi && fsEl && workspace.contains(fsEl)) {
+        void document.exitFullscreen?.().catch(() => undefined);
         return;
       }
       reflow();
     };
 
     document.addEventListener("fullscreenchange", onFsChange);
-    // Some WebKit builds still fire the prefixed event.
     document.addEventListener("webkitfullscreenchange", onFsChange as EventListener);
     return () => {
       document.removeEventListener("fullscreenchange", onFsChange);
       document.removeEventListener("webkitfullscreenchange", onFsChange as EventListener);
     };
   }, [multi]);
+
+  useEffect(() => {
+    if (!multi) return;
+    const timers = [0, 80, 240, 600].map((ms) =>
+      window.setTimeout(() => {
+        window.dispatchEvent(new Event("resize"));
+        layoutSyncBus.reflowVisible();
+      }, ms),
+    );
+    return () => {
+      for (const timer of timers) window.clearTimeout(timer);
+    };
+  }, [maximizedPane, multi]);
+
+  useEffect(() => {
+    if (!multi) return;
+    const host = primaryHostRef.current;
+    if (!host) return;
+
+    const toggle = () => {
+      setMaximizedPane((current) => {
+        const next = current == null ? activePaneRef.current : null;
+        maximizedPaneRef.current = next;
+        return next;
+      });
+    };
+
+    let doc: Document | null = null;
+    const keyDocs = new Set<Document>();
+    const patched = new Set<Window>();
+    let toggling = false;
+    const press = () => {
+      if (toggling) return;
+      toggling = true;
+      window.setTimeout(() => {
+        toggling = false;
+      }, 500);
+      toggle();
+    };
+    const elementProto = (win: Window) =>
+      (win as unknown as { Element?: { prototype: Element & { __forgeFsBlocked?: boolean; __forgeFsOrig?: typeof Element.prototype.requestFullscreen } } }).Element?.prototype;
+    const swallowFullscreen = (win: Window) => {
+      const proto = elementProto(win);
+      if (!proto || proto.__forgeFsBlocked) return;
+      proto.__forgeFsOrig = proto.requestFullscreen;
+      // Shift+F calls this. Expand the selected chart instead of the browser.
+      proto.requestFullscreen = function requestFullscreen(this: Element) {
+        const win = this.ownerDocument?.defaultView;
+        const frames = [...(workspaceRef.current?.querySelectorAll("iframe") ?? [])];
+        const index = frames.findIndex((frame) => frame.contentWindow === win);
+        if (index >= 0) {
+          activePaneRef.current = index;
+          layoutSyncBus.focusPaneFromPlot(index);
+        }
+        press();
+        return Promise.resolve();
+      };
+      proto.__forgeFsBlocked = true;
+      patched.add(win);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (event.key !== "f" && event.key !== "F") return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const node = event.currentTarget as Document | null;
+      const fromDoc = node && node.nodeType === 9 ? node.defaultView : null;
+      const win = fromDoc ?? event.view ?? null;
+      const frames = [...(workspaceRef.current?.querySelectorAll("iframe") ?? [])];
+      const index = frames.findIndex((frame) => frame.contentWindow === win);
+      if (index >= 0) {
+        activePaneRef.current = index;
+        layoutSyncBus.focusPaneFromPlot(index);
+      }
+      press();
+    };
+    const onPress = (event: Event) => {
+      if (!isFullscreenButton(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof (event as Event & { stopImmediatePropagation?: () => void }).stopImmediatePropagation === "function") {
+        (event as Event & { stopImmediatePropagation: () => void }).stopImmediatePropagation();
+      }
+      press();
+    };
+    const pressEvents = ["pointerdown", "mousedown", "pointerup", "mouseup", "click"] as const;
+    const attach = () => {
+      const frames = workspaceRef.current?.querySelectorAll("iframe") ?? [];
+      for (const frame of frames) {
+        const win = frame.contentWindow;
+        if (win) swallowFullscreen(win);
+        const next = frame.contentDocument;
+        if (!next || keyDocs.has(next)) continue;
+        keyDocs.add(next);
+        next.addEventListener("keydown", onKey, true);
+      }
+      const primary = host.querySelector("iframe")?.contentDocument ?? null;
+      if (!primary || primary === doc) return;
+      if (doc) {
+        for (const type of pressEvents) doc.removeEventListener(type, onPress, true);
+      }
+      doc = primary;
+      for (const type of pressEvents) doc.addEventListener(type, onPress, true);
+    };
+    attach();
+    window.addEventListener("keydown", onKey, true);
+    const poll = window.setInterval(attach, 500);
+    return () => {
+      window.clearInterval(poll);
+      window.removeEventListener("keydown", onKey, true);
+      if (doc) {
+        for (const type of pressEvents) doc.removeEventListener(type, onPress, true);
+      }
+      for (const keyDoc of keyDocs) keyDoc.removeEventListener("keydown", onKey, true);
+      for (const win of patched) {
+        const proto = elementProto(win);
+        if (proto?.__forgeFsOrig) {
+          proto.requestFullscreen = proto.__forgeFsOrig;
+          proto.__forgeFsBlocked = false;
+        }
+      }
+    };
+  }, [multi, chartLayout]);
 
   // The primary iframe stays full-window so the original navbar spans every pane.
   // The plot inside it is sized to pane 0; the header element is left alone.
@@ -253,6 +374,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
         );
       },
       () => splitEdgesRef.current,
+      () => maximizedPaneRef.current === 0,
     );
   }, [chartLayout, multi]);
 
@@ -340,6 +462,17 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
     ? sanitizeSplitEdges(layoutId, splitEdges)
     : [];
   const layoutChrome = chrome;
+  const maximized =
+    maximizedPane != null && maximizedPane >= 0 && maximizedPane < grid.count ? maximizedPane : null;
+  const expandedRect = () => {
+    if (workspaceSize.width < 8 || workspaceSize.height < 8) return null;
+    return {
+      left: layoutChrome.leftToolbarWidth,
+      top: layoutChrome.headerHeight,
+      width: Math.max(0, workspaceSize.width - layoutChrome.leftToolbarWidth),
+      height: Math.max(0, workspaceSize.height - layoutChrome.headerHeight),
+    };
+  };
 
   const beginDrag = useCallback((edgeIndex: number, event: ReactPointerEvent<HTMLElement>) => {
     event.preventDefault();
@@ -421,10 +554,12 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
       {/* Secondary layers under the original navbar (kept mounted for layout switches). */}
       {Array.from({ length: MAX_CHART_PANES - 1 }, (_, offset) => {
         const index = offset + 1;
-        const visible = multi && index < grid.count;
-        const rect = visible
-          ? paneRectInWorkspace(layoutId, index, workspaceSize, layoutChrome, edgesForLayout)
-          : null;
+        const visible = multi && index < grid.count && (maximized == null || maximized === index);
+        const rect = !visible
+          ? null
+          : maximized === index
+            ? expandedRect()
+            : paneRectInWorkspace(layoutId, index, workspaceSize, layoutChrome, edgesForLayout);
         const shown = Boolean(visible && rect && rect.width >= 8 && rect.height >= 8);
         const isActive = shown && activePane === index;
         const symbol = paneSymbols[index] ?? lastSymbol;
@@ -444,6 +579,16 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
               // The primary iframe is full-size under these panes. Leaving the
               // crosshair alive there draws a column of lines and steals the cursor.
               releaseOtherChartPointers(workspaceRef.current, index);
+            }}
+            onPointerLeave={() => {
+              if (!shown) return;
+              const iframe = workspaceRef.current?.querySelectorAll("iframe")[index];
+              const clear = () => releaseOtherChartPointers(iframe ? iframe.parentElement : null, -1);
+              // A fast jump can redraw the crosshair after the first leave.
+              clear();
+              window.setTimeout(() => {
+                if (!iframe?.matches(":hover") && !iframe?.parentElement?.matches(":hover")) clear();
+              }, 60);
             }}
             onPointerDownCapture={() => {
               if (shown && !menusOpen) layoutSyncBus.focusPaneFromPlot(index);
@@ -500,7 +645,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
       })}
 
       {/* Active outline for primary plot slot (navbar stays untouched). */}
-      {multi && activePane === 0
+      {multi && maximized == null && activePane === 0
         ? (() => {
             const rect = paneRectInWorkspace(layoutId, 0, workspaceSize, layoutChrome, edgesForLayout);
             if (!rect) return null;
@@ -524,7 +669,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
         : null}
 
       {/* Draggable middle lines for 2-/3-pane strip layouts. */}
-      {multi && edgesForLayout.length > 0
+      {multi && maximized == null && edgesForLayout.length > 0
         ? edgesForLayout.map((frac, edgeIndex) => {
             const vertical = isVerticalSplit(layoutId);
             const contentW = Math.max(0, workspaceSize.width - layoutChrome.leftToolbarWidth);

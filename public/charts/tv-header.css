@@ -1,5 +1,10 @@
 /* Forge header + chart chrome (Charting Library iframe). Keep overrides light. */
 
+/* The library keeps a second "Save" in the button for the saved flash. Hide it until then. */
+#header-toolbar-save-load [class*="saveString"][class*="hidden"] {
+  display: none !important;
+}
+
 .tv-header {
   border-bottom: 1px solid rgba(120, 123, 134, 0.22) !important;
 }

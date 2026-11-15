@@ -16,8 +16,8 @@ function brokerAsset(file: string): string {
 }
 
 const BY_EXCHANGE: Record<string, BrokerLogo> = {
-  IRAN: { id: "faraz", src: brokerAsset("faraz.svg"), label: "Faraz" },
-  FARAZ: { id: "faraz", src: brokerAsset("faraz.svg"), label: "Faraz" },
+  IRAN: { id: "faraz", src: brokerAsset("faraz.svg"), label: "Forge Plus" },
+  FARAZ: { id: "faraz", src: brokerAsset("faraz.svg"), label: "Forge Plus" },
   FOREXCOM: { id: "forexcom", src: brokerAsset("forexcom.png"), label: "FOREXCOM" },
   FXPRO: { id: "fxpro", src: brokerAsset("fxpro.svg"), label: "FXPRO" },
   FXCM: { id: "fxcm", src: brokerAsset("fxcm.svg"), label: "FXCM" },

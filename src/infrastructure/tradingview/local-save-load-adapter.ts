@@ -161,9 +161,25 @@ function deserializeLineTools(data: SerializedLineTools): Partial<LineToolsAndGr
   };
 }
 
-/** Stable id for the user’s primary named layout. */
+/** Stable id for the user’s primary named layout. The visible name is theirs. */
 export const RADIAR_LAYOUT_ID = "radiar-layout";
 export const RADIAR_LAYOUT_NAME = "Radiar";
+
+const AUTOSAVE_FLAG = "forge.layout.autosave";
+const CURRENT_LAYOUT_KEY = "forge.layout.current.v1";
+
+/** Names the library invents from the Save button. They must not replace a name the user typed. */
+const PLACEHOLDER_LAYOUT =
+  /^(save|saved|save layout|layout|untitled|unnamed|new layout|radiar|forge|trader)$/i;
+
+export function isPlaceholderLayoutName(name: string): boolean {
+  return !name.trim() || PLACEHOLDER_LAYOUT.test(name.trim());
+}
+
+interface CurrentLayout {
+  readonly id: string | number;
+  readonly name: string;
+}
 
 /**
  * Implements TradingView's save/load contract on top of `KeyValueStorage`, so
@@ -171,9 +187,115 @@ export const RADIAR_LAYOUT_NAME = "Radiar";
  */
 export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
   private onChange: (() => void) | null = null;
+  private defaultLayoutName = "Layout";
+  private explicitSave = false;
 
-  constructor(private readonly storage: KeyValueStorage) {
-    this.ensureRadiarLayoutMeta();
+  constructor(private readonly storage: KeyValueStorage) {}
+
+  /**
+   * The name on the layout menu. “Radiar” was the old forced title; a saved
+   * chart under that title takes the signed-in name (Mohammad, and so on).
+   */
+  setDefaultLayoutName(name: string): void {
+    const next = name.trim();
+    if (!next || isPlaceholderLayoutName(next)) return;
+    this.defaultLayoutName = next;
+    const chosen = this.readCurrent();
+    if (chosen && !isPlaceholderLayoutName(chosen.name)) return;
+    try {
+      const list = this.charts();
+      if (list.some((chart) => chart.name === next && String(chart.id) !== RADIAR_LAYOUT_ID)) return;
+      let changed = false;
+      const renamed = list.map((chart) => {
+        const forced = String(chart.id) === RADIAR_LAYOUT_ID || isPlaceholderLayoutName(chart.name);
+        if (!forced || chart.name === next) return chart;
+        changed = true;
+        return { ...chart, name: next };
+      });
+      if (changed) this.storage.set(KEYS.charts, renamed);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** The name the user typed (Mohammad). Survives a refresh; “Save” does not replace it. */
+  currentLayoutName(): string {
+    const current = this.readCurrent();
+    return current && !isPlaceholderLayoutName(current.name) ? current.name : "";
+  }
+
+  currentLayoutId(): string | number | undefined {
+    return this.readCurrent()?.id;
+  }
+
+  /** Remember a name the user chose, and put it back on a chart the library renamed to Save. */
+  rememberLayout(name: string): string | number {
+    const next = name.trim();
+    const current = this.readCurrent();
+    const id = current?.id ?? RADIAR_LAYOUT_ID;
+    if (!next || isPlaceholderLayoutName(next)) return id;
+    this.storage.set(CURRENT_LAYOUT_KEY, { id, name: next } satisfies CurrentLayout);
+    try {
+      const list = this.charts();
+      let changed = false;
+      const renamed = list.map((chart) => {
+        const mine = String(chart.id) === String(id);
+        if (!mine || chart.name === next) return chart;
+        changed = true;
+        return { ...chart, name: next };
+      });
+      if (changed) this.storage.set(KEYS.charts, renamed);
+    } catch {
+      /* ignore */
+    }
+    return id;
+  }
+
+  /**
+   * After a refresh the library only restores the candle snapshot, not the layout title.
+   * Copy that snapshot into the named chart so Recently used still lists Mohammad.
+   */
+  ensureNamedLayout(symbol: string, resolution: string): void {
+    const current = this.readCurrent();
+    if (!current || isPlaceholderLayoutName(current.name)) return;
+    const list = this.charts();
+    const found = list.find((chart) => String(chart.id) === String(current.id));
+    if (found?.content && found.content !== "{}" && found.content !== "null" && found.name === current.name) return;
+    const autosave = this.storage.get<unknown>("forge.tv.autosave.v3", undefined);
+    if (!autosave || typeof autosave !== "object") return;
+    let content = "";
+    try {
+      content = JSON.stringify(autosave);
+    } catch {
+      return;
+    }
+    if (content.length < 40 || content === "{}" || content === "null") return;
+    const record: ChartData = {
+      ...(found ?? {}),
+      id: current.id,
+      name: current.name,
+      symbol: found?.symbol || symbol,
+      resolution: (found?.resolution || resolution) as ChartData["resolution"],
+      content: found?.content && found.content !== "{}" && found.content !== "null" ? found.content : content,
+      timestamp: Math.round(Date.now() / 1000),
+    };
+    this.storage.set(KEYS.charts, [
+      ...list.filter((chart) => String(chart.id) !== String(current.id) && chart.name !== record.name),
+      record,
+    ]);
+  }
+
+  /** The next `saveChart` is a Save / Rename / Copy, not the timer. */
+  markExplicitSave(): void {
+    this.explicitSave = true;
+  }
+
+  isAutosaveEnabled(): boolean {
+    return this.storage.get<boolean>(AUTOSAVE_FLAG, true) !== false;
+  }
+
+  setAutosaveEnabled(on: boolean): void {
+    this.storage.set(AUTOSAVE_FLAG, on);
   }
 
   /** Fired after drawings change so the account can push them to the other device. */
@@ -181,70 +303,84 @@ export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
     this.onChange = listener;
   }
 
-  /** Ensure a named “Radiar” layout always exists in Open layout… */
-  private ensureRadiarLayoutMeta(): void {
-    try {
-      const list = this.charts();
-      if (list.some((c) => c.id === RADIAR_LAYOUT_ID || c.name === RADIAR_LAYOUT_NAME)) return;
-      const record: ChartData = {
-        id: RADIAR_LAYOUT_ID,
-        name: RADIAR_LAYOUT_NAME,
-        symbol: "XAUUSD",
-        resolution: "15" as never,
-        content: "",
-        timestamp: Math.round(Date.now() / 1000),
-      };
-      this.storage.set(KEYS.charts, [...list, record]);
-    } catch {
-      /* ignore */
-    }
-  }
-
   /* ── chart layouts ─────────────────────────────────────────────────── */
 
   async getAllCharts(): Promise<ChartMetaInfo[]> {
-    this.ensureRadiarLayoutMeta();
-    return this.charts().map(({ id, name, symbol, resolution, timestamp }) => ({
-      id: id!,
-      name,
-      symbol,
-      resolution,
-      timestamp,
-    }));
+    return this.charts()
+      .filter((chart) => chart.content && chart.content !== "{}" && chart.content !== "null")
+      .map(({ id, name, symbol, resolution, timestamp }) => ({
+        id: id!,
+        name,
+        symbol,
+        resolution,
+        timestamp,
+      }));
   }
 
   async removeChart(id: string | number): Promise<void> {
-    // Never delete the Radiar layout slot.
-    if (String(id) === RADIAR_LAYOUT_ID) return;
     this.storage.set(
       KEYS.charts,
-      this.charts().filter((c) => c.id !== id),
+      this.charts().filter((c) => String(c.id) !== String(id)),
     );
   }
 
   async saveChart(chartData: ChartData): Promise<string | number> {
-    const name = (chartData.name || "").trim() || RADIAR_LAYOUT_NAME;
-    const preferRadiar = name.toLowerCase() === "radiar" || !chartData.id;
-    const id = preferRadiar ? RADIAR_LAYOUT_ID : (chartData.id ?? Date.now().toString(36));
+    const explicit = this.explicitSave;
+    this.explicitSave = false;
+    const requested = (chartData.name || "").trim();
+    const placeholder = isPlaceholderLayoutName(requested);
+    const current = this.readCurrent();
+    const list = this.charts();
+    const existing =
+      (chartData.id != null ? list.find((chart) => String(chart.id) === String(chartData.id)) : undefined) ??
+      (!explicit && current?.id != null
+        ? list.find((chart) => String(chart.id) === String(current.id))
+        : undefined) ??
+      (!placeholder ? list.find((chart) => chart.name === requested) : undefined);
+    const kept =
+      (existing && !isPlaceholderLayoutName(existing.name) ? existing.name : "") ||
+      (current && !isPlaceholderLayoutName(current.name) ? current.name : "") ||
+      (!isPlaceholderLayoutName(this.defaultLayoutName) ? this.defaultLayoutName : "");
+    const name = !placeholder ? requested : explicit ? kept || requested || "Layout" : kept || requested || "Layout";
+    if (!explicit && !this.isAutosaveEnabled()) {
+      return existing?.id ?? chartData.id ?? current?.id ?? name;
+    }
+    // A copy asks for a new id. Autosave must keep the chart the user already named.
+    const id =
+      chartData.id ??
+      existing?.id ??
+      (explicit ? Date.now().toString(36) : current?.id ?? RADIAR_LAYOUT_ID);
     const content = typeof chartData.content === "string" ? chartData.content.trim() : "";
-    // Never overwrite a saved layout / template with an empty payload (blank chart
-    // after a failed history fetch used to wipe study templates + drawings).
+    // Never overwrite a saved layout with an empty payload (a blank chart after a
+    // failed history fetch used to wipe indicators and drawings).
     if (!content || content === "{}" || content === "null") {
-      const existing = this.charts().find((c) => c.id === id || c.name === (preferRadiar ? RADIAR_LAYOUT_NAME : name));
-      if (existing?.content) return existing.id ?? id;
+      if (existing?.content) {
+        if (name && name !== existing.name) {
+          const renamed: ChartData = { ...existing, id: existing.id ?? id, name, timestamp: Math.round(Date.now() / 1000) };
+          this.writeChart(renamed);
+          if (!isPlaceholderLayoutName(name)) this.storage.set(CURRENT_LAYOUT_KEY, { id: renamed.id ?? id, name });
+        }
+        return existing.id ?? id;
+      }
+      if (!placeholder) this.storage.set(CURRENT_LAYOUT_KEY, { id, name });
+      return id;
     }
     const record: ChartData = {
       ...chartData,
       id,
-      name: preferRadiar ? RADIAR_LAYOUT_NAME : name,
+      name,
       timestamp: Math.round(Date.now() / 1000),
     };
-    this.storage.set(KEYS.charts, [...this.charts().filter((c) => c.id !== id && c.name !== record.name), record]);
+    this.writeChart(record);
+    if (!isPlaceholderLayoutName(name)) {
+      this.storage.set(CURRENT_LAYOUT_KEY, { id, name } satisfies CurrentLayout);
+    }
+    this.rememberLayoutDrawings(id, record.symbol);
     return id;
   }
 
   async getChartContent(chartId: number | string): Promise<string> {
-    const chart = this.charts().find((c) => c.id === chartId);
+    const chart = this.charts().find((c) => String(c.id) === String(chartId));
     if (!chart) throw new Error(`Chart ${chartId} not found`);
     return chart.content;
   }
@@ -397,6 +533,8 @@ export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
       }
     } else if (want) {
       chunks.push(...bucketsForSymbol(all, want));
+      const savedWithLayout = all[`layoutsave::${chartId}`] ?? (layoutId ? all[`layoutsave::${layoutId}`] : undefined);
+      if (savedWithLayout) chunks.push(savedWithLayout);
     } else if (requestType === "allLineTools") {
       chunks.push(...Object.values(all));
     } else if (requestType === "mainSeriesLineTools") {
@@ -429,6 +567,20 @@ export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
     return this.storage.get<ChartData[]>(KEYS.charts, []);
   }
 
+  private readCurrent(): CurrentLayout | null {
+    const raw = this.storage.get<CurrentLayout | null>(CURRENT_LAYOUT_KEY, null);
+    if (!raw || raw.id == null || typeof raw.name !== "string") return null;
+    return raw;
+  }
+
+  private writeChart(record: ChartData): void {
+    const id = record.id;
+    this.storage.set(KEYS.charts, [
+      ...this.charts().filter((chart) => String(chart.id) !== String(id) && chart.name !== record.name),
+      record,
+    ]);
+  }
+
   private studyTemplates(): StudyTemplateData[] {
     return this.storage.get<StudyTemplateData[]>(KEYS.studyTemplates, []);
   }
@@ -439,6 +591,19 @@ export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
 
   private chartTemplates(): ChartTemplates {
     return this.storage.get<ChartTemplates>(KEYS.chartTemplates, {});
+  }
+
+  /** Keep the drawings that belonged to this named layout, as well as the symbol copy. */
+  private rememberLayoutDrawings(chartId: string | number, symbol: string): void {
+    const all = this.lineToolStore();
+    const chunks = bucketsForSymbol(all, symbol);
+    if (!chunks.length) return;
+    const merged = chunks.reduce<SerializedLineTools>(
+      (acc, bucket) => mergeLineToolBuckets(acc, bucket),
+      { sources: [], groups: [], symbol },
+    );
+    all[`layoutsave::${chartId}`] = merged;
+    this.storage.set(KEYS.lineTools, all);
   }
 
   private lineToolsKey(layoutId: string | undefined, chartId: string | number): string {

@@ -436,6 +436,7 @@ export function mountFullWidthNavbar(
   getLayout: () => ChartLayoutId,
   onChrome: (chrome: ChromeInsets) => void,
   getSplitEdges: () => PaneSplitEdges,
+  isExpanded?: () => boolean,
 ): () => void {
   let stopped = false;
   let lock = false;
@@ -472,6 +473,8 @@ export function mountFullWidthNavbar(
 
     if (getLayout() === "s") {
       releasePaneBox(center);
+      releasePaneBox(center?.querySelector(".chart-container") as HTMLElement | null);
+      releasePaneBox(center?.querySelector(".chart-widget") as HTMLElement | null);
       releasePaneBox(bottom);
       const W = doc.documentElement.clientWidth || container.clientWidth;
       const H = doc.documentElement.clientHeight || container.clientHeight;
@@ -493,22 +496,33 @@ export function mountFullWidthNavbar(
     const W = doc.documentElement.clientWidth || container.clientWidth;
     const H = doc.documentElement.clientHeight || container.clientHeight;
     if (W < 32 || H < 32) return;
-    const slot = contentSlotsFor(getLayout(), getSplitEdges())[0];
+    // A maximized first chart fills the area under the navbar. Releasing the
+    // pane box (the single-chart path) collapses that plot to 0×0.
+    const slot = isExpanded?.()
+      ? { x: 0, y: 0, w: 1, h: 1 }
+      : contentSlotsFor(getLayout(), getSplitEdges())[0];
     if (!slot) return;
 
     const contentW = Math.max(0, W - leftToolbarWidth);
     const contentH = Math.max(0, H - headerHeight);
     const paneW = Math.max(16, Math.round(slot.w * contentW));
     const paneH = Math.max(16, Math.round(slot.h * contentH - (slot.y + slot.h < 1 ? PANE_GAP : 0)));
-    const bottomH = bottom?.offsetHeight ?? 0;
-    const plotH = Math.max(16, paneH - bottomH);
+    // The date-range bar sits on the bottom of the plot and was covering the
+    // time axis. Keep that strip, and size the candles above it.
+    const controls = doc.querySelector(".chart-controls-bar") as HTMLElement | null;
+    const controlsH = Math.round(controls?.offsetHeight ?? bottom?.offsetHeight ?? 0);
+    const reserved = controlsH >= 8 ? controlsH : 0;
+    const plotH = Math.max(16, paneH - reserved);
     const left = Math.round(leftToolbarWidth + slot.x * contentW);
     const top = Math.round(headerHeight + slot.y * contentH);
+    const widgetEl = center?.querySelector(".chart-widget") as HTMLElement | null;
+    const chartContainer = center?.querySelector(".chart-container") as HTMLElement | null;
     const owners = chartOwners(win);
     const sized =
       center?.dataset[PANE_BOX] === "1" &&
       Math.abs(center.offsetWidth - paneW) <= 1 &&
-      Math.abs(center.offsetHeight - plotH) <= 1 &&
+      Math.abs(center.offsetHeight - paneH) <= 1 &&
+      (widgetEl == null || Math.abs(widgetEl.offsetHeight - plotH) <= 2) &&
       owners != null &&
       Math.abs(owners.width.value() - paneW) <= 1 &&
       Math.abs(owners.height.value() - plotH) <= 1;
@@ -521,10 +535,21 @@ export function mountFullWidthNavbar(
         center.style.setProperty("left", `${left}px`, "important");
         center.style.setProperty("top", `${top}px`, "important");
         center.style.setProperty("width", `${paneW}px`, "important");
-        center.style.setProperty("height", `${plotH}px`, "important");
+        center.style.setProperty("height", `${paneH}px`, "important");
         center.style.setProperty("right", "auto", "important");
         center.style.setProperty("bottom", "auto", "important");
         center.style.setProperty("overflow", "hidden", "important");
+      }
+      for (const el of [chartContainer, widgetEl]) {
+        if (!el) continue;
+        el.dataset[PANE_BOX] = "1";
+        el.style.setProperty("position", "absolute", "important");
+        el.style.setProperty("left", "0", "important");
+        el.style.setProperty("top", "0", "important");
+        el.style.setProperty("width", `${paneW}px`, "important");
+        el.style.setProperty("height", `${plotH}px`, "important");
+        el.style.setProperty("right", "auto", "important");
+        el.style.setProperty("bottom", "auto", "important");
       }
       if (bottom) {
         bottom.dataset[PANE_BOX] = "1";
@@ -533,6 +558,9 @@ export function mountFullWidthNavbar(
         bottom.style.setProperty("width", `${paneW}px`, "important");
         bottom.style.setProperty("right", "auto", "important");
         bottom.style.setProperty("bottom", "auto", "important");
+      }
+      if (controls) {
+        controls.style.setProperty("z-index", "6", "important");
       }
       // The price scale lives inside this widget. Matching the pane width
       // puts it on the pane's trailing edge and makes Alt+R land there.
@@ -565,6 +593,8 @@ export function mountFullWidthNavbar(
     const topEl = doc?.querySelector(".layout__area--top") as HTMLElement | null;
     const leftEl = doc?.querySelector(".layout__area--left") as HTMLElement | null;
     releasePaneBox(center);
+    releasePaneBox(center?.querySelector(".chart-container") as HTMLElement | null);
+    releasePaneBox(center?.querySelector(".chart-widget") as HTMLElement | null);
     releasePaneBox(doc?.querySelector(".layout__area--bottom") as HTMLElement | null);
     if (win && doc) {
       const header = topEl ? topEl.offsetTop + topEl.offsetHeight : 0;
@@ -705,11 +735,14 @@ export function watchPrimaryMenusOpen(
     let best: DOMRect | null = null;
     for (const node of candidates) {
       if (!isHeaderMenu(node)) continue;
-      // Chart settings is moved into its pane once. Until that position is
-      // locked, a full-size dialog would punch a hole that jumps every frame.
+      // A dialog has to show through the other charts. Skip a full-window
+      // shell; the real card is the sized dialog inside it.
       if (node.getAttribute("role") === "dialog") {
-        const locked = (node as HTMLElement).dataset?.forgePinLock === "1";
-        if (!locked) continue;
+        const box = node.getBoundingClientRect();
+        const fullW = doc.documentElement.clientWidth;
+        const fullH = doc.documentElement.clientHeight;
+        if (box.width < 200 || box.height < 120) continue;
+        if (fullW > 0 && box.width > fullW * 0.92 && box.height > fullH * 0.92) continue;
       }
       const r = visibleBox(node, doc);
       if (!r) continue;
@@ -741,6 +774,13 @@ export function watchPrimaryMenusOpen(
   const scheduleCheck = () => {
     window.clearTimeout(debounce);
     debounce = window.setTimeout(check, 80);
+    // A settings card is often inserted empty and sized a moment later.
+    window.setTimeout(() => {
+      if (!stopped) check();
+    }, 320);
+    window.setTimeout(() => {
+      if (!stopped) check();
+    }, 700);
   };
 
   const bind = () => {
@@ -992,14 +1032,6 @@ export function mountFloatingChromePin(container: HTMLElement): () => void {
   let stopped = false;
   let timer = 0;
 
-  const isSettingsDialog = (el: HTMLElement): boolean => {
-    if (el.getAttribute("role") !== "dialog") return false;
-    const hint = `${el.getAttribute("data-name") ?? ""} ${el.getAttribute("data-dialog-name") ?? ""} ${el.getAttribute("aria-label") ?? ""}`.toLowerCase();
-    if (/propert|setting/.test(hint)) return true;
-    const rect = el.getBoundingClientRect();
-    return rect.width >= 260 && rect.height >= 180;
-  };
-
   const releasePin = (el: HTMLElement) => {
     if (el.dataset.forgePin !== "1" && el.dataset.forgePin !== "drag" && !el.style.getPropertyValue("--forge-pin-left")) {
       return;
@@ -1009,6 +1041,7 @@ export function mountFloatingChromePin(container: HTMLElement): () => void {
     delete el.dataset.forgePinScroll;
     el.style.removeProperty("--forge-pin-left");
     el.style.removeProperty("--forge-pin-top");
+    el.style.removeProperty("--forge-pin-w");
     el.style.removeProperty("--forge-pin-max-h");
     el.style.removeProperty("--forge-pin-max-w");
   };
@@ -1023,6 +1056,12 @@ export function mountFloatingChromePin(container: HTMLElement): () => void {
   };
 
   const pinElement = (el: HTMLElement, bounds: DOMRect) => {
+    // Dialogs stay where the library placed them. Moving one pulls the form
+    // out of its card, and the other charts then cover what is left.
+    if (el.getAttribute("role") === "dialog") {
+      releasePin(el);
+      return;
+    }
     if (libraryOwnsToolbar(el)) {
       releasePin(el);
       return;
@@ -1036,25 +1075,6 @@ export function mountFloatingChromePin(container: HTMLElement): () => void {
     if (el.parentElement?.closest(PIN_TARGETS)) return;
     const rect = el.getBoundingClientRect();
     if (rect.width < 8 || rect.height < 8) return;
-    if (isSettingsDialog(el)) {
-      const margin = 8;
-      const maxW = Math.max(40, bounds.width - margin * 2);
-      const maxH = Math.max(40, bounds.height - margin * 2);
-      const width = Math.min(rect.width, maxW);
-      const height = Math.min(rect.height, maxH);
-      const left = bounds.left + Math.max(margin, (bounds.width - width) / 2);
-      const top = bounds.top + Math.max(margin, (bounds.height - height) / 2);
-      el.dataset.forgePin = "1";
-      el.dataset.forgePinLock = "1";
-      el.style.setProperty("--forge-pin-left", `${Math.round(left)}px`);
-      el.style.setProperty("--forge-pin-top", `${Math.round(top)}px`);
-      el.style.setProperty("--forge-pin-max-w", `${Math.round(maxW)}px`);
-      if (rect.height > maxH + 1 || rect.width > maxW + 1) {
-        el.dataset.forgePinScroll = "1";
-        el.style.setProperty("--forge-pin-max-h", `${Math.round(maxH)}px`);
-      }
-      return;
-    }
     const margin = 8;
     const maxW = Math.max(40, bounds.width - margin * 2);
     const maxH = Math.max(40, bounds.height - margin * 2);
