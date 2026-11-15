@@ -75,7 +75,7 @@ export const HTF_CANDLES_DEFAULTS: HtfCandlesOptions = {
   // Off by default — HTF remain timers looked like a second blue countdown.
   showTimer: false,
   showHtfName: true,
-  showInterval: true,
+  showInterval: false,
   showGroupBackdrop: false,
   dailyOpenMode: "midnight",
   timezoneOffset: -4,
@@ -257,6 +257,8 @@ function remainingLabel(htf: HtfPreset, lastBarTime: number, nowMs = Date.now())
 
 export interface HtfComputeResult {
   readonly cmds: DrawCmd[];
+  /** Chart bars of empty space the groups need to the right of price. */
+  readonly rightBars: number;
 }
 
 function paintOneGroup(
@@ -486,10 +488,10 @@ export function computeHtfCandles(
   opts: HtfCandlesOptions,
 ): HtfComputeResult {
   const cmds: DrawCmd[] = [];
-  if (chartBars.length < 3 || chartIntervalSec <= 0) return { cmds };
+  if (chartBars.length < 3 || chartIntervalSec <= 0) return { cmds, rightBars: 0 };
 
   const enabled = opts.slots.filter((s) => s.enable).slice(0, Math.max(1, Math.min(6, opts.limitHtf)));
-  if (enabled.length === 0) return { cmds };
+  if (enabled.length === 0) return { cmds, rightBars: 0 };
 
   const lastChartTime = chartBars[chartBars.length - 1]!.time;
   const step = Math.max(1, chartIntervalSec);
@@ -506,7 +508,8 @@ export function computeHtfCandles(
     cursor = end + groupGap;
   }
 
-  return { cmds };
+  const rightBars = Math.max(0, Math.ceil((cursor - lastChartTime) / step));
+  return { cmds, rightBars };
 }
 
 const linestyleMap = { solid: 0, dotted: 1, dashed: 2 } as const;

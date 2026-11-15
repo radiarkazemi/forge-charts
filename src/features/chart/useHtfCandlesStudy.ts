@@ -70,6 +70,7 @@ export function useHtfCandlesStudy(chart: ChartController | null): void {
   const lastFpRef = useRef("");
   const genRef = useRef(0);
   const pendingRef = useRef(false);
+  const offsetNeedRef = useRef(0);
 
   useEffect(() => {
     if (!chart || !ready) return;
@@ -83,6 +84,7 @@ export function useHtfCandlesStudy(chart: ChartController | null): void {
     clearDrawings();
     lastKeyRef.current = "";
     lastFpRef.current = "";
+    offsetNeedRef.current = 0;
 
     function clearDrawings(): void {
       const ids = entityIdsRef.current;
@@ -163,7 +165,8 @@ export function useHtfCandlesStudy(chart: ChartController | null): void {
           // Force off — HTF remain labels duplicated the blue price-scale countdown.
           showTimer: false,
           showHtfName: bool("showHtfName", HTF_CANDLES_DEFAULTS.showHtfName),
-          showInterval: bool("showInterval", HTF_CANDLES_DEFAULTS.showInterval),
+          // New id so a saved "on" from the broken label pile does not come back.
+          showInterval: bool("candleTime", false),
           showGroupBackdrop: bool("showGroupBackdrop", HTF_CANDLES_DEFAULTS.showGroupBackdrop),
           dailyOpenMode,
           timezoneOffset: Math.max(
@@ -274,7 +277,19 @@ export function useHtfCandlesStudy(chart: ChartController | null): void {
         const key = `${optsKey}|${tip.time}:${tip.close.toFixed(5)}:${tip.high.toFixed(5)}:${tip.low.toFixed(5)}`;
         if (!force && lastKeyRef.current === key && lastFpRef.current) return;
         const chartIntervalSec = intervalToSeconds(interval);
-        const { cmds } = computeHtfCandles(bars, chartIntervalSec, opts);
+        const { cmds, rightBars } = computeHtfCandles(bars, chartIntervalSec, opts);
+        // The groups sit to the right of price. Without this margin the
+        // library stacks every future candle on the last bar.
+        const need = Math.min(280, Math.max(12, rightBars + 4));
+        if (cmds.length > 0 && need > offsetNeedRef.current) {
+          try {
+            const scale = api.getTimeScale();
+            if (scale.rightOffset() < need) scale.setRightOffset(need);
+            offsetNeedRef.current = need;
+          } catch {
+            /* ignore */
+          }
+        }
         const fp = fingerprintCmds(cmds);
         if (!force && fp === lastFpRef.current && lastKeyRef.current === key) return;
         if (cancelled || myGen !== genRef.current) return;

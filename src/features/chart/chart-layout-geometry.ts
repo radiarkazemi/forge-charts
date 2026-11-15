@@ -735,11 +735,14 @@ export function watchPrimaryMenusOpen(
     let best: DOMRect | null = null;
     for (const node of candidates) {
       if (!isHeaderMenu(node)) continue;
-      // Chart settings is moved into its pane once. Until that position is
-      // locked, a full-size dialog would punch a hole that jumps every frame.
+      // A dialog has to show through the other charts. Skip a full-window
+      // shell; the real card is the sized dialog inside it.
       if (node.getAttribute("role") === "dialog") {
-        const locked = (node as HTMLElement).dataset?.forgePinLock === "1";
-        if (!locked) continue;
+        const box = node.getBoundingClientRect();
+        const fullW = doc.documentElement.clientWidth;
+        const fullH = doc.documentElement.clientHeight;
+        if (box.width < 200 || box.height < 120) continue;
+        if (fullW > 0 && box.width > fullW * 0.92 && box.height > fullH * 0.92) continue;
       }
       const r = visibleBox(node, doc);
       if (!r) continue;
@@ -771,6 +774,13 @@ export function watchPrimaryMenusOpen(
   const scheduleCheck = () => {
     window.clearTimeout(debounce);
     debounce = window.setTimeout(check, 80);
+    // A settings card is often inserted empty and sized a moment later.
+    window.setTimeout(() => {
+      if (!stopped) check();
+    }, 320);
+    window.setTimeout(() => {
+      if (!stopped) check();
+    }, 700);
   };
 
   const bind = () => {
@@ -1009,27 +1019,6 @@ function ensurePinStyle(doc: Document): void {
       max-width: var(--forge-pin-max-w, none) !important;
       visibility: visible !important;
     }
-    /* Indicator settings: a solid card that scrolls, on every study. */
-    html:not(.theme-dark) [data-forge-pin="1"][role="dialog"] {
-      background-color: #ffffff !important;
-      color: #131722 !important;
-      border: 1px solid #e0e3eb !important;
-    }
-    html.theme-dark [data-forge-pin="1"][role="dialog"],
-    html[class*="dark"] [data-forge-pin="1"][role="dialog"] {
-      background-color: #1e222d !important;
-      color: #d1d4dc !important;
-      border: 1px solid #434651 !important;
-    }
-    [data-forge-pin="1"][role="dialog"] {
-      border-radius: 6px !important;
-      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28) !important;
-      box-sizing: border-box !important;
-      width: var(--forge-pin-w, 520px) !important;
-      max-width: var(--forge-pin-max-w, 560px) !important;
-      max-height: var(--forge-pin-max-h, 80vh) !important;
-      overflow: auto !important;
-    }
   `;
   doc.head.appendChild(style);
 }
@@ -1042,22 +1031,6 @@ function ensurePinStyle(doc: Document): void {
 export function mountFloatingChromePin(container: HTMLElement): () => void {
   let stopped = false;
   let timer = 0;
-
-  const isSearchDialog = (el: HTMLElement): boolean => {
-    const name = (el.getAttribute("data-name") || "").toLowerCase();
-    const dialog = (el.getAttribute("data-dialog-name") || "").toLowerCase();
-    if (name === "globalsearch" || name.includes("quick-search") || name.includes("quicksearch")) return true;
-    return /search tool or function/.test(dialog);
-  };
-
-  const isSettingsDialog = (el: HTMLElement): boolean => {
-    if (el.getAttribute("role") !== "dialog") return false;
-    if (isSearchDialog(el)) return false;
-    const hint = `${el.getAttribute("data-name") ?? ""} ${el.getAttribute("data-dialog-name") ?? ""} ${el.getAttribute("aria-label") ?? ""}`.toLowerCase();
-    if (/propert|setting/.test(hint)) return true;
-    const text = (el.innerText || "").slice(0, 600);
-    return /\bInputs\b/.test(text) && /\bStyle\b/.test(text);
-  };
 
   const releasePin = (el: HTMLElement) => {
     if (el.dataset.forgePin !== "1" && el.dataset.forgePin !== "drag" && !el.style.getPropertyValue("--forge-pin-left")) {
@@ -1083,8 +1056,9 @@ export function mountFloatingChromePin(container: HTMLElement): () => void {
   };
 
   const pinElement = (el: HTMLElement, bounds: DOMRect) => {
-    // Quick search is one card. Pinning its inner dialog pulls the field out of the card.
-    if (isSearchDialog(el)) {
+    // Dialogs stay where the library placed them. Moving one pulls the form
+    // out of its card, and the other charts then cover what is left.
+    if (el.getAttribute("role") === "dialog") {
       releasePin(el);
       return;
     }
@@ -1101,23 +1075,6 @@ export function mountFloatingChromePin(container: HTMLElement): () => void {
     if (el.parentElement?.closest(PIN_TARGETS)) return;
     const rect = el.getBoundingClientRect();
     if (rect.width < 8 || rect.height < 8) return;
-    if (isSettingsDialog(el)) {
-      const margin = 8;
-      const maxW = Math.max(40, bounds.width - margin * 2);
-      const maxH = Math.max(40, bounds.height - margin * 2);
-      const preferred = Math.min(maxW, Math.max(rect.width, Math.min(520, maxW)));
-      const left = bounds.left + Math.max(margin, (bounds.width - preferred) / 2);
-      const top = bounds.top + Math.max(margin, (bounds.height - Math.min(rect.height, maxH)) / 2);
-      el.dataset.forgePin = "1";
-      el.dataset.forgePinLock = "1";
-      el.dataset.forgePinScroll = "1";
-      el.style.setProperty("--forge-pin-left", `${Math.round(left)}px`);
-      el.style.setProperty("--forge-pin-top", `${Math.round(top)}px`);
-      el.style.setProperty("--forge-pin-w", `${Math.round(preferred)}px`);
-      el.style.setProperty("--forge-pin-max-w", `${Math.round(maxW)}px`);
-      el.style.setProperty("--forge-pin-max-h", `${Math.round(maxH)}px`);
-      return;
-    }
     const margin = 8;
     const maxW = Math.max(40, bounds.width - margin * 2);
     const maxH = Math.max(40, bounds.height - margin * 2);

@@ -257,22 +257,55 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
     };
 
     let doc: Document | null = null;
-    let patchedWin: Window | null = null;
+    const keyDocs = new Set<Document>();
+    const patched = new Set<Window>();
     let toggling = false;
+    const press = () => {
+      if (toggling) return;
+      toggling = true;
+      window.setTimeout(() => {
+        toggling = false;
+      }, 500);
+      toggle();
+    };
     const elementProto = (win: Window) =>
       (win as unknown as { Element?: { prototype: Element & { __forgeFsBlocked?: boolean; __forgeFsOrig?: typeof Element.prototype.requestFullscreen } } }).Element?.prototype;
     const swallowFullscreen = (win: Window) => {
       const proto = elementProto(win);
-      if (!proto || proto.__forgeFsBlocked) {
-        patchedWin = win;
-        return;
-      }
+      if (!proto || proto.__forgeFsBlocked) return;
       proto.__forgeFsOrig = proto.requestFullscreen;
-      proto.requestFullscreen = function requestFullscreen() {
-        return Promise.reject(new DOMException("Forge pane maximize", "NotAllowedError"));
+      // Shift+F calls this. Expand the selected chart instead of the browser.
+      proto.requestFullscreen = function requestFullscreen(this: Element) {
+        const win = this.ownerDocument?.defaultView;
+        const frames = [...(workspaceRef.current?.querySelectorAll("iframe") ?? [])];
+        const index = frames.findIndex((frame) => frame.contentWindow === win);
+        if (index >= 0) {
+          activePaneRef.current = index;
+          layoutSyncBus.focusPaneFromPlot(index);
+        }
+        press();
+        return Promise.resolve();
       };
       proto.__forgeFsBlocked = true;
-      patchedWin = win;
+      patched.add(win);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (event.key !== "f" && event.key !== "F") return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const node = event.currentTarget as Document | null;
+      const fromDoc = node && node.nodeType === 9 ? node.defaultView : null;
+      const win = fromDoc ?? event.view ?? null;
+      const frames = [...(workspaceRef.current?.querySelectorAll("iframe") ?? [])];
+      const index = frames.findIndex((frame) => frame.contentWindow === win);
+      if (index >= 0) {
+        activePaneRef.current = index;
+        layoutSyncBus.focusPaneFromPlot(index);
+      }
+      press();
     };
     const onPress = (event: Event) => {
       if (!isFullscreenButton(event.target)) return;
@@ -281,38 +314,43 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
       if (typeof (event as Event & { stopImmediatePropagation?: () => void }).stopImmediatePropagation === "function") {
         (event as Event & { stopImmediatePropagation: () => void }).stopImmediatePropagation();
       }
-      // pointerdown, mousedown, and click are one press.
-      if (toggling) return;
-      toggling = true;
-      window.setTimeout(() => {
-        toggling = false;
-      }, 500);
-      toggle();
+      press();
     };
     const pressEvents = ["pointerdown", "mousedown", "pointerup", "mouseup", "click"] as const;
     const attach = () => {
-      const frame = host.querySelector("iframe");
-      const next = frame?.contentDocument ?? null;
-      const win = frame?.contentWindow ?? null;
-      if (win) swallowFullscreen(win);
-      if (!next || next === doc) return;
+      const frames = workspaceRef.current?.querySelectorAll("iframe") ?? [];
+      for (const frame of frames) {
+        const win = frame.contentWindow;
+        if (win) swallowFullscreen(win);
+        const next = frame.contentDocument;
+        if (!next || keyDocs.has(next)) continue;
+        keyDocs.add(next);
+        next.addEventListener("keydown", onKey, true);
+      }
+      const primary = host.querySelector("iframe")?.contentDocument ?? null;
+      if (!primary || primary === doc) return;
       if (doc) {
         for (const type of pressEvents) doc.removeEventListener(type, onPress, true);
       }
-      doc = next;
+      doc = primary;
       for (const type of pressEvents) doc.addEventListener(type, onPress, true);
     };
     attach();
+    window.addEventListener("keydown", onKey, true);
     const poll = window.setInterval(attach, 500);
     return () => {
       window.clearInterval(poll);
+      window.removeEventListener("keydown", onKey, true);
       if (doc) {
         for (const type of pressEvents) doc.removeEventListener(type, onPress, true);
       }
-      const proto = patchedWin ? elementProto(patchedWin) : undefined;
-      if (proto?.__forgeFsOrig) {
-        proto.requestFullscreen = proto.__forgeFsOrig;
-        proto.__forgeFsBlocked = false;
+      for (const keyDoc of keyDocs) keyDoc.removeEventListener("keydown", onKey, true);
+      for (const win of patched) {
+        const proto = elementProto(win);
+        if (proto?.__forgeFsOrig) {
+          proto.requestFullscreen = proto.__forgeFsOrig;
+          proto.__forgeFsBlocked = false;
+        }
       }
     };
   }, [multi, chartLayout]);
