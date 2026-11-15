@@ -21,13 +21,10 @@ export const SHORT_POSITION_ICON = iconSvg(
   "short",
 );
 
-/** Heart replaces the smiley on the icon tool. */
-export const HEART_ICON = iconSvg(
-  `<path fill="none" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round" d="M14 22.4c-.35 0-7.15-4.15-9.35-8.15C3.1 11.15 3.95 7.35 7.45 6.2c2.05-.7 3.95.15 5.15 1.85 1.2-1.7 3.1-2.55 5.15-1.85 3.5 1.15 4.35 4.95 2.8 8.05C21.15 18.25 14.35 22.4 14 22.4z"/>`,
-  "heart",
-);
+/** Even two-lobe outline. The icon tool uses this instead of the smiley. */
+export const HEART_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="28" height="28" data-forge-icon="heart"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>`;
 
-const PATCH_VERSION = "5";
+const PATCH_VERSION = "6";
 
 function replaceSvg(root: Element, svgHtml: string, kind: string): void {
   const svg = root.querySelector("svg");
@@ -59,8 +56,11 @@ function patchDoc(doc: Document): void {
 
   const iconButton = doc.querySelector('[data-name="linetool-group-font-icons"] button[aria-label="Icon"]');
   const face = iconButton?.querySelector("svg");
-  // Only the default smiley. A different icon the user picked stays.
-  if (iconButton && face && /9\.95/.test(face.innerHTML)) replaceSvg(iconButton, HEART_ICON, "heart");
+  // The default smiley, and our own heart so a better outline can replace the old one.
+  // A different icon the user picked stays.
+  if (iconButton && face && (/9\.95/.test(face.innerHTML) || face.getAttribute("data-forge-icon") === "heart")) {
+    replaceSvg(iconButton, HEART_ICON, "heart");
+  }
 }
 
 export function mountPositionToolIconPatcher(container: HTMLElement): () => void {
