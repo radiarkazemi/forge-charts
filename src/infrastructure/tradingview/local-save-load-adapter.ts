@@ -136,26 +136,27 @@ export function refreshLayoutSnapshots(store: LineToolStore, delta: SerializedLi
   return changed ? next : store;
 }
 
-/** Remote nulls delete. Otherwise the later entry wins. Same id from both devices is kept. */
+/**
+ * A null entry is a deletion. It wins over the other device's copy, and it is
+ * kept so the next sync cannot put that drawing back.
+ */
 export function mergeLineToolBuckets(
   local: SerializedLineTools | undefined,
   remote: SerializedLineTools | undefined,
 ): SerializedLineTools {
   const sources = new Map<string, unknown>();
   const groups = new Map<string, unknown>();
-  const apply = (bucket: SerializedLineTools | undefined, overwrite: boolean) => {
+  const apply = (bucket: SerializedLineTools | undefined, into: Map<string, unknown>, entries: Array<[string, unknown]> | null | undefined) => {
     if (!bucket) return;
-    for (const [id, value] of bucket.sources ?? []) {
-      if (value == null) sources.delete(id);
-      else if (overwrite || !sources.has(id)) sources.set(id, value);
-    }
-    for (const [id, value] of bucket.groups ?? []) {
-      if (value == null) groups.delete(id);
-      else if (overwrite || !groups.has(id)) groups.set(id, value);
+    for (const [id, value] of entries ?? []) {
+      if (into.has(id) && into.get(id) == null) continue;
+      into.set(id, value == null ? null : value);
     }
   };
-  apply(local, true);
-  apply(remote, true);
+  apply(local, sources, local?.sources);
+  apply(remote, sources, remote?.sources);
+  apply(local, groups, local?.groups);
+  apply(remote, groups, remote?.groups);
   const byId = (entries: Array<[string, unknown]>) =>
     entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   return {
@@ -165,7 +166,7 @@ export function mergeLineToolBuckets(
   };
 }
 
-/** Keep every symbol's drawings from both devices. A drawing id only drops when the newer copy says it was deleted. */
+/** Keep every symbol's drawings from both devices. A deleted drawing stays deleted. */
 export function mergeLineToolStores(local: unknown, remote: unknown): LineToolStore {
   const left = asLineToolStore(local);
   const right = asLineToolStore(remote);
@@ -596,6 +597,77 @@ export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
     this.onChange?.();
   }
 
+  /**
+   * The chart's current drawings are the whole set. Anything missing was deleted
+   * and must stay deleted when the account syncs.
+   */
+  saveFullLineToolsState(state: LineToolsAndGroupsState): Promise<void> {
+    if (!state.sources) return Promise.resolve();
+    const all = this.lineToolStore();
+    const serialized = serializeLineTools(state);
+    const bySymbol = new Map<string, SerializedLineTools>();
+    for (const [id, value] of serialized.sources ?? []) {
+      const fromTool =
+        value && typeof value === "object" && "symbol" in value
+          ? drawingSymbolKey((value as { symbol?: string }).symbol)
+          : "";
+      const symbol = preferSymbol(fromTool, drawingSymbolKey(state.symbol));
+      if (!symbol) continue;
+      const bucket = bySymbol.get(symbol) ?? { sources: [], groups: [], symbol };
+      bucket.sources = [...(bucket.sources ?? []), [id, value ?? null]];
+      bySymbol.set(symbol, bucket);
+    }
+    for (const [id, value] of serialized.groups ?? []) {
+      const fromGroup =
+        value && typeof value === "object" && "symbol" in value
+          ? drawingSymbolKey((value as { symbol?: string }).symbol)
+          : "";
+      const symbol = preferSymbol(fromGroup, drawingSymbolKey(state.symbol));
+      if (!symbol) continue;
+      const bucket = bySymbol.get(symbol) ?? { sources: [], groups: [], symbol };
+      bucket.groups = [...(bucket.groups ?? []), [id, value ?? null]];
+      bySymbol.set(symbol, bucket);
+    }
+    const touched = new Set<string>(bySymbol.keys());
+    const currentSymbol = drawingSymbolKey(state.symbol);
+    if (currentSymbol) touched.add(currentSymbol);
+    const removedSources: Array<[string, null]> = [];
+    const removedGroups: Array<[string, null]> = [];
+    for (const symbol of touched) {
+      const key = symbolBucket(symbol);
+      const existing = all[key];
+      const incoming = bySymbol.get(symbol) ?? { sources: [], groups: [], symbol };
+      const sourceIds = new Set((incoming.sources ?? []).map(([id]) => id));
+      const groupIds = new Set((incoming.groups ?? []).map(([id]) => id));
+      const sources = [...(incoming.sources ?? [])];
+      for (const [id, value] of existing?.sources ?? []) {
+        if (sourceIds.has(id)) continue;
+        const toolSymbol =
+          value && typeof value === "object" && "symbol" in value
+            ? drawingSymbolKey((value as { symbol?: string }).symbol)
+            : "";
+        if (toolSymbol && !drawingSymbolsMatch(toolSymbol, symbol)) continue;
+        sources.push([id, null]);
+        removedSources.push([id, null]);
+      }
+      const groups = [...(incoming.groups ?? [])];
+      for (const [id] of existing?.groups ?? []) {
+        if (groupIds.has(id)) continue;
+        groups.push([id, null]);
+        removedGroups.push([id, null]);
+      }
+      all[key] = { sources, groups, symbol: incoming.symbol || existing?.symbol || symbol };
+    }
+    const delta: SerializedLineTools = {
+      sources: [...(serialized.sources ?? []), ...removedSources],
+      groups: [...(serialized.groups ?? []), ...removedGroups],
+      symbol: state.symbol,
+    };
+    this.storage.set(KEYS.lineTools, refreshLayoutSnapshots(all, delta));
+    this.onChange?.();
+    return Promise.resolve();
+  }
+
   async loadLineToolsAndGroups(
     layoutId: string | undefined,
     chartId: string | number,
@@ -649,8 +721,9 @@ export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
       const symbol = drawingSymbolKey((value as { symbol?: string }).symbol || merged.symbol);
       return !symbol || drawingSymbolsMatch(symbol, want);
     });
-    if (!sources.length && !(merged.groups ?? []).length) return null;
-    return deserializeLineTools({ ...merged, sources });
+    const groups = (merged.groups ?? []).filter((entry) => entry[1] != null);
+    if (!sources.length && !groups.length) return null;
+    return deserializeLineTools({ ...merged, sources, groups });
   }
 
   /* ── internals ─────────────────────────────────────────────────────── */

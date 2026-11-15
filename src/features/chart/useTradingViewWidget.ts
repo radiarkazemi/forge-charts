@@ -414,7 +414,8 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
             if (cancelled || !widget || Date.now() < ignoreDrawingsUntil) return;
             try {
               const drawn = widget.activeChart().getLineToolsState();
-              void saveLoadAdapter.saveLineToolsAndGroups(undefined, "1", drawn);
+              if (!drawn?.sources) return;
+              void (saveLoadAdapter as LocalSaveLoadAdapter).saveFullLineToolsState(drawn);
             } catch {
               /* separate drawing storage is not available on this library build */
             }
