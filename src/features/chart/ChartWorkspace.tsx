@@ -53,12 +53,20 @@ function releaseOtherChartPointers(root: HTMLElement | null, keepIndex: number):
   iframes.forEach((iframe, index) => {
     if (index === keepIndex) return;
     const doc = iframe.contentDocument;
-    const target = doc?.querySelector(".chart-container") ?? doc?.body;
-    if (!target) return;
-    const gone = new MouseEvent("mouseleave", { bubbles: true, clientX: -1, clientY: -1 });
-    target.dispatchEvent(gone);
-    target.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, clientX: -1, clientY: -1 }));
+    if (!doc) return;
+    const nodes = doc.querySelectorAll(
+      ".chart-gui-wrapper, .chart-container, .chart-markup-table, .pane, canvas, body",
+    );
+    nodes.forEach((target) => {
+      for (const type of ["pointerleave", "pointerout", "pointercancel", "mouseleave", "mouseout"]) {
+        target.dispatchEvent(new Event(type, { bubbles: true }));
+      }
+      target.dispatchEvent(
+        new MouseEvent("mousemove", { bubbles: true, clientX: -10000, clientY: -10000 }),
+      );
+    });
   });
+  layoutSyncBus.releaseCrosshair(keepIndex);
 }
 
 /**
@@ -104,7 +112,6 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   const splitEdgesRef = useRef<PaneSplitEdges>(splitEdges);
   const activePaneRef = useRef(0);
   const maximizedPaneRef = useRef<number | null>(null);
-  const suppressFullscreenRef = useRef(false);
   layoutRef.current = layoutId;
   splitEdgesRef.current = splitEdges;
   activePaneRef.current = activePane;
@@ -206,13 +213,10 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
 
     const onFsChange = () => {
       const fsEl = document.fullscreenElement;
+      // Never turn a cancelled browser fullscreen into another maximize.
+      // That second write is why one press took three clicks to undo.
       if (multi && fsEl && workspace.contains(fsEl)) {
         void document.exitFullscreen?.().catch(() => undefined);
-        if (!suppressFullscreenRef.current && maximizedPaneRef.current == null) {
-          const pane = activePaneRef.current;
-          maximizedPaneRef.current = pane;
-          setMaximizedPane(pane);
-        }
         return;
       }
       reflow();
@@ -245,10 +249,6 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
     if (!host) return;
 
     const toggle = () => {
-      suppressFullscreenRef.current = true;
-      window.setTimeout(() => {
-        suppressFullscreenRef.current = false;
-      }, 700);
       setMaximizedPane((current) => {
         const next = current == null ? activePaneRef.current : null;
         maximizedPaneRef.current = next;
@@ -257,7 +257,23 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
     };
 
     let doc: Document | null = null;
+    let patchedWin: Window | null = null;
     let toggling = false;
+    const elementProto = (win: Window) =>
+      (win as unknown as { Element?: { prototype: Element & { __forgeFsBlocked?: boolean; __forgeFsOrig?: typeof Element.prototype.requestFullscreen } } }).Element?.prototype;
+    const swallowFullscreen = (win: Window) => {
+      const proto = elementProto(win);
+      if (!proto || proto.__forgeFsBlocked) {
+        patchedWin = win;
+        return;
+      }
+      proto.__forgeFsOrig = proto.requestFullscreen;
+      proto.requestFullscreen = function requestFullscreen() {
+        return Promise.reject(new DOMException("Forge pane maximize", "NotAllowedError"));
+      };
+      proto.__forgeFsBlocked = true;
+      patchedWin = win;
+    };
     const onPress = (event: Event) => {
       if (!isFullscreenButton(event.target)) return;
       event.preventDefault();
@@ -265,29 +281,39 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
       if (typeof (event as Event & { stopImmediatePropagation?: () => void }).stopImmediatePropagation === "function") {
         (event as Event & { stopImmediatePropagation: () => void }).stopImmediatePropagation();
       }
-      // pointerdown and click both reach this. One press, one toggle.
+      // pointerdown, mousedown, and click are one press.
       if (toggling) return;
       toggling = true;
       window.setTimeout(() => {
         toggling = false;
-      }, 400);
+      }, 500);
       toggle();
     };
+    const pressEvents = ["pointerdown", "mousedown", "pointerup", "mouseup", "click"] as const;
     const attach = () => {
-      const next = host.querySelector("iframe")?.contentDocument ?? null;
+      const frame = host.querySelector("iframe");
+      const next = frame?.contentDocument ?? null;
+      const win = frame?.contentWindow ?? null;
+      if (win) swallowFullscreen(win);
       if (!next || next === doc) return;
-      doc?.removeEventListener("pointerdown", onPress, true);
-      doc?.removeEventListener("click", onPress, true);
+      if (doc) {
+        for (const type of pressEvents) doc.removeEventListener(type, onPress, true);
+      }
       doc = next;
-      doc.addEventListener("pointerdown", onPress, true);
-      doc.addEventListener("click", onPress, true);
+      for (const type of pressEvents) doc.addEventListener(type, onPress, true);
     };
     attach();
     const poll = window.setInterval(attach, 500);
     return () => {
       window.clearInterval(poll);
-      doc?.removeEventListener("pointerdown", onPress, true);
-      doc?.removeEventListener("click", onPress, true);
+      if (doc) {
+        for (const type of pressEvents) doc.removeEventListener(type, onPress, true);
+      }
+      const proto = patchedWin ? elementProto(patchedWin) : undefined;
+      if (proto?.__forgeFsOrig) {
+        proto.requestFullscreen = proto.__forgeFsOrig;
+        proto.__forgeFsBlocked = false;
+      }
     };
   }, [multi, chartLayout]);
 
@@ -515,6 +541,16 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
               // The primary iframe is full-size under these panes. Leaving the
               // crosshair alive there draws a column of lines and steals the cursor.
               releaseOtherChartPointers(workspaceRef.current, index);
+            }}
+            onPointerLeave={() => {
+              if (!shown) return;
+              const iframe = workspaceRef.current?.querySelectorAll("iframe")[index];
+              const clear = () => releaseOtherChartPointers(iframe ? iframe.parentElement : null, -1);
+              // A fast jump can redraw the crosshair after the first leave.
+              clear();
+              window.setTimeout(() => {
+                if (!iframe?.matches(":hover") && !iframe?.parentElement?.matches(":hover")) clear();
+              }, 60);
             }}
             onPointerDownCapture={() => {
               if (shown && !menusOpen) layoutSyncBus.focusPaneFromPlot(index);

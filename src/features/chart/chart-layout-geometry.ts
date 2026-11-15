@@ -473,6 +473,8 @@ export function mountFullWidthNavbar(
 
     if (getLayout() === "s") {
       releasePaneBox(center);
+      releasePaneBox(center?.querySelector(".chart-container") as HTMLElement | null);
+      releasePaneBox(center?.querySelector(".chart-widget") as HTMLElement | null);
       releasePaneBox(bottom);
       const W = doc.documentElement.clientWidth || container.clientWidth;
       const H = doc.documentElement.clientHeight || container.clientHeight;
@@ -505,15 +507,22 @@ export function mountFullWidthNavbar(
     const contentH = Math.max(0, H - headerHeight);
     const paneW = Math.max(16, Math.round(slot.w * contentW));
     const paneH = Math.max(16, Math.round(slot.h * contentH - (slot.y + slot.h < 1 ? PANE_GAP : 0)));
-    const bottomH = bottom?.offsetHeight ?? 0;
-    const plotH = Math.max(16, paneH - bottomH);
+    // The date-range bar sits on the bottom of the plot and was covering the
+    // time axis. Keep that strip, and size the candles above it.
+    const controls = doc.querySelector(".chart-controls-bar") as HTMLElement | null;
+    const controlsH = Math.round(controls?.offsetHeight ?? bottom?.offsetHeight ?? 0);
+    const reserved = controlsH >= 8 ? controlsH : 0;
+    const plotH = Math.max(16, paneH - reserved);
     const left = Math.round(leftToolbarWidth + slot.x * contentW);
     const top = Math.round(headerHeight + slot.y * contentH);
+    const widgetEl = center?.querySelector(".chart-widget") as HTMLElement | null;
+    const chartContainer = center?.querySelector(".chart-container") as HTMLElement | null;
     const owners = chartOwners(win);
     const sized =
       center?.dataset[PANE_BOX] === "1" &&
       Math.abs(center.offsetWidth - paneW) <= 1 &&
-      Math.abs(center.offsetHeight - plotH) <= 1 &&
+      Math.abs(center.offsetHeight - paneH) <= 1 &&
+      (widgetEl == null || Math.abs(widgetEl.offsetHeight - plotH) <= 2) &&
       owners != null &&
       Math.abs(owners.width.value() - paneW) <= 1 &&
       Math.abs(owners.height.value() - plotH) <= 1;
@@ -526,10 +535,21 @@ export function mountFullWidthNavbar(
         center.style.setProperty("left", `${left}px`, "important");
         center.style.setProperty("top", `${top}px`, "important");
         center.style.setProperty("width", `${paneW}px`, "important");
-        center.style.setProperty("height", `${plotH}px`, "important");
+        center.style.setProperty("height", `${paneH}px`, "important");
         center.style.setProperty("right", "auto", "important");
         center.style.setProperty("bottom", "auto", "important");
         center.style.setProperty("overflow", "hidden", "important");
+      }
+      for (const el of [chartContainer, widgetEl]) {
+        if (!el) continue;
+        el.dataset[PANE_BOX] = "1";
+        el.style.setProperty("position", "absolute", "important");
+        el.style.setProperty("left", "0", "important");
+        el.style.setProperty("top", "0", "important");
+        el.style.setProperty("width", `${paneW}px`, "important");
+        el.style.setProperty("height", `${plotH}px`, "important");
+        el.style.setProperty("right", "auto", "important");
+        el.style.setProperty("bottom", "auto", "important");
       }
       if (bottom) {
         bottom.dataset[PANE_BOX] = "1";
@@ -538,6 +558,9 @@ export function mountFullWidthNavbar(
         bottom.style.setProperty("width", `${paneW}px`, "important");
         bottom.style.setProperty("right", "auto", "important");
         bottom.style.setProperty("bottom", "auto", "important");
+      }
+      if (controls) {
+        controls.style.setProperty("z-index", "6", "important");
       }
       // The price scale lives inside this widget. Matching the pane width
       // puts it on the pane's trailing edge and makes Alt+R land there.
@@ -570,6 +593,8 @@ export function mountFullWidthNavbar(
     const topEl = doc?.querySelector(".layout__area--top") as HTMLElement | null;
     const leftEl = doc?.querySelector(".layout__area--left") as HTMLElement | null;
     releasePaneBox(center);
+    releasePaneBox(center?.querySelector(".chart-container") as HTMLElement | null);
+    releasePaneBox(center?.querySelector(".chart-widget") as HTMLElement | null);
     releasePaneBox(doc?.querySelector(".layout__area--bottom") as HTMLElement | null);
     if (win && doc) {
       const header = topEl ? topEl.offsetTop + topEl.offsetHeight : 0;
@@ -984,6 +1009,27 @@ function ensurePinStyle(doc: Document): void {
       max-width: var(--forge-pin-max-w, none) !important;
       visibility: visible !important;
     }
+    /* Indicator settings: a solid card that scrolls, on every study. */
+    html:not(.theme-dark) [data-forge-pin="1"][role="dialog"] {
+      background-color: #ffffff !important;
+      color: #131722 !important;
+      border: 1px solid #e0e3eb !important;
+    }
+    html.theme-dark [data-forge-pin="1"][role="dialog"],
+    html[class*="dark"] [data-forge-pin="1"][role="dialog"] {
+      background-color: #1e222d !important;
+      color: #d1d4dc !important;
+      border: 1px solid #434651 !important;
+    }
+    [data-forge-pin="1"][role="dialog"] {
+      border-radius: 6px !important;
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28) !important;
+      box-sizing: border-box !important;
+      width: var(--forge-pin-w, 520px) !important;
+      max-width: var(--forge-pin-max-w, 560px) !important;
+      max-height: var(--forge-pin-max-h, 80vh) !important;
+      overflow: auto !important;
+    }
   `;
   doc.head.appendChild(style);
 }
@@ -1045,19 +1091,17 @@ export function mountFloatingChromePin(container: HTMLElement): () => void {
       const margin = 8;
       const maxW = Math.max(40, bounds.width - margin * 2);
       const maxH = Math.max(40, bounds.height - margin * 2);
-      const width = Math.min(rect.width, maxW);
-      const height = Math.min(rect.height, maxH);
-      const left = bounds.left + Math.max(margin, (bounds.width - width) / 2);
-      const top = bounds.top + Math.max(margin, (bounds.height - height) / 2);
+      const preferred = Math.min(maxW, Math.max(rect.width, Math.min(520, maxW)));
+      const left = bounds.left + Math.max(margin, (bounds.width - preferred) / 2);
+      const top = bounds.top + Math.max(margin, (bounds.height - Math.min(rect.height, maxH)) / 2);
       el.dataset.forgePin = "1";
       el.dataset.forgePinLock = "1";
+      el.dataset.forgePinScroll = "1";
       el.style.setProperty("--forge-pin-left", `${Math.round(left)}px`);
       el.style.setProperty("--forge-pin-top", `${Math.round(top)}px`);
+      el.style.setProperty("--forge-pin-w", `${Math.round(preferred)}px`);
       el.style.setProperty("--forge-pin-max-w", `${Math.round(maxW)}px`);
-      if (rect.height > maxH + 1 || rect.width > maxW + 1) {
-        el.dataset.forgePinScroll = "1";
-        el.style.setProperty("--forge-pin-max-h", `${Math.round(maxH)}px`);
-      }
+      el.style.setProperty("--forge-pin-max-h", `${Math.round(maxH)}px`);
       return;
     }
     const margin = 8;

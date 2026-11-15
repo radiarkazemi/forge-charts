@@ -163,6 +163,7 @@ export function useHtfCandlesStudy(chart: ChartController | null): void {
           // Force off — HTF remain labels duplicated the blue price-scale countdown.
           showTimer: false,
           showHtfName: bool("showHtfName", HTF_CANDLES_DEFAULTS.showHtfName),
+          showInterval: bool("showInterval", HTF_CANDLES_DEFAULTS.showInterval),
           showGroupBackdrop: bool("showGroupBackdrop", HTF_CANDLES_DEFAULTS.showGroupBackdrop),
           dailyOpenMode,
           timezoneOffset: Math.max(

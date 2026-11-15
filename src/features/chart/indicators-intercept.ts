@@ -381,7 +381,7 @@ function paintList(listEl: HTMLElement, nav: NavId, q: string): void {
   const parts: string[] = [];
   if (forge.length) {
     const sec =
-      nav === "editorsPicks" || nav === "top" || nav === "trending" ? "COMMUNITY" : "MY SCRIPTS";
+      nav === "editorsPicks" || nav === "top" || nav === "trending" ? "COMMUNITY" : "FORGE VIP";
     parts.push(`<div class="fi-sec">${sec}</div>`);
     parts.push(forge.map((e) => rowHtml(e, q)).join(""));
   }

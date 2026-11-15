@@ -119,6 +119,7 @@ class LayoutSyncBus {
   /** One linked cross per pane (CL has no setCrossHair across widgets). */
   private readonly crosshairMarkers = new Map<number, { vert: EntityId; horz: EntityId | null }>();
   private crosshairRaf = 0;
+  private crosshairGen = 0;
   /** Serializes marker creates so a fast mouse cannot stack a column of lines. */
   private crosshairChain: Promise<void> = Promise.resolve();
   private pendingCrosshair: { sourceIndex: number; time: number; price: number } | null = null;
@@ -906,6 +907,20 @@ class LayoutSyncBus {
     });
   }
 
+  /** Drop linked crosshair lines on every pane except `keepIndex` (-1 clears all). */
+  releaseCrosshair(keepIndex: number): void {
+    this.crosshairGen += 1;
+    this.pendingCrosshair = null;
+    if (this.crosshairRaf) {
+      window.cancelAnimationFrame(this.crosshairRaf);
+      this.crosshairRaf = 0;
+    }
+    for (const index of [...this.crosshairMarkers.keys()]) {
+      if (index === keepIndex) continue;
+      this.dropCrosshairMarker(index);
+    }
+  }
+
   private clearCrosshairMarkers(): void {
     for (const [paneIndex, marker] of this.crosshairMarkers) {
       const controller = this.panes.get(paneIndex)?.controller;
@@ -949,6 +964,7 @@ class LayoutSyncBus {
    * symbol. Panes with a different symbol keep their own cross.
    */
   private async paintCrosshairMarkers(sourceIndex: number, time: number, price: number): Promise<void> {
+    const gen = this.crosshairGen;
     if (!this.flags.crosshair) {
       this.clearCrosshairMarkers();
       return;
@@ -967,7 +983,7 @@ class LayoutSyncBus {
       if (existing && controller.moveCrosshairMarker(existing.vert, existing.horz, time, price)) continue;
       if (existing) this.dropCrosshairMarker(index);
       const created = await controller.createCrosshairMarker(time, price);
-      if (!this.flags.crosshair) {
+      if (gen !== this.crosshairGen || !this.flags.crosshair) {
         if (created) {
           controller.removeEntity(created.vert);
           controller.forgetIgnoredDrawing(created.vert);

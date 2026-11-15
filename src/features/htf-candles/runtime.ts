@@ -38,6 +38,8 @@ export interface HtfCandlesOptions {
   readonly showLabels: boolean;
   readonly showTimer: boolean;
   readonly showHtfName: boolean;
+  /** Time or weekday printed on each higher-timeframe candle. */
+  readonly showInterval: boolean;
   readonly showGroupBackdrop: boolean;
   readonly dailyOpenMode: DailyOpenMode;
   readonly timezoneOffset: number;
@@ -73,7 +75,8 @@ export const HTF_CANDLES_DEFAULTS: HtfCandlesOptions = {
   // Off by default — HTF remain timers looked like a second blue countdown.
   showTimer: false,
   showHtfName: true,
-  showGroupBackdrop: true,
+  showInterval: true,
+  showGroupBackdrop: false,
   dailyOpenMode: "midnight",
   timezoneOffset: -4,
   bodyTransparency: 30,
@@ -215,6 +218,27 @@ function withAlpha(color: string, transparency: number): string {
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 }
 
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+
+function intervalText(bar: HtfBar, htf: HtfPreset, offsetHours: number): string {
+  if (htf === "1W") return "1W";
+  if (htf === "1M") return "1M";
+  const parts = localParts(bar.time, offsetHours);
+  if (htf === "1D") return WEEKDAYS[parts.weekday] ?? "1D";
+  const hh = Math.floor(parts.mins / 60);
+  const mm = parts.mins % 60;
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
+/** A higher timeframe that cannot be built from this chart is hidden. */
+function htfFitsChart(htf: HtfPreset, chartSec: number): boolean {
+  if (chartSec <= 0) return false;
+  const htfSec = htfSeconds(htf);
+  if (htfSec <= chartSec) return false;
+  if (htf === "1D" || htf === "1W" || htf === "1M") return true;
+  return htfSec % chartSec === 0;
+}
+
 function remainingLabel(htf: HtfPreset, lastBarTime: number, nowMs = Date.now()): string {
   const step = htfSeconds(htf);
   const closeAt = (Math.floor(lastBarTime / step) + 1) * step;
@@ -244,7 +268,7 @@ function paintOneGroup(
   slot: HtfSlot,
   lastChartTime: number,
 ): number {
-  const width = Math.max(1, opts.widthBars) * step;
+  const width = Math.max(1, opts.widthBars) * 2 * step;
   const gap = Math.max(0, opts.spacingBars) * step;
   const stride = width + gap;
   const n = htfBars.length;
@@ -322,24 +346,38 @@ function paintOneGroup(
       cmds.push({ kind: "label", t1: tRight, p1: c.low, color: bodyColor, text: String(c.low) });
     }
 
-    if (opts.showTrace) {
-      for (const [price, style] of [
-        [c.open, "solid"],
-        [c.close, "dotted"],
-        [c.high, "dotted"],
-        [c.low, "dotted"],
-      ] as const) {
-        cmds.push({
-          kind: "line",
-          t1: lastChartTime,
-          p1: price,
-          t2: tLeft,
-          p2: price,
-          color: withAlpha(bodyColor, 70),
-          width: 1,
-          style,
-        });
-      }
+    if (opts.showInterval) {
+      cmds.push({
+        kind: "label",
+        t1: tMid,
+        p1: c.high,
+        color: "#787b86",
+        text: intervalText(c, slot.htf, opts.timezoneOffset),
+      });
+    }
+  }
+
+  if (opts.showTrace && n > 0) {
+    const last = htfBars[n - 1]!;
+    const tLeft = groupOrigin + (n - 1) * stride;
+    const bull = last.close >= last.open;
+    const color = withAlpha(bull ? opts.bullBody : opts.bearBody, 55);
+    for (const [price, style] of [
+      [last.open, "solid"],
+      [last.high, "dotted"],
+      [last.low, "dotted"],
+      [last.close, "dashed"],
+    ] as const) {
+      cmds.push({
+        kind: "line",
+        t1: lastChartTime,
+        p1: price,
+        t2: tLeft,
+        p2: price,
+        color,
+        width: 1,
+        style,
+      });
     }
   }
 
@@ -350,10 +388,21 @@ function paintOneGroup(
       const bullGap = c.low > a.high;
       const bearGap = c.high < a.low;
       if (!bullGap && !bearGap) continue;
-      const tLeft = groupOrigin + (i - 1) * stride;
-      const tRight = tLeft + width;
       const top = bullGap ? c.low : a.low;
       const bot = bullGap ? a.high : c.high;
+      if (top <= bot) continue;
+      let end = n - 1;
+      for (let k = i + 1; k < n; k += 1) {
+        const later = htfBars[k]!;
+        const mitigated = bullGap ? later.low <= top && later.low >= bot : later.high >= bot && later.high <= top;
+        const through = bullGap ? later.low < bot : later.high > top;
+        if (mitigated || through) {
+          end = k;
+          break;
+        }
+      }
+      const tLeft = groupOrigin + (i - 1) * stride;
+      const tRight = groupOrigin + end * stride + width;
       cmds.push({
         kind: "rect",
         t1: tLeft,
@@ -449,6 +498,7 @@ export function computeHtfCandles(
 
   let cursor = lastChartTime + pad;
   for (const slot of enabled) {
+    if (!htfFitsChart(slot.htf, chartIntervalSec)) continue;
     const all = aggregateHtfBars(chartBars, slot.htf, opts.dailyOpenMode, opts.timezoneOffset);
     const n = Math.max(1, Math.min(40, slot.candleCount));
     const slice = all.slice(-n);

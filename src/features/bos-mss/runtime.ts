@@ -10,7 +10,6 @@
 
 import type { EntityId, IChartWidgetApi } from "@/infrastructure/tradingview";
 import {
-  bosEventDedupeKey,
   DEFAULT_STRUCTURE_SCALES,
   resolveStructureScales,
   scaleFontSize,
@@ -64,7 +63,7 @@ export const BOS_MSS_DEFAULTS: BosMssInputs = {
   leftBars: 2,
   rightBars: 2,
   breakOnWick: false,
-  smartScales: true,
+  smartScales: false,
   scalesText: DEFAULT_STRUCTURE_SCALES.join(","),
   showBosPlus: true,
   showBosMinus: true,
@@ -167,36 +166,72 @@ export function detectBosMssAtScale(
     const bar = bars[i]!;
     const ph = pivotHigh(bars, i, left, right);
     const pl = pivotLow(bars, i, left, right);
+    // Keep the structure point traders actually break:
+    // uptrend tracks the higher high and the higher low,
+    // downtrend tracks the lower low and the lower high.
     if (ph != null) {
-      lastSH = ph;
-      lastSHBar = i - right;
+      const pivotBar = i - right;
+      const unbroken = brokenSHBar == null || brokenSHBar !== lastSHBar;
+      if (
+        lastSH == null ||
+        !unbroken ||
+        (structureDir >= 0 && ph > lastSH) ||
+        (structureDir < 0 && ph < lastSH)
+      ) {
+        lastSH = ph;
+        lastSHBar = pivotBar;
+      }
     }
     if (pl != null) {
-      lastSL = pl;
-      lastSLBar = i - right;
+      const pivotBar = i - right;
+      const unbroken = brokenSLBar == null || brokenSLBar !== lastSLBar;
+      if (
+        lastSL == null ||
+        !unbroken ||
+        (structureDir <= 0 && pl < lastSL) ||
+        (structureDir > 0 && pl > lastSL)
+      ) {
+        lastSL = pl;
+        lastSLBar = pivotBar;
+      }
     }
 
     const useHigh = breakOnWick ? bar.high : bar.close;
     const useLow = breakOnWick ? bar.low : bar.close;
     const preStructure = structureDir;
 
-    const bullBreak =
+    let bullBreak =
       lastSH != null &&
       lastSHBar != null &&
+      lastSHBar < i &&
       useHigh > lastSH &&
       (brokenSHBar == null || brokenSHBar !== lastSHBar);
-    const bearBreak =
+    let bearBreak =
       lastSL != null &&
       lastSLBar != null &&
+      lastSLBar < i &&
       useLow < lastSL &&
       (brokenSLBar == null || brokenSLBar !== lastSLBar);
+    // One bar cannot be both a bullish and a bearish break.
+    if (bullBreak && bearBreak) {
+      if (bar.close >= bar.open) bearBreak = false;
+      else bullBreak = false;
+    }
 
     if (bullBreak && lastSH != null && lastSHBar != null) {
       const kind: BosMssKind = preStructure === -1 ? "MSS+" : "BOS+";
+      let breakAt = i;
+      for (let k = lastSHBar + 1; k <= i; k += 1) {
+        const probe = breakOnWick ? bars[k]!.high : bars[k]!.close;
+        if (probe > lastSH) {
+          breakAt = k;
+          break;
+        }
+      }
       events.push({
         kind,
         t1: bars[lastSHBar]!.time,
-        t2: bar.time,
+        t2: bars[breakAt]!.time,
         price: lastSH,
         scale,
       });
@@ -206,10 +241,18 @@ export function detectBosMssAtScale(
 
     if (bearBreak && lastSL != null && lastSLBar != null) {
       const kind: BosMssKind = preStructure === 1 ? "MSS-" : "BOS-";
+      let breakAt = i;
+      for (let k = lastSLBar + 1; k <= i; k += 1) {
+        const probe = breakOnWick ? bars[k]!.low : bars[k]!.close;
+        if (probe < lastSL) {
+          breakAt = k;
+          break;
+        }
+      }
       events.push({
         kind,
         t1: bars[lastSLBar]!.time,
-        t2: bar.time,
+        t2: bars[breakAt]!.time,
         price: lastSL,
         scale,
       });
@@ -238,7 +281,10 @@ export function detectBosMss(
     // Each tier uses equal left/right = scale (classic symmetric pivots).
     const tier = detectBosMssAtScale(bars, scale, scale, inputs.breakOnWick, scale);
     for (const ev of tier) {
-      const key = bosEventDedupeKey(ev);
+      // Same swing and break: the larger scale decides BOS versus MSS.
+      const side = ev.kind.endsWith("+") ? "+" : "-";
+      const price = Math.round(ev.price * 1e5) / 1e5;
+      const key = `${ev.t1}|${ev.t2}|${price}|${side}`;
       const prev = byKey.get(key);
       if (!prev || ev.scale > prev.scale) byKey.set(key, ev);
     }
