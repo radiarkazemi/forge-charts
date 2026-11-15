@@ -132,12 +132,67 @@ def _persian(text: str) -> bool:
     return any("\u0600" <= ch <= "\u06FF" for ch in text)
 
 
-def instrument_kind(symbol: str, name: str) -> str | None:
-    """Classify one TSETMC row, or None when it is not a real instrument.
+def _norm_name(name: str) -> str:
+    return "".join(name.replace("\u200c", "").replace("\u200d", "").split())
 
-    Rights end with ح and are not the share. Calls start with ض, puts with ط.
-    صندوق is a fund. اخزا / اجاره / مرابحه / اوراق are bonds. A name with no
-    Persian letters, or a deleted name, is dropped.
+
+def _board_suffix(symbol: str) -> str:
+    """Plain symbol when this row is the numbered copy (فولاد3 → فولاد)."""
+    end = len(symbol)
+    while end > 0 and symbol[end - 1].isdigit():
+        end -= 1
+    base = symbol[:end].strip()
+    if base and base != symbol and _persian(base):
+        return base
+    return ""
+
+
+# Official YVal codes on the market-watch sheet (confirmed against the live board).
+# 303 is a Farabourse share, not a fund. 309 is the base-market share, not a right.
+_YVAL_KIND = {
+    300: "stock",
+    303: "stock",
+    309: "stock",
+    313: "stock",
+    305: "fund",
+    315: "fund",
+    380: "fund",
+    400: "right",
+    403: "right",
+    404: "right",
+    311: "option",
+    312: "option",
+    320: "option",
+    321: "option",
+    304: "futures",
+    308: "futures",
+    701: "futures",
+    306: "bond",
+    208: "bond",
+    301: "bond",
+    706: "bond",
+    206: "bond",
+    307: "bond",
+}
+# Power cargo, warehouse slips, and similar rows. They are not chart symbols.
+_YVAL_SKIP = {200, 201, 801, 802, 803, 804}
+
+
+def _positive(*values: Any) -> float:
+    """First real price. Zero is missing, and a rial change (pc) must not sneak in."""
+    for value in values:
+        number = _num(value)
+        if number > 0:
+            return number
+    return 0.0
+
+
+def instrument_kind(symbol: str, name: str, yval: int = 0) -> str | None:
+    """Classify one TSETMC row, or None when it is not a chart instrument.
+
+    The watch sheet's YVal is the official type. The name rules are only the
+    fallback for the old Excel sheet, which has no type code. Rights end with ح.
+    Calls start with ض, puts with ط. Power-cargo slips are dropped.
     """
     sym = " ".join(symbol.strip().split())
     title = " ".join(name.strip().split())
@@ -145,6 +200,11 @@ def instrument_kind(symbol: str, name: str) -> str | None:
         return None
     if "حذف" in title:
         return None
+    code = int(yval or 0)
+    if code in _YVAL_SKIP:
+        return None
+    if code in _YVAL_KIND:
+        return _YVAL_KIND[code]
     blob = f"{sym} {title}"
     if sym.endswith("ح"):
         return "right"
@@ -156,7 +216,7 @@ def instrument_kind(symbol: str, name: str) -> str | None:
         return "fund"
     if any(bit in blob for bit in ("اخزا", "اجاره", "مرابحه", "اوراق", "سخند", "سخاب", "مشارکت")):
         return "bond"
-    if "آتی" in title or "قرارداد" in title:
+    if "آتی" in title or "آتي" in title or "قرارداد" in title:
         return "futures"
     return "stock"
 
@@ -181,7 +241,8 @@ def clean_board(raw_rows: list[dict[str, Any]]) -> dict[str, Any]:
         if "حذف" in name:
             dropped["removed"] += 1
             continue
-        kind = instrument_kind(symbol, name)
+        yval = int(_num(raw.get("yVal") or raw.get("yval") or 0))
+        kind = instrument_kind(symbol, name, yval)
         if kind is None:
             dropped["empty"] += 1
             continue
@@ -212,6 +273,22 @@ def clean_board(raw_rows: list[dict[str, Any]]) -> dict[str, Any]:
         new_score = (1 if row["volume"] > 0 else 0, 1 if row["insCode"] else 0, row["close"])
         if new_score > old_score:
             kept[prev] = row
+    # The watch repeats a share as فولاد and فولاد3 for a second board.
+    # Same company name → keep the plain symbol. A numbered option (ضهرم8024)
+    # does not share the share's name, so it stays.
+    plain_names = {
+        _norm_name(str(row["name"])): str(row["symbol"])
+        for row in kept
+        if not _board_suffix(str(row["symbol"]))
+    }
+    deduped: list[dict[str, Any]] = []
+    for row in kept:
+        suffix = _board_suffix(str(row["symbol"]))
+        if suffix and plain_names.get(_norm_name(str(row["name"]))) == suffix:
+            dropped["duplicate"] += 1
+            continue
+        deduped.append(row)
+    kept = deduped
     counts: dict[str, int] = {}
     for row in kept:
         counts[row["kind"]] = counts.get(row["kind"], 0) + 1
@@ -239,9 +316,12 @@ def _json_instrument(row: dict[str, Any]) -> dict[str, Any] | None:
         "name": name,
         "insCode": ins,
         "flow": row.get("flow") or row.get("Flow") or 0,
-        "last": row.get("pDrCotVal") or row.get("pdv") or row.get("lastPrice") or row.get("lastprice") or row.get("last") or 0,
-        "close": row.get("pClosing") or row.get("pc") or row.get("closingPrice") or row.get("closingprice") or row.get("close") or 0,
-        "volume": row.get("qTotTran5J") or row.get("qtj") or row.get("tradeVolume") or row.get("volume") or 0,
+        "yVal": row.get("yVal") or row.get("YVal") or 0,
+        # pdv / pcl are the filled watch fields. pDrCotVal and pClosing are
+        # often 0 on this sheet, and pc is the rial change, not the close.
+        "last": _positive(row.get("pdv"), row.get("pDrCotVal"), row.get("lastPrice"), row.get("lastprice"), row.get("last")),
+        "close": _positive(row.get("pcl"), row.get("pClosing"), row.get("closingPrice"), row.get("closingprice"), row.get("close")),
+        "volume": _positive(row.get("qtj"), row.get("qTotTran5J"), row.get("tradeVolume"), row.get("volume")),
     }
 
 
