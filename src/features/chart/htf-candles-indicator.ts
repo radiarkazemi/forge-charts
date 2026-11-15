@@ -79,7 +79,7 @@ export const HTF_CANDLES_STUDY_DEFAULTS = {
   showVi: HTF_CANDLES_DEFAULTS.showVi,
   showTrace: HTF_CANDLES_DEFAULTS.showTrace,
   showLabels: HTF_CANDLES_DEFAULTS.showLabels,
-  showTimer: HTF_CANDLES_DEFAULTS.showTimer,
+  remainTime: HTF_CANDLES_DEFAULTS.showTimer,
   showHtfName: HTF_CANDLES_DEFAULTS.showHtfName,
   candleTime: HTF_CANDLES_DEFAULTS.showInterval,
   dailyOpenMode: HTF_CANDLES_DEFAULTS.dailyOpenMode,
@@ -255,9 +255,9 @@ export function createHtfCandlesIndicator(PineJS: {
           type: "bool",
         },
         {
-          id: "showTimer",
+          id: "remainTime",
           name: "Label · Remaining time",
-          defval: HTF_CANDLES_STUDY_DEFAULTS.showTimer,
+          defval: HTF_CANDLES_STUDY_DEFAULTS.remainTime,
           type: "bool",
         },
         {

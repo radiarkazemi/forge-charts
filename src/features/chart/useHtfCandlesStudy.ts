@@ -162,8 +162,7 @@ export function useHtfCandlesStudy(chart: ChartController | null): void {
           showVi: bool("showVi", HTF_CANDLES_DEFAULTS.showVi),
           showTrace: bool("showTrace", HTF_CANDLES_DEFAULTS.showTrace),
           showLabels: bool("showLabels", HTF_CANDLES_DEFAULTS.showLabels),
-          // Force off — HTF remain labels duplicated the blue price-scale countdown.
-          showTimer: false,
+          showTimer: bool("remainTime", HTF_CANDLES_DEFAULTS.showTimer),
           showHtfName: bool("showHtfName", HTF_CANDLES_DEFAULTS.showHtfName),
           // New id so a saved "on" from the broken label pile does not come back.
           showInterval: bool("candleTime", false),
@@ -273,10 +272,13 @@ export function useHtfCandlesStudy(chart: ChartController | null): void {
           return;
         }
         const tip = bars[bars.length - 1]!;
-        // Tip key ignores sub-tick noise; OHLC tip changes drive redraws.
-        const key = `${optsKey}|${tip.time}:${tip.close.toFixed(5)}:${tip.high.toFixed(5)}:${tip.low.toFixed(5)}`;
-        if (!force && lastKeyRef.current === key && lastFpRef.current) return;
         const chartIntervalSec = intervalToSeconds(interval);
+        const nowSec = Math.floor(Date.now() / 1000);
+        const live = nowSec >= tip.time && nowSec - tip.time < chartIntervalSec + 20;
+        // Minute bucket refreshes the countdown while the candle is still forming.
+        const timerBucket = opts.showTimer && live ? Math.floor(nowSec / 60) : 0;
+        const key = `${optsKey}|${tip.time}:${tip.close.toFixed(5)}:${tip.high.toFixed(5)}:${tip.low.toFixed(5)}|tm${timerBucket}`;
+        if (!force && lastKeyRef.current === key && lastFpRef.current) return;
         const { cmds, rightBars } = computeHtfCandles(bars, chartIntervalSec, opts);
         // The groups sit to the right of price. Without this margin the
         // library stacks every future candle on the last bar.

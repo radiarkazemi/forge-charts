@@ -218,6 +218,10 @@ export interface DrawCmd {
   stopPrice?: number;
   /** `position` only: stop-zone fill (#hex). `fill` is the target/profit fill. */
   stopFill?: string;
+  /** Text drawings: vertical anchor. `bottom` sits the text above the price. */
+  vAlign?: "top" | "middle" | "bottom";
+  /** Text drawings: font size in px. */
+  fontSize?: number;
 }
 
 function pivotHigh(bars: readonly OrcaBar[], i: number, left: number, right: number): number | null {
