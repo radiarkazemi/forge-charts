@@ -15,8 +15,9 @@ function profilePersonIcon(): string {
 const LAYOUT_GRID_ICON =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28" fill="none"><rect x="5" y="5" width="18" height="18" rx="1" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 2.5" stroke-linecap="round"/><path d="M14 6.2v15.6M6.2 14h15.6" stroke="currentColor" stroke-width="1.15" stroke-linecap="square" opacity="0.75"/></svg>';
 
+/** TradingView header alert: alarm clock, a bell on each side, two feet. */
 const ALERT_ICON =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28" fill="currentColor"><path d="M8.1 5.4 6.2 3.5l-1 1 1.9 1.9a8.8 8.8 0 1 0 1-1zm6.4 2.2a6.4 6.4 0 1 1 0 12.8 6.4 6.4 0 0 1 0-12.8zm-.8 2.1v4.2l3.1 1.8.7-1.2-2.4-1.4V9.7h-1.4zM9.2 22.6a4.2 4.2 0 0 0 8.6 0H9.2z"/></svg>';
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28" fill="currentColor"><ellipse cx="8.3" cy="7.1" rx="1.85" ry="2.7" transform="rotate(-32 8.3 7.1)"/><ellipse cx="19.7" cy="7.1" rx="1.85" ry="2.7" transform="rotate(32 19.7 7.1)"/><path d="M9.15 18.7 7.4 22.6h2.7l.85-1.35z"/><path d="M18.85 18.7 20.6 22.6h-2.7l-.85-1.35z"/><path fill-rule="evenodd" d="M14 6.7a6.4 6.4 0 1 0 0 12.8 6.4 6.4 0 0 0 0-12.8zm-.7 1.8v3.9l2.55 1.55.7-1.15-1.9-1.15V8.5h-1.35z"/></svg>';
 
 const REPLAY_ICON =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28" fill="currentColor"><path d="M13 7.2 5.8 14 13 20.8V7.2zm9 0L14.8 14 22 20.8V7.2z"/></svg>';
@@ -54,6 +55,8 @@ export interface HeaderToolbarHandlers {
   readonly getProfile: () => UserProfile;
   /** Persist the current chart under the name the user chose. */
   readonly onSaveNamedLayout?: (name?: string) => void;
+  /** Name the user gave this layout. Empty until they rename it. */
+  readonly currentLayoutName?: () => string;
   readonly onCopyLayout?: (name: string) => void;
   readonly onLoadLayout?: (id: string | number) => void;
   readonly onDownloadChartData?: () => void;
@@ -350,13 +353,25 @@ export function mountHeaderToolbar(
         indInterceptBound = ind;
       }
       mountSaveMenu(doc, widget, handlers);
+      watchLayoutLabel(doc, handlers);
       mountIndicatorMenu(doc, widget, handlers);
       fixQuickSearch(doc);
       hideDuplicateSaveLabel(doc);
       if (!sym || !profileBtn.isConnected) return;
       const parent = sym.parentElement;
-      if (parent && profileBtn.parentElement) {
+      const slot = profileBtn.parentElement;
+      if (parent && slot && slot !== parent) {
         parent.insertBefore(profileBtn, sym);
+        // The library leaves a 37px hole where the profile button was created.
+        if (slot.childElementCount === 0 && slot.hasAttribute("data-is-custom-header-element")) {
+          const group = slot.parentElement;
+          const sep = group?.previousElementSibling ?? null;
+          slot.remove();
+          if (group && group.childElementCount === 0) {
+            group.remove();
+            if (sep && String(sep.className).includes("separator")) sep.remove();
+          }
+        }
       }
     } catch {
       /* iframe may not be ready */
@@ -445,10 +460,12 @@ function shortSymbol(symbol: string): string {
 }
 
 function isGenericLayoutName(name: string): boolean {
-  return !name.trim() || /^(layout|untitled|unnamed|new layout|radiar|forge)$/i.test(name.trim());
+  return !name.trim() || /^(save|saved|save layout|layout|untitled|unnamed|new layout|radiar|forge|trader)$/i.test(name.trim());
 }
 
 function layoutNameOf(widget: IChartingLibraryWidget, handlers: HeaderToolbarHandlers): string {
+  const stored = handlers.currentLayoutName?.().trim() || "";
+  if (stored && !isGenericLayoutName(stored)) return stored;
   const profileName = handlers.getProfile().displayName?.trim() || "";
   const realProfile = isGenericLayoutName(profileName) ? "" : profileName;
   try {
@@ -460,12 +477,35 @@ function layoutNameOf(widget: IChartingLibraryWidget, handlers: HeaderToolbarHan
   return realProfile || "Layout";
 }
 
+/** The library paints “Save” again after a refresh. Put the chosen name back. */
+function watchLayoutLabel(doc: Document, handlers: HeaderToolbarHandlers): void {
+  const apply = () => {
+    const name = handlers.currentLayoutName?.().trim() || "";
+    if (!name || isGenericLayoutName(name)) return;
+    for (const button of doc.querySelectorAll<HTMLElement>("#header-toolbar-save-load")) {
+      const span = button.querySelector<HTMLElement>(".js-button-text span:not([class*='hidden'])");
+      if (span && span.textContent !== name) span.textContent = name;
+    }
+  };
+  apply();
+  if (doc.documentElement.getAttribute("data-forge-layout-label") === "1") return;
+  const buttons = [...doc.querySelectorAll("#header-toolbar-save-load")];
+  if (!buttons.length) return;
+  doc.documentElement.setAttribute("data-forge-layout-label", "1");
+  for (const button of buttons) {
+    new MutationObserver(apply).observe(button, { subtree: true, characterData: true, childList: true });
+  }
+  window.setTimeout(apply, 600);
+  window.setTimeout(apply, 1800);
+}
+
 function mountSaveMenu(doc: Document, widget: IChartingLibraryWidget, handlers: HeaderToolbarHandlers): void {
   const chevrons = [...doc.querySelectorAll<HTMLElement>('[data-name="save-load-menu"]')].filter(
     (el) => el.getAttribute("data-forge-save-menu") !== "1",
   );
   if (!chevrons.length) return;
   for (const el of chevrons) el.setAttribute("data-forge-save-menu", "1");
+  watchLayoutLabel(doc, handlers);
   const chevron = chevrons[chevrons.length - 1]!;
   let menu: HTMLElement | null = null;
   let mode: "list" | "name" = "list";

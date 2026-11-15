@@ -524,8 +524,16 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
           if (cancelled || !widget) return;
           const chartWidget = widget;
           const layouts = saveLoadAdapter as LocalSaveLoadAdapter;
-          const displayName = getProfile().displayName?.trim() || "Layout";
-          layouts.setDefaultLayoutName(displayName);
+          const displayName = getProfile().displayName?.trim() || "";
+          if (displayName && !/^(save|saved|layout|untitled|unnamed|radiar|forge|trader)$/i.test(displayName)) {
+            layouts.setDefaultLayoutName(displayName);
+          }
+          try {
+            const symbolInterval = chartWidget.symbolInterval();
+            layouts.ensureNamedLayout(symbolInterval.symbol, symbolInterval.interval);
+          } catch {
+            /* chart not ready */
+          }
           const api = mountHeaderToolbar(chartWidget, {
             onCreateAlert,
             onToggleTheme,
@@ -541,15 +549,30 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
             getProfile,
             onSaveNamedLayout: (name) => {
               const profileName = getProfile().displayName?.trim() || "";
-              const realProfile = /^(radiar|layout|forge|trader|untitled)$/i.test(profileName) ? "" : profileName;
+              const realProfile = /^(radiar|layout|forge|trader|untitled|save|saved)$/i.test(profileName) ? "" : profileName;
               if (realProfile) layouts.setDefaultLayoutName(realProfile);
               const requested = (name || "").trim();
-              const chosen = !requested || /^(layout|untitled|unnamed|radiar|forge)$/i.test(requested)
+              const chosen = !requested || /^(layout|untitled|unnamed|radiar|forge|save|saved)$/i.test(requested)
                 ? realProfile || requested || "Layout"
                 : requested;
+              const layoutId = layouts.rememberLayout(chosen);
               layouts.markExplicitSave();
-              chartWidget.saveChartToServer(() => notifyProfileDirty?.(), undefined, { chartName: chosen });
+              chartWidget.save((state) => {
+                const symbolInterval = chartWidget.symbolInterval();
+                void layouts
+                  .saveChart({
+                    id: layoutId,
+                    name: chosen,
+                    content: JSON.stringify(state),
+                    symbol: symbolInterval.symbol,
+                    resolution: symbolInterval.interval,
+                    timestamp: Math.round(Date.now() / 1000),
+                  })
+                  .then(() => notifyProfileDirty?.());
+              });
+              chartWidget.saveChartToServer(undefined, undefined, { chartName: chosen });
             },
+            currentLayoutName: () => layouts.currentLayoutName(),
             onCopyLayout: (name) => {
               chartWidget.save((state) => {
                 layouts.markExplicitSave();
