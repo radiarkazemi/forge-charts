@@ -72,6 +72,8 @@ export interface Settings {
 }
 
 const STORAGE_KEY = "forge.settings.v1";
+/** When the layer arrangement last changed. A plain chart open must not wipe it. */
+export const LAYOUT_STAMP_KEY = "forge.settings.layoutStamp.v1";
 
 export const DEFAULT_WATCHLIST: readonly string[] = [
   "XAUUSD",
@@ -299,11 +301,18 @@ export function activeProfile(settings: Settings): UserProfile {
 export class SettingsService {
   readonly settings: Store<Settings>;
 
-  constructor(storage: KeyValueStorage) {
+  constructor(private readonly storage: KeyValueStorage) {
     const persisted = storage.get<unknown>(STORAGE_KEY, DEFAULT_SETTINGS);
     const sanitized = sanitizeSettings(persisted);
     this.settings = createPersistentStore<Settings>(storage, STORAGE_KEY, sanitized);
     this.settings.set(sanitized);
+  }
+
+  /** Read the account copy after another computer's layout arrived. */
+  reload(): void {
+    const next = sanitizeSettings(this.storage.get<unknown>(STORAGE_KEY, DEFAULT_SETTINGS));
+    if (JSON.stringify(this.settings.get()) === JSON.stringify(next)) return;
+    this.settings.set(next);
   }
 
   setTheme(theme: ThemeMode): void {
@@ -330,6 +339,21 @@ export class SettingsService {
     this.setSidePanel(this.settings.get().sidePanel === id ? null : id);
   }
 
+  /** Restore the layer arrangement stored inside a named layout. */
+  applySavedLayout(saved: {
+    chartLayout?: unknown;
+    paneSymbols?: unknown;
+    layoutSync?: unknown;
+  }): void {
+    const current = this.settings.get();
+    this.patch({
+      chartLayout: sanitizeLayout(saved.chartLayout),
+      paneSymbols: sanitizeStringList(saved.paneSymbols, [current.lastSymbol || "XAUUSD"]),
+      layoutSync: saved.layoutSync ? sanitizeLayoutSync(saved.layoutSync) : current.layoutSync,
+    });
+    this.touchLayout();
+  }
+
   setChartLayout(chartLayout: ChartLayoutId): void {
     const next = sanitizeLayout(chartLayout);
     const primary = this.settings.get().lastSymbol || "XAUUSD";
@@ -348,12 +372,14 @@ export class SettingsService {
             interval: false,
           });
     this.patch({ chartLayout: next, paneSymbols: panes, layoutSync });
+    this.touchLayout();
   }
 
   setLayoutSync(partial: Partial<LayoutSyncSettings>): void {
     this.patch({
       layoutSync: sanitizeLayoutSync({ ...this.settings.get().layoutSync, ...partial }),
     });
+    this.touchLayout();
   }
 
   toggleLayoutSync(key: keyof LayoutSyncSettings): void {
@@ -369,6 +395,7 @@ export class SettingsService {
     next[paneIndex] = ticker;
     this.patch({ paneSymbols: next });
     if (paneIndex === 0) this.patch({ lastSymbol: ticker });
+    this.touchLayout();
   }
 
   rememberChart(lastSymbol: string, lastInterval: Interval): void {
@@ -440,5 +467,9 @@ export class SettingsService {
 
   private patch(partial: Partial<Settings>): void {
     this.settings.update((current) => sanitizeSettings({ ...current, ...partial }));
+  }
+
+  private touchLayout(): void {
+    this.storage.set(LAYOUT_STAMP_KEY, Date.now());
   }
 }

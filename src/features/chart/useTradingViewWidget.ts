@@ -9,6 +9,7 @@ import {
   type IBasicDataFeed,
   type IChartingLibraryWidget,
   type IExternalSaveLoadAdapter,
+  libraryChartState,
   LocalSaveLoadAdapter,
   type ISettingsAdapter,
   type WidgetConstructor,
@@ -29,7 +30,13 @@ import {
 } from "./symbol-search-defaults";
 import { mountIndicatorsIntercept } from "./indicators-intercept";
 import { isChartPaintBusy } from "./study-paint-gate";
-import { DEFAULT_FAVORITE_INDICATORS, DRAWINGS_UPDATED_EVENT, USER_SETTINGS_KEY } from "@/features/profile-sync";
+import {
+  DEFAULT_FAVORITE_INDICATORS,
+  DRAWINGS_UPDATED_EVENT,
+  profilePersistHeld,
+  SETTINGS_UPDATED_EVENT,
+  USER_SETTINGS_KEY,
+} from "@/features/profile-sync";
 
 export interface TradingViewWidgetDeps {
   readonly controller: ChartController;
@@ -78,6 +85,7 @@ export interface TradingViewWidgetDeps {
     drawings: boolean;
     indicators: boolean;
   };
+  readonly getChartLayout?: () => ChartLayoutId;
   readonly onSymbolChanged?: (paneIndex: number, symbol: string) => void;
   readonly getLastPrice: () => number | null;
   readonly onHeaderReady?: (api: HeaderToolbarApi) => void;
@@ -127,19 +135,22 @@ function openSavedTseSession(saved: object | undefined): object | undefined {
 /** Reject corrupt / incomplete library snapshots that leave the chart spinning forever. */
 function readAutosave(storage: KeyValueStorage): object | undefined {
   purgeLegacyAutosaves(storage);
-  const tryParse = (raw: unknown): object | undefined => {
-    if (!raw || typeof raw !== "object") return undefined;
-    const record = raw as Record<string, unknown>;
-    const hasCharts = Array.isArray(record.charts) || Array.isArray(record.content);
-    const hasLayout = typeof record.layout === "string" || typeof record.name === "string";
-    if (!hasCharts && !hasLayout) return undefined;
-    return raw as object;
+  const heal = (key: string, raw: unknown): object | undefined => {
+    const state = libraryChartState(raw);
+    if (!state) return undefined;
+    if (state !== raw) {
+      try {
+        storage.set(key, state);
+      } catch {
+        /* ignore */
+      }
+    }
+    return state;
   };
-  const primary = tryParse(storage.get<unknown>(AUTOSAVE_KEY, undefined));
+  const primary = heal(AUTOSAVE_KEY, storage.get<unknown>(AUTOSAVE_KEY, undefined));
   if (primary) return primary;
-  const bak = tryParse(storage.get<unknown>(AUTOSAVE_BAK_KEY, undefined));
+  const bak = heal(AUTOSAVE_BAK_KEY, storage.get<unknown>(AUTOSAVE_BAK_KEY, undefined));
   if (bak) {
-    // Restore backup into the live key so the next refresh keeps it.
     try {
       storage.set(AUTOSAVE_KEY, bak);
     } catch {
@@ -204,6 +215,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         indicators: false,
       },
   );
+  const getChartLayout = useEffectEvent(() => deps.getChartLayout?.() ?? "s");
   const onSymbolChanged = useEffectEvent((symbol: string) => deps.onSymbolChanged?.(paneIndex, symbol));
   const getLastPrice = useEffectEvent(() => deps.getLastPrice());
   const readInitial = useEffectEvent(() => ({
@@ -346,6 +358,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
 
           const runPersist = () => {
             try {
+              if (profilePersistHeld()) return;
               // Wait out active shape paints so we don't save mid-storm.
               if (isChartPaintBusy()) {
                 persistQueued = true;
@@ -399,18 +412,20 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
           // Coalesce — do NOT save synchronously on every study/drawing tick.
           let drawingSyncTimer: number | undefined;
           let ignoreDrawingsUntil = 0;
+          let drawGen = 0;
           const syncDrawingsNow = () => {
             if (cancelled || !widget || Date.now() < ignoreDrawingsUntil) return;
             try {
               const drawn = widget.activeChart().getLineToolsState();
-              void saveLoadAdapter.saveLineToolsAndGroups(undefined, "1", drawn);
+              if (!drawn?.sources) return;
+              void (saveLoadAdapter as LocalSaveLoadAdapter).saveFullLineToolsState(drawn);
             } catch {
               /* separate drawing storage is not available on this library build */
             }
           };
           const paintRemoteDrawings = () => {
             if (cancelled || !widget) return;
-            ignoreDrawingsUntil = Date.now() + 1_500;
+            const gen = drawGen;
             const chart = widget.activeChart();
             let symbol = "";
             try {
@@ -422,7 +437,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
             void saveLoadAdapter
               .loadLineToolsAndGroups(undefined, "1", "mainSeriesLineTools", { symbol })
               .then((state) => {
-                if (cancelled || !widget || !state?.sources) return;
+                if (cancelled || !widget || gen !== drawGen || !state?.sources) return;
                 ignoreDrawingsUntil = Date.now() + 1_500;
                 return chart.applyLineToolsState(state as never);
               })
@@ -433,8 +448,24 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
           window.addEventListener(DRAWINGS_UPDATED_EVENT, paintRemoteDrawings);
           try {
             widget.subscribe("study_event", schedulePersist as never);
-            widget.subscribe("drawing_event", (() => {
+            widget.subscribe("drawing_event", ((sourceId: string, eventType: string) => {
               if (Date.now() < ignoreDrawingsUntil) return;
+              if (eventType === "remove") {
+                drawGen += 1;
+                try {
+                  (saveLoadAdapter as LocalSaveLoadAdapter).forgetLineTool(String(sourceId));
+                } catch {
+                  /* the chart already dropped the drawing */
+                }
+                return;
+              }
+              if (eventType === "create") {
+                try {
+                  (saveLoadAdapter as LocalSaveLoadAdapter).reviveLineTool(String(sourceId));
+                } catch {
+                  /* a brand new drawing has nothing to revive */
+                }
+              }
               schedulePersist();
               window.clearTimeout(drawingSyncTimer);
               drawingSyncTimer = window.setTimeout(syncDrawingsNow, 350);
@@ -545,6 +576,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
             onSetChartLayout,
             onToggleLayoutSync,
             getLayoutSync,
+            getChartLayout,
             getLastPrice,
             getProfile,
             onSaveNamedLayout: (name) => {
@@ -559,6 +591,11 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
               layouts.markExplicitSave();
               chartWidget.save((state) => {
                 const symbolInterval = chartWidget.symbolInterval();
+                const account = storage.get<{
+                  chartLayout?: string;
+                  paneSymbols?: string[];
+                  layoutSync?: object;
+                }>("forge.settings.v1", {});
                 void layouts
                   .saveChart({
                     id: layoutId,
@@ -567,7 +604,12 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
                     symbol: symbolInterval.symbol,
                     resolution: symbolInterval.interval,
                     timestamp: Math.round(Date.now() / 1000),
-                  })
+                    forgeLayout: {
+                      chartLayout: account.chartLayout,
+                      paneSymbols: account.paneSymbols,
+                      layoutSync: account.layoutSync,
+                    },
+                  } as never)
                   .then(() => notifyProfileDirty?.());
               });
               chartWidget.saveChartToServer(undefined, undefined, { chartName: chosen });
@@ -589,19 +631,38 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
               });
             },
             onLoadLayout: (id) => {
-              void layouts.getAllCharts().then((charts) => {
-                const chart = charts.find((item) => String(item.id) === String(id));
-                if (!chart) return;
-                const symbol = chart.symbol.includes(":") ? chart.symbol.slice(chart.symbol.lastIndexOf(":") + 1) : chart.symbol;
-                void chartWidget.loadChartFromServer({
-                  id: chart.id,
-                  name: chart.name,
-                  image_url: "",
-                  modified_iso: chart.timestamp,
-                  short_symbol: symbol,
-                  interval: chart.resolution,
+              const charts = storage.get<
+                Array<{
+                  id?: string | number;
+                  name?: string;
+                  content?: string;
+                  forgeLayout?: {
+                    chartLayout?: unknown;
+                    paneSymbols?: unknown;
+                    layoutSync?: unknown;
+                  };
+                }>
+              >("forge.tv.charts", []);
+              const chart = charts.find((item) => String(item.id) === String(id));
+              if (!chart) return;
+              const state = libraryChartState(chart.content);
+              if (state) {
+                storage.set("forge.tv.autosave.v3", state);
+                storage.set("forge.tv.autosave.v3.bak", state);
+              }
+              if (chart.forgeLayout) {
+                const current = storage.get<Record<string, unknown>>("forge.settings.v1", {});
+                storage.set("forge.settings.v1", {
+                  ...current,
+                  chartLayout: chart.forgeLayout.chartLayout ?? current.chartLayout,
+                  paneSymbols: chart.forgeLayout.paneSymbols ?? current.paneSymbols,
+                  layoutSync: chart.forgeLayout.layoutSync ?? current.layoutSync,
                 });
-              });
+              }
+              if (chart.id != null && chart.name) {
+                storage.set("forge.layout.current.v1", { id: chart.id, name: chart.name });
+              }
+              window.dispatchEvent(new CustomEvent(SETTINGS_UPDATED_EVENT));
             },
             onDownloadChartData: () => {
               void chartWidget
@@ -702,7 +763,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         /* ignore */
       }
       // Flush latest chart state before tearing down (layout switches / HMR).
-      if (isPrimary && widget) {
+      if (isPrimary && widget && !profilePersistHeld()) {
         try {
           widget.save(
             (state) => storage.set(autosaveKey, state),
@@ -742,7 +803,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
       // Theme is in forge.settings; also snapshot chart so CL chrome matches after refresh.
       try {
         const widget = controller.getWidget();
-        if (widget) {
+        if (widget && !profilePersistHeld()) {
           const key = isPrimary ? AUTOSAVE_KEY : `${AUTOSAVE_KEY}.pane.${paneIndex}`;
           widget.save(
             (state) => storage.set(key, state),

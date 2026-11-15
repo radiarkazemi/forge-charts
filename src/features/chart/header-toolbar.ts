@@ -51,6 +51,7 @@ export interface HeaderToolbarHandlers {
   readonly onSetChartLayout: (layout: ChartLayoutId) => void;
   readonly onToggleLayoutSync?: (key: SyncKey) => void;
   readonly getLayoutSync?: () => LayoutSyncSettings;
+  readonly getChartLayout?: () => ChartLayoutId;
   readonly getLastPrice: () => number | null;
   readonly getProfile: () => UserProfile;
   /** Persist the current chart under the name the user chose. */
@@ -85,60 +86,117 @@ export interface HeaderToolbarApi {
   readonly updateProfile: (profile: UserProfile) => void;
 }
 
-function syncLabel(key: SyncKey, on: boolean): string {
-  const names: Record<SyncKey, string> = {
-    symbol: "Symbol",
-    interval: "Interval",
-    crosshair: "Crosshair",
-    time: "Scroll / move",
-    dateRange: "Date range",
-    drawings: "Drawings",
-    indicators: "Indicators",
-  };
-  return `${names[key]}  ${on ? "● ON" : "○ OFF"}`;
+const SYNC_ROWS: ReadonlyArray<{ readonly key: SyncKey; readonly label: string }> = [
+  { key: "symbol", label: "Symbol" },
+  { key: "interval", label: "Interval" },
+  { key: "crosshair", label: "Crosshair" },
+  { key: "time", label: "Time" },
+  { key: "dateRange", label: "Date range" },
+  { key: "drawings", label: "Drawings" },
+  { key: "indicators", label: "Indicators" },
+];
+
+function readLayoutSync(handlers: HeaderToolbarHandlers): LayoutSyncSettings {
+  return (
+    handlers.getLayoutSync?.() ?? {
+      symbol: true,
+      interval: false,
+      crosshair: false,
+      time: false,
+      dateRange: false,
+      drawings: true,
+      indicators: false,
+    }
+  );
 }
 
-function buildLayoutMenuItems(handlers: HeaderToolbarHandlers) {
-  const sync = handlers.getLayoutSync?.() ?? {
-    symbol: true,
-    interval: false,
-    crosshair: false,
-    time: false,
-    dateRange: false,
-    drawings: true,
-    indicators: false,
+/** Layout grid and the sync switches. The library dropdown only had text rows. */
+function mountLayersMenu(widget: IChartingLibraryWidget, handlers: HeaderToolbarHandlers): void {
+  const button = widget.createButton({ align: "right", useTradingViewStyle: false });
+  button.innerHTML = LAYOUT_GRID_ICON;
+  button.setAttribute("title", "Select layout");
+  button.setAttribute("aria-label", "Select layout");
+  Object.assign(button.style, {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "38px",
+    height: "38px",
+    padding: "0",
+    cursor: "pointer",
+    background: "transparent",
+    border: "0",
+    color: "inherit",
+  });
+  const doc = button.ownerDocument;
+  let menu: HTMLElement | null = null;
+
+  const close = () => {
+    menu?.remove();
+    menu = null;
   };
-  const syncKeys: SyncKey[] = [
-    "symbol",
-    "interval",
-    "crosshair",
-    "time",
-    "dateRange",
-    "drawings",
-    "indicators",
-  ];
-  const choices = handlers.mobile
-    ? CHART_LAYOUT_CHOICES.filter((choice) => PHONE_LAYOUT_IDS.includes(choice.id))
-    : CHART_LAYOUT_CHOICES;
-  return [
-    ...choices.map((choice) => ({
-      title: choice.title,
-      icon: choice.icon,
-      onSelect: () => handlers.onSetChartLayout(choice.id),
-    })),
-    {
-      title: "── Sync in layout ──",
-      onSelect: () => {
-        /* section header */
-      },
-    },
-    ...syncKeys.map((key) => ({
-      title: syncLabel(key, sync[key]),
-      onSelect: () => {
+
+  const paint = () => {
+    if (!menu) return;
+    const current = handlers.getChartLayout?.() ?? "s";
+    const sync = readLayoutSync(handlers);
+    const choices = handlers.mobile
+      ? CHART_LAYOUT_CHOICES.filter((choice) => PHONE_LAYOUT_IDS.includes(choice.id))
+      : CHART_LAYOUT_CHOICES;
+    const cells = choices
+      .map(
+        (choice) =>
+          `<button type="button" class="flm-cell${choice.id === current ? " is-on" : ""}" data-layout="${choice.id}" title="${choice.title}" aria-label="${choice.title}">${choice.icon}</button>`,
+      )
+      .join("");
+    const rows = SYNC_ROWS.map(
+      (row) =>
+        `<div class="fsm-item"><span>${row.label}</span><button type="button" class="fsm-switch${sync[row.key] ? " is-on" : ""}" data-sync="${row.key}" aria-label="${row.label}"></button></div>`,
+    ).join("");
+    menu.innerHTML = `<div class="flm-grid">${cells}</div><div class="fsm-label">SYNC IN LAYOUT</div>${rows}`;
+  };
+
+  const open = (event: Event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (menu) {
+      close();
+      return;
+    }
+    ensureMenuStyles(doc);
+    menu = doc.createElement("div");
+    menu.className = "forge-save-menu forge-layout-menu";
+    if (doc.documentElement.classList.contains("theme-dark")) menu.classList.add("is-dark");
+    const box = button.getBoundingClientRect();
+    menu.style.top = `${Math.round(box.bottom + 4)}px`;
+    menu.style.right = `${Math.max(8, Math.round(doc.documentElement.clientWidth - box.right))}px`;
+    doc.body.appendChild(menu);
+    paint();
+  };
+
+  button.addEventListener("click", open);
+  doc.addEventListener("click", (event) => {
+    if (!menu) return;
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+    if (menu.contains(target)) {
+      const layout = (target.closest("[data-layout]") as HTMLElement | null)?.dataset.layout as ChartLayoutId | undefined;
+      if (layout) {
+        handlers.onSetChartLayout(layout);
+        close();
+        return;
+      }
+      const key = (target.closest("[data-sync]") as HTMLElement | null)?.dataset.sync as SyncKey | undefined;
+      if (key) {
+        event.preventDefault();
+        event.stopPropagation();
         handlers.onToggleLayoutSync?.(key);
-      },
-    })),
-  ];
+        paint();
+      }
+      return;
+    }
+    if (!button.contains(target)) close();
+  });
 }
 
 /**
@@ -153,40 +211,9 @@ export function mountHeaderToolbar(
   widget: IChartingLibraryWidget,
   handlers: HeaderToolbarHandlers,
 ): HeaderToolbarApi {
-  type DropdownApi = { applyOptions: (o: { items: ReturnType<typeof buildLayoutMenuItems> }) => void };
-  let layoutDropdown: DropdownApi | null = null;
-  const refreshLayoutMenu = () => {
-    try {
-      layoutDropdown?.applyOptions({ items: buildLayoutMenuItems(handlers) });
-    } catch {
-      /* dropdown gone */
-    }
-  };
-  const wrapped: HeaderToolbarHandlers = {
-    ...handlers,
-    onSetChartLayout: (layout) => {
-      handlers.onSetChartLayout(layout);
-      refreshLayoutMenu();
-    },
-    onToggleLayoutSync: (key) => {
-      handlers.onToggleLayoutSync?.(key);
-      window.setTimeout(refreshLayoutMenu, 0);
-    },
-  };
-
   // Secondary panes get the same Select Layout + Sync menu (options on both sides).
   if (handlers.compact) {
-    void widget
-      .createDropdown({
-        title: " ",
-        tooltip: "Select layout / Sync in layout",
-        align: "right",
-        icon: LAYOUT_GRID_ICON,
-        items: buildLayoutMenuItems(wrapped),
-      })
-      .then((api) => {
-        layoutDropdown = api as DropdownApi;
-      });
+    mountLayersMenu(widget, handlers);
     return {
       updateProfile: () => {
         /* no avatar on secondary panes */
@@ -213,18 +240,8 @@ export function mountHeaderToolbar(
     });
   }
 
-  // Multi-pane Select Layout — icon-only dashed square (never templates 2×2).
-  void widget
-    .createDropdown({
-      title: " ",
-      tooltip: "Select layout",
-      align: "right",
-      icon: LAYOUT_GRID_ICON,
-      items: buildLayoutMenuItems(wrapped),
-    })
-    .then((api) => {
-      layoutDropdown = api as DropdownApi;
-    });
+  // Multi-pane Select Layout — grid of panes plus the sync switches.
+  mountLayersMenu(widget, handlers);
 
   // Profile person icon → left of Symbol Search (Faraz / TV layout).
   const profile = handlers.getProfile();
@@ -434,7 +451,7 @@ function hideDuplicateSaveLabel(doc: Document): void {
   const style = doc.createElement("style");
   style.id = "forge-save-label-style";
   style.textContent = `
-    #header-toolbar-save-load [class*="saveString"][class*="hidden"] { display: none !important; }
+    #header-toolbar-save-load [class*="saveString"] { display: none !important; }
     .forge-header-action:hover { background: rgba(120, 123, 134, 0.12); }
   `;
   (doc.head || doc.documentElement).appendChild(style);
@@ -483,6 +500,11 @@ function watchLayoutLabel(doc: Document, handlers: HeaderToolbarHandlers): void 
     const name = handlers.currentLayoutName?.().trim() || "";
     if (!name || isGenericLayoutName(name)) return;
     for (const button of doc.querySelectorAll<HTMLElement>("#header-toolbar-save-load")) {
+      for (const node of button.querySelectorAll<HTMLElement>("span, div")) {
+        if (node.children.length > 0) continue;
+        if ((node.textContent || "").trim() !== "Save") continue;
+        node.style.display = "none";
+      }
       const span = button.querySelector<HTMLElement>(".js-button-text span:not([class*='hidden'])");
       if (span && span.textContent !== name) span.textContent = name;
     }
@@ -805,14 +827,21 @@ function ensureMenuStyles(doc: Document): void {
   const style = doc.createElement("style");
   style.id = "forge-header-menu-style";
   style.textContent = `
-    .forge-save-menu, .forge-ind-menu {
+    .forge-save-menu, .forge-ind-menu, .forge-layout-menu {
       position: fixed; z-index: 2147483646; min-width: 280px; max-width: 360px;
       background: #fff; color: #131722; border: 1px solid #e0e3eb; border-radius: 6px;
       box-shadow: 0 8px 28px rgba(0,0,0,0.28); padding: 6px 0;
       font-family: -apple-system, BlinkMacSystemFont, Trebuchet MS, Roboto, Ubuntu, sans-serif;
       font-size: 14px; box-sizing: border-box; overflow: hidden;
     }
-    .forge-save-menu.is-dark, .forge-ind-menu.is-dark { background: #1e222d; color: #d1d4dc; border-color: #434651; }
+    .forge-save-menu.is-dark, .forge-ind-menu.is-dark, .forge-layout-menu.is-dark { background: #1e222d; color: #d1d4dc; border-color: #434651; }
+    .flm-grid { display: grid; grid-template-columns: repeat(5, 32px); gap: 4px; padding: 8px 12px 4px; }
+    .flm-cell {
+      width: 32px; height: 32px; border: 0; border-radius: 4px; padding: 0; cursor: pointer;
+      background: transparent; color: inherit;
+    }
+    .flm-cell svg { width: 28px; height: 28px; display: block; margin: 2px; }
+    .flm-cell.is-on, .flm-cell:hover { background: rgba(41, 98, 255, 0.16); color: #2962ff; }
     .fsm-item, .fim-row, .fsm-recent {
       width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px;
       border: 0; background: transparent; color: inherit; cursor: pointer;

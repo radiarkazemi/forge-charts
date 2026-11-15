@@ -7,18 +7,32 @@ import { mergeLineToolStores } from "@/infrastructure/tradingview/local-save-loa
 import {
   applyProfilePayload,
   collectProfilePayload,
+  mergeAccountLayout,
+  mergeDrawingTemplates,
   readLocalStamp,
   touchLocalStamp,
   type ProfilePayload,
 } from "./profile-blob";
+import {
+  holdProfilePersist,
+  mergeUserSettings,
+  readSettingsStamps,
+  readUserSettings,
+  writeSettingsStamps,
+  writeUserSettings,
+  USER_SETTINGS_KEY,
+  USER_SETTINGS_META_KEY,
+} from "./settings-adapter";
 
 const SYNC_KEY_SESSION = "forge.profile.syncKey.v1";
 const ACCOUNT_KEY_SESSION = "forge.profile.accountKey.v1";
 const CREDS_LOCAL = "forge.profile.syncCreds.v1";
 const SIGNED_OUT_KEY = "forge.auth.signedOut.v1";
 
-/** Fired when a cloud conflict merged drawings into this browser. The chart remounts. */
+/** Fired when a cloud conflict merged drawings into this browser. The chart repaints them. */
 export const DRAWINGS_UPDATED_EVENT = "forge:drawings-updated";
+/** Fired when chart properties arrived from the other computer. The chart reloads them. */
+export const SETTINGS_UPDATED_EVENT = "forge:settings-updated";
 
 export interface ProfileSyncCredentials {
   readonly accountKey: string;
@@ -107,6 +121,72 @@ interface RemoteProfile {
   readonly payload: ProfilePayload | null;
 }
 
+export interface ProfilePullResult {
+  readonly appliedRemote: boolean;
+  readonly drawingsChanged: boolean;
+  readonly settingsChanged: boolean;
+}
+
+function stableSettings(value: unknown): string {
+  if (!value || typeof value !== "object") return "";
+  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return JSON.stringify(entries);
+}
+
+function asSettings(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof entry === "string") out[key] = entry;
+  }
+  return out;
+}
+
+function asStamps(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, number> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof entry === "number" && Number.isFinite(entry)) out[key] = entry;
+  }
+  return out;
+}
+
+/** Fold the other computer's drawings and settings in before this device publishes. */
+function absorbRemoteEdits(storage: KeyValueStorage, payload: ProfilePayload | null | undefined): {
+  drawingsChanged: boolean;
+  settingsChanged: boolean;
+} {
+  if (!payload?.keys) return { drawingsChanged: false, settingsChanged: false };
+  const beforeTools = JSON.stringify(storage.get("forge.tv.lineTools", null));
+  const beforeSettings = stableSettings(readUserSettings(storage));
+  const remoteTools = payload.keys["forge.tv.lineTools"];
+  if (remoteTools !== undefined) {
+    storage.set("forge.tv.lineTools", mergeLineToolStores(storage.get("forge.tv.lineTools", {}), remoteTools));
+  }
+  const remoteTemplates = payload.keys["forge.tv.drawingTemplates"];
+  if (remoteTemplates !== undefined) {
+    storage.set(
+      "forge.tv.drawingTemplates",
+      mergeDrawingTemplates(storage.get("forge.tv.drawingTemplates", {}), remoteTemplates),
+    );
+  }
+  if (payload.keys[USER_SETTINGS_KEY] !== undefined || payload.keys[USER_SETTINGS_META_KEY] !== undefined) {
+    const merged = mergeUserSettings(
+      readUserSettings(storage),
+      asSettings(payload.keys[USER_SETTINGS_KEY]),
+      readSettingsStamps(storage),
+      asStamps(payload.keys[USER_SETTINGS_META_KEY]),
+    );
+    writeUserSettings(storage, merged.map);
+    writeSettingsStamps(storage, merged.stamps);
+  }
+  const layoutChanged = mergeAccountLayout(storage, payload.keys, false);
+  return {
+    drawingsChanged: beforeTools !== JSON.stringify(storage.get("forge.tv.lineTools", null)),
+    settingsChanged: beforeSettings !== stableSettings(readUserSettings(storage)) || layoutChanged,
+  };
+}
+
 async function fetchRemote(creds: ProfileSyncCredentials): Promise<RemoteProfile | null> {
   const url = `${apiBase()}/v1/profile?accountKey=${encodeURIComponent(creds.accountKey)}`;
   const res = await fetch(url, {
@@ -193,6 +273,7 @@ export async function syncProfileOnLogin(
 
   if (remote.payload && remote.updatedAt > localAt) {
     const remoteTools = JSON.stringify(remote.payload.keys?.["forge.tv.lineTools"] ?? null);
+    holdProfilePersist();
     applyProfilePayload(storage, remote.payload);
     touchLocalStamp(storage, remote.updatedAt);
     // This device had a trendline the other one did not. Publish the union.
@@ -214,6 +295,7 @@ export async function syncProfileOnLogin(
     try {
       const result = await pushRemote(creds, storage, at);
       if (result.conflict?.payload) {
+        holdProfilePersist();
         applyProfilePayload(storage, result.conflict.payload);
         touchLocalStamp(storage, result.conflict.updatedAt);
         return { appliedRemote: true };
@@ -233,21 +315,36 @@ export async function syncProfileOnLogin(
 export async function pullProfileIfNewer(
   storage: KeyValueStorage,
   creds: ProfileSyncCredentials,
-): Promise<{ appliedRemote: boolean }> {
+): Promise<ProfilePullResult> {
+  const unchanged: ProfilePullResult = { appliedRemote: false, drawingsChanged: false, settingsChanged: false };
   let remote: RemoteProfile | null = null;
   try {
     remote = await fetchRemote(creds);
   } catch {
-    return { appliedRemote: false };
+    return unchanged;
   }
   if (!remote?.payload || !(remote.updatedAt > readLocalStamp(storage))) {
-    return { appliedRemote: false };
+    return unchanged;
   }
-  const before = JSON.stringify(storage.get("forge.tv.lineTools", null));
+  const beforeTools = JSON.stringify(storage.get("forge.tv.lineTools", null));
+  const beforeSettings = stableSettings(readUserSettings(storage));
+  const layoutFields = () => {
+    const settings = storage.get<Record<string, unknown> | null>("forge.settings.v1", null);
+    return JSON.stringify({
+      chartLayout: settings?.chartLayout ?? null,
+      paneSymbols: settings?.paneSymbols ?? null,
+      layoutSync: settings?.layoutSync ?? null,
+      current: storage.get("forge.layout.current.v1", null),
+    });
+  };
+  const beforeLayout = layoutFields();
+  holdProfilePersist();
   applyProfilePayload(storage, remote.payload);
   touchLocalStamp(storage, remote.updatedAt);
-  const after = JSON.stringify(storage.get("forge.tv.lineTools", null));
-  return { appliedRemote: before !== after };
+  const drawingsChanged = beforeTools !== JSON.stringify(storage.get("forge.tv.lineTools", null));
+  const layoutChanged = beforeLayout !== layoutFields();
+  const settingsChanged = beforeSettings !== stableSettings(readUserSettings(storage)) || layoutChanged;
+  return { appliedRemote: drawingsChanged || settingsChanged, drawingsChanged, settingsChanged };
 }
 
 /** Debounced background push after local chart/settings changes. */
@@ -277,23 +374,27 @@ export function createProfileSyncPusher(storage: KeyValueStorage): {
         } catch {
           remote = null;
         }
-        // Keep the other device's trendline. A newer phone save must not wipe it.
-        const remoteTools = remote?.payload?.keys?.["forge.tv.lineTools"];
-        if (remoteTools !== undefined) {
-          storage.set(
-            "forge.tv.lineTools",
-            mergeLineToolStores(storage.get("forge.tv.lineTools", {}), remoteTools),
-          );
+        // Keep the other device's drawings and the settings this device did not edit.
+        const absorbed = absorbRemoteEdits(storage, remote?.payload);
+        if (absorbed.settingsChanged) {
+          holdProfilePersist();
+          window.dispatchEvent(new CustomEvent(SETTINGS_UPDATED_EVENT));
+        } else if (absorbed.drawingsChanged) {
+          window.dispatchEvent(new CustomEvent(DRAWINGS_UPDATED_EVENT));
         }
         const at = Math.max(Date.now(), (remote?.updatedAt ?? 0) + 1);
         const result = await pushRemote(creds, storage, at);
         if (result.conflict?.payload) {
           const before = JSON.stringify(storage.get("forge.tv.lineTools", null));
+          const beforeSettings = stableSettings(readUserSettings(storage));
+          holdProfilePersist();
           applyProfilePayload(storage, result.conflict.payload);
           const again = await pushRemote(creds, storage, (result.conflict.updatedAt || 0) + 1);
           touchLocalStamp(storage, again.ok ? again.updatedAt : result.conflict.updatedAt);
           const after = JSON.stringify(storage.get("forge.tv.lineTools", null));
-          if (before !== after) window.dispatchEvent(new CustomEvent(DRAWINGS_UPDATED_EVENT));
+          const settingsChanged = beforeSettings !== stableSettings(readUserSettings(storage));
+          if (settingsChanged) window.dispatchEvent(new CustomEvent(SETTINGS_UPDATED_EVENT));
+          else if (before !== after) window.dispatchEvent(new CustomEvent(DRAWINGS_UPDATED_EVENT));
         } else if (result.ok) {
           touchLocalStamp(storage, result.updatedAt);
         }
