@@ -306,15 +306,25 @@ export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
   /* ── chart layouts ─────────────────────────────────────────────────── */
 
   async getAllCharts(): Promise<ChartMetaInfo[]> {
-    return this.charts()
-      .filter((chart) => chart.content && chart.content !== "{}" && chart.content !== "null")
-      .map(({ id, name, symbol, resolution, timestamp }) => ({
-        id: id!,
-        name,
-        symbol,
-        resolution,
-        timestamp,
-      }));
+    const stored = this.charts();
+    const withContent = stored.filter((chart) => chart.content && chart.content !== "{}" && chart.content !== "null");
+    const named = withContent.filter((chart) => !isPlaceholderLayoutName(chart.name));
+    // “Layout” is the name the Save button invents. Once a real name exists, drop it.
+    if (named.length > 0 && named.length < withContent.length) {
+      const keep = new Set(named.map((chart) => String(chart.id)));
+      this.storage.set(
+        KEYS.charts,
+        stored.filter((chart) => keep.has(String(chart.id)) || !isPlaceholderLayoutName(chart.name)),
+      );
+    }
+    const visible = named.length > 0 ? named : withContent;
+    return visible.map(({ id, name, symbol, resolution, timestamp }) => ({
+      id: id!,
+      name,
+      symbol,
+      resolution,
+      timestamp,
+    }));
   }
 
   async removeChart(id: string | number): Promise<void> {
@@ -575,8 +585,13 @@ export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
 
   private writeChart(record: ChartData): void {
     const id = record.id;
+    const dropPlaceholders = !isPlaceholderLayoutName(record.name);
     this.storage.set(KEYS.charts, [
-      ...this.charts().filter((chart) => String(chart.id) !== String(id) && chart.name !== record.name),
+      ...this.charts().filter((chart) => {
+        if (String(chart.id) === String(id) || chart.name === record.name) return false;
+        if (dropPlaceholders && isPlaceholderLayoutName(chart.name)) return false;
+        return true;
+      }),
       record,
     ]);
   }

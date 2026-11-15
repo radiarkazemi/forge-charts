@@ -537,7 +537,8 @@ function mountSaveMenu(doc: Document, widget: IChartingLibraryWidget, handlers: 
     const autosave = handlers.isAutosaveOn?.() !== false;
     void handlers.getSavedLayouts?.().then((rows) => {
       if (!menu || mode !== "list") return;
-      const recent = rows
+      const named = rows.filter((row) => !isGenericLayoutName(row.name));
+      const recent = (named.length > 0 ? named : rows)
         .slice()
         .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
         .slice(0, 6)
@@ -806,12 +807,12 @@ function ensureMenuStyles(doc: Document): void {
   style.textContent = `
     .forge-save-menu, .forge-ind-menu {
       position: fixed; z-index: 2147483646; min-width: 280px; max-width: 360px;
-      background: #fff; color: #131722; border-radius: 6px;
+      background: #fff; color: #131722; border: 1px solid #e0e3eb; border-radius: 6px;
       box-shadow: 0 8px 28px rgba(0,0,0,0.28); padding: 6px 0;
       font-family: -apple-system, BlinkMacSystemFont, Trebuchet MS, Roboto, Ubuntu, sans-serif;
-      font-size: 14px;
+      font-size: 14px; box-sizing: border-box; overflow: hidden;
     }
-    .forge-save-menu.is-dark, .forge-ind-menu.is-dark { background: #1e222d; color: #d1d4dc; }
+    .forge-save-menu.is-dark, .forge-ind-menu.is-dark { background: #1e222d; color: #d1d4dc; border-color: #434651; }
     .fsm-item, .fim-row, .fsm-recent {
       width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px;
       border: 0; background: transparent; color: inherit; cursor: pointer;
