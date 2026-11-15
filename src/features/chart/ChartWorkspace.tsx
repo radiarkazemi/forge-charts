@@ -109,10 +109,13 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   const [maximizedPane, setMaximizedPane] = useState<number | null>(null);
   const [settingsEpoch, setSettingsEpoch] = useState(0);
   useEffect(() => {
-    const onSettings = () => setSettingsEpoch((epoch) => epoch + 1);
+    const onSettings = () => {
+      settings.reload();
+      setSettingsEpoch((epoch) => epoch + 1);
+    };
     window.addEventListener(SETTINGS_UPDATED_EVENT, onSettings);
     return () => window.removeEventListener(SETTINGS_UPDATED_EVENT, onSettings);
-  }, []);
+  }, [settings]);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const primaryHostRef = useRef<HTMLDivElement | null>(null);
   const layoutRef = useRef<ChartLayoutId>(layoutId);

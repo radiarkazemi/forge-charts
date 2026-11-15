@@ -206,7 +206,7 @@ export const RADIAR_LAYOUT_ID = "radiar-layout";
 export const RADIAR_LAYOUT_NAME = "Radiar";
 
 const AUTOSAVE_FLAG = "forge.layout.autosave";
-const CURRENT_LAYOUT_KEY = "forge.layout.current.v1";
+export const CURRENT_LAYOUT_KEY = "forge.layout.current.v1";
 
 /** Names the library invents from the Save button. They must not replace a name the user typed. */
 const PLACEHOLDER_LAYOUT =
@@ -415,11 +415,16 @@ export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
       if (!placeholder) this.storage.set(CURRENT_LAYOUT_KEY, { id, name });
       return id;
     }
-    const record: ChartData = {
+    const carried = existing as (ChartData & { forgeLayout?: unknown }) | undefined;
+    const incoming = chartData as ChartData & { forgeLayout?: unknown };
+    const record: ChartData & { forgeLayout?: unknown } = {
       ...chartData,
       id,
       name,
       timestamp: Math.round(Date.now() / 1000),
+      // The library autosave does not know about layers. Keep the arrangement
+      // that was stored with this named layout.
+      forgeLayout: incoming.forgeLayout ?? carried?.forgeLayout,
     };
     this.writeChart(record);
     if (!isPlaceholderLayoutName(name)) {

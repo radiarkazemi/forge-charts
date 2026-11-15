@@ -7,6 +7,7 @@ import { mergeLineToolStores } from "@/infrastructure/tradingview/local-save-loa
 import {
   applyProfilePayload,
   collectProfilePayload,
+  mergeAccountLayout,
   mergeDrawingTemplates,
   readLocalStamp,
   touchLocalStamp,
@@ -179,9 +180,10 @@ function absorbRemoteEdits(storage: KeyValueStorage, payload: ProfilePayload | n
     writeUserSettings(storage, merged.map);
     writeSettingsStamps(storage, merged.stamps);
   }
+  const layoutChanged = mergeAccountLayout(storage, payload.keys, false);
   return {
     drawingsChanged: beforeTools !== JSON.stringify(storage.get("forge.tv.lineTools", null)),
-    settingsChanged: beforeSettings !== stableSettings(readUserSettings(storage)),
+    settingsChanged: beforeSettings !== stableSettings(readUserSettings(storage)) || layoutChanged,
   };
 }
 
@@ -326,11 +328,16 @@ export async function pullProfileIfNewer(
   }
   const beforeTools = JSON.stringify(storage.get("forge.tv.lineTools", null));
   const beforeSettings = stableSettings(readUserSettings(storage));
+  const beforeLayout = JSON.stringify(storage.get("forge.settings.v1", null));
+  const beforeCurrent = JSON.stringify(storage.get("forge.layout.current.v1", null));
   holdProfilePersist();
   applyProfilePayload(storage, remote.payload);
   touchLocalStamp(storage, remote.updatedAt);
   const drawingsChanged = beforeTools !== JSON.stringify(storage.get("forge.tv.lineTools", null));
-  const settingsChanged = beforeSettings !== stableSettings(readUserSettings(storage));
+  const layoutChanged =
+    beforeLayout !== JSON.stringify(storage.get("forge.settings.v1", null)) ||
+    beforeCurrent !== JSON.stringify(storage.get("forge.layout.current.v1", null));
+  const settingsChanged = beforeSettings !== stableSettings(readUserSettings(storage)) || layoutChanged;
   return { appliedRemote: drawingsChanged || settingsChanged, drawingsChanged, settingsChanged };
 }
 

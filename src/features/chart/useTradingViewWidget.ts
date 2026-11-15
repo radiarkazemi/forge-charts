@@ -33,6 +33,7 @@ import {
   DEFAULT_FAVORITE_INDICATORS,
   DRAWINGS_UPDATED_EVENT,
   profilePersistHeld,
+  SETTINGS_UPDATED_EVENT,
   USER_SETTINGS_KEY,
 } from "@/features/profile-sync";
 
@@ -565,6 +566,11 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
               layouts.markExplicitSave();
               chartWidget.save((state) => {
                 const symbolInterval = chartWidget.symbolInterval();
+                const account = storage.get<{
+                  chartLayout?: string;
+                  paneSymbols?: string[];
+                  layoutSync?: object;
+                }>("forge.settings.v1", {});
                 void layouts
                   .saveChart({
                     id: layoutId,
@@ -573,7 +579,12 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
                     symbol: symbolInterval.symbol,
                     resolution: symbolInterval.interval,
                     timestamp: Math.round(Date.now() / 1000),
-                  })
+                    forgeLayout: {
+                      chartLayout: account.chartLayout,
+                      paneSymbols: account.paneSymbols,
+                      layoutSync: account.layoutSync,
+                    },
+                  } as never)
                   .then(() => notifyProfileDirty?.());
               });
               chartWidget.saveChartToServer(undefined, undefined, { chartName: chosen });
@@ -595,19 +606,44 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
               });
             },
             onLoadLayout: (id) => {
-              void layouts.getAllCharts().then((charts) => {
-                const chart = charts.find((item) => String(item.id) === String(id));
-                if (!chart) return;
-                const symbol = chart.symbol.includes(":") ? chart.symbol.slice(chart.symbol.lastIndexOf(":") + 1) : chart.symbol;
-                void chartWidget.loadChartFromServer({
-                  id: chart.id,
-                  name: chart.name,
-                  image_url: "",
-                  modified_iso: chart.timestamp,
-                  short_symbol: symbol,
-                  interval: chart.resolution,
+              const charts = storage.get<
+                Array<{
+                  id?: string | number;
+                  name?: string;
+                  content?: string;
+                  forgeLayout?: {
+                    chartLayout?: unknown;
+                    paneSymbols?: unknown;
+                    layoutSync?: unknown;
+                  };
+                }>
+              >("forge.tv.charts", []);
+              const chart = charts.find((item) => String(item.id) === String(id));
+              if (!chart) return;
+              if (chart.content && chart.content !== "{}" && chart.content !== "null") {
+                try {
+                  const parsed = JSON.parse(chart.content) as unknown;
+                  if (parsed && typeof parsed === "object") {
+                    storage.set("forge.tv.autosave.v3", parsed);
+                    storage.set("forge.tv.autosave.v3.bak", parsed);
+                  }
+                } catch {
+                  /* keep the chart that is open */
+                }
+              }
+              if (chart.forgeLayout) {
+                const current = storage.get<Record<string, unknown>>("forge.settings.v1", {});
+                storage.set("forge.settings.v1", {
+                  ...current,
+                  chartLayout: chart.forgeLayout.chartLayout ?? current.chartLayout,
+                  paneSymbols: chart.forgeLayout.paneSymbols ?? current.paneSymbols,
+                  layoutSync: chart.forgeLayout.layoutSync ?? current.layoutSync,
                 });
-              });
+              }
+              if (chart.id != null && chart.name) {
+                storage.set("forge.layout.current.v1", { id: chart.id, name: chart.name });
+              }
+              window.dispatchEvent(new CustomEvent(SETTINGS_UPDATED_EVENT));
             },
             onDownloadChartData: () => {
               void chartWidget
