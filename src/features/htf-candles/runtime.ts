@@ -72,8 +72,8 @@ export const HTF_CANDLES_DEFAULTS: HtfCandlesOptions = {
   showVi: true,
   showTrace: false,
   showLabels: false,
-  // Off by default — HTF remain timers looked like a second blue countdown.
-  showTimer: false,
+  // Name above and below each group, with the remaining time in parentheses.
+  showTimer: true,
   showHtfName: true,
   showInterval: false,
   showGroupBackdrop: false,
@@ -239,7 +239,7 @@ function htfFitsChart(htf: HtfPreset, chartSec: number): boolean {
   return htfSec % chartSec === 0;
 }
 
-function remainingLabel(htf: HtfPreset, lastBarTime: number, nowMs = Date.now()): string {
+function remainingClock(htf: HtfPreset, lastBarTime: number, nowMs: number): string {
   const step = htfSeconds(htf);
   const closeAt = (Math.floor(lastBarTime / step) + 1) * step;
   let rem = Math.max(0, closeAt - Math.floor(nowMs / 1000));
@@ -255,10 +255,108 @@ function remainingLabel(htf: HtfPreset, lastBarTime: number, nowMs = Date.now())
   return `${pad(mins)}:${pad(secs)}`;
 }
 
+/** `(n/a)` off the live bar, otherwise the time left in this higher-timeframe candle. */
+export function htfRemainText(htf: HtfPreset, lastBarTime: number, live: boolean, nowMs = Date.now()): string {
+  if (!live) return "(n/a)";
+  return `(${remainingClock(htf, lastBarTime, nowMs)})`;
+}
+
 export interface HtfComputeResult {
   readonly cmds: DrawCmd[];
   /** Chart bars of empty space the groups need to the right of price. */
   readonly rightBars: number;
+}
+
+interface PaintedGroup {
+  readonly end: number;
+  readonly mid: number;
+  readonly hi: number;
+  readonly lo: number;
+  readonly name: string;
+  readonly timer: string;
+}
+
+const FVG_GRAY = "#9aa0ab";
+const LABEL_GRAY = "#787b86";
+
+/** Fair-value and volume gaps, drawn under the bodies so the candles stay in front. */
+function paintImbalances(
+  cmds: DrawCmd[],
+  htfBars: readonly HtfBar[],
+  groupOrigin: number,
+  width: number,
+  stride: number,
+  opts: HtfCandlesOptions,
+): void {
+  const n = htfBars.length;
+  const leftOf = (i: number) => groupOrigin + i * stride;
+  const rightOf = (i: number) => leftOf(i) + width;
+
+  if (opts.showFvg && n >= 3) {
+    for (let i = 0; i <= n - 3; i += 1) {
+      const older = htfBars[i]!;
+      const newer = htfBars[i + 2]!;
+      const olderBody = Math.max(older.open, older.close);
+      const olderBodyBot = Math.min(older.open, older.close);
+      const newerBody = Math.max(newer.open, newer.close);
+      const newerBodyBot = Math.min(newer.open, newer.close);
+      const bull =
+        newer.low > older.high && newerBodyBot > olderBody;
+      const bear =
+        newer.high < older.low && newerBody < olderBodyBot;
+      if (!bull && !bear) continue;
+      const top = bull ? newer.low : older.low;
+      const bot = bull ? older.high : newer.high;
+      if (top <= bot) continue;
+      cmds.push({
+        kind: "rect",
+        t1: leftOf(i),
+        p1: top,
+        t2: rightOf(i + 2),
+        p2: bot,
+        color: FVG_GRAY,
+        fill: withAlpha(FVG_GRAY, 78),
+        style: "solid",
+        width: 1,
+        borderWidth: 0,
+      });
+    }
+  }
+
+  if (opts.showVi && n >= 2) {
+    for (let i = 0; i <= n - 2; i += 1) {
+      const older = htfBars[i]!;
+      const newer = htfBars[i + 1]!;
+      const olderTop = Math.max(older.open, older.close);
+      const olderBot = Math.min(older.open, older.close);
+      const newerTop = Math.max(newer.open, newer.close);
+      const newerBot = Math.min(newer.open, newer.close);
+      let top = 0;
+      let bot = 0;
+      if (newer.low < older.high && newerBot > olderTop) {
+        top = newerBot;
+        bot = olderTop;
+      } else if (newer.high > older.low && newerTop < olderBot) {
+        top = olderBot;
+        bot = newerTop;
+      } else {
+        continue;
+      }
+      if (top <= bot) continue;
+      cmds.push({
+        kind: "rect",
+        t1: leftOf(i),
+        p1: top,
+        t2: rightOf(i + 1),
+        p2: bot,
+        color: "#ef5350",
+        fill: withAlpha("#ef5350", 55),
+        style: "solid",
+        width: 1,
+        borderWidth: 0,
+      });
+    }
+  }
 }
 
 function paintOneGroup(
@@ -269,12 +367,23 @@ function paintOneGroup(
   opts: HtfCandlesOptions,
   slot: HtfSlot,
   lastChartTime: number,
-): number {
+  live: boolean,
+  nowMs: number,
+): PaintedGroup {
   const width = Math.max(1, opts.widthBars) * 2 * step;
   const gap = Math.max(0, opts.spacingBars) * step;
   const stride = width + gap;
   const n = htfBars.length;
-  if (n === 0) return groupOrigin;
+  const name = htfLabel(slot.htf);
+  const empty: PaintedGroup = {
+    end: groupOrigin,
+    mid: groupOrigin,
+    hi: Number.NaN,
+    lo: Number.NaN,
+    name,
+    timer: "(n/a)",
+  };
+  if (n === 0) return empty;
 
   const groupWidth = n * width + Math.max(0, n - 1) * gap;
   const hi = Math.max(...htfBars.map((c) => c.high));
@@ -295,6 +404,8 @@ function paintOneGroup(
       width: 1,
     });
   }
+
+  paintImbalances(cmds, htfBars, groupOrigin, width, stride, opts);
 
   for (let i = 0; i < n; i += 1) {
     const c = htfBars[i]!;
@@ -383,100 +494,53 @@ function paintOneGroup(
     }
   }
 
-  if (opts.showFvg && n >= 3) {
-    for (let i = 2; i < n; i += 1) {
-      const a = htfBars[i - 2]!;
-      const c = htfBars[i]!;
-      const bullGap = c.low > a.high;
-      const bearGap = c.high < a.low;
-      if (!bullGap && !bearGap) continue;
-      const top = bullGap ? c.low : a.low;
-      const bot = bullGap ? a.high : c.high;
-      if (top <= bot) continue;
-      let end = n - 1;
-      for (let k = i + 1; k < n; k += 1) {
-        const later = htfBars[k]!;
-        const mitigated = bullGap ? later.low <= top && later.low >= bot : later.high >= bot && later.high <= top;
-        const through = bullGap ? later.low < bot : later.high > top;
-        if (mitigated || through) {
-          end = k;
-          break;
-        }
-      }
-      const tLeft = groupOrigin + (i - 1) * stride;
-      const tRight = groupOrigin + end * stride + width;
-      cmds.push({
-        kind: "rect",
-        t1: tLeft,
-        p1: top,
-        t2: tRight,
-        p2: bot,
-        color: bullGap ? "#26a69a" : "#ef5350",
-        fill: withAlpha(bullGap ? "#26a69a" : "#ef5350", 85),
-        style: "dotted",
-        width: 1,
-      });
-    }
-  }
-
-  if (opts.showVi && n >= 2) {
-    for (let i = 1; i < n; i += 1) {
-      const prev = htfBars[i - 1]!;
-      const cur = htfBars[i]!;
-      const prevTop = Math.max(prev.open, prev.close);
-      const prevBot = Math.min(prev.open, prev.close);
-      const curTop = Math.max(cur.open, cur.close);
-      const curBot = Math.min(cur.open, cur.close);
-      let top = 0;
-      let bot = 0;
-      let ok = false;
-      if (curBot > prevTop) {
-        top = curBot;
-        bot = prevTop;
-        ok = true;
-      } else if (prevBot > curTop) {
-        top = prevBot;
-        bot = curTop;
-        ok = true;
-      }
-      if (!ok || top <= bot) continue;
-      const tLeft = groupOrigin + i * stride;
-      const tRight = tLeft + width;
-      cmds.push({
-        kind: "rect",
-        t1: tLeft,
-        p1: top,
-        t2: tRight,
-        p2: bot,
-        color: "#ef5350",
-        fill: withAlpha("#ef5350", 88),
-        style: "dotted",
-        width: 1,
-      });
-    }
-  }
-
   const mid = Math.floor(groupOrigin + groupWidth / 2);
-  if (opts.showHtfName) {
-    cmds.push({
-      kind: "label",
-      t1: mid,
-      p1: hi + padY * 3,
-      color: "#787b86",
-      text: htfLabel(slot.htf),
-    });
-  }
-  if (opts.showTimer) {
-    cmds.push({
-      kind: "label",
-      t1: mid,
-      p1: lo - padY * 3,
-      color: "#787b86",
-      text: remainingLabel(slot.htf, htfBars[n - 1]!.time),
-    });
-  }
+  return {
+    end: groupOrigin + groupWidth,
+    mid,
+    hi,
+    lo,
+    name,
+    timer: htfRemainText(slot.htf, htfBars[n - 1]!.time, live, nowMs),
+  };
+}
 
-  return groupOrigin + groupWidth;
+function pushGroupLabels(cmds: DrawCmd[], groups: readonly PaintedGroup[], opts: HtfCandlesOptions): void {
+  const visible = groups.filter((g) => Number.isFinite(g.hi) && Number.isFinite(g.lo));
+  if (visible.length === 0) return;
+  if (!opts.showHtfName && !opts.showTimer) return;
+  const hi = Math.max(...visible.map((g) => g.hi));
+  const lo = Math.min(...visible.map((g) => g.lo));
+  for (const g of visible) {
+    const top: string[] = [];
+    const bottom: string[] = [];
+    if (opts.showHtfName) top.push(g.name);
+    if (opts.showTimer) top.push(g.timer);
+    if (opts.showTimer) bottom.push(g.timer);
+    if (opts.showHtfName) bottom.push(g.name);
+    if (top.length > 0) {
+      cmds.push({
+        kind: "label",
+        t1: g.mid,
+        p1: hi,
+        color: LABEL_GRAY,
+        text: top.join("\n"),
+        vAlign: "bottom",
+        fontSize: 13,
+      });
+    }
+    if (bottom.length > 0) {
+      cmds.push({
+        kind: "label",
+        t1: g.mid,
+        p1: lo,
+        color: LABEL_GRAY,
+        text: bottom.join("\n"),
+        vAlign: "top",
+        fontSize: 13,
+      });
+    }
+  }
 }
 
 /**
@@ -486,6 +550,7 @@ export function computeHtfCandles(
   chartBars: readonly HtfBar[],
   chartIntervalSec: number,
   opts: HtfCandlesOptions,
+  nowMs = Date.now(),
 ): HtfComputeResult {
   const cmds: DrawCmd[] = [];
   if (chartBars.length < 3 || chartIntervalSec <= 0) return { cmds, rightBars: 0 };
@@ -494,19 +559,25 @@ export function computeHtfCandles(
   if (enabled.length === 0) return { cmds, rightBars: 0 };
 
   const lastChartTime = chartBars[chartBars.length - 1]!.time;
+  const nowSec = Math.floor(nowMs / 1000);
+  const live = nowSec >= lastChartTime && nowSec - lastChartTime < chartIntervalSec + 20;
   const step = Math.max(1, chartIntervalSec);
   const pad = Math.max(1, opts.paddingBars) * step;
   const groupGap = Math.max(0, opts.groupGapBars) * step;
 
   let cursor = lastChartTime + pad;
+  const groups: PaintedGroup[] = [];
   for (const slot of enabled) {
     if (!htfFitsChart(slot.htf, chartIntervalSec)) continue;
     const all = aggregateHtfBars(chartBars, slot.htf, opts.dailyOpenMode, opts.timezoneOffset);
     const n = Math.max(1, Math.min(40, slot.candleCount));
     const slice = all.slice(-n);
-    const end = paintOneGroup(cmds, slice, cursor, step, opts, slot, lastChartTime);
-    cursor = end + groupGap;
+    const painted = paintOneGroup(cmds, slice, cursor, step, opts, slot, lastChartTime, live, nowMs);
+    if (Number.isFinite(painted.hi)) groups.push(painted);
+    cursor = painted.end + groupGap;
   }
+
+  pushGroupLabels(cmds, groups, opts);
 
   const rightBars = Math.max(0, Math.ceil((cursor - lastChartTime) / step));
   return { cmds, rightBars };
@@ -573,7 +644,7 @@ export async function paintHtfCandlesOnChart(
               linecolor: stroke,
               backgroundColor: fillHex,
               fillBackground: true,
-              linewidth: 1,
+              linewidth: cmd.borderWidth ?? 1,
               linestyle: linestyleMap[cmd.style ?? "solid"],
               transparency,
               filled: true,
@@ -590,12 +661,12 @@ export async function paintHtfCandlesOnChart(
             text: (cmd.text ?? "").trim() || "·",
             overrides: {
               color: stroke,
-              fontsize: 11,
               fillBackground: false,
               drawBorder: false,
               bold: false,
               horzLabelsAlign: "center",
-              vertLabelsAlign: "middle",
+              vertLabelsAlign: cmd.vAlign ?? "middle",
+              fontsize: cmd.fontSize ?? 11,
             },
           },
         );
