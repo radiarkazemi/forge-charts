@@ -1,4 +1,4 @@
-import { intervalSeconds, parseInterval, isMarketSessionOpen, type Bar, type BarRange, type Interval, type Quote, type SymbolInfo } from "@/domain";
+import { intervalSeconds, parseInterval, isFxDailyBreak, isMarketSessionOpen, type Bar, type BarRange, type Interval, type Quote, type SymbolInfo } from "@/domain";
 import type { MarketDataProvider, Unsubscribe } from "@/application";
 import { buildUrl, fetchJson } from "../http/fetch-json";
 import { startPolling } from "./polling";
@@ -320,23 +320,83 @@ function applyTick(
   };
 }
 
+const BROKER_HISTORY = "/tv-history";
+
 /**
- * Mid-session holes in Mongo (live writer outages) look like price gaps on the chart.
- * TradingView’s broker feed stays continuous — splice Germany `/ohlc/` into those holes only.
- * Skips overnight session breaks (≥ 45m on minute charts).
- * Daily+ weekend gaps (2–4d) are normal — never treat them as holes (merging midnight
- * Germany bars with 22:00/23:00 Mongo dailies also broke the TV FX session grid).
+ * A missing stretch the broker still printed. The one-hour New York pause and
+ * the weekend are real closes, so those stay empty.
+ */
+function isFillableHole(prevSec: number, nextSec: number, stepSec: number): boolean {
+  const gap = nextSec - prevSec;
+  if (!(gap > stepSec * 1.5)) return false;
+  if (gap >= 12 * 3_600) return false;
+  if (gap <= 90 * 60 && isFxDailyBreak(prevSec + Math.floor(gap / 2))) return false;
+  return true;
+}
+
+/**
+ * Mid-session holes in Mongo (live writer outages) look like empty space on the chart.
+ * The broker series stays continuous through those minutes.
  */
 function hasMidSessionHoles(bars: readonly Bar[], stepSec: number): boolean {
-  if (bars.length < 2 || stepSec <= 0) return false;
-  if (stepSec >= 86_400) return false;
-  const limit = stepSec * 1.5;
-  const sessionBreak = Math.max(stepSec * 9, 45 * 60);
+  if (bars.length < 2 || stepSec <= 0 || stepSec >= 86_400) return false;
   for (let i = 1; i < bars.length; i += 1) {
-    const gap = bars[i]!.time - bars[i - 1]!.time;
-    if (gap > limit && gap < sessionBreak) return true;
+    if (isFillableHole(bars[i - 1]!.time, bars[i]!.time, stepSec)) return true;
   }
   return false;
+}
+
+/** Keep the stored candle. Insert a broker candle only where that store skipped the time. */
+export function fillInsideHoles(primary: readonly Bar[], fill: readonly Bar[], stepSec: number): Bar[] {
+  if (primary.length < 2 || fill.length === 0) return [...primary];
+  const holes: Array<[number, number]> = [];
+  for (let i = 1; i < primary.length; i += 1) {
+    const prev = primary[i - 1]!.time;
+    const next = primary[i]!.time;
+    if (isFillableHole(prev, next, stepSec)) holes.push([prev, next]);
+  }
+  if (!holes.length) return [...primary];
+  const extra = fill.filter((bar) => holes.some(([start, end]) => bar.time > start && bar.time < end));
+  if (!extra.length) return [...primary];
+  return mergeBarsPreferPrimary(primary, extra);
+}
+
+async function fetchBrokerMinutes(apiSymbol: string, fromSec: number, toSec: number): Promise<Bar[]> {
+  const count = Math.min(10_000, Math.ceil(Math.max(60, toSec - fromSec) / 60) + 30);
+  const json = await fetchJson<OhlcResponse>(
+    buildUrl(BROKER_HISTORY, {
+      symbol: `FOREXCOM:${apiSymbol}`,
+      resolution: "1",
+      count,
+      before: toSec,
+    }),
+    { timeoutMs: 20_000 },
+  );
+  return (json.bars ?? [])
+    .map(parseBar)
+    .filter((bar): bar is Bar => bar !== null)
+    .filter((bar) => bar.time >= fromSec - 60 && bar.time < toSec)
+    .sort((a, b) => a.time - b.time);
+}
+
+/** Copy broker candles into Mongo holes. Stored prices stay as they are. */
+async function spliceBrokerHoles(apiSymbol: string, bars: Bar[], stepSec: number): Promise<Bar[]> {
+  if (!hasMidSessionHoles(bars, stepSec)) return bars;
+  let from = Number.POSITIVE_INFINITY;
+  let to = 0;
+  for (let i = 1; i < bars.length; i += 1) {
+    if (!isFillableHole(bars[i - 1]!.time, bars[i]!.time, stepSec)) continue;
+    from = Math.min(from, bars[i - 1]!.time);
+    to = Math.max(to, bars[i]!.time);
+  }
+  if (to <= from) return bars;
+  try {
+    let fill = await fetchBrokerMinutes(apiSymbol, from, to + stepSec);
+    if (stepSec > 60) fill = aggregateBars(fill, stepSec);
+    return fillInsideHoles(bars, fill, stepSec);
+  } catch {
+    return bars;
+  }
 }
 
 function mergeBarsPreferPrimary(primary: readonly Bar[], fill: readonly Bar[]): Bar[] {
@@ -630,6 +690,9 @@ export class GermanyMarketProvider implements MarketDataProvider {
         } catch {
           bars = [];
         }
+      }
+      if ((route.kind === "metal" || route.kind === "forex") && bars.length) {
+        bars = await spliceBrokerHoles(route.apiSymbol, bars, step);
       }
       if (!bars.length) {
         // Forex routes are Mongo-only — Germany `/ohlc/` 502s for EURUSD etc.
@@ -1235,6 +1298,9 @@ export class GermanyMarketProvider implements MarketDataProvider {
     if (!parents.length) {
       const germanyNeed = Math.min(MAX_BARS, Math.ceil((limit * step) / 60) + 10);
       parents = await fetchOhlc(route.apiSymbol, route.exchange, "1", germanyNeed);
+    }
+    if ((route.kind === "metal" || route.kind === "forex") && parents.length) {
+      parents = await spliceBrokerHoles(route.apiSymbol, parents, 60);
     }
     if (!parents.length) throw new Error(`germany-market: no 1m parents for ${route.apiSymbol}`);
     const bars = synthesizeFromMinuteBars(parents, step);
