@@ -328,15 +328,21 @@ export async function pullProfileIfNewer(
   }
   const beforeTools = JSON.stringify(storage.get("forge.tv.lineTools", null));
   const beforeSettings = stableSettings(readUserSettings(storage));
-  const beforeLayout = JSON.stringify(storage.get("forge.settings.v1", null));
-  const beforeCurrent = JSON.stringify(storage.get("forge.layout.current.v1", null));
+  const layoutFields = () => {
+    const settings = storage.get<Record<string, unknown> | null>("forge.settings.v1", null);
+    return JSON.stringify({
+      chartLayout: settings?.chartLayout ?? null,
+      paneSymbols: settings?.paneSymbols ?? null,
+      layoutSync: settings?.layoutSync ?? null,
+      current: storage.get("forge.layout.current.v1", null),
+    });
+  };
+  const beforeLayout = layoutFields();
   holdProfilePersist();
   applyProfilePayload(storage, remote.payload);
   touchLocalStamp(storage, remote.updatedAt);
   const drawingsChanged = beforeTools !== JSON.stringify(storage.get("forge.tv.lineTools", null));
-  const layoutChanged =
-    beforeLayout !== JSON.stringify(storage.get("forge.settings.v1", null)) ||
-    beforeCurrent !== JSON.stringify(storage.get("forge.layout.current.v1", null));
+  const layoutChanged = beforeLayout !== layoutFields();
   const settingsChanged = beforeSettings !== stableSettings(readUserSettings(storage)) || layoutChanged;
   return { appliedRemote: drawingsChanged || settingsChanged, drawingsChanged, settingsChanged };
 }

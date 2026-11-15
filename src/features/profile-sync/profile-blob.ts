@@ -7,6 +7,7 @@ import { LAYOUT_STAMP_KEY, sanitizeSettings } from "@/application";
 import {
   CURRENT_LAYOUT_KEY,
   isPlaceholderLayoutName,
+  libraryChartState,
   mergeLineToolStores,
 } from "@/infrastructure/tradingview/local-save-load-adapter";
 import {
@@ -63,8 +64,10 @@ export function readLocalStamp(storage: KeyValueStorage): number {
 }
 
 export function touchLocalStamp(storage: KeyValueStorage, at = Date.now()): number {
-  storage.set(STAMP_KEY, { updatedAt: at } satisfies LocalProfileStamp);
-  return at;
+  // A slow pull must not move the stamp backwards and re-apply the same profile forever.
+  const next = Math.max(readLocalStamp(storage), at);
+  storage.set(STAMP_KEY, { updatedAt: next } satisfies LocalProfileStamp);
+  return next;
 }
 
 export function collectProfilePayload(storage: KeyValueStorage): ProfilePayload {
@@ -249,13 +252,7 @@ function unionWatchlist(local: readonly string[], remote: readonly string[]): st
 }
 
 function parseChartBody(content: string): object | null {
-  if (!content || content === "{}" || content === "null") return null;
-  try {
-    const parsed = JSON.parse(content) as unknown;
-    return parsed && typeof parsed === "object" ? (parsed as object) : null;
-  } catch {
-    return null;
-  }
+  return libraryChartState(content);
 }
 
 /**

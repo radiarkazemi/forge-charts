@@ -9,6 +9,7 @@ import {
   type IBasicDataFeed,
   type IChartingLibraryWidget,
   type IExternalSaveLoadAdapter,
+  libraryChartState,
   LocalSaveLoadAdapter,
   type ISettingsAdapter,
   type WidgetConstructor,
@@ -133,19 +134,22 @@ function openSavedTseSession(saved: object | undefined): object | undefined {
 /** Reject corrupt / incomplete library snapshots that leave the chart spinning forever. */
 function readAutosave(storage: KeyValueStorage): object | undefined {
   purgeLegacyAutosaves(storage);
-  const tryParse = (raw: unknown): object | undefined => {
-    if (!raw || typeof raw !== "object") return undefined;
-    const record = raw as Record<string, unknown>;
-    const hasCharts = Array.isArray(record.charts) || Array.isArray(record.content);
-    const hasLayout = typeof record.layout === "string" || typeof record.name === "string";
-    if (!hasCharts && !hasLayout) return undefined;
-    return raw as object;
+  const heal = (key: string, raw: unknown): object | undefined => {
+    const state = libraryChartState(raw);
+    if (!state) return undefined;
+    if (state !== raw) {
+      try {
+        storage.set(key, state);
+      } catch {
+        /* ignore */
+      }
+    }
+    return state;
   };
-  const primary = tryParse(storage.get<unknown>(AUTOSAVE_KEY, undefined));
+  const primary = heal(AUTOSAVE_KEY, storage.get<unknown>(AUTOSAVE_KEY, undefined));
   if (primary) return primary;
-  const bak = tryParse(storage.get<unknown>(AUTOSAVE_BAK_KEY, undefined));
+  const bak = heal(AUTOSAVE_BAK_KEY, storage.get<unknown>(AUTOSAVE_BAK_KEY, undefined));
   if (bak) {
-    // Restore backup into the live key so the next refresh keeps it.
     try {
       storage.set(AUTOSAVE_KEY, bak);
     } catch {
@@ -620,16 +624,10 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
               >("forge.tv.charts", []);
               const chart = charts.find((item) => String(item.id) === String(id));
               if (!chart) return;
-              if (chart.content && chart.content !== "{}" && chart.content !== "null") {
-                try {
-                  const parsed = JSON.parse(chart.content) as unknown;
-                  if (parsed && typeof parsed === "object") {
-                    storage.set("forge.tv.autosave.v3", parsed);
-                    storage.set("forge.tv.autosave.v3.bak", parsed);
-                  }
-                } catch {
-                  /* keep the chart that is open */
-                }
+              const state = libraryChartState(chart.content);
+              if (state) {
+                storage.set("forge.tv.autosave.v3", state);
+                storage.set("forge.tv.autosave.v3.bak", state);
               }
               if (chart.forgeLayout) {
                 const current = storage.get<Record<string, unknown>>("forge.settings.v1", {});

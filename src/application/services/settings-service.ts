@@ -310,7 +310,9 @@ export class SettingsService {
 
   /** Read the account copy after another computer's layout arrived. */
   reload(): void {
-    this.settings.set(sanitizeSettings(this.storage.get<unknown>(STORAGE_KEY, DEFAULT_SETTINGS)));
+    const next = sanitizeSettings(this.storage.get<unknown>(STORAGE_KEY, DEFAULT_SETTINGS));
+    if (JSON.stringify(this.settings.get()) === JSON.stringify(next)) return;
+    this.settings.set(next);
   }
 
   setTheme(theme: ThemeMode): void {

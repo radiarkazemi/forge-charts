@@ -216,6 +216,36 @@ export function isPlaceholderLayoutName(name: string): boolean {
   return !name.trim() || PLACEHOLDER_LAYOUT.test(name.trim());
 }
 
+/**
+ * The library chart snapshot lives at `charts`. A saved layout sometimes stores
+ * that snapshot inside a symbol wrapper (`{ symbol, name, content }`). Passing
+ * the wrapper to the widget as `saved_data` leaves the chart blank.
+ */
+export function libraryChartState(value: unknown): object | null {
+  let current = value;
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (typeof current === "string") {
+      const trimmed = current.trim();
+      if (!trimmed || trimmed === "{}" || trimmed === "null") return null;
+      try {
+        current = JSON.parse(trimmed) as unknown;
+      } catch {
+        return null;
+      }
+      continue;
+    }
+    if (!current || typeof current !== "object" || Array.isArray(current)) return null;
+    const record = current as Record<string, unknown>;
+    if (Array.isArray(record.charts) && record.charts.length > 0) return record;
+    if (typeof record.content === "string") {
+      current = record.content;
+      continue;
+    }
+    return null;
+  }
+  return null;
+}
+
 interface CurrentLayout {
   readonly id: string | number;
   readonly name: string;
@@ -301,8 +331,8 @@ export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
     const list = this.charts();
     const found = list.find((chart) => String(chart.id) === String(current.id));
     if (found?.content && found.content !== "{}" && found.content !== "null" && found.name === current.name) return;
-    const autosave = this.storage.get<unknown>("forge.tv.autosave.v3", undefined);
-    if (!autosave || typeof autosave !== "object") return;
+    const autosave = libraryChartState(this.storage.get<unknown>("forge.tv.autosave.v3", undefined));
+    if (!autosave) return;
     let content = "";
     try {
       content = JSON.stringify(autosave);
@@ -437,7 +467,8 @@ export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
   async getChartContent(chartId: number | string): Promise<string> {
     const chart = this.charts().find((c) => String(c.id) === String(chartId));
     if (!chart) throw new Error(`Chart ${chartId} not found`);
-    return chart.content;
+    const state = libraryChartState(chart.content);
+    return state ? JSON.stringify(state) : chart.content;
   }
 
   /* ── study templates ───────────────────────────────────────────────── */

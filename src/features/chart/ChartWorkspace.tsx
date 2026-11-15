@@ -110,8 +110,9 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   const [settingsEpoch, setSettingsEpoch] = useState(0);
   useEffect(() => {
     const onSettings = () => {
+      const before = settings.settings.get().chartLayout;
       settings.reload();
-      setSettingsEpoch((epoch) => epoch + 1);
+      if (settings.settings.get().chartLayout !== before) setSettingsEpoch((epoch) => epoch + 1);
     };
     window.addEventListener(SETTINGS_UPDATED_EVENT, onSettings);
     return () => window.removeEventListener(SETTINGS_UPDATED_EVENT, onSettings);
