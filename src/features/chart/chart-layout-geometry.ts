@@ -436,6 +436,7 @@ export function mountFullWidthNavbar(
   getLayout: () => ChartLayoutId,
   onChrome: (chrome: ChromeInsets) => void,
   getSplitEdges: () => PaneSplitEdges,
+  isExpanded?: () => boolean,
 ): () => void {
   let stopped = false;
   let lock = false;
@@ -493,7 +494,11 @@ export function mountFullWidthNavbar(
     const W = doc.documentElement.clientWidth || container.clientWidth;
     const H = doc.documentElement.clientHeight || container.clientHeight;
     if (W < 32 || H < 32) return;
-    const slot = contentSlotsFor(getLayout(), getSplitEdges())[0];
+    // A maximized first chart fills the area under the navbar. Releasing the
+    // pane box (the single-chart path) collapses that plot to 0×0.
+    const slot = isExpanded?.()
+      ? { x: 0, y: 0, w: 1, h: 1 }
+      : contentSlotsFor(getLayout(), getSplitEdges())[0];
     if (!slot) return;
 
     const contentW = Math.max(0, W - leftToolbarWidth);

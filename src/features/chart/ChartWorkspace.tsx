@@ -35,6 +35,17 @@ function isVerticalSplit(layout: ChartLayoutId): boolean {
   return layout === "2h" || layout === "3h" || layout === "4h";
 }
 
+function isFullscreenButton(target: EventTarget | null): boolean {
+  const node = target as Element | null;
+  if (!node || typeof node.closest !== "function") return false;
+  const button = node.closest("button, [role='button']");
+  if (!button) return false;
+  const id = button.id || "";
+  const name = button.getAttribute("data-name") || "";
+  const label = `${button.getAttribute("aria-label") || ""} ${button.getAttribute("title") || ""} ${button.getAttribute("data-tooltip") || ""}`;
+  return id === "header-toolbar-fullscreen" || name === "header-toolbar-fullscreen" || /full\s*screen/i.test(label);
+}
+
 /** Drop a stuck crosshair in every pane except `keepIndex` (-1 clears all). */
 function releaseOtherChartPointers(root: HTMLElement | null, keepIndex: number): void {
   if (!root) return;
@@ -85,16 +96,24 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   const [menusOpen, setMenusOpen] = useState(false);
   const [menuHole, setMenuHole] = useState<MenuHoleRect | null>(null);
   const [favHole, setFavHole] = useState<MenuHoleRect | null>(null);
+  /** One chart filling the workspace. Null is the multi-pane grid. */
+  const [maximizedPane, setMaximizedPane] = useState<number | null>(null);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const primaryHostRef = useRef<HTMLDivElement | null>(null);
   const layoutRef = useRef<ChartLayoutId>(layoutId);
   const splitEdgesRef = useRef<PaneSplitEdges>(splitEdges);
+  const activePaneRef = useRef(0);
+  const maximizedPaneRef = useRef<number | null>(null);
+  const suppressFullscreenRef = useRef(false);
   layoutRef.current = layoutId;
   splitEdgesRef.current = splitEdges;
+  activePaneRef.current = activePane;
+  maximizedPaneRef.current = maximizedPane;
 
   // Reset dividers when the layout shape changes.
   useEffect(() => {
     setSplitEdges(defaultSplitEdges(layoutId));
+    setMaximizedPane(null);
   }, [layoutId]);
 
   useEffect(() => {
@@ -161,15 +180,15 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   }, []);
 
   /**
-   * CL’s header fullscreen targets the primary iframe only — multipane secondaries
-   * then sit outside the fullscreen element and paint white. Promote fullscreen to
-   * the whole workspace so every pane stays sized and visible.
+   * The header fullscreen button asks the library to fullscreen the primary iframe.
+   * In a multi-chart layout that request is cancelled at once, so the chart snaps
+   * back. Keep the chosen chart large inside the workspace instead, and let the
+   * same button restore the grid.
    */
   useEffect(() => {
     const workspace = workspaceRef.current;
     if (!workspace) return;
 
-    let promoting = false;
     const reflow = () => {
       const measure = () => {
         setWorkspaceSize({
@@ -187,52 +206,90 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
 
     const onFsChange = () => {
       const fsEl = document.fullscreenElement;
-      if (!fsEl) {
-        reflow();
-        return;
-      }
-      // Already the workspace — just reflow after size settles.
-      if (fsEl === workspace) {
-        reflow();
-        return;
-      }
-      // Primary (or any) iframe went fullscreen while multipane — lift to workspace.
-      if (multi && workspace.contains(fsEl) && fsEl !== workspace && !promoting) {
-        promoting = true;
-        const req =
-          workspace.requestFullscreen?.bind(workspace) ??
-          (
-            workspace as HTMLElement & {
-              webkitRequestFullscreen?: () => Promise<void> | void;
-            }
-          ).webkitRequestFullscreen?.bind(workspace);
-        void document
-          .exitFullscreen()
-          .catch(() => undefined)
-          .then(() => {
-            try {
-              return req?.();
-            } catch {
-              return undefined;
-            }
-          })
-          .finally(() => {
-            promoting = false;
-            reflow();
-          });
+      if (multi && fsEl && workspace.contains(fsEl)) {
+        void document.exitFullscreen?.().catch(() => undefined);
+        if (!suppressFullscreenRef.current && maximizedPaneRef.current == null) {
+          const pane = activePaneRef.current;
+          maximizedPaneRef.current = pane;
+          setMaximizedPane(pane);
+        }
         return;
       }
       reflow();
     };
 
     document.addEventListener("fullscreenchange", onFsChange);
-    // Some WebKit builds still fire the prefixed event.
     document.addEventListener("webkitfullscreenchange", onFsChange as EventListener);
     return () => {
       document.removeEventListener("fullscreenchange", onFsChange);
       document.removeEventListener("webkitfullscreenchange", onFsChange as EventListener);
     };
   }, [multi]);
+
+  useEffect(() => {
+    if (!multi) return;
+    const timers = [0, 80, 240, 600].map((ms) =>
+      window.setTimeout(() => {
+        window.dispatchEvent(new Event("resize"));
+        layoutSyncBus.reflowVisible();
+      }, ms),
+    );
+    return () => {
+      for (const timer of timers) window.clearTimeout(timer);
+    };
+  }, [maximizedPane, multi]);
+
+  useEffect(() => {
+    if (!multi) return;
+    const host = primaryHostRef.current;
+    if (!host) return;
+
+    const toggle = () => {
+      suppressFullscreenRef.current = true;
+      window.setTimeout(() => {
+        suppressFullscreenRef.current = false;
+      }, 700);
+      setMaximizedPane((current) => {
+        const next = current == null ? activePaneRef.current : null;
+        maximizedPaneRef.current = next;
+        return next;
+      });
+    };
+
+    let doc: Document | null = null;
+    let toggling = false;
+    const onPress = (event: Event) => {
+      if (!isFullscreenButton(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof (event as Event & { stopImmediatePropagation?: () => void }).stopImmediatePropagation === "function") {
+        (event as Event & { stopImmediatePropagation: () => void }).stopImmediatePropagation();
+      }
+      // pointerdown and click both reach this. One press, one toggle.
+      if (toggling) return;
+      toggling = true;
+      window.setTimeout(() => {
+        toggling = false;
+      }, 400);
+      toggle();
+    };
+    const attach = () => {
+      const next = host.querySelector("iframe")?.contentDocument ?? null;
+      if (!next || next === doc) return;
+      doc?.removeEventListener("pointerdown", onPress, true);
+      doc?.removeEventListener("click", onPress, true);
+      doc = next;
+      doc.addEventListener("pointerdown", onPress, true);
+      doc.addEventListener("click", onPress, true);
+    };
+    attach();
+    const poll = window.setInterval(attach, 500);
+    return () => {
+      window.clearInterval(poll);
+      doc?.removeEventListener("pointerdown", onPress, true);
+      doc?.removeEventListener("click", onPress, true);
+    };
+  }, [multi, chartLayout]);
 
   // The primary iframe stays full-window so the original navbar spans every pane.
   // The plot inside it is sized to pane 0; the header element is left alone.
@@ -253,6 +310,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
         );
       },
       () => splitEdgesRef.current,
+      () => maximizedPaneRef.current === 0,
     );
   }, [chartLayout, multi]);
 
@@ -340,6 +398,17 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
     ? sanitizeSplitEdges(layoutId, splitEdges)
     : [];
   const layoutChrome = chrome;
+  const maximized =
+    maximizedPane != null && maximizedPane >= 0 && maximizedPane < grid.count ? maximizedPane : null;
+  const expandedRect = () => {
+    if (workspaceSize.width < 8 || workspaceSize.height < 8) return null;
+    return {
+      left: layoutChrome.leftToolbarWidth,
+      top: layoutChrome.headerHeight,
+      width: Math.max(0, workspaceSize.width - layoutChrome.leftToolbarWidth),
+      height: Math.max(0, workspaceSize.height - layoutChrome.headerHeight),
+    };
+  };
 
   const beginDrag = useCallback((edgeIndex: number, event: ReactPointerEvent<HTMLElement>) => {
     event.preventDefault();
@@ -421,10 +490,12 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
       {/* Secondary layers under the original navbar (kept mounted for layout switches). */}
       {Array.from({ length: MAX_CHART_PANES - 1 }, (_, offset) => {
         const index = offset + 1;
-        const visible = multi && index < grid.count;
-        const rect = visible
-          ? paneRectInWorkspace(layoutId, index, workspaceSize, layoutChrome, edgesForLayout)
-          : null;
+        const visible = multi && index < grid.count && (maximized == null || maximized === index);
+        const rect = !visible
+          ? null
+          : maximized === index
+            ? expandedRect()
+            : paneRectInWorkspace(layoutId, index, workspaceSize, layoutChrome, edgesForLayout);
         const shown = Boolean(visible && rect && rect.width >= 8 && rect.height >= 8);
         const isActive = shown && activePane === index;
         const symbol = paneSymbols[index] ?? lastSymbol;
@@ -500,7 +571,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
       })}
 
       {/* Active outline for primary plot slot (navbar stays untouched). */}
-      {multi && activePane === 0
+      {multi && maximized == null && activePane === 0
         ? (() => {
             const rect = paneRectInWorkspace(layoutId, 0, workspaceSize, layoutChrome, edgesForLayout);
             if (!rect) return null;
@@ -524,7 +595,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
         : null}
 
       {/* Draggable middle lines for 2-/3-pane strip layouts. */}
-      {multi && edgesForLayout.length > 0
+      {multi && maximized == null && edgesForLayout.length > 0
         ? edgesForLayout.map((frac, edgeIndex) => {
             const vertical = isVerticalSplit(layoutId);
             const contentW = Math.max(0, workspaceSize.width - layoutChrome.leftToolbarWidth);
