@@ -3598,10 +3598,29 @@ async def tsetmc_search(request: web.Request) -> web.Response:
     return web.json_response({"hits": hits})
 
 
+async def tsetmc_catalog(request: web.Request) -> web.Response:
+    """Cleaned full Tehran board. Browser calls this, never cdn.tsetmc.com."""
+    from tsetmc_feed import board_catalog
+
+    session: aiohttp.ClientSession = request.app["session"]
+    payload = await board_catalog(session)
+    return web.json_response(payload)
+
+
 async def _poll_tsetmc(session: aiohttp.ClientSession) -> None:
     from tsetmc_feed import poll_tsetmc
 
     await poll_tsetmc(session, lambda: list(SUBS.keys()), broadcast)
+
+
+async def _warm_tsetmc_catalog(session: aiohttp.ClientSession) -> None:
+    from tsetmc_feed import board_catalog
+
+    await asyncio.sleep(3)
+    try:
+        await board_catalog(session)
+    except Exception as exc:
+        LOG.warning("tsetmc catalog warm: %s", exc)
 
 
 async def start_background(app: web.Application) -> None:
@@ -3636,6 +3655,7 @@ async def start_background(app: web.Application) -> None:
         asyncio.create_task(poll_iran_faraz_tail(session)),
         asyncio.create_task(poll_purge_flat_ticks()),
         asyncio.create_task(_poll_tsetmc(session)),
+        asyncio.create_task(_warm_tsetmc_catalog(session)),
     ]
 
 
@@ -3655,8 +3675,10 @@ def main() -> None:
     app.router.add_get("/iran-gold/quote", iran_gold_quote)
     app.router.add_get("/iran-gold/tsetmc/history", tsetmc_history)
     app.router.add_get("/iran-gold/tsetmc/search", tsetmc_search)
+    app.router.add_get("/iran-gold/tsetmc/catalog", tsetmc_catalog)
     app.router.add_get("/tsetmc/history", tsetmc_history)
     app.router.add_get("/tsetmc/search", tsetmc_search)
+    app.router.add_get("/tsetmc/catalog", tsetmc_catalog)
     app.router.add_get("/tv-history", tv_history)
     app.router.add_get("/health", health)
     app.on_startup.append(start_background)

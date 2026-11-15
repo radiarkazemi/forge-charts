@@ -16,6 +16,7 @@ import { useServices } from "@/app/use-services";
 import type { UiLanguage } from "@/application";
 import { SESSION_TSE, type SymbolInfo } from "@/domain";
 import { StaticSymbolRepository } from "@/infrastructure";
+import { loadTsetmcBoard, tsetmcSymbol } from "@/infrastructure/market-data/tsetmc-catalog";
 import { useStore } from "@/shared/hooks/useStore";
 import { brokerLogoForExchange } from "./broker-logos";
 import { layoutSyncBus } from "./layout-sync";
@@ -145,6 +146,7 @@ export function SymbolSearchDialog({ open, onClose }: SymbolSearchDialogProps) {
   const [query, setQuery] = useState("");
   const [chip, setChip] = useState<ChipId>("all");
   const [remote, setRemote] = useState<SymbolInfo[]>([]);
+  const [boardCount, setBoardCount] = useState(0);
 
   useEffect(() => {
     if (!open) return;
@@ -166,6 +168,22 @@ export function SymbolSearchDialog({ open, onClose }: SymbolSearchDialogProps) {
       }
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    let dead = false;
+    void loadTsetmcBoard().then((board) => {
+      if (dead || !board || board.total === 0) return;
+      const repo = symbols instanceof StaticSymbolRepository ? symbols : null;
+      if (repo) {
+        for (const row of board.rows) repo.registerDynamic(tsetmcSymbol(row));
+      }
+      setBoardCount(board.total);
+    });
+    return () => {
+      dead = true;
+    };
+  }, [open, symbols]);
 
   useEffect(() => {
     const q = query.trim();
@@ -206,7 +224,7 @@ export function SymbolSearchDialog({ open, onClose }: SymbolSearchDialogProps) {
     };
   }, [open, query, symbols]);
 
-  const all = useMemo(() => symbols.all(), [symbols, remote]);
+  const all = useMemo(() => symbols.all(), [symbols, remote, boardCount]);
   const chips = useMemo(() => {
     const present = new Set(all.map((s) => s.exchange.toUpperCase()));
     const ids: ChipId[] = ["all"];
@@ -525,6 +543,13 @@ export function SymbolSearchDialog({ open, onClose }: SymbolSearchDialogProps) {
         {filtered.length === 0 ? (
           <Typography sx={{ px: 2, py: 3, color: muted, textAlign: "center" }}>
             {language === "fa" ? "نمادی یافت نشد" : "No symbols found"}
+          </Typography>
+        ) : null}
+        {boardCount > filtered.length && (chip === "tse" || query.trim().length > 0) ? (
+          <Typography sx={{ px: 2, py: 1.25, color: muted, textAlign: "center", fontSize: 12 }}>
+            {language === "fa"
+              ? `${boardCount.toLocaleString("fa-IR")} نماد تهران روی تابلو است. برای دیدن بقیه نام را بنویسید.`
+              : `${boardCount.toLocaleString("en-US")} Tehran names are on the board. Type to narrow.`}
           </Typography>
         ) : null}
       </List>

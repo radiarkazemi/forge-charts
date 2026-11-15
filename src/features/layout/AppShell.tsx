@@ -15,6 +15,7 @@ import { useStore } from "@/shared/hooks/useStore";
 import { SidePanel } from "./SidePanel";
 import { SideRail } from "./SideRail";
 import { SubscriptionPage } from "@/features/billing/SubscriptionPage";
+import { AdminPanel } from "@/features/admin/AdminPanel";
 import type { SignedInAccount } from "@/features/profile/account-label";
 
 interface AppShellProps {
@@ -50,6 +51,7 @@ export function AppShell({ onSignOut, account }: AppShellProps) {
   const [indicatorsOpen, setIndicatorsOpen] = useState(false);
   const [profileMenuPos, setProfileMenuPos] = useState<ProfileAnchorRect | null>(null);
   const [subscribeOpen, setSubscribeOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
 
   useEffect(() => {
     document.title = `${symbol} — Forge Charts`;
@@ -212,6 +214,14 @@ export function AppShell({ onSignOut, account }: AppShellProps) {
           setProfileMenuPos(null);
           setSubscribeOpen(true);
         }}
+        onOpenAdmin={() => {
+          setProfileMenuPos(null);
+          const url = new URL(window.location.href);
+          url.searchParams.set("view", "admin");
+          if (!url.hash) url.hash = "system";
+          window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+          setAdminOpen(true);
+        }}
         onSignOut={onSignOut}
         alertCount={alertCount}
         onOpenWatchlist={isMobile ? () => settings.toggleSidePanel("watchlist") : undefined}
@@ -225,6 +235,17 @@ export function AppShell({ onSignOut, account }: AppShellProps) {
           signedIn
           onBack={() => setSubscribeOpen(false)}
           onSignIn={() => setSubscribeOpen(false)}
+        />
+      ) : null}
+      {adminOpen ? (
+        <AdminPanel
+          onBack={() => {
+            const url = new URL(window.location.href);
+            url.searchParams.delete("view");
+            url.hash = "";
+            window.history.replaceState(null, "", `${url.pathname}${url.search}`);
+            setAdminOpen(false);
+          }}
         />
       ) : null}
     </Box>
