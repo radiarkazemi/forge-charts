@@ -29,7 +29,12 @@ import {
 } from "./symbol-search-defaults";
 import { mountIndicatorsIntercept } from "./indicators-intercept";
 import { isChartPaintBusy } from "./study-paint-gate";
-import { DEFAULT_FAVORITE_INDICATORS, DRAWINGS_UPDATED_EVENT, USER_SETTINGS_KEY } from "@/features/profile-sync";
+import {
+  DEFAULT_FAVORITE_INDICATORS,
+  DRAWINGS_UPDATED_EVENT,
+  profilePersistHeld,
+  USER_SETTINGS_KEY,
+} from "@/features/profile-sync";
 
 export interface TradingViewWidgetDeps {
   readonly controller: ChartController;
@@ -346,6 +351,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
 
           const runPersist = () => {
             try {
+              if (profilePersistHeld()) return;
               // Wait out active shape paints so we don't save mid-storm.
               if (isChartPaintBusy()) {
                 persistQueued = true;
@@ -702,7 +708,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         /* ignore */
       }
       // Flush latest chart state before tearing down (layout switches / HMR).
-      if (isPrimary && widget) {
+      if (isPrimary && widget && !profilePersistHeld()) {
         try {
           widget.save(
             (state) => storage.set(autosaveKey, state),
@@ -742,7 +748,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
       // Theme is in forge.settings; also snapshot chart so CL chrome matches after refresh.
       try {
         const widget = controller.getWidget();
-        if (widget) {
+        if (widget && !profilePersistHeld()) {
           const key = isPrimary ? AUTOSAVE_KEY : `${AUTOSAVE_KEY}.pane.${paneIndex}`;
           widget.save(
             (state) => storage.set(key, state),

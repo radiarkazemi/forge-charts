@@ -18,6 +18,7 @@ import {
   readSyncCredentials,
   storeSyncCredentials,
   DRAWINGS_UPDATED_EVENT,
+  SETTINGS_UPDATED_EVENT,
   pullProfileIfNewer,
   syncProfileOnLogin,
   type ProfileSyncCredentials,
@@ -183,8 +184,9 @@ export function App() {
       try {
         const result = await pullProfileIfNewer(current.storage, creds);
         if (!result.appliedRemote || servicesRef.current !== current) return;
-        // The chart is already open. Ask it to paint the new line; don't send the user through login.
-        window.dispatchEvent(new CustomEvent(DRAWINGS_UPDATED_EVENT));
+        // Settings need a fresh chart. Drawings can be painted onto the one already open.
+        if (result.settingsChanged) window.dispatchEvent(new CustomEvent(SETTINGS_UPDATED_EVENT));
+        else if (result.drawingsChanged) window.dispatchEvent(new CustomEvent(DRAWINGS_UPDATED_EVENT));
       } catch {
         /* offline */
       } finally {

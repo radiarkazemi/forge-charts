@@ -21,6 +21,7 @@ import {
 } from "./chart-layout-geometry";
 import { getChartLayoutGrid, MAX_CHART_PANES, phoneChartLayout } from "./chart-layouts";
 import { layoutSyncBus } from "./layout-sync";
+import { SETTINGS_UPDATED_EVENT } from "@/features/profile-sync";
 import { TradingViewChart } from "./TradingViewChart";
 import { mountTvLayersHeader, syncHeaderChromeRetry } from "./tv-layers-header";
 
@@ -106,6 +107,12 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   const [favHole, setFavHole] = useState<MenuHoleRect | null>(null);
   /** One chart filling the workspace. Null is the multi-pane grid. */
   const [maximizedPane, setMaximizedPane] = useState<number | null>(null);
+  const [settingsEpoch, setSettingsEpoch] = useState(0);
+  useEffect(() => {
+    const onSettings = () => setSettingsEpoch((epoch) => epoch + 1);
+    window.addEventListener(SETTINGS_UPDATED_EVENT, onSettings);
+    return () => window.removeEventListener(SETTINGS_UPDATED_EVENT, onSettings);
+  }, []);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const primaryHostRef = useRef<HTMLDivElement | null>(null);
   const layoutRef = useRef<ChartLayoutId>(layoutId);
@@ -542,6 +549,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
         }}
       >
         <TradingViewChart
+          key={`settings-${settingsEpoch}`}
           onCreateAlert={onCreateAlert}
           onOpenProfile={onOpenProfile}
           paneIndex={0}
@@ -634,6 +642,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
               </Box>
             ) : null}
             <TradingViewChart
+              key={`settings-${settingsEpoch}`}
               onCreateAlert={onCreateAlert}
               onOpenProfile={onOpenProfile}
               paneIndex={index}

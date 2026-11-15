@@ -74,7 +74,6 @@ const ENABLED_FEATURES: ChartingLibraryFeatureset[] = [
   "study_templates",
   "chart_template_storage",
   "items_favoriting",
-  "use_localstorage_for_settings",
   "pre_post_market_sessions",
   "seconds_resolution",
   "display_market_status",
@@ -92,6 +91,9 @@ const ENABLED_FEATURES: ChartingLibraryFeatureset[] = [
 ];
 
 const DISABLED_FEATURES: ChartingLibraryFeatureset[] = [
+  // Chart properties and drawing defaults belong to the account, not this browser.
+  "use_localstorage_for_settings",
+  "save_chart_properties_to_local_storage",
   "popup_hints",
   "symbol_info_price_source",
   // Forge has its own right rail. The library toolbar is an empty strip

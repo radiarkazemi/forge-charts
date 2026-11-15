@@ -96,6 +96,46 @@ function bucketsForSymbol(all: LineToolStore, want: string): SerializedLineTools
   return hits.map((hit) => hit.bucket);
 }
 
+/**
+ * A layout snapshot is taken when the chart is saved. Later color / level edits
+ * land on the symbol copy. Refresh the snapshot so it does not keep the old settings.
+ */
+export function refreshLayoutSnapshots(store: LineToolStore, delta: SerializedLineTools): LineToolStore {
+  const deltaSources = delta.sources ?? [];
+  const deltaGroups = delta.groups ?? [];
+  if (deltaSources.length === 0 && deltaGroups.length === 0) return store;
+  const sourceIds = new Map(deltaSources);
+  const groupIds = new Map(deltaGroups);
+  let changed = false;
+  const next: LineToolStore = { ...store };
+  for (const [key, bucket] of Object.entries(store)) {
+    if (!key.startsWith("layoutsave::")) continue;
+    const sources = new Map(bucket.sources ?? []);
+    const groups = new Map(bucket.groups ?? []);
+    let bucketChanged = false;
+    for (const [id, value] of sourceIds) {
+      if (!sources.has(id)) continue;
+      if (value == null) sources.delete(id);
+      else sources.set(id, value);
+      bucketChanged = true;
+    }
+    for (const [id, value] of groupIds) {
+      if (!groups.has(id)) continue;
+      if (value == null) groups.delete(id);
+      else groups.set(id, value);
+      bucketChanged = true;
+    }
+    if (!bucketChanged) continue;
+    changed = true;
+    next[key] = {
+      ...bucket,
+      sources: [...sources.entries()],
+      groups: [...groups.entries()],
+    };
+  }
+  return changed ? next : store;
+}
+
 /** Remote nulls delete. Otherwise the later entry wins. Same id from both devices is kept. */
 export function mergeLineToolBuckets(
   local: SerializedLineTools | undefined,
@@ -516,7 +556,7 @@ export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
         all[key] = mergeLineToolBuckets(all[key], { sources: looseSources, groups: [], symbol: state.symbol });
       }
     }
-    this.storage.set(KEYS.lineTools, all);
+    this.storage.set(KEYS.lineTools, refreshLayoutSnapshots(all, serialized));
     this.onChange?.();
   }
 
@@ -542,11 +582,17 @@ export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
         if (sources.length) chunks.push({ ...bucket, sources });
       }
     } else if (want) {
-      chunks.push(...bucketsForSymbol(all, want));
+      // The layout snapshot is the older copy. The symbol copy has the latest
+      // colors, levels and line styles, so it has to be applied last.
       const savedWithLayout = all[`layoutsave::${chartId}`] ?? (layoutId ? all[`layoutsave::${layoutId}`] : undefined);
       if (savedWithLayout) chunks.push(savedWithLayout);
+      chunks.push(...bucketsForSymbol(all, want));
     } else if (requestType === "allLineTools") {
-      chunks.push(...Object.values(all));
+      const ranked = Object.entries(all).sort(([a], [b]) => {
+        const rank = (key: string) => (key.startsWith("symbol::") ? 2 : key.startsWith("layoutsave::") ? 0 : 1);
+        return rank(a) - rank(b);
+      });
+      chunks.push(...ranked.map(([, bucket]) => bucket));
     } else if (requestType === "mainSeriesLineTools") {
       const symbolBuckets = Object.entries(all).filter(([key]) => key.startsWith("symbol::"));
       const only = symbolBuckets.length === 1 ? symbolBuckets[0]?.[1] : undefined;
