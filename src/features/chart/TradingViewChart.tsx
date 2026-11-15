@@ -258,6 +258,7 @@ export function TradingViewChart({
     onSetChartLayout: (layout) => settings.setChartLayout(layout),
     onToggleLayoutSync: (key) => settings.toggleLayoutSync(key),
     getLayoutSync: () => settings.settings.get().layoutSync,
+    getChartLayout: () => settings.settings.get().chartLayout,
     onSymbolChanged: (index, ticker) => settings.setPaneSymbol(index, ticker),
     getLastPrice: () => quote?.price ?? null,
     onHeaderReady: (api) => {

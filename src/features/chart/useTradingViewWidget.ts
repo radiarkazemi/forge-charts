@@ -85,6 +85,7 @@ export interface TradingViewWidgetDeps {
     drawings: boolean;
     indicators: boolean;
   };
+  readonly getChartLayout?: () => ChartLayoutId;
   readonly onSymbolChanged?: (paneIndex: number, symbol: string) => void;
   readonly getLastPrice: () => number | null;
   readonly onHeaderReady?: (api: HeaderToolbarApi) => void;
@@ -214,6 +215,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
         indicators: false,
       },
   );
+  const getChartLayout = useEffectEvent(() => deps.getChartLayout?.() ?? "s");
   const onSymbolChanged = useEffectEvent((symbol: string) => deps.onSymbolChanged?.(paneIndex, symbol));
   const getLastPrice = useEffectEvent(() => deps.getLastPrice());
   const readInitial = useEffectEvent(() => ({
@@ -410,6 +412,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
           // Coalesce — do NOT save synchronously on every study/drawing tick.
           let drawingSyncTimer: number | undefined;
           let ignoreDrawingsUntil = 0;
+          let drawGen = 0;
           const syncDrawingsNow = () => {
             if (cancelled || !widget || Date.now() < ignoreDrawingsUntil) return;
             try {
@@ -422,7 +425,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
           };
           const paintRemoteDrawings = () => {
             if (cancelled || !widget) return;
-            ignoreDrawingsUntil = Date.now() + 1_500;
+            const gen = drawGen;
             const chart = widget.activeChart();
             let symbol = "";
             try {
@@ -434,7 +437,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
             void saveLoadAdapter
               .loadLineToolsAndGroups(undefined, "1", "mainSeriesLineTools", { symbol })
               .then((state) => {
-                if (cancelled || !widget || !state?.sources) return;
+                if (cancelled || !widget || gen !== drawGen || !state?.sources) return;
                 ignoreDrawingsUntil = Date.now() + 1_500;
                 return chart.applyLineToolsState(state as never);
               })
@@ -445,8 +448,24 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
           window.addEventListener(DRAWINGS_UPDATED_EVENT, paintRemoteDrawings);
           try {
             widget.subscribe("study_event", schedulePersist as never);
-            widget.subscribe("drawing_event", (() => {
+            widget.subscribe("drawing_event", ((sourceId: string, eventType: string) => {
               if (Date.now() < ignoreDrawingsUntil) return;
+              if (eventType === "remove") {
+                drawGen += 1;
+                try {
+                  (saveLoadAdapter as LocalSaveLoadAdapter).forgetLineTool(String(sourceId));
+                } catch {
+                  /* the chart already dropped the drawing */
+                }
+                return;
+              }
+              if (eventType === "create") {
+                try {
+                  (saveLoadAdapter as LocalSaveLoadAdapter).reviveLineTool(String(sourceId));
+                } catch {
+                  /* a brand new drawing has nothing to revive */
+                }
+              }
               schedulePersist();
               window.clearTimeout(drawingSyncTimer);
               drawingSyncTimer = window.setTimeout(syncDrawingsNow, 350);
@@ -557,6 +576,7 @@ export function useTradingViewWidget(containerRef: RefObject<HTMLDivElement | nu
             onSetChartLayout,
             onToggleLayoutSync,
             getLayoutSync,
+            getChartLayout,
             getLastPrice,
             getProfile,
             onSaveNamedLayout: (name) => {

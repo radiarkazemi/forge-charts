@@ -639,7 +639,15 @@ export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
       const incoming = bySymbol.get(symbol) ?? { sources: [], groups: [], symbol };
       const sourceIds = new Set((incoming.sources ?? []).map(([id]) => id));
       const groupIds = new Set((incoming.groups ?? []).map(([id]) => id));
-      const sources = [...(incoming.sources ?? [])];
+      const kept = new Map(existing?.sources ?? []);
+      const sources: Array<[string, unknown]> = [];
+      for (const [id, value] of incoming.sources ?? []) {
+        if (kept.has(id) && kept.get(id) == null && value != null) {
+          sources.push([id, null]);
+          continue;
+        }
+        sources.push([id, value ?? null]);
+      }
       for (const [id, value] of existing?.sources ?? []) {
         if (sourceIds.has(id)) continue;
         const toolSymbol =
@@ -666,6 +674,42 @@ export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
     this.storage.set(KEYS.lineTools, refreshLayoutSnapshots(all, delta));
     this.onChange?.();
     return Promise.resolve();
+  }
+
+  /** The drawing was removed. Remember that before a stale snapshot can save it again. */
+  forgetLineTool(id: string): void {
+    if (!id) return;
+    const all = this.lineToolStore();
+    const keys = Object.keys(all);
+    if (keys.length === 0) {
+      all["deleted::drawings"] = { sources: [[id, null]], groups: [], symbol: "" };
+    }
+    for (const key of keys) {
+      const bucket = all[key];
+      if (!bucket) continue;
+      const sources = [...(bucket.sources ?? [])];
+      const index = sources.findIndex(([sid]) => sid === id);
+      if (index >= 0) sources[index] = [id, null];
+      else sources.push([id, null]);
+      all[key] = { ...bucket, sources };
+    }
+    this.storage.set(KEYS.lineTools, all);
+    this.onChange?.();
+  }
+
+  /** Undo / a new drawing with the same id may be stored again. */
+  reviveLineTool(id: string): void {
+    if (!id) return;
+    const all = this.lineToolStore();
+    let changed = false;
+    for (const [key, bucket] of Object.entries(all)) {
+      const sources = (bucket.sources ?? []).filter((entry) => !(entry[0] === id && entry[1] == null));
+      if (sources.length === (bucket.sources ?? []).length) continue;
+      changed = true;
+      all[key] = { ...bucket, sources };
+    }
+    if (!changed) return;
+    this.storage.set(KEYS.lineTools, all);
   }
 
   async loadLineToolsAndGroups(
