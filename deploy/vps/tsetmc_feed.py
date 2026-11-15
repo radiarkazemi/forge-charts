@@ -95,16 +95,420 @@ def _adjust_flag(symbol: str, requested: int | None) -> int:
     return 1
 
 
+# The public watch sheet is one mixed pile: shares, rights, funds, bonds, options,
+# blank rows, and Latin junk. Chart search and the admin board both go through
+# this cleaner so those are not shown as if they were the same instrument.
+_FLOW_MARKET = {
+    1: "بورس",
+    2: "فرابورس",
+    3: "آتی",
+    4: "پایه",
+    5: "بورس کالا",
+    6: "بورس انرژی",
+    7: "بورس کالا",
+}
+_KIND_ORDER = {"stock": 0, "fund": 1, "right": 2, "bond": 3, "futures": 4, "option": 5}
+_CATALOG: tuple[float, dict[str, Any]] | None = None
+_CATALOG_TTL = 15 * 60
+_CATALOG_MISS: tuple[float, dict[str, Any]] | None = None
+_CATALOG_MISS_TTL = 60.0
+_WATCH_URL = (
+    f"{CDN}/ClosingPrice/GetMarketWatch?market=0&industrialGroup="
+    "&paperTypes[0]=1&paperTypes[1]=2&paperTypes[2]=3&paperTypes[3]=4"
+    "&paperTypes[4]=5&paperTypes[5]=6&paperTypes[6]=7&paperTypes[7]=8"
+    "&paperTypes[8]=9&showTraded=false&withBestLimits=false"
+)
+_MAP_URL = (
+    f"{CDN}/InstrumentProvider/api/v1/MarketMap/MarketMapNew/fa"
+    "?marketIds[0]=20&marketIds[1]=30"
+    "&MarketTypes[0]=Cash&MarketTypes[1]=Future&MarketTypes[2]=Option"
+    "&MarketTypes[3]=Debt&MarketTypes[4]=ETF&MarketTypes[5]=TradeOption"
+    "&BasedOnVolume=false"
+)
+_EXCEL_URL = "https://old.tsetmc.com/tsev2/excel/MarketWatchPlus.aspx?d=0"
+
+
+def _persian(text: str) -> bool:
+    return any("\u0600" <= ch <= "\u06FF" for ch in text)
+
+
+def instrument_kind(symbol: str, name: str) -> str | None:
+    """Classify one TSETMC row, or None when it is not a real instrument.
+
+    Rights end with ح and are not the share. Calls start with ض, puts with ط.
+    صندوق is a fund. اخزا / اجاره / مرابحه / اوراق are bonds. A name with no
+    Persian letters, or a deleted name, is dropped.
+    """
+    sym = " ".join(symbol.strip().split())
+    title = " ".join(name.strip().split())
+    if not sym or not title or not _persian(sym):
+        return None
+    if "حذف" in title:
+        return None
+    blob = f"{sym} {title}"
+    if sym.endswith("ح"):
+        return "right"
+    if sym.startswith("ض") or sym.startswith("ط"):
+        return "option"
+    if "اختيار" in blob or "اختیار" in blob:
+        return "option"
+    if "صندوق" in title:
+        return "fund"
+    if any(bit in blob for bit in ("اخزا", "اجاره", "مرابحه", "اوراق", "سخند", "سخاب", "مشارکت")):
+        return "bond"
+    if "آتی" in title or "قرارداد" in title:
+        return "futures"
+    return "stock"
+
+
+def clean_board(raw_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """One row per symbol. Last trade and official close stay separate."""
+    kept: list[dict[str, Any]] = []
+    dropped = {"empty": 0, "not_persian": 0, "removed": 0, "duplicate": 0}
+    at: dict[str, int] = {}
+    for raw in raw_rows:
+        if not isinstance(raw, dict):
+            dropped["empty"] += 1
+            continue
+        symbol = " ".join(str(raw.get("symbol") or "").strip().split())
+        name = " ".join(str(raw.get("name") or "").strip().split())
+        if not symbol or not name:
+            dropped["empty"] += 1
+            continue
+        if not _persian(symbol):
+            dropped["not_persian"] += 1
+            continue
+        if "حذف" in name:
+            dropped["removed"] += 1
+            continue
+        kind = instrument_kind(symbol, name)
+        if kind is None:
+            dropped["empty"] += 1
+            continue
+        flow = int(_num(raw.get("flow") or 0))
+        market = str(raw.get("market") or "").strip() or _FLOW_MARKET.get(flow, "")
+        ins = str(raw.get("insCode") or "").strip()
+        if ins and not ins.isdigit():
+            ins = ""
+        row = {
+            "symbol": symbol,
+            "name": name,
+            "insCode": ins,
+            "kind": kind,
+            "market": market,
+            "flow": flow,
+            "last": _num(raw.get("last")),
+            "close": _num(raw.get("close")),
+            "volume": _num(raw.get("volume")),
+        }
+        prev = at.get(symbol)
+        if prev is None:
+            at[symbol] = len(kept)
+            kept.append(row)
+            continue
+        dropped["duplicate"] += 1
+        old = kept[prev]
+        old_score = (1 if old["volume"] > 0 else 0, 1 if old["insCode"] else 0, old["close"])
+        new_score = (1 if row["volume"] > 0 else 0, 1 if row["insCode"] else 0, row["close"])
+        if new_score > old_score:
+            kept[prev] = row
+    counts: dict[str, int] = {}
+    for row in kept:
+        counts[row["kind"]] = counts.get(row["kind"], 0) + 1
+    kept.sort(key=lambda row: (_KIND_ORDER.get(str(row["kind"]), 9), str(row["symbol"])))
+    return {"rows": kept, "dropped": dropped, "counts": counts, "total": len(kept)}
+
+
+def _json_instrument(row: dict[str, Any]) -> dict[str, Any] | None:
+    symbol = str(
+        row.get("lVal18AFC")
+        or row.get("lva")
+        or row.get("instrumentName")
+        or row.get("instrument_Name")
+        or row.get("symbol")
+        or ""
+    ).strip()
+    name = str(
+        row.get("lVal30") or row.get("lvc") or row.get("companyName") or row.get("name") or symbol
+    ).strip()
+    if not symbol:
+        return None
+    ins = str(row.get("insCode") or row.get("inscode") or "").strip()
+    return {
+        "symbol": symbol,
+        "name": name,
+        "insCode": ins,
+        "flow": row.get("flow") or row.get("Flow") or 0,
+        "last": row.get("pDrCotVal") or row.get("pdv") or row.get("lastPrice") or row.get("lastprice") or row.get("last") or 0,
+        "close": row.get("pClosing") or row.get("pc") or row.get("closingPrice") or row.get("closingprice") or row.get("close") or 0,
+        "volume": row.get("qTotTran5J") or row.get("qtj") or row.get("tradeVolume") or row.get("volume") or 0,
+    }
+
+
+def _walk_map(node: Any, out: list[dict[str, Any]]) -> None:
+    if isinstance(node, list):
+        for item in node:
+            _walk_map(item, out)
+        return
+    if not isinstance(node, dict):
+        return
+    if node.get("instrumentName") or node.get("lVal18AFC") or node.get("instrument_Name"):
+        row = _json_instrument(node)
+        if row:
+            out.append(row)
+    for value in node.values():
+        if isinstance(value, (dict, list)):
+            _walk_map(value, out)
+
+
+def _col_index(ref: str) -> int:
+    n = 0
+    for ch in ref:
+        if not ch.isalpha():
+            break
+        n = n * 26 + (ord(ch.upper()) - 64)
+    return max(0, n - 1)
+
+
+def _xlsx_rows(blob: bytes) -> list[list[str]]:
+    import xml.etree.ElementTree as ET
+    import zipfile
+    from io import BytesIO
+
+    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    with zipfile.ZipFile(BytesIO(blob)) as zf:
+        names = zf.namelist()
+        shared: list[str] = []
+        if "xl/sharedStrings.xml" in names:
+            root = ET.fromstring(zf.read("xl/sharedStrings.xml"))
+            for si in root.findall(f"{ns}si"):
+                shared.append("".join((node.text or "") for node in si.iter(f"{ns}t")))
+        sheet = "xl/worksheets/sheet1.xml"
+        if sheet not in names:
+            sheets = sorted(name for name in names if name.startswith("xl/worksheets/sheet"))
+            if not sheets:
+                return []
+            sheet = sheets[0]
+        root = ET.fromstring(zf.read(sheet))
+        rows: list[list[str]] = []
+        for row in root.findall(f"{ns}sheetData/{ns}row"):
+            cells: dict[int, str] = {}
+            for cell in row.findall(f"{ns}c"):
+                kind = cell.get("t") or ""
+                if kind == "inlineStr":
+                    text = "".join((node.text or "") for node in cell.iter(f"{ns}t"))
+                else:
+                    value = cell.find(f"{ns}v")
+                    text = value.text if value is not None and value.text else ""
+                    if kind == "s" and text.isdigit():
+                        index = int(text)
+                        text = shared[index] if index < len(shared) else ""
+                cells[_col_index(cell.get("r") or "A")] = text
+            if not cells:
+                continue
+            width = max(cells) + 1
+            rows.append([cells.get(i, "") for i in range(width)])
+        return rows
+
+
+def _html_rows(text: str) -> list[list[str]]:
+    import re
+
+    rows: list[list[str]] = []
+    for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", text, flags=re.I | re.S):
+        cells = re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", tr, flags=re.I | re.S)
+        if not cells:
+            continue
+        rows.append(
+            [
+                re.sub(r"<[^>]+>", "", cell).replace("&nbsp;", " ").replace("\xa0", " ").strip()
+                for cell in cells
+            ]
+        )
+    return rows
+
+
+def _rows_from_table(table: list[list[str]]) -> list[dict[str, Any]]:
+    header_at = -1
+    for index, row in enumerate(table[:8]):
+        if any(cell.strip() == "نماد" for cell in row):
+            header_at = index
+            break
+    if header_at < 0:
+        return []
+    header = [cell.strip() for cell in table[header_at]]
+
+    def column(*names: str) -> int:
+        for name in names:
+            for index, cell in enumerate(header):
+                if cell == name or (name and name in cell):
+                    return index
+        return -1
+
+    i_sym = column("نماد")
+    i_name = column("نام")
+    i_vol = column("حجم")
+    i_last = column("آخرین معامله", "آخرین")
+    i_close = column("قیمت پایانی", "پایانی")
+    out: list[dict[str, Any]] = []
+    for row in table[header_at + 1 :]:
+        def cell(index: int) -> str:
+            return row[index].strip() if 0 <= index < len(row) else ""
+
+        symbol = cell(i_sym)
+        if not symbol:
+            continue
+        out.append(
+            {
+                "symbol": symbol,
+                "name": cell(i_name) or symbol,
+                "last": cell(i_last).replace(",", ""),
+                "close": cell(i_close).replace(",", ""),
+                "volume": cell(i_vol).replace(",", ""),
+            }
+        )
+    return out
+
+
+def parse_board_blob(blob: bytes, content_type: str = "") -> list[dict[str, Any]]:
+    if blob[:2] == b"PK":
+        return _rows_from_table(_xlsx_rows(blob))
+    if blob[:4] == bytes((0xD0, 0xCF, 0x11, 0xE0)):
+        raise RuntimeError("legacy xls board")
+    text = blob.decode("utf-8", errors="replace")
+    if "<tr" in text.lower():
+        return _rows_from_table(_html_rows(text))
+    raise RuntimeError(f"unrecognized board ({content_type or 'unknown'}, {len(blob)} bytes)")
+
+
+def _remember_catalog(at: float, payload: dict[str, Any]) -> None:
+    global _CATALOG
+    _CATALOG = (at, payload)
+    for row in payload.get("rows") or []:
+        ins = str(row.get("insCode") or "")
+        symbol = str(row.get("symbol") or "")
+        if ins and symbol:
+            _INS[symbol] = ins
+
+
+def _catalog_rows() -> list[dict[str, Any]]:
+    if not _CATALOG:
+        return []
+    rows = _CATALOG[1].get("rows")
+    return rows if isinstance(rows, list) else []
+
+
+async def _load_raw_board(
+    session: aiohttp.ClientSession,
+) -> tuple[list[dict[str, Any]], str, list[str]]:
+    errors: list[str] = []
+    best: list[dict[str, Any]] = []
+    source = ""
+
+    def consider(name: str, rows: list[dict[str, Any]]) -> bool:
+        nonlocal best, source
+        if len(rows) > len(best):
+            best = rows
+            source = name
+        return len(best) >= 2000
+
+    try:
+        payload = await _get_json(session, _WATCH_URL)
+        rows = [row for row in (_json_instrument(item) for item in _lists(payload) if isinstance(item, dict)) if row]
+        if consider("market-watch", rows):
+            return best, source, errors
+    except Exception as exc:
+        errors.append(f"market-watch: {exc}")
+
+    try:
+        payload = await _get_json(session, _MAP_URL)
+        rows = []
+        _walk_map(payload, rows)
+        if consider("market-map", rows):
+            return best, source, errors
+    except Exception as exc:
+        errors.append(f"market-map: {exc}")
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=45)
+        async with session.get(_EXCEL_URL, headers=HEADERS, timeout=timeout) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"tsetmc {resp.status}")
+            blob = await resp.read()
+            ctype = str(resp.headers.get("Content-Type") or "")
+        consider("market-watch-excel", parse_board_blob(blob, ctype))
+    except Exception as exc:
+        errors.append(f"market-watch-excel: {exc}")
+    return best, source, errors
+
+
+async def board_catalog(session: aiohttp.ClientSession) -> dict[str, Any]:
+    """Full cleaned Tehran board. Cached. The browser never calls TSETMC itself."""
+    global _CATALOG_MISS
+    now = time.time()
+    if _CATALOG and now - _CATALOG[0] < _CATALOG_TTL:
+        return _CATALOG[1]
+    if _CATALOG_MISS and now - _CATALOG_MISS[0] < _CATALOG_MISS_TTL:
+        return _CATALOG_MISS[1]
+    raw, source, errors = await _load_raw_board(session)
+    cleaned = clean_board(raw)
+    payload: dict[str, Any] = {
+        "updatedAt": int(now * 1000),
+        "source": source or "empty",
+        "errors": errors,
+        **cleaned,
+    }
+    if cleaned["rows"]:
+        _remember_catalog(now, payload)
+        LOG.info(
+            "tsetmc board %s rows from %s (dropped %s)",
+            cleaned["total"],
+            payload["source"],
+            cleaned["dropped"],
+        )
+    else:
+        _CATALOG_MISS = (now, payload)
+        LOG.warning("tsetmc board empty: %s", errors)
+    return payload
+
+
+def _catalog_hits(query: str) -> list[dict[str, str]]:
+    key = query.strip()
+    if not key:
+        return []
+    hits: list[dict[str, str]] = []
+    for row in _catalog_rows():
+        symbol = str(row.get("symbol") or "")
+        name = str(row.get("name") or "")
+        if key not in symbol and key not in name:
+            continue
+        ins = str(row.get("insCode") or "")
+        if ins:
+            _INS[symbol] = ins
+        hits.append(
+            {
+                "symbol": symbol,
+                "name": name,
+                "insCode": ins,
+                "kind": str(row.get("kind") or ""),
+            }
+        )
+        if len(hits) >= 30:
+            break
+    return hits
+
+
 async def search_hits(session: aiohttp.ClientSession, query: str) -> list[dict[str, str]]:
     key = query.strip()
     if not key:
         return []
+    local = _catalog_hits(key)
+    api_hits: list[dict[str, str]] = []
     try:
         payload = await _get_json(session, f"{CDN}/Instrument/GetInstrumentSearch/{quote(key)}")
     except Exception as exc:
         LOG.warning("tsetmc search %s: %s", key, exc)
-        return []
-    hits: list[dict[str, str]] = []
+        payload = None
     seen: set[str] = set()
     for row in _lists(payload):
         if not isinstance(row, dict):
@@ -114,12 +518,25 @@ async def search_hits(session: aiohttp.ClientSession, query: str) -> list[dict[s
         title = str(row.get("lVal30") or row.get("lVal18AFC") or name).strip()
         if not ins or not name or name in seen:
             continue
+        if instrument_kind(name, title) is None:
+            continue
         seen.add(name)
         _INS[name] = ins
-        hits.append({"symbol": name, "name": title, "insCode": ins})
-        if len(hits) >= 20:
+        api_hits.append({"symbol": name, "name": title, "insCode": ins, "kind": instrument_kind(name, title) or ""})
+        if len(api_hits) >= 30:
             break
-    return hits
+    if not local:
+        return api_hits
+    by_symbol = {hit["symbol"]: hit for hit in local}
+    for hit in api_hits:
+        known = by_symbol.get(hit["symbol"])
+        if known is None:
+            by_symbol[hit["symbol"]] = hit
+            continue
+        if not known.get("insCode") and hit.get("insCode"):
+            known["insCode"] = hit["insCode"]
+            _INS[hit["symbol"]] = hit["insCode"]
+    return list(by_symbol.values())[:30]
 
 
 async def resolve_ins(session: aiohttp.ClientSession, symbol: str) -> str | None:

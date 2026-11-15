@@ -19,6 +19,7 @@ import LanguageIcon from "@mui/icons-material/Language";
 import LogoutIcon from "@mui/icons-material/Logout";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import CreditCardOutlinedIcon from "@mui/icons-material/CreditCardOutlined";
+import StorageOutlinedIcon from "@mui/icons-material/StorageOutlined";
 import type { UiLanguage, UserProfile } from "@/application";
 import { isDevSite } from "@/dev-site";
 import { formatPrice, readPlanChoice } from "@/features/billing/plans";
@@ -37,6 +38,7 @@ interface ProfileMenuProps {
   readonly onCycleLanguage: () => void;
   readonly onOpenProfile: () => void;
   readonly onOpenSubscription: () => void;
+  readonly onOpenAdmin: () => void;
   readonly onSignOut: () => void;
   readonly alertCount?: number;
   readonly onOpenWatchlist?: () => void;
@@ -56,6 +58,7 @@ const COPY = {
     night: "Dark theme",
     language: "Language",
     langValue: "English",
+    admin: "Data",
     signOut: "Sign out",
     watchlist: "Watchlist",
     alerts: "Alerts",
@@ -78,6 +81,7 @@ const COPY = {
     night: "حالت شب",
     language: "زبان",
     langValue: "فارسی",
+    admin: "داده‌ها",
     signOut: "خروج از حساب",
     watchlist: "دیده‌بان",
     alerts: "هشدارها",
@@ -124,6 +128,7 @@ export function ProfileMenu({
   onCycleLanguage,
   onOpenProfile,
   onOpenSubscription,
+  onOpenAdmin,
   onSignOut,
   alertCount = 0,
   onOpenWatchlist,
@@ -388,6 +393,21 @@ export function ProfileMenu({
           <ChevronRightIcon fontSize="small" sx={{ color: muted, transform: rtl ? "scaleX(-1)" : undefined }} />
         </ListItemButton>
       </List>
+
+      <Divider sx={{ borderColor: border, my: 0.5 }} />
+
+      <ListItemButton
+        onClick={() => {
+          onClose();
+          onOpenAdmin();
+        }}
+        sx={{ py: 1.1, "&:hover": { bgcolor: hover } }}
+      >
+        <ListItemIcon sx={{ minWidth: 40, color: "inherit" }}>
+          <StorageOutlinedIcon fontSize="small" />
+        </ListItemIcon>
+        <ListItemText primary={t.admin} />
+      </ListItemButton>
 
       <Divider sx={{ borderColor: border, my: 0.5 }} />
 

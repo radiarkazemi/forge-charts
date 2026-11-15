@@ -61,7 +61,8 @@ function cfdSeeds(): Seed[] {
  * (Iran gold, XAU, majors, indices) before sparse Yahoo demo equities.
  */
 const SEEDS: readonly Seed[] = [
-  // Iran domestic gold — Faraz (keep legend titles short so OHLC fits)
+  // Iran domestic gold. Titles stay short so OHLC fits.
+  // The live rial print is still the old relay; it is not the price source we keep.
   ["ABSHODE", "آبشده نقدی", "IRAN", "commodity", 0],
   ["G18", "گرم طلا ۱۸", "IRAN", "commodity", 0],
   ["G24", "طلای ۲۴", "IRAN", "commodity", 0],
@@ -268,7 +269,7 @@ function featuredRank(ticker: string): number {
 /** In-memory reference data. Swap for an API-backed repository without touching callers. */
 export class StaticSymbolRepository implements SymbolRepository {
   private readonly symbols: readonly SymbolInfo[];
-  /** Symbols discovered from TSETMC search. Not preloaded — only what the user typed. */
+  /** Tehran names from the cleaned TSETMC board, plus anything typed in search. */
   private readonly dynamic: SymbolInfo[] = [];
 
   constructor(seeds: readonly Seed[] = SEEDS) {

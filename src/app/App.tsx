@@ -29,6 +29,7 @@ import { isDevSite } from "../dev-site";
 import { isPlaceholderAccountName } from "@/features/profile/account-label";
 import { DevLanding } from "@/features/auth/DevLanding";
 import { SubscriptionPage } from "@/features/billing/SubscriptionPage";
+import { AdminPanel } from "@/features/admin/AdminPanel";
 import { ServicesProvider } from "./ServicesProvider";
 
 function buildSessionServices(session: AuthSession): Services {
@@ -339,6 +340,22 @@ export function App() {
       <ThemeProvider theme={gateTheme}>
         <CssBaseline />
       </ThemeProvider>
+    );
+  }
+
+  if (view === "admin" && session && services && bootDone && !needsSafetyBoot) {
+    return (
+      <ServicesProvider services={services}>
+        <AppThemeProvider>
+          <AdminPanel
+            onBack={() => {
+              clearPageView();
+              window.location.hash = "";
+              setView(null);
+            }}
+          />
+        </AppThemeProvider>
+      </ServicesProvider>
     );
   }
 
