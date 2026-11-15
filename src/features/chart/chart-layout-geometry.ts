@@ -1043,12 +1043,20 @@ export function mountFloatingChromePin(container: HTMLElement): () => void {
   let stopped = false;
   let timer = 0;
 
+  const isSearchDialog = (el: HTMLElement): boolean => {
+    const name = (el.getAttribute("data-name") || "").toLowerCase();
+    const dialog = (el.getAttribute("data-dialog-name") || "").toLowerCase();
+    if (name === "globalsearch" || name.includes("quick-search") || name.includes("quicksearch")) return true;
+    return /search tool or function/.test(dialog);
+  };
+
   const isSettingsDialog = (el: HTMLElement): boolean => {
     if (el.getAttribute("role") !== "dialog") return false;
+    if (isSearchDialog(el)) return false;
     const hint = `${el.getAttribute("data-name") ?? ""} ${el.getAttribute("data-dialog-name") ?? ""} ${el.getAttribute("aria-label") ?? ""}`.toLowerCase();
     if (/propert|setting/.test(hint)) return true;
-    const rect = el.getBoundingClientRect();
-    return rect.width >= 260 && rect.height >= 180;
+    const text = (el.innerText || "").slice(0, 600);
+    return /\bInputs\b/.test(text) && /\bStyle\b/.test(text);
   };
 
   const releasePin = (el: HTMLElement) => {
@@ -1060,6 +1068,7 @@ export function mountFloatingChromePin(container: HTMLElement): () => void {
     delete el.dataset.forgePinScroll;
     el.style.removeProperty("--forge-pin-left");
     el.style.removeProperty("--forge-pin-top");
+    el.style.removeProperty("--forge-pin-w");
     el.style.removeProperty("--forge-pin-max-h");
     el.style.removeProperty("--forge-pin-max-w");
   };
@@ -1074,6 +1083,11 @@ export function mountFloatingChromePin(container: HTMLElement): () => void {
   };
 
   const pinElement = (el: HTMLElement, bounds: DOMRect) => {
+    // Quick search is one card. Pinning its inner dialog pulls the field out of the card.
+    if (isSearchDialog(el)) {
+      releasePin(el);
+      return;
+    }
     if (libraryOwnsToolbar(el)) {
       releasePin(el);
       return;
