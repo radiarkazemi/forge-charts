@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Box from "@mui/material/Box";
 import useMediaQuery from "@mui/material/useMediaQuery";
-import { isDevSite } from "@/dev-site";
+import { devLandingUrl, isDevSite } from "@/dev-site";
 import { googleClientId, mountGoogleButton } from "./google-sign-in";
 import { fetchTapeQuotes, placeholderTape, type TapeQuote } from "./login-quotes";
 import { LoginInfoPage, type InfoPageId } from "./login-pages";
@@ -13,7 +13,7 @@ function brandSrc(file: string): string {
 }
 
 function homeHref(): string {
-  return isDevSite() ? "?view=landing" : "https://forgechart.ir/";
+  return isDevSite() ? devLandingUrl() : "https://forgechart.ir/";
 }
 
 interface ForgeLoginPictureProps {
@@ -489,7 +489,7 @@ function ArtCard({
         sx={{ width: "100%", height: "auto", display: "block", pointerEvents: "none", userSelect: "none" }}
       />
       {dev ? (
-        <Box component="a" href="?view=landing" aria-label="Forge" sx={{ position: "absolute", left: "28%", top: "2%", width: "38%", height: "28%" }} />
+        <Box component="a" href={homeHref()} aria-label="Forge" sx={{ position: "absolute", left: "28%", top: "2%", width: "38%", height: "28%" }} />
       ) : null}
       <Box sx={{
         position: "absolute",
