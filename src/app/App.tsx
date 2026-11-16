@@ -25,11 +25,9 @@ import {
 } from "@/features/profile-sync";
 import { AppThemeProvider } from "./AppThemeProvider";
 import { createServices, type Services } from "./container";
-import { isDevSite } from "../dev-site";
+import { devAdminUrl, devLandingUrl, isDevSite } from "../dev-site";
 import { isPlaceholderAccountName } from "@/features/profile/account-label";
-import { DevLanding } from "@/features/auth/DevLanding";
 import { SubscriptionPage } from "@/features/billing/SubscriptionPage";
-import { AdminPanel } from "@/features/admin/AdminPanel";
 import { ServicesProvider } from "./ServicesProvider";
 
 function buildSessionServices(session: AuthSession): Services {
@@ -228,13 +226,8 @@ export function App() {
     servicesRef.current = built;
     setServices(built);
     setNeedsSafetyBoot(false);
-    // Opening the data admin from the dev landing must survive sign-in.
-    if (pageView() === "admin") {
-      setView("admin");
-    } else {
-      clearPageView();
-      setView(null);
-    }
+    clearPageView();
+    setView(null);
     setSession(next);
   }, [auth]);
 
@@ -298,14 +291,10 @@ export function App() {
     window.setTimeout(dropSession, 1200);
   }, [auth, devSite]);
 
-  // Dev home is the landing. The product root stays the chart sign-in.
-  if (devSite && (view === "landing" || (!session && view == null))) {
-    return (
-      <ThemeProvider theme={gateTheme}>
-        <CssBaseline />
-        <DevLanding signedIn={Boolean(session)} />
-      </ThemeProvider>
-    );
+  // The dev landing and admin are the design pages. The product root stays the chart sign-in.
+  if (devSite && (view === "landing" || view === "admin" || (!session && view == null))) {
+    window.location.replace(view === "admin" ? devAdminUrl() : devLandingUrl());
+    return null;
   }
 
   if (view === "subscribe" && !(needsSafetyBoot && session)) {
@@ -351,22 +340,6 @@ export function App() {
       <ThemeProvider theme={gateTheme}>
         <CssBaseline />
       </ThemeProvider>
-    );
-  }
-
-  if (view === "admin" && session && services && bootDone && !needsSafetyBoot) {
-    return (
-      <ServicesProvider services={services}>
-        <AppThemeProvider>
-          <AdminPanel
-            onBack={() => {
-              clearPageView();
-              window.location.hash = "";
-              setView(null);
-            }}
-          />
-        </AppThemeProvider>
-      </ServicesProvider>
     );
   }
 

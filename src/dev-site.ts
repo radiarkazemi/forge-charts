@@ -5,6 +5,25 @@ const PREFIX = "forge.dev.";
  * `/team/` is the same build with the normal login form, so teammates
  * can open it without that password dialog.
  */
+/** `/team` or `/dev`, without a trailing slash. */
+export function devRoot(): string {
+  try {
+    return window.location.pathname.startsWith("/dev") ? "/dev" : "/team";
+  } catch {
+    return "/team";
+  }
+}
+
+/** Exact landing from the Forge design, hosted on the dev site. */
+export function devLandingUrl(): string {
+  return `${devRoot()}/landing/`;
+}
+
+/** Exact admin console from the Forge design, hosted on the dev site. */
+export function devAdminUrl(): string {
+  return `${devRoot()}/landing/admin/#overview`;
+}
+
 export function isDevSite(): boolean {
   try {
     const path = window.location.pathname;
