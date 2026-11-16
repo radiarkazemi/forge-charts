@@ -451,7 +451,11 @@ function hideDuplicateSaveLabel(doc: Document): void {
   const style = doc.createElement("style");
   style.id = "forge-save-label-style";
   style.textContent = `
-    #header-toolbar-save-load [data-forge-save-caption="1"] { display: none !important; }
+    #header-toolbar-save-load { display: inline-flex !important; align-items: center !important; min-width: 104px !important; height: 38px !important; }
+    #header-toolbar-save-load [data-forge-library-label] { display: none !important; }
+    #header-toolbar-save-load [data-forge-layout-label] { display: flex !important; flex-direction: column !important; align-items: flex-start !important; }
+    #header-toolbar-save-load [data-forge-layout-title] { display: block !important; font-size: 14px !important; font-weight: 600 !important; line-height: 16px !important; }
+    #header-toolbar-save-load [data-forge-layout-sub] { display: block !important; font-size: 11px !important; line-height: 14px !important; color: #787b86 !important; }
     .forge-header-action:hover { background: rgba(120, 123, 134, 0.12); }
   `;
   (doc.head || doc.documentElement).appendChild(style);
@@ -494,63 +498,48 @@ function layoutNameOf(widget: IChartingLibraryWidget, handlers: HeaderToolbarHan
   return realProfile || "Layout";
 }
 
-function isSaveCaption(text: string): boolean {
-  return /^(save|saved)$/i.test(text.trim());
+/** TradingView’s button is two lines: the layout name, then Save. */
+function paintLayoutName(doc: Document, name: string): void {
+  const shown = name.trim() && !isGenericLayoutName(name) ? name.trim() : "Layout";
+  for (const button of doc.querySelectorAll<HTMLElement>("#header-toolbar-save-load")) {
+    const host = button.querySelector<HTMLElement>(".js-button-text") ?? button;
+    for (const child of [...host.children]) {
+      if (child.hasAttribute("data-forge-layout-label")) continue;
+      child.setAttribute("data-forge-library-label", "1");
+    }
+    let label = host.querySelector<HTMLElement>("[data-forge-layout-label]");
+    if (!label) {
+      label = doc.createElement("span");
+      label.setAttribute("data-forge-layout-label", "1");
+      const title = doc.createElement("span");
+      title.setAttribute("data-forge-layout-title", "1");
+      const sub = doc.createElement("span");
+      sub.setAttribute("data-forge-layout-sub", "1");
+      sub.textContent = "Save";
+      label.append(title, sub);
+      host.appendChild(label);
+    }
+    const title = label.querySelector<HTMLElement>("[data-forge-layout-title]");
+    if (title && title.textContent !== shown) title.textContent = shown;
+  }
 }
 
-/** The library paints “Save” under the layout name. Keep the name, hide only that word. */
 function watchLayoutLabel(
   doc: Document,
   widget: IChartingLibraryWidget,
   handlers: HeaderToolbarHandlers,
 ): void {
-  const apply = (name: string) => {
-    const label = name.trim();
-    const real = label && !isGenericLayoutName(label) ? label : "";
-    for (const button of doc.querySelectorAll<HTMLElement>("#header-toolbar-save-load")) {
-      for (const node of button.querySelectorAll<HTMLElement>("[class*='saveString']")) {
-        node.style.removeProperty("display");
-      }
-      const leaves = [...button.querySelectorAll<HTMLElement>("span, div")].filter(
-        (node) => node.childElementCount === 0 && !node.hasAttribute("data-forge-layout-name"),
-      );
-      let libraryName = "";
-      for (const node of leaves) {
-        const text = (node.textContent || "").trim();
-        if (isSaveCaption(text)) {
-          node.setAttribute("data-forge-save-caption", "1");
-          continue;
-        }
-        if (text) libraryName = text;
-      }
-      const host = button.querySelector<HTMLElement>(".js-button-text") ?? button;
-      const existing = host.querySelector<HTMLElement>("[data-forge-layout-name]");
-      if (!real || libraryName === real) {
-        existing?.remove();
-        continue;
-      }
-      let nameEl = existing;
-      if (!nameEl) {
-        nameEl = doc.createElement("div");
-        nameEl.setAttribute("data-forge-layout-name", "1");
-        nameEl.style.lineHeight = "16px";
-        nameEl.style.fontWeight = "600";
-        host.prepend(nameEl);
-      }
-      if (nameEl.textContent !== real) nameEl.textContent = real;
-    }
-  };
   const refresh = () => {
     const direct = layoutNameOf(widget, handlers);
     if (direct && !isGenericLayoutName(direct)) {
-      apply(direct);
+      paintLayoutName(doc, direct);
       return;
     }
     void handlers.getSavedLayouts?.().then((rows) => {
       const named = rows
         .filter((row) => !isGenericLayoutName(row.name))
         .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
-      apply(named[0]?.name || direct);
+      paintLayoutName(doc, named[0]?.name || direct);
     });
   };
   refresh();
@@ -558,11 +547,18 @@ function watchLayoutLabel(
   const buttons = [...doc.querySelectorAll("#header-toolbar-save-load")];
   if (!buttons.length) return;
   doc.documentElement.setAttribute("data-forge-layout-label", "1");
+  let painting = false;
+  const observed = () => {
+    if (painting) return;
+    painting = true;
+    refresh();
+    painting = false;
+  };
   for (const button of buttons) {
-    new MutationObserver(() => refresh()).observe(button, { subtree: true, characterData: true, childList: true });
+    new MutationObserver(observed).observe(button, { subtree: true, childList: true });
   }
-  window.setTimeout(refresh, 600);
-  window.setTimeout(refresh, 1800);
+  window.setTimeout(refresh, 400);
+  window.setTimeout(refresh, 1400);
 }
 
 function mountSaveMenu(doc: Document, widget: IChartingLibraryWidget, handlers: HeaderToolbarHandlers): void {
@@ -601,6 +597,7 @@ function mountSaveMenu(doc: Document, widget: IChartingLibraryWidget, handlers: 
       return;
     }
     const autosave = handlers.isAutosaveOn?.() !== false;
+    const layoutTitle = layoutNameOf(widget, handlers);
     void handlers.getSavedLayouts?.().then((rows) => {
       if (!menu || mode !== "list") return;
       const named = rows.filter((row) => !isGenericLayoutName(row.name));
@@ -615,8 +612,12 @@ function mountSaveMenu(doc: Document, widget: IChartingLibraryWidget, handlers: 
         .join("");
       const list = menu.querySelector(".fsm-recent-slot");
       if (list) list.innerHTML = recent || `<div class="fsm-empty">No saved layouts yet</div>`;
+      const title = menu.querySelector(".fsm-name strong");
+      const best = named[0]?.name?.trim();
+      if (title && best && isGenericLayoutName(layoutTitle)) title.textContent = best;
     });
     menu.innerHTML = `
+      <div class="fsm-name"><strong>${layoutTitle.replace(/[&<>]/g, (ch) => (ch === "&" ? "&amp;" : ch === "<" ? "&lt;" : "&gt;"))}</strong><span>Save</span></div>
       <button type="button" class="fsm-item" data-act="save"><span>Save layout</span><kbd>Ctrl + S</kbd></button>
       <div class="fsm-item"><span>Autosave</span><button type="button" class="fsm-switch${autosave ? " is-on" : ""}" data-act="autosave" aria-label="Autosave"></button></div>
       <div class="fsm-item"><span>Share layout</span><button type="button" class="fsm-switch" data-act="share" aria-label="Share layout" disabled></button></div>
@@ -872,19 +873,25 @@ function ensureMenuStyles(doc: Document): void {
   style.id = "forge-header-menu-style";
   style.textContent = `
     .forge-save-menu, .forge-ind-menu, .forge-layout-menu {
-      position: fixed; z-index: 2147483646; min-width: 280px; max-width: 360px;
+      position: fixed; z-index: 2147483646;
       background: #fff; color: #131722; border: 1px solid #e0e3eb; border-radius: 6px;
       box-shadow: 0 8px 28px rgba(0,0,0,0.28); padding: 6px 0;
       font-family: -apple-system, BlinkMacSystemFont, Trebuchet MS, Roboto, Ubuntu, sans-serif;
-      font-size: 14px; box-sizing: border-box; overflow: hidden;
+      font-size: 14px; box-sizing: border-box;
     }
+    .forge-save-menu { width: 292px; }
+    .forge-layout-menu { width: 312px; padding-top: 8px; }
+    .forge-ind-menu { min-width: 280px; max-width: 360px; }
     .forge-save-menu.is-dark, .forge-ind-menu.is-dark, .forge-layout-menu.is-dark { background: #1e222d; color: #d1d4dc; border-color: #434651; }
-    .flm-grid { display: grid; grid-template-columns: repeat(5, 32px); gap: 4px; padding: 8px 12px 4px; }
+    .fsm-name { display: flex; flex-direction: column; gap: 2px; padding: 8px 16px 10px; border-bottom: 1px solid rgba(120,123,134,0.28); }
+    .fsm-name strong { font-size: 14px; font-weight: 600; line-height: 18px; }
+    .fsm-name span { font-size: 12px; color: #787b86; }
+    .flm-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; padding: 4px 12px 10px; }
     .flm-cell {
-      width: 32px; height: 32px; border: 0; border-radius: 4px; padding: 0; cursor: pointer;
-      background: transparent; color: inherit;
+      width: 100%; height: 44px; border: 0; border-radius: 4px; padding: 0; cursor: pointer;
+      background: transparent; color: inherit; display: grid; place-items: center;
     }
-    .flm-cell svg { width: 28px; height: 28px; display: block; margin: 2px; }
+    .flm-cell svg { width: 28px; height: 28px; display: block; }
     .flm-cell.is-on, .flm-cell:hover { background: rgba(41, 98, 255, 0.16); color: #2962ff; }
     .fsm-item, .fim-row, .fsm-recent {
       width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px;

@@ -349,7 +349,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
     ? "/charts/tv-header-mobile.css?v=19"
     : hideHeader
       ? "/charts/tv-header-secondary.css?v=9"
-      : "/charts/tv-header.css?v=9";
+      : "/charts/tv-header.css?v=10";
 
   return {
     container: input.container,
