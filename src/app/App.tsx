@@ -228,8 +228,13 @@ export function App() {
     servicesRef.current = built;
     setServices(built);
     setNeedsSafetyBoot(false);
-    clearPageView();
-    setView(null);
+    // Opening the data admin from the dev landing must survive sign-in.
+    if (pageView() === "admin") {
+      setView("admin");
+    } else {
+      clearPageView();
+      setView(null);
+    }
     setSession(next);
   }, [auth]);
 
@@ -293,8 +298,14 @@ export function App() {
     window.setTimeout(dropSession, 1200);
   }, [auth, devSite]);
 
-  if (devSite && view === "landing") {
-    return <DevLanding signedIn={Boolean(session && services)} />;
+  // Dev home is the landing. The product root stays the chart sign-in.
+  if (devSite && (view === "landing" || (!session && view == null))) {
+    return (
+      <ThemeProvider theme={gateTheme}>
+        <CssBaseline />
+        <DevLanding signedIn={Boolean(session)} />
+      </ThemeProvider>
+    );
   }
 
   if (view === "subscribe" && !(needsSafetyBoot && session)) {
