@@ -379,6 +379,64 @@ async function fetchBrokerMinutes(apiSymbol: string, fromSec: number, toSec: num
     .sort((a, b) => a.time - b.time);
 }
 
+/**
+ * Stored candles whose ranges do not meet. The broker printed the prices in
+ * between; the live writer dropped them, so the chart shows a gap.
+ */
+export function brokerGapWindows(bars: readonly Bar[], stepSec: number): Array<[number, number]> {
+  if (bars.length < 2 || stepSec <= 0 || stepSec >= 86_400) return [];
+  const windows: Array<[number, number]> = [];
+  for (let i = 1; i < bars.length; i += 1) {
+    const prev = bars[i - 1]!;
+    const next = bars[i]!;
+    const dt = next.time - prev.time;
+    // Weekend and the 17:00 New York pause are real closes. Leave those.
+    if (dt <= 0 || dt >= 12 * 3_600) continue;
+    if (dt <= 90 * 60 && isFxDailyBreak(prev.time + Math.floor(dt / 2))) continue;
+    const scale = Math.max(Math.abs(prev.close), Math.abs(next.close), 1);
+    const eps = scale * 1e-8;
+    const disjoint = next.low > prev.high + eps || prev.low > next.high + eps;
+    if (!disjoint) continue;
+    const from = bars[Math.max(0, i - 2)]!.time;
+    const to = bars[Math.min(bars.length - 1, i + 1)]!.time + stepSec;
+    const last = windows[windows.length - 1];
+    if (last && from <= last[1] + 6 * 3_600) last[1] = Math.max(last[1], to);
+    else windows.push([from, to]);
+  }
+  return windows.slice(-6);
+}
+
+/**
+ * Copy the broker candle onto a stored candle that left a price gap.
+ * High and low keep whichever print went further. Open and close follow the broker.
+ * Times the store never had are not added here.
+ */
+export function overlayBrokerCandles(
+  primary: readonly Bar[],
+  broker: readonly Bar[],
+  fromSec: number,
+  toSec: number,
+): Bar[] {
+  if (broker.length === 0) return [...primary];
+  const byTime = new Map<number, Bar>();
+  for (const bar of broker) {
+    if (bar.time >= fromSec && bar.time < toSec) byTime.set(bar.time, bar);
+  }
+  if (byTime.size === 0) return [...primary];
+  return primary.map((bar) => {
+    const src = byTime.get(bar.time);
+    if (!src) return bar;
+    return {
+      time: bar.time,
+      open: src.open,
+      high: Math.max(bar.high, src.high),
+      low: Math.min(bar.low, src.low),
+      close: src.close,
+      volume: bar.volume > 0 ? bar.volume : src.volume,
+    };
+  });
+}
+
 /** Copy broker candles into Mongo holes. Stored prices stay as they are. */
 async function spliceBrokerHoles(apiSymbol: string, bars: Bar[], stepSec: number): Promise<Bar[]> {
   if (!hasMidSessionHoles(bars, stepSec)) return bars;
@@ -397,6 +455,23 @@ async function spliceBrokerHoles(apiSymbol: string, bars: Bar[], stepSec: number
   } catch {
     return bars;
   }
+}
+
+/** Replace gapped candles with the broker's own range so the chart meets where the broker meets. */
+async function repairBrokerPriceGaps(apiSymbol: string, bars: Bar[], stepSec: number): Promise<Bar[]> {
+  const windows = brokerGapWindows(bars, stepSec);
+  if (!windows.length) return bars;
+  let out = bars;
+  for (const [from, to] of windows) {
+    try {
+      let fill = await fetchBrokerMinutes(apiSymbol, from, to);
+      if (stepSec > 60) fill = aggregateBars(fill, stepSec);
+      out = overlayBrokerCandles(out, fill, from, to);
+    } catch {
+      /* keep the stored candles */
+    }
+  }
+  return out;
 }
 
 function mergeBarsPreferPrimary(primary: readonly Bar[], fill: readonly Bar[]): Bar[] {
@@ -693,6 +768,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
       }
       if ((route.kind === "metal" || route.kind === "forex") && bars.length) {
         bars = await spliceBrokerHoles(route.apiSymbol, bars, step);
+        bars = await repairBrokerPriceGaps(route.apiSymbol, bars, step);
       }
       if (!bars.length) {
         // Forex routes are Mongo-only — Germany `/ohlc/` 502s for EURUSD etc.
@@ -1301,6 +1377,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
     }
     if ((route.kind === "metal" || route.kind === "forex") && parents.length) {
       parents = await spliceBrokerHoles(route.apiSymbol, parents, 60);
+      parents = await repairBrokerPriceGaps(route.apiSymbol, parents, 60);
     }
     if (!parents.length) throw new Error(`germany-market: no 1m parents for ${route.apiSymbol}`);
     const bars = synthesizeFromMinuteBars(parents, step);
