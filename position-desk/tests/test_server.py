@@ -13,6 +13,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 TMP = tempfile.mkdtemp()
 os.environ["FORGE_SEAT_TOKEN"] = "test-token"
 os.environ["FORGE_SEAT_STATE"] = os.path.join(TMP, "state.json")
+os.environ["FORGE_SEAT_BOOTSTRAP"] = os.path.join(TMP, "bootstrap")
+os.makedirs(os.environ["FORGE_SEAT_BOOTSTRAP"], exist_ok=True)
 
 import server  # noqa: E402
 from tests.test_engine import swing_book
@@ -68,6 +70,22 @@ class ServerTests(unittest.TestCase):
         self.assertTrue(desk["connected"])
         page = urllib.request.urlopen(f"http://127.0.0.1:{self.port}/", timeout=5)
         self.assertIn(b"Forge Seat", page.read())
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/Start-ForgeSeat.cmd", timeout=5) as response:
+            launcher = response.read()
+            self.assertIn("Start-ForgeSeat.cmd", response.headers.get("Content-Disposition", ""))
+        self.assertIn(b"Market Watch", launcher)
+        self.assertNotIn(b"GcOy", launcher)
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{self.port}/bootstrap/python-setup.exe", timeout=5)
+        except urllib.error.HTTPError as exc:
+            self.assertEqual(exc.code, 404)
+        else:
+            self.fail("missing installer was served")
+        installer = os.path.join(os.environ["FORGE_SEAT_BOOTSTRAP"], "python-setup.exe")
+        with open(installer, "wb") as handle:
+            handle.write(b"MZ-test")
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/bootstrap/python-setup.exe", timeout=5) as response:
+            self.assertEqual(response.read(), b"MZ-test")
         try:
             self.request("/api/desk?symbol=XAUUSD", token="nope")
         except urllib.error.HTTPError as exc:

@@ -24,14 +24,23 @@ There is also `bridge/ForgeSeatExport.mq5` if you would rather attach an EA. Add
 
 ## Run the bridge
 
-On the PC where MT5 is logged in:
+On the Windows PC where MT5 is logged in, double-click `bridge/Start-ForgeSeat.cmd`.
+The first run downloads a private Python and the MetaTrader connector from the desk,
+asks for the desk token once, then asks for the Market Watch symbols once
+(`XAUUSD,EURUSD`). Leave MetaTrader open and leave the command window open.
+The desk marks the feed stale after 20 seconds of silence.
+
+The same file is served at `/Start-ForgeSeat.cmd` on the desk host. The Windows
+installers it downloads are `GET /bootstrap/python-setup.exe`, `/bootstrap/numpy.whl`,
+and `/bootstrap/MetaTrader5.whl` (placed in `FORGE_SEAT_BOOTSTRAP`, default
+`/var/lib/forge-seat/bootstrap`).
+
+A manual run, if Python is already installed:
 
 ```bash
 py -3 -m pip install MetaTrader5
 py -3 mt5_bridge.py --url http://SERVER:8096 --token YOUR_TOKEN --symbols XAUUSD,EURUSD
 ```
-
-Symbol names must match Market Watch. Leave both the terminal and this process running. The desk marks the feed stale after 20 seconds of silence.
 
 ## Read the page
 

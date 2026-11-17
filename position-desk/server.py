@@ -24,6 +24,8 @@ TOKEN = os.environ.get("FORGE_SEAT_TOKEN", "").strip()
 PORT = int(os.environ.get("FORGE_SEAT_PORT", "8096"))
 STATE_PATH = os.environ.get("FORGE_SEAT_STATE", os.path.join(os.path.dirname(__file__), "data", "state.json"))
 WEB_ROOT = os.path.join(os.path.dirname(__file__), "web")
+BRIDGE_ROOT = os.path.join(os.path.dirname(__file__), "bridge")
+BOOTSTRAP_ROOT = os.environ.get("FORGE_SEAT_BOOTSTRAP", "/var/lib/forge-seat/bootstrap")
 MAX_BODY = 3_000_000
 
 FILES = {
@@ -177,16 +179,41 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         return
 
-    def _send(self, status: int, body: bytes, content_type: str) -> None:
+    def _headers(self, status: int, content_type: str, length: int, *, download_name: str | None = None) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(length))
+        if download_name:
+            self.send_header("Content-Disposition", f'attachment; filename="{download_name}"')
+            self.send_header("Cache-Control", "public, max-age=3600")
+        else:
+            self.send_header("Cache-Control", "no-store")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.end_headers()
+
+    def _send(self, status: int, body: bytes, content_type: str) -> None:
+        self._headers(status, content_type, len(body))
         self.wfile.write(body)
+
+    def _send_path(self, path: str, content_type: str, download_name: str | None = None) -> None:
+        try:
+            size = os.path.getsize(path)
+            handle = open(path, "rb")
+        except OSError:
+            self._json(404, {"error": "missing file"})
+            return
+        self._headers(200, content_type, size, download_name=download_name)
+        with handle:
+            while True:
+                chunk = handle.read(64 * 1024)
+                if not chunk:
+                    break
+                try:
+                    self.wfile.write(chunk)
+                except (BrokenPipeError, ConnectionResetError):
+                    break
 
     def _json(self, status: int, payload: dict) -> None:
         self._send(status, json.dumps(payload).encode("utf-8"), "application/json; charset=utf-8")
@@ -225,18 +252,23 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, _desk(symbol))
             return
         item = FILES.get(parsed.path)
-        if item is None:
+        if item is not None:
+            name, content_type = item
+            self._send_path(os.path.join(WEB_ROOT, name), content_type)
+            return
+        downloads = {
+            "/Start-ForgeSeat.cmd": (os.path.join(BRIDGE_ROOT, "Start-ForgeSeat.cmd"), "application/octet-stream", "Start-ForgeSeat.cmd"),
+            "/bridge/mt5_bridge.py": (os.path.join(BRIDGE_ROOT, "mt5_bridge.py"), "text/plain; charset=utf-8", None),
+            "/bootstrap/python-setup.exe": (os.path.join(BOOTSTRAP_ROOT, "python-setup.exe"), "application/octet-stream", "python-setup.exe"),
+            "/bootstrap/numpy.whl": (os.path.join(BOOTSTRAP_ROOT, "numpy.whl"), "application/octet-stream", "numpy.whl"),
+            "/bootstrap/MetaTrader5.whl": (os.path.join(BOOTSTRAP_ROOT, "MetaTrader5.whl"), "application/octet-stream", "MetaTrader5.whl"),
+        }
+        download = downloads.get(parsed.path)
+        if download is None:
             self._json(404, {"error": "not found"})
             return
-        name, content_type = item
-        path = os.path.join(WEB_ROOT, name)
-        try:
-            with open(path, "rb") as handle:
-                body = handle.read()
-        except OSError:
-            self._json(404, {"error": "missing file"})
-            return
-        self._send(200, body, content_type)
+        path, content_type, download_name = download
+        self._send_path(path, content_type, download_name)
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
