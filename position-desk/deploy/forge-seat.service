@@ -1,0 +1,14 @@
+[Unit]
+Description=Forge Seat MT5 location desk
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/forge-seat
+EnvironmentFile=/etc/forge-seat.env
+ExecStart=/usr/bin/python3 /opt/forge-seat/server.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

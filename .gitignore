@@ -13,3 +13,5 @@ indicators/.trh-secrets.json
 
 public/charting_library/
 deploy/vps/__pycache__/
+position-desk/data/
+**/__pycache__/

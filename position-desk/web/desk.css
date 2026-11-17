@@ -1,0 +1,133 @@
+:root {
+  color-scheme: dark;
+  --bg: #12140f;
+  --bg-2: #1b1e16;
+  --ink: #f3f1e6;
+  --muted: #b7b39f;
+  --line: #34382c;
+  --good: #c6f27a;
+  --bad: #ff8d7a;
+  --warn: #f0c36a;
+  --flat: #d9d4c4;
+  --accent: #e4ff6a;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(900px 280px at 10% -10%, rgba(228, 255, 106, 0.08), transparent 60%),
+    var(--bg);
+  color: var(--ink);
+  font: 15px/1.45 "Segoe UI", "Helvetica Neue", sans-serif;
+}
+
+.top {
+  display: flex;
+  gap: 16px;
+  align-items: end;
+  flex-wrap: wrap;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: rgba(18, 20, 15, 0.94);
+  backdrop-filter: blur(8px);
+}
+
+.brand { display: flex; gap: 10px; align-items: center; margin-right: auto; }
+.brand strong { display: block; letter-spacing: 0.04em; }
+.brand small { color: var(--muted); }
+.mark {
+  width: 14px;
+  height: 28px;
+  background: var(--accent);
+  clip-path: polygon(0 0, 100% 18%, 100% 100%, 0 82%);
+}
+
+label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
+input, select, button {
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+button { cursor: pointer; }
+button:hover { border-color: var(--accent); }
+
+.feed, time {
+  font-variant-numeric: tabular-nums;
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.feed.live { color: var(--good); border-color: #4d5c28; }
+.feed.stale { color: var(--warn); }
+
+main {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 18px;
+  padding: 18px 22px 32px;
+}
+
+.ticket, .board {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.lede { color: var(--muted); margin-top: 0; }
+.sides { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.sides button.on[data-side="long"] { background: #243016; color: var(--good); }
+.sides button.on[data-side="short"] { background: #3a221c; color: var(--bad); }
+.sides button.on[data-side="flat"] { background: #2a2b24; color: var(--flat); }
+.ticket label { margin-bottom: 10px; }
+.ticket input { width: 100%; }
+#save { width: 100%; background: var(--accent); color: #1a1c12; font-weight: 700; border: 0; }
+.error { color: var(--bad); }
+
+.banner { border-radius: 12px; padding: 16px 16px 12px; background: #23261c; }
+.banner.good { background: #1d2914; }
+.banner.bad { background: #321c18; }
+.banner.warn { background: #332914; }
+.kicker { margin: 0; letter-spacing: 0.14em; text-transform: uppercase; font-size: 12px; color: var(--muted); }
+h1 { margin: 4px 0 8px; font-size: 34px; line-height: 1.05; letter-spacing: -0.03em; }
+#summary { margin: 0; color: var(--flat); max-width: 70ch; }
+
+.score-row { display: flex; gap: 12px; align-items: center; margin-top: 14px; }
+#score { font: 700 28px/1 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; min-width: 2ch; }
+.track { flex: 1; height: 8px; background: #11130e; border-radius: 99px; overflow: hidden; }
+#score-bar { height: 100%; width: 0; background: var(--accent); }
+#scores { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.split { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 18px; margin-top: 16px; }
+h2 { margin: 0 0 8px; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+#reasons { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+#reasons li { padding: 8px 10px; border-left: 3px solid var(--line); background: #15170f; }
+#reasons li.good { border-color: var(--good); }
+#reasons li.bad { border-color: var(--bad); }
+#reasons li.neutral { border-color: var(--warn); }
+
+dl { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; margin: 0; }
+dt { color: var(--muted); }
+dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+
+canvas {
+  width: 100%;
+  height: 160px;
+  margin-top: 16px;
+  background: #10120c;
+  border-radius: 12px;
+}
+
+@media (max-width: 900px) {
+  main, .split { grid-template-columns: 1fr; }
+  h1 { font-size: 28px; }
+}
