@@ -28,16 +28,20 @@ if not exist "%PY%" (
 "%PY%" -m pip --version >nul 2>&1
 if errorlevel 1 "%PY%" -m ensurepip --upgrade >nul 2>&1
 
-if exist "%ROOT%\numpy.whl" if exist "%ROOT%\MetaTrader5.whl" goto havewheels
-call :download "%DESK%/bootstrap/numpy.whl" "%ROOT%\numpy.whl"
+set "NUMPY=numpy-2.5.5-cp312-cp312-win_amd64.whl"
+set "MT5W=metatrader5-5.0.6231-cp312-cp312-win_amd64.whl"
+if exist "%ROOT%\numpy.whl" if not exist "%ROOT%\%NUMPY%" ren "%ROOT%\numpy.whl" "%NUMPY%"
+if exist "%ROOT%\MetaTrader5.whl" if not exist "%ROOT%\%MT5W%" ren "%ROOT%\MetaTrader5.whl" "%MT5W%"
+if exist "%ROOT%\%NUMPY%" if exist "%ROOT%\%MT5W%" goto havewheels
+call :download "%DESK%/bootstrap/%NUMPY%" "%ROOT%\%NUMPY%"
 if errorlevel 1 goto fail
-call :download "%DESK%/bootstrap/MetaTrader5.whl" "%ROOT%\MetaTrader5.whl"
+call :download "%DESK%/bootstrap/%MT5W%" "%ROOT%\%MT5W%"
 if errorlevel 1 goto fail
 :havewheels
 echo Checking the MetaTrader connector...
 "%PY%" -c "import MetaTrader5" >nul 2>&1
 if not errorlevel 1 goto havemt5
-"%PY%" -m pip install --disable-pip-version-check --no-warn-script-location --no-index --find-links "%ROOT%" numpy MetaTrader5
+"%PY%" -m pip install --disable-pip-version-check --no-warn-script-location "%ROOT%\%NUMPY%" "%ROOT%\%MT5W%"
 if errorlevel 1 goto fail
 :havemt5
 

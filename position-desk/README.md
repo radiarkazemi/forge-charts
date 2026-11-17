@@ -31,9 +31,10 @@ asks for the desk token once, then asks for the Market Watch symbols once
 The desk marks the feed stale after 20 seconds of silence.
 
 The same file is served at `/Start-ForgeSeat.cmd` on the desk host. The Windows
-installers it downloads are `GET /bootstrap/python-setup.exe`, `/bootstrap/numpy.whl`,
-and `/bootstrap/MetaTrader5.whl` (placed in `FORGE_SEAT_BOOTSTRAP`, default
-`/var/lib/forge-seat/bootstrap`).
+files it downloads live in `FORGE_SEAT_BOOTSTRAP` (default `/var/lib/forge-seat/bootstrap`):
+`python-setup.exe`, `numpy-2.5.5-cp312-cp312-win_amd64.whl`, and
+`metatrader5-5.0.6231-cp312-cp312-win_amd64.whl`. Pip ignores a wheel whose
+filename was shortened, so those full names have to stay intact.
 
 A manual run, if Python is already installed:
 

@@ -260,8 +260,16 @@ class Handler(BaseHTTPRequestHandler):
             "/Start-ForgeSeat.cmd": (os.path.join(BRIDGE_ROOT, "Start-ForgeSeat.cmd"), "application/octet-stream", "Start-ForgeSeat.cmd"),
             "/bridge/mt5_bridge.py": (os.path.join(BRIDGE_ROOT, "mt5_bridge.py"), "text/plain; charset=utf-8", None),
             "/bootstrap/python-setup.exe": (os.path.join(BOOTSTRAP_ROOT, "python-setup.exe"), "application/octet-stream", "python-setup.exe"),
-            "/bootstrap/numpy.whl": (os.path.join(BOOTSTRAP_ROOT, "numpy.whl"), "application/octet-stream", "numpy.whl"),
-            "/bootstrap/MetaTrader5.whl": (os.path.join(BOOTSTRAP_ROOT, "MetaTrader5.whl"), "application/octet-stream", "MetaTrader5.whl"),
+            "/bootstrap/numpy-2.5.5-cp312-cp312-win_amd64.whl": (
+                os.path.join(BOOTSTRAP_ROOT, "numpy-2.5.5-cp312-cp312-win_amd64.whl"),
+                "application/octet-stream",
+                "numpy-2.5.5-cp312-cp312-win_amd64.whl",
+            ),
+            "/bootstrap/metatrader5-5.0.6231-cp312-cp312-win_amd64.whl": (
+                os.path.join(BOOTSTRAP_ROOT, "metatrader5-5.0.6231-cp312-cp312-win_amd64.whl"),
+                "application/octet-stream",
+                "metatrader5-5.0.6231-cp312-cp312-win_amd64.whl",
+            ),
         }
         download = downloads.get(parsed.path)
         if download is None:

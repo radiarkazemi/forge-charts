@@ -74,6 +74,8 @@ class ServerTests(unittest.TestCase):
             launcher = response.read()
             self.assertIn("Start-ForgeSeat.cmd", response.headers.get("Content-Disposition", ""))
         self.assertIn(b"Market Watch", launcher)
+        self.assertIn(b"numpy-2.5.5-cp312-cp312-win_amd64.whl", launcher)
+        self.assertNotIn(b"find-links", launcher)
         self.assertNotIn(b"GcOy", launcher)
         try:
             urllib.request.urlopen(f"http://127.0.0.1:{self.port}/bootstrap/python-setup.exe", timeout=5)
