@@ -3301,6 +3301,29 @@ def _ws_origin_allowed(origin: str | None, request_host: str | None) -> bool:
     return bool(request_host) and host == _browser_host(request_host)
 
 
+def _client_ip(request: web.Request) -> str:
+    forwarded = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+    return forwarded or request.remote or "0.0.0.0"
+
+
+_TV_HIST_SEM = asyncio.Semaphore(int(os.environ.get("TV_HISTORY_CONCURRENCY", "2")))
+_TV_HIST_TTL = float(os.environ.get("TV_HISTORY_CACHE_TTL", "25"))
+_TV_HIST_CACHE: dict[tuple[str, str, int, int], tuple[float, list]] = {}
+_TV_HIST_IP: dict[str, list[float]] = {}
+_WS_MAX_CHANNELS = int(os.environ.get("MARKET_TICKS_MAX_CHANNELS", "24"))
+
+
+def _ip_burst_ok(bucket: dict[str, list[float]], ip: str, window: float, burst: int) -> bool:
+    now = time.monotonic()
+    recent = [stamp for stamp in bucket.get(ip, []) if now - stamp < window]
+    if len(recent) >= burst:
+        bucket[ip] = recent
+        return False
+    recent.append(now)
+    bucket[ip] = recent[-burst * 2 :]
+    return True
+
+
 async def ws_handler(request: web.Request) -> web.WebSocketResponse:
     if not _ws_origin_allowed(request.headers.get("Origin"), request.headers.get("Host")):
         raise web.HTTPForbidden(text="origin not allowed")
@@ -3319,6 +3342,8 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                 continue
             channel = normalize_channel(str(payload.get("channel") or ""))
             if not channel:
+                continue
+            if len(subscribed) >= _WS_MAX_CHANNELS:
                 continue
             async with LOCK:
                 SUBS.setdefault(channel, set()).add(ws)
@@ -3515,14 +3540,35 @@ async def tv_history(request: web.Request) -> web.Response:
         count = int(request.query.get("count") or 500)
     except ValueError:
         count = 500
+    count = max(1, min(count, 2_000))
     before_raw = request.query.get("before")
     before = float(before_raw) if before_raw not in (None, "") else None
+    ip = _client_ip(request)
+    if not _ip_burst_ok(_TV_HIST_IP, ip, 2.0, 6):
+        return web.json_response({"detail": "too many history requests", "bars": []}, status=429)
 
-    try:
-        bars = await fetch_tv_history_bars(symbol, resolution, count, before=before)
-    except Exception as exc:
-        LOG.warning("tv-history %s %s: %s", symbol, resolution, exc)
-        return web.json_response({"detail": str(exc), "symbol": symbol, "bars": []}, status=502)
+    cache_key = (symbol, resolution, count, int((before or 0) // 60))
+    now = time.monotonic()
+    cached = _TV_HIST_CACHE.get(cache_key)
+    if cached and now - cached[0] < _TV_HIST_TTL:
+        bars = cached[1]
+    else:
+        try:
+            await asyncio.wait_for(_TV_HIST_SEM.acquire(), timeout=8)
+        except asyncio.TimeoutError:
+            return web.json_response({"detail": "history busy", "symbol": symbol, "bars": []}, status=503)
+        try:
+            bars = await fetch_tv_history_bars(symbol, resolution, count, before=before)
+            _TV_HIST_CACHE[cache_key] = (time.monotonic(), bars)
+            if len(_TV_HIST_CACHE) > 80:
+                oldest = sorted(_TV_HIST_CACHE.items(), key=lambda item: item[1][0])[:40]
+                for key, _ in oldest:
+                    _TV_HIST_CACHE.pop(key, None)
+        except Exception as exc:
+            LOG.warning("tv-history %s %s: %s", symbol, resolution, exc)
+            return web.json_response({"detail": str(exc), "symbol": symbol, "bars": []}, status=502)
+        finally:
+            _TV_HIST_SEM.release()
 
     return web.json_response(
         {
