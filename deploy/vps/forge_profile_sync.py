@@ -32,6 +32,10 @@ PORT = int(os.environ.get("FORGE_PROFILE_PORT", "8010"))
 MAX_PAYLOAD_BYTES = int(os.environ.get("FORGE_PROFILE_MAX_BYTES", str(8 * 1024 * 1024)))
 
 _client: MongoClient | None = None
+# An open chart used to download the whole layout every 1.5s. Serve the blob
+# at most this often per account; the timestamp check is always allowed.
+_FULL_MIN_SEC = 15.0
+_last_full: dict[str, float] = {}
 
 
 def coll():
@@ -81,9 +85,19 @@ async def get_profile(request: web.Request) -> web.Response:
     # Only the matching accountKey document is returned — never another profile.
     if str(doc.get("_id") or "").lower() != account_key:
         return web.json_response({"error": "forbidden"}, status=403)
+    updated_at = int(doc.get("updatedAt") or 0)
+    # The open chart asks this often. meta=1 is the timestamp only, so a quiet
+    # account does not ship the whole layout blob on every check.
+    if (request.rel_url.query.get("meta") or "") == "1":
+        return web.json_response({"updatedAt": updated_at, "accountKey": account_key})
+    now_mono = time.monotonic()
+    last_full = _last_full.get(account_key, 0.0)
+    if now_mono - last_full < _FULL_MIN_SEC:
+        return web.json_response({"updatedAt": updated_at, "payload": None, "accountKey": account_key})
+    _last_full[account_key] = now_mono
     return web.json_response(
         {
-            "updatedAt": int(doc.get("updatedAt") or 0),
+            "updatedAt": updated_at,
             "payload": doc.get("payload"),
             "accountKey": account_key,
         }

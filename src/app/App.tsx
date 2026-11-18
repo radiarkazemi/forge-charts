@@ -196,7 +196,9 @@ export function App() {
       if (document.visibilityState === "visible") void pull();
     };
     document.addEventListener("visibilitychange", onVisible);
-    const timer = window.setInterval(() => void pull(), 1_500);
+    // The full profile is the saved chart. A timestamp check every 20s is enough
+    // for another device; polling the blob every 1.5s was starving the live candles.
+    const timer = window.setInterval(() => void pull(), 20_000);
     void pull();
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
