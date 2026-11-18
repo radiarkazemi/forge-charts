@@ -138,6 +138,15 @@ export function AppsRailIcon(props: SvgIconProps) {
   );
 }
 
+export function SeatRailIcon(props: SvgIconProps) {
+  return (
+    <SvgIcon {...props} viewBox="0 0 28 28" inheritViewBox>
+      <path {...stroke} d="M8 18.5h12M9.5 18.5V12a4.5 4.5 0 0 1 9 0v6.5" />
+      <path {...stroke} d="M11 12.5h6" />
+    </SvgIcon>
+  );
+}
+
 export function HelpRailIcon(props: SvgIconProps) {
   return (
     <SvgIcon {...props} viewBox="0 0 28 28" inheritViewBox>

@@ -294,6 +294,7 @@ export function MobileBottomBar({
           {(
             [
               { label: "Alert", run: onCreateAlert },
+              { label: "Seat", run: () => settings.toggleSidePanel("seat") },
               { label: "Compare", run: () => chart.openSymbolSearch() },
               { label: "Object tree", run: () => chart.openObjectTree() },
               { label: "Undo", run: () => chart.undo() },
