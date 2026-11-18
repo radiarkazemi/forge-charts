@@ -81,9 +81,14 @@ async def get_profile(request: web.Request) -> web.Response:
     # Only the matching accountKey document is returned — never another profile.
     if str(doc.get("_id") or "").lower() != account_key:
         return web.json_response({"error": "forbidden"}, status=403)
+    updated_at = int(doc.get("updatedAt") or 0)
+    # The open chart asks this often. meta=1 is the timestamp only, so a quiet
+    # account does not ship the whole layout blob on every check.
+    if (request.rel_url.query.get("meta") or "") == "1":
+        return web.json_response({"updatedAt": updated_at, "accountKey": account_key})
     return web.json_response(
         {
-            "updatedAt": int(doc.get("updatedAt") or 0),
+            "updatedAt": updated_at,
             "payload": doc.get("payload"),
             "accountKey": account_key,
         }
