@@ -38,14 +38,14 @@ export function SidePanel({
       sx={{
         width: pine
           ? "100%"
-          : panel === "seat"
-            ? { xs: `min(100%, ${PANEL_WIDTH}px)`, sm: 380 }
-            : { xs: `min(100%, ${PANEL_WIDTH}px)`, sm: 320 },
+          : { xs: `min(100%, ${PANEL_WIDTH}px)`, sm: panel === "seat" ? 280 : 320 },
         height: "100%",
         display: "flex",
         flexDirection: "column",
         borderLeft: pine || overlay ? 0 : 1,
         borderColor: "divider",
+        bgcolor: panel === "seat" ? "#131722" : undefined,
+        color: panel === "seat" ? "#d1d4dc" : undefined,
         minHeight: 0,
         flex: 1,
         ...(overlay
