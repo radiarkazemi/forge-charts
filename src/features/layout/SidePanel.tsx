@@ -3,6 +3,7 @@ import type { SidePanelId } from "@/application";
 import { AlertsPanel } from "@/features/alerts/AlertsPanel";
 import { DataWindowPanel } from "@/features/data-window/DataWindowPanel";
 import { PineEditorPanel } from "@/features/pine/PineEditorPanel";
+import { SeatPanel } from "@/features/seat/SeatPanel";
 import { WatchlistPanel } from "@/features/watchlist/WatchlistPanel";
 import { RAIL_WIDTH_COMPACT } from "./mobile-chrome";
 
@@ -37,7 +38,9 @@ export function SidePanel({
       sx={{
         width: pine
           ? "100%"
-          : { xs: `min(100%, ${PANEL_WIDTH}px)`, sm: 320 },
+          : panel === "seat"
+            ? { xs: `min(100%, ${PANEL_WIDTH}px)`, sm: 380 }
+            : { xs: `min(100%, ${PANEL_WIDTH}px)`, sm: 320 },
         height: "100%",
         display: "flex",
         flexDirection: "column",
@@ -63,6 +66,7 @@ export function SidePanel({
       {panel === "watchlist" ? <WatchlistPanel onClose={onClose} /> : null}
       {panel === "alerts" ? <AlertsPanel onClose={onClose} onCreate={onCreateAlert} /> : null}
       {panel === "data" ? <DataWindowPanel onClose={onClose} /> : null}
+      {panel === "seat" ? <SeatPanel onClose={onClose} /> : null}
       {panel === "pine" ? (
         <PineEditorPanel onClose={onClose} onOpenObjectTree={onOpenObjectTree} onRun={onRunPine} />
       ) : null}

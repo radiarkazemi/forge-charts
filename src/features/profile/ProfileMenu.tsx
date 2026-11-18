@@ -43,6 +43,7 @@ interface ProfileMenuProps {
   readonly alertCount?: number;
   readonly onOpenWatchlist?: () => void;
   readonly onOpenAlerts?: () => void;
+  readonly onOpenSeat?: () => void;
   readonly onOpenIndicators?: () => void;
   readonly onOpenChartSettings?: () => void;
 }
@@ -62,6 +63,7 @@ const COPY = {
     signOut: "Sign out",
     watchlist: "Watchlist",
     alerts: "Alerts",
+    seat: "Seat check",
     indicators: "Indicators",
     chartSettings: "Chart settings",
     subscription: "Subscription",
@@ -85,6 +87,7 @@ const COPY = {
     signOut: "خروج از حساب",
     watchlist: "دیده‌بان",
     alerts: "هشدارها",
+    seat: "بررسی جایگاه",
     indicators: "اندیکاتورها",
     chartSettings: "تنظیمات نمودار",
     subscription: "اشتراک",
@@ -133,6 +136,7 @@ export function ProfileMenu({
   alertCount = 0,
   onOpenWatchlist,
   onOpenAlerts,
+  onOpenSeat,
   onOpenIndicators,
   onOpenChartSettings,
 }: ProfileMenuProps) {
@@ -334,7 +338,7 @@ export function ProfileMenu({
         </ListItemButton>
       </List>
 
-      {onOpenWatchlist || onOpenAlerts || onOpenIndicators || onOpenChartSettings ? (
+      {onOpenWatchlist || onOpenAlerts || onOpenSeat || onOpenIndicators || onOpenChartSettings ? (
         <>
           <Divider sx={{ borderColor: border, my: 0.5 }} />
           <List dense disablePadding>
@@ -342,6 +346,7 @@ export function ProfileMenu({
               [
                 onOpenWatchlist ? { label: t.watchlist, run: onOpenWatchlist } : null,
                 onOpenAlerts ? { label: t.alerts, run: onOpenAlerts } : null,
+                onOpenSeat ? { label: t.seat, run: onOpenSeat } : null,
                 onOpenIndicators ? { label: t.indicators, run: onOpenIndicators } : null,
                 onOpenChartSettings ? { label: t.chartSettings, run: onOpenChartSettings } : null,
               ].filter((row) => row !== null) as { label: string; run: () => void }[]

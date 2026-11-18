@@ -220,6 +220,7 @@ export function AppShell({ onSignOut, account }: AppShellProps) {
         alertCount={alertCount}
         onOpenWatchlist={isMobile ? () => settings.toggleSidePanel("watchlist") : undefined}
         onOpenAlerts={isMobile ? () => settings.toggleSidePanel("alerts") : undefined}
+        onOpenSeat={isMobile ? () => settings.toggleSidePanel("seat") : undefined}
         onOpenIndicators={isMobile ? () => chart.openIndicators() : undefined}
         onOpenChartSettings={isMobile ? () => chart.openChartProperties() : undefined}
       />
