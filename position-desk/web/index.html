@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Forge Seat</title>
+  <link rel="stylesheet" href="/desk.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <div>
+        <strong>Forge Seat</strong>
+        <small>Location check from the MT5 feed</small>
+      </div>
+    </div>
+    <label class="token">
+      Token
+      <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="bridge token" />
+    </label>
+    <label>
+      Symbol
+      <select id="symbol"></select>
+    </label>
+    <div class="feed" id="feed">offline</div>
+    <time id="clock"></time>
+  </header>
+
+  <main>
+    <section class="ticket">
+      <h2>Your position</h2>
+      <p class="lede">Enter the trade you are judging. The desk does not place it. It tells you whether the live numbers still agree with that seat.</p>
+      <div class="sides" id="sides">
+        <button type="button" data-side="long">Long</button>
+        <button type="button" data-side="short">Short</button>
+        <button type="button" data-side="flat" class="on">Flat</button>
+      </div>
+      <label>Entry<input id="entry" inputmode="decimal" /></label>
+      <label>Stop<input id="stop" inputmode="decimal" /></label>
+      <label>Target<input id="target" inputmode="decimal" /></label>
+      <button id="save" type="button">Check this seat</button>
+      <p id="ticket-error" class="error" hidden></p>
+    </section>
+
+    <section class="board">
+      <div id="banner" class="banner warming">
+        <p class="kicker" id="kicker">Warming</p>
+        <h1 id="headline">Waiting for the terminal</h1>
+        <p id="summary">Paste the server token, then start the bridge on the PC where MT5 is logged in.</p>
+        <div class="score-row">
+          <span id="score">—</span>
+          <div class="track"><div id="score-bar"></div></div>
+          <span id="scores"></span>
+        </div>
+      </div>
+      <div class="split">
+        <div>
+          <h2>Why</h2>
+          <ul id="reasons"></ul>
+        </div>
+        <div>
+          <h2>Numbers you cannot keep in your head</h2>
+          <dl id="metrics"></dl>
+        </div>
+      </div>
+      <canvas id="spark" width="900" height="160"></canvas>
+    </section>
+  </main>
+  <script src="/desk.js"></script>
+</body>
+</html>

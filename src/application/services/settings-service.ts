@@ -7,7 +7,7 @@ export type ThemeMode = "dark" | "light";
 /** UI language for Forge chrome (profile menu, symbol picker, …). */
 export type UiLanguage = "en" | "fa";
 
-export type SidePanelId = "watchlist" | "alerts" | "data" | "pine";
+export type SidePanelId = "watchlist" | "alerts" | "data" | "pine" | "seat";
 
 
 /** Multi-chart page layout (1 / 2 / 3 / 4 panes). */
@@ -206,7 +206,9 @@ function sanitizeStringList(value: unknown, fallback: readonly string[]): readon
 }
 
 function sanitizeSidePanel(value: unknown): SidePanelId | null {
-  return value === "watchlist" || value === "alerts" || value === "data" || value === "pine" ? value : null;
+  return value === "watchlist" || value === "alerts" || value === "data" || value === "pine" || value === "seat"
+    ? value
+    : null;
 }
 
 function sanitizeLayoutSync(value: unknown): LayoutSyncSettings {
