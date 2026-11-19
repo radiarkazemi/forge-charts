@@ -301,9 +301,20 @@ function structureBias(bars: readonly Bar[], k: number): { bias: number; text: s
 function lastDealingRange(bars: readonly Bar[], k: number): DealingRange | null {
   const { highs, lows } = pivots(bars, k);
   if (!highs.length || !lows.length) return null;
-  const high = bars[highs.at(-1)!]!.high;
-  const low = bars[lows.at(-1)!]!.low;
-  if (high <= low) return null;
+  const lastHigh = highs.at(-1)!;
+  const lastLow = lows.at(-1)!;
+  if (lastHigh > lastLow) {
+    let low = bars[lastHigh]!.low;
+    for (let index = lastHigh; index < bars.length; index += 1) low = Math.min(low, bars[index]!.low);
+    const high = bars[lastHigh]!.high;
+    if (!(high > low)) return null;
+    return { low, high, eq: (high + low) / 2 };
+  }
+  let low = bars[lastLow]!.low;
+  for (let index = lastLow; index < bars.length; index += 1) low = Math.min(low, bars[index]!.low);
+  const earlierHigh = [...highs].reverse().find((index) => index < lastLow);
+  const high = earlierHigh == null ? bars[lastLow]!.high : bars[earlierHigh]!.high;
+  if (!(high > low)) return null;
   return { low, high, eq: (high + low) / 2 };
 }
 
@@ -598,7 +609,7 @@ function scoreSide(input: {
   if (input.erH1 != null && input.erH1 >= 0.35 && input.structure === direction) {
     score += 10;
     reasons.push({ tone: "good", text: `15-minute efficiency is ${input.erH1.toFixed(2)}, so the trend is covering ground rather than chopping.` });
-  } else if (input.erH1 != null && input.erH1 < 0.18) {
+  } else if (input.erH1 != null && input.erH1 < 0.175) {
     reasons.push({ tone: "neutral", text: `15-minute efficiency is ${input.erH1.toFixed(2)}. Price is rotating more than it is travelling.` });
   }
   if (input.rvPct != null && input.rvPct >= 0.92) {
@@ -770,8 +781,6 @@ export function analyzeSeat(
   const profile = volumeProfile(execution.slice(-120));
   const where = profileWhere(price, profile);
   const pad = atrValue * 0.15;
-  const longZone = touches(price, [...openFvgs(execution, 1), ...openOrderBlocks(execution, 1)], pad);
-  const shortZone = touches(price, [...openFvgs(execution, -1), ...openOrderBlocks(execution, -1)], pad);
   const longExcursions = adverseExcursions(execution, 1);
   const shortExcursions = adverseExcursions(execution, -1);
   const longHeat = percentile(longExcursions, 0.7);
@@ -787,6 +796,10 @@ export function analyzeSeat(
   const stop = position?.stop ?? null;
   const target = position?.target ?? null;
   const placedAt = position?.placedAt ?? null;
+  const longAnchor = side === "long" && entry != null ? entry : price;
+  const shortAnchor = side === "short" && entry != null ? entry : price;
+  const longZone = touches(longAnchor, [...openFvgs(execution, 1), ...openOrderBlocks(execution, 1)], pad);
+  const shortZone = touches(shortAnchor, [...openFvgs(execution, -1), ...openOrderBlocks(execution, -1)], pad);
 
   const geometry = (forSide: "long" | "short") => {
     if (side !== forSide || entry == null || stop == null || atrValue <= 0) return { dist: null as number | null, valid: null as boolean | null, banked: false };
@@ -810,6 +823,7 @@ export function analyzeSeat(
   };
   const longRead = scoreSide({
     ...shared,
+    price: longAnchor,
     side: "long",
     zone: longZone,
     stopDistanceAtr: longGeo.banked ? null : longGeo.dist,
@@ -819,6 +833,7 @@ export function analyzeSeat(
   });
   const shortRead = scoreSide({
     ...shared,
+    price: shortAnchor,
     side: "short",
     zone: shortZone,
     stopDistanceAtr: shortGeo.banked ? null : shortGeo.dist,
