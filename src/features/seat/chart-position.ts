@@ -8,6 +8,7 @@ export interface ChartPosition {
   readonly entry: number;
   readonly stop: number;
   readonly target: number;
+  readonly placedAt: number | null;
 }
 
 interface ShapePoint {
@@ -104,7 +105,7 @@ export function readPosition(chart: PositionChart, id: string, name?: string): C
     const stopLevel = num(props.stopLevel);
     if (entry == null || profitLevel == null || stopLevel == null) return null;
     const { stop, target } = pricesFromLevels(side, entry, profitLevel, stopLevel, minTickOf(chart));
-    return { id, side, entry, stop, target };
+    return { id, side, entry, stop, target, placedAt: num(shape.getPoints()[0]?.time) };
   } catch {
     return null;
   }

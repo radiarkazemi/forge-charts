@@ -29,6 +29,7 @@ export interface SeatPosition {
   readonly entry: number | null;
   readonly stop: number | null;
   readonly target: number | null;
+  readonly placedAt?: number | null;
 }
 
 export interface SeatReason {
@@ -179,6 +180,41 @@ function atr(bars: readonly Bar[], n = 14): number | null {
   let value = ranges.slice(0, n).reduce((sum, item) => sum + item, 0) / n;
   for (const tr of ranges.slice(n)) value = (value * (n - 1) + tr) / n;
   return value;
+}
+
+function tradeProgress(
+  bars: readonly Bar[],
+  side: "long" | "short",
+  entry: number,
+  stop: number,
+  target: number,
+  fromTime: number | null,
+): "target" | "stop" | "open" {
+  const scoped = fromTime == null ? bars : bars.filter((bar) => bar.time >= fromTime - 300);
+  let last: "target" | "stop" | null = null;
+  let active = false;
+  for (const bar of scoped) {
+    const hitStop = side === "short" ? bar.high >= stop : bar.low <= stop;
+    const hitTarget = side === "short" ? bar.low <= target : bar.high >= target;
+    if (!active) {
+      if (bar.low <= entry && bar.high >= entry) active = true;
+      else continue;
+    }
+    if (hitStop && hitTarget) {
+      active = false;
+      continue;
+    }
+    if (hitStop) {
+      last = "stop";
+      active = false;
+      continue;
+    }
+    if (hitTarget) {
+      last = "target";
+      active = false;
+    }
+  }
+  return last ?? "open";
 }
 
 function efficiencyRatio(closes: readonly number[], n = 10): number | null {
@@ -742,6 +778,7 @@ export function analyzeSeat(
   const entry = position?.entry ?? null;
   const stop = position?.stop ?? null;
   const target = position?.target ?? null;
+  const placedAt = position?.placedAt ?? null;
 
   const geometry = (forSide: "long" | "short") => {
     if (side !== forSide || entry == null || stop == null || atrValue <= 0) return { dist: null as number | null, valid: null as boolean | null, banked: false };
@@ -822,13 +859,26 @@ export function analyzeSeat(
     valid &&
     read.structureAgrees &&
     located &&
-    !targetWrong &&
-    !read.reasons.some((reason) => reason.tone === "bad")
+    !targetWrong
   ) verdict = "SEAT_OK";
   else if (side === "long" || side === "short") verdict = "WEAK_LOCATION";
   else if (read.score >= 70 && read.structureAgrees && located && !chased) verdict = "LOCATION_VALID";
 
+  const progress =
+    (side === "long" || side === "short") && entry != null && stop != null && target != null && valid !== false && !targetWrong
+      ? tradeProgress(execution, side, entry, stop, target, placedAt)
+      : "open";
+  if (progress === "stop") verdict = "THESIS_BROKEN";
+  else if (progress === "target") verdict = "SEAT_OK";
+
   let reasons = [...read.reasons];
+  if (progress === "target") {
+    reasons = [{ tone: "good", text: "Price traded the take profit after the entry." }, ...reasons];
+  } else if (progress === "stop") {
+    reasons = [{ tone: "bad", text: "Price traded the stop after the entry." }, ...reasons];
+  } else if (banked && (side === "long" || side === "short")) {
+    reasons = [{ tone: "good", text: "Open profit is past 1 ATR, so this location is working." }, ...reasons];
+  }
   let rr: number | null = null;
   if (targetWrong) {
     reasons = [...reasons, { tone: "bad", text: "Take profit is on the wrong side of the entry." }];

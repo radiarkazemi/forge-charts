@@ -28,6 +28,7 @@ interface Draft {
   readonly entry: number;
   readonly stop: number;
   readonly target: number;
+  readonly placedAt: number | null;
 }
 
 function chartApi(widget: unknown): PositionChart | null {
@@ -72,6 +73,9 @@ function bannerTone(verdict: string): "warn" | "bad" | "good" | "idle" {
 
 function checkLabel(reason: SeatReason, side: PositionSide): string {
   const text = reason.text.toLowerCase();
+  if (text.includes("traded the take profit")) return "Take profit was reached";
+  if (text.includes("traded the stop")) return "Stop was traded";
+  if (text.includes("location is working")) return "Open profit is past 1 ATR";
   if (text.includes("swings agree")) return "Swing structure aligns";
   if (text.includes("point the other")) return "Swings point the other way";
   if (text.includes("mixed") || text.includes("not confirmed")) return "Swings are not confirmed";
@@ -176,7 +180,8 @@ export function SeatPanel({ onClose }: SeatPanelProps) {
           current.id === match.id &&
           current.entry === match.entry &&
           current.stop === match.stop &&
-          current.target === match.target
+          current.target === match.target &&
+          current.placedAt === match.placedAt
         ) {
           return current;
         }
@@ -203,7 +208,7 @@ export function SeatPanel({ onClose }: SeatPanelProps) {
     return analyzeSeat(
       { M5: readyM5, H1: readyH1 },
       price > 0 ? { time: quote?.updatedAt ?? 0, bid: price, ask: price } : null,
-      { side: draft.side as SeatSide, entry: draft.entry, stop: draft.stop, target: draft.target },
+      { side: draft.side as SeatSide, entry: draft.entry, stop: draft.stop, target: draft.target, placedAt: draft.placedAt },
       { digits, feedAgeSec: price > 0 || readyM5.length ? 0 : null },
     );
   }, [digits, draft, quote, readyH1, readyM5]);
@@ -263,7 +268,7 @@ export function SeatPanel({ onClose }: SeatPanelProps) {
         return;
       }
       const placed = readPosition(api, id, side === "long" ? "long_position" : "short_position");
-      setDraft(placed ?? { id, side, entry: price, stop: stopPrice, target: targetPrice });
+      setDraft(placed ?? { id, side, entry: price, stop: stopPrice, target: targetPrice, placedAt: time });
     } catch {
       await chart.selectLineTool(side === "long" ? "long_position" : "short_position");
     }
@@ -274,13 +279,21 @@ export function SeatPanel({ onClose }: SeatPanelProps) {
   const tone = desk ? bannerTone(desk.verdict) : "idle";
   const stopAtr = desk?.metrics.stopAtr;
   const lead = desk?.reasons.find((reason) => reason.tone === "bad") ?? desk?.reasons.find((reason) => reason.tone === "neutral");
+  const targetReached = desk?.reasons.some((reason) => reason.text.includes("traded the take profit")) ?? false;
+  const working = desk?.reasons.some((reason) => reason.text.includes("location is working")) ?? false;
   const bannerDetail = !desk
     ? "Choose Short or Long. The position tool drops on the chart."
     : desk.verdict === "REVIEW_STOP" && stopAtr != null
       ? `Stop is ${stopAtr.toFixed(2)} ATR away`
-      : lead
-        ? checkLabel(lead, draft?.side ?? armed)
-        : "The live numbers agree with this location.";
+      : desk.verdict === "SEAT_OK" && targetReached
+        ? "Take profit was reached"
+        : desk.verdict === "SEAT_OK" && working
+          ? "Open profit is past 1 ATR"
+          : desk.verdict === "SEAT_OK"
+            ? "Structure and the zone agree."
+            : lead
+              ? checkLabel(lead, draft?.side ?? armed)
+              : "The live numbers agree with this location.";
   const rr = desk?.metrics.rr;
 
   return (
