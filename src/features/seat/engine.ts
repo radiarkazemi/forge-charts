@@ -872,10 +872,26 @@ export function analyzeSeat(
   else if (side === "long" || side === "short") verdict = "WEAK_LOCATION";
   else if (read.score >= 70 && read.structureAgrees && located && !chased) verdict = "LOCATION_VALID";
 
-  const progress =
-    (side === "long" || side === "short") && entry != null && stop != null && target != null && valid !== false && !targetWrong
-      ? tradeProgress(execution, side, entry, stop, target, placedAt)
-      : "open";
+  let progress: "target" | "stop" | "open" = "open";
+  if ((side === "long" || side === "short") && entry != null && stop != null && target != null && valid !== false && !targetWrong) {
+    progress = tradeProgress(execution, side, entry, stop, target, placedAt);
+    if (progress === "open") {
+      for (const frame of [frames.H1, frames.M15, frames.M5, frames.M1]) {
+        if (!frame.length) continue;
+        const next = tradeProgress(frame, side, entry, stop, target, null);
+        if (next !== "open") {
+          progress = next;
+          break;
+        }
+      }
+    }
+    if (progress === "open") {
+      if (side === "short" && price >= stop) progress = "stop";
+      else if (side === "long" && price <= stop) progress = "stop";
+      else if (side === "short" && price <= target) progress = "target";
+      else if (side === "long" && price >= target) progress = "target";
+    }
+  }
   if (progress === "stop") verdict = "THESIS_BROKEN";
   else if (progress === "target") verdict = "SEAT_OK";
 
