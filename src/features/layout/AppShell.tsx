@@ -99,6 +99,16 @@ export function AppShell({ onSignOut, account }: AppShellProps) {
     return () => window.removeEventListener("forge:open-indicators", onOpen);
   }, []);
 
+  useEffect(() => {
+    const open = () => settings.toggleSidePanel("seat");
+    window.addEventListener("forge:open-seat", open);
+    return () => window.removeEventListener("forge:open-seat", open);
+  }, [settings]);
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("forge:seat-panel", { detail: { open: sidePanel === "seat" } }));
+  }, [sidePanel]);
+
   const openAlertDialog = () => setAlertDialogOpen(true);
   const openProfileMenu = () =>
     setProfileMenuPos({ top: 8, left: 12, bottom: 40, right: 44 });
@@ -138,7 +148,8 @@ export function AppShell({ onSignOut, account }: AppShellProps) {
                   sx={{
                     position: "absolute",
                     inset: 0,
-                    bgcolor: "rgba(0,0,0,0.5)",
+                    bgcolor: overlayPanel === "seat" ? "transparent" : "rgba(0,0,0,0.5)",
+                    pointerEvents: overlayPanel === "seat" ? "none" : "auto",
                     zIndex: 19,
                   }}
                 />

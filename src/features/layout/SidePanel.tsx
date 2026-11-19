@@ -19,8 +19,6 @@ interface SidePanelProps {
   readonly overlayRight?: number;
 }
 
-const PANEL_WIDTH = 420;
-
 export function SidePanel({
   panel,
   onClose,
@@ -38,28 +36,43 @@ export function SidePanel({
       sx={{
         width: pine
           ? "100%"
-          : { xs: `min(100%, ${PANEL_WIDTH}px)`, sm: panel === "seat" ? 280 : 320 },
-        height: "100%",
+          : { xs: "100%", sm: panel === "seat" ? 360 : 320 },
+        height: overlay && panel === "seat" ? "auto" : "100%",
+        maxHeight: overlay && panel === "seat" ? "min(72%, 640px)" : undefined,
         display: "flex",
         flexDirection: "column",
         borderLeft: pine || overlay ? 0 : 1,
-        borderColor: "divider",
-        bgcolor: panel === "seat" ? "#131722" : undefined,
-        color: panel === "seat" ? "#d1d4dc" : undefined,
+        borderColor: panel === "seat" ? "#e0e3eb" : "divider",
+        bgcolor: panel === "seat" ? "#ffffff" : undefined,
+        color: panel === "seat" ? "#131722" : undefined,
         minHeight: 0,
         flex: 1,
-        ...(overlay
-          ? {
-              position: "absolute",
-              top: 0,
-              right: overlayRight,
-              bottom: 0,
-              zIndex: 20,
-              // Mobile: full width minus the rail (desktop keeps a capped panel).
-              width: `calc(100% - ${overlayRight}px)`,
-              maxWidth: `calc(100% - ${overlayRight}px)`,
-              boxShadow: "-8px 0 24px rgba(0,0,0,0.35)",
-            }
+            ...(overlay
+          ? panel === "seat"
+            ? {
+                position: "absolute",
+                left: 8,
+                right: 8,
+                bottom: 8,
+                top: "auto",
+                zIndex: 20,
+                width: "auto",
+                maxWidth: "none",
+                borderRadius: "16px",
+                overflow: "hidden",
+                pointerEvents: "auto",
+                boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+              }
+            : {
+                position: "absolute",
+                top: 0,
+                right: overlayRight,
+                bottom: 0,
+                zIndex: 20,
+                width: `calc(100% - ${overlayRight}px)`,
+                maxWidth: `calc(100% - ${overlayRight}px)`,
+                boxShadow: "-8px 0 24px rgba(0,0,0,0.35)",
+              }
           : {}),
       }}
     >
