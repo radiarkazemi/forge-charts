@@ -605,6 +605,12 @@ function scoreSide(input: {
         tone: "neutral",
         text: `Stop is ${input.stopDistanceAtr.toFixed(2)} ATR away. Swing-heat history is still short, so this is only a working range.`,
       });
+    } else {
+      score -= 6;
+      reasons.push({
+        tone: "neutral",
+        text: `Stop is ${input.stopDistanceAtr.toFixed(2)} ATR away. It clears the noise, but the risk is wide.`,
+      });
     }
   }
   let capped = Math.max(0, Math.min(100, Math.round(score)));
@@ -799,20 +805,35 @@ export function analyzeSeat(
     (side === "long" && dealing != null && price < dealing.low) || (side === "short" && dealing != null && price > dealing.high);
   const stopInsideHeat = (side === "long" || side === "short") && read.stopInsideHeat && !banked;
   const missingStop = (side === "long" || side === "short") && (entry == null || stop == null);
+  const reward =
+    entry != null && target != null ? (side === "short" ? entry - target : side === "long" ? target - entry : Math.abs(target - entry)) : null;
+  const risk =
+    entry != null && stop != null ? (side === "short" ? stop - entry : side === "long" ? entry - stop : Math.abs(entry - stop)) : null;
+  const targetWrong = (side === "long" || side === "short") && reward != null && reward <= 0;
   let verdict: SeatVerdict = "STAND_ASIDE";
   if (spreadStressed && !throughStop) verdict = "SPREAD_STRESS";
   else if ((side === "long" || side === "short") && (throughStop || lostSwing || valid === false)) verdict = "THESIS_BROKEN";
   else if (stopInsideHeat) verdict = "REVIEW_STOP";
   else if (chased && (side === checked || side === "flat")) verdict = "DO_NOT_CHASE";
   else if (missingStop) verdict = "WEAK_LOCATION";
-  else if ((side === "long" || side === "short") && read.score >= 70 && valid && read.structureAgrees && located) verdict = "SEAT_OK";
+  else if (
+    (side === "long" || side === "short") &&
+    read.score >= 70 &&
+    valid &&
+    read.structureAgrees &&
+    located &&
+    !targetWrong &&
+    !read.reasons.some((reason) => reason.tone === "bad")
+  ) verdict = "SEAT_OK";
   else if (side === "long" || side === "short") verdict = "WEAK_LOCATION";
   else if (read.score >= 70 && read.structureAgrees && located && !chased) verdict = "LOCATION_VALID";
 
   let reasons = [...read.reasons];
   let rr: number | null = null;
-  if (entry != null && stop != null && target != null && Math.abs(entry - stop) > 0) {
-    rr = Math.abs(target - entry) / Math.abs(entry - stop);
+  if (targetWrong) {
+    reasons = [...reasons, { tone: "bad", text: "Take profit is on the wrong side of the entry." }];
+  } else if (reward != null && risk != null && risk > 0) {
+    rr = reward / risk;
     if ((side === "long" || side === "short") && rr < 1.2) {
       reasons = [...reasons, { tone: "neutral", text: `Reward to risk against your target is ${rr.toFixed(2)}.` }];
     }

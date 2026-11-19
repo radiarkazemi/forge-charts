@@ -1,4 +1,6 @@
+import Box from "@mui/material/Box";
 import Paper from "@mui/material/Paper";
+import { useEffect, useRef, useState } from "react";
 import type { SidePanelId } from "@/application";
 import { AlertsPanel } from "@/features/alerts/AlertsPanel";
 import { DataWindowPanel } from "@/features/data-window/DataWindowPanel";
@@ -19,6 +21,18 @@ interface SidePanelProps {
   readonly overlayRight?: number;
 }
 
+const SEAT_WIDTH_KEY = "forge.seat.width";
+
+function storedSeatWidth(): number {
+  try {
+    const saved = Number(localStorage.getItem(SEAT_WIDTH_KEY));
+    if (saved >= 240 && saved <= 480) return saved;
+  } catch {
+    /* storage can be blocked */
+  }
+  return 280;
+}
+
 export function SidePanel({
   panel,
   onClose,
@@ -29,25 +43,38 @@ export function SidePanel({
   overlayRight = RAIL_WIDTH_COMPACT,
 }: SidePanelProps) {
   const pine = panel === "pine";
+  const seat = panel === "seat";
+  const [seatWidth, setSeatWidth] = useState(storedSeatWidth);
+  const drag = useRef<{ x: number; width: number } | null>(null);
+  useEffect(() => {
+    if (!seat || overlay) return;
+    try {
+      localStorage.setItem(SEAT_WIDTH_KEY, String(seatWidth));
+    } catch {
+      /* ignore */
+    }
+  }, [overlay, seat, seatWidth]);
   return (
     <Paper
       square
       elevation={overlay ? 8 : 0}
       sx={{
-        width: pine
-          ? "100%"
-          : { xs: "100%", sm: panel === "seat" ? 360 : 320 },
-        height: overlay && panel === "seat" ? "auto" : "100%",
-        maxHeight: overlay && panel === "seat" ? "min(72%, 640px)" : undefined,
+        width: pine ? "100%" : seat ? (overlay ? "100%" : seatWidth) : 320,
+        height: seat ? "auto" : "100%",
+        maxHeight: overlay && seat ? "min(72%, 640px)" : seat ? "100%" : undefined,
         display: "flex",
         flexDirection: "column",
         borderLeft: pine || overlay ? 0 : 1,
-        borderColor: panel === "seat" ? "#e0e3eb" : "divider",
-        bgcolor: panel === "seat" ? "#ffffff" : undefined,
-        color: panel === "seat" ? "#131722" : undefined,
+        borderColor: seat ? "#e0e3eb" : "divider",
+        bgcolor: seat ? "#ffffff" : undefined,
+        color: seat ? "#131722" : undefined,
         minHeight: 0,
-        flex: 1,
-            ...(overlay
+        minWidth: 0,
+        overflow: seat ? "hidden" : undefined,
+        position: "relative",
+        alignSelf: seat && !overlay ? "flex-start" : undefined,
+        flex: seat ? "0 0 auto" : 1,
+        ...(overlay
           ? panel === "seat"
             ? {
                 position: "absolute",
@@ -76,6 +103,36 @@ export function SidePanel({
           : {}),
       }}
     >
+      {seat && !overlay ? (
+        <Box
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize Setup Review"
+          onPointerDown={(event) => {
+            drag.current = { x: event.clientX, width: seatWidth };
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={(event) => {
+            if (!drag.current) return;
+            const next = Math.min(480, Math.max(240, Math.round(drag.current.width + drag.current.x - event.clientX)));
+            setSeatWidth(next);
+          }}
+          onPointerUp={() => {
+            drag.current = null;
+          }}
+          sx={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: 8,
+            cursor: "col-resize",
+            zIndex: 3,
+            touchAction: "none",
+            "&:hover": { bgcolor: "rgba(41,98,255,0.28)" },
+          }}
+        />
+      ) : null}
       {panel === "watchlist" ? <WatchlistPanel onClose={onClose} /> : null}
       {panel === "alerts" ? <AlertsPanel onClose={onClose} onCreate={onCreateAlert} /> : null}
       {panel === "data" ? <DataWindowPanel onClose={onClose} /> : null}

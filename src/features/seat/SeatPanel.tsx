@@ -93,7 +93,7 @@ function checkLabel(reason: SeatReason, side: PositionSide): string {
   if (text.includes("vwap")) return "Extended from session value";
   if (text.includes("through your stop")) return "Price is through the stop";
   if (text.includes("wrong side")) return "Stop is on the wrong side";
-  if (text.includes("wide")) return "Stop is wide";
+  if (text.includes("risk is wide") || text.includes("wide")) return "Stop is wide";
   if (text.includes("atr away")) return "Stop versus swing heat";
   if (text.includes("reward")) return "Reward to risk is set";
   return reason.text.length > 52 ? `${reason.text.slice(0, 50)}…` : reason.text;
@@ -208,6 +208,28 @@ export function SeatPanel({ onClose }: SeatPanelProps) {
     );
   }, [digits, draft, quote, readyH1, readyM5]);
 
+  const reviewSetup = async () => {
+    setChecksOpen(true);
+    const api = chartApi(chart.getWidget());
+    if (!api) {
+      setError("The chart is still loading.");
+      return;
+    }
+    const rows = readPositions(api);
+    const match = rows.find((row) => row.side === armed) ?? rows.at(-1) ?? null;
+    if (!match) {
+      await place(armed);
+      return;
+    }
+    setDraft(match);
+    setArmed(match.side);
+    const reward = match.side === "short" ? match.entry - match.target : match.target - match.entry;
+    const risk = match.side === "short" ? match.stop - match.entry : match.entry - match.stop;
+    if (!(reward > 0)) setError("Take profit is on the wrong side of the entry.");
+    else if (!(risk > 0)) setError(match.side === "short" ? "For a short, the stop has to be above the entry." : "For a long, the stop has to be below the entry.");
+    else setError("");
+  };
+
   const place = async (side: PositionSide) => {
     setError("");
     setArmed(side);
@@ -251,16 +273,22 @@ export function SeatPanel({ onClose }: SeatPanelProps) {
   const review = desk ? desk.reasons.length - align : 0;
   const tone = desk ? bannerTone(desk.verdict) : "idle";
   const stopAtr = desk?.metrics.stopAtr;
-  const bannerDetail =
-    stopAtr != null && Number.isFinite(stopAtr)
+  const lead = desk?.reasons.find((reason) => reason.tone === "bad") ?? desk?.reasons.find((reason) => reason.tone === "neutral");
+  const bannerDetail = !desk
+    ? "Choose Short or Long. The position tool drops on the chart."
+    : desk.verdict === "REVIEW_STOP" && stopAtr != null
       ? `Stop is ${stopAtr.toFixed(2)} ATR away`
-      : desk?.summary.split(". ")[0] ?? "Place a position on the chart.";
+      : lead
+        ? checkLabel(lead, draft?.side ?? armed)
+        : "The live numbers agree with this location.";
   const rr = desk?.metrics.rr;
 
   return (
     <Box
       sx={{
-        height: "100%",
+        height: "auto",
+        maxHeight: "100%",
+        overflow: "auto",
         minHeight: 0,
         display: "flex",
         flexDirection: "column",
@@ -295,7 +323,7 @@ export function SeatPanel({ onClose }: SeatPanelProps) {
         </IconButton>
       </Box>
 
-      <Box sx={{ px: 1.5, overflow: "auto", flex: 1, minHeight: 0, pb: 1 }}>
+      <Box sx={{ px: 1.5, minWidth: 0, pb: 1 }}>
         <Box
           sx={{
             display: "flex",
@@ -362,7 +390,10 @@ export function SeatPanel({ onClose }: SeatPanelProps) {
             label="Vol rank"
             value={desk?.metrics.rvPercentile == null ? "—" : `${Math.round(desk.metrics.rvPercentile * 100)}th`}
           />
-          <ContextRow label="Heat" value={desk?.metrics.heatP70Atr == null ? "—" : `${desk.metrics.heatP70Atr.toFixed(2)} ATR`} />
+          <ContextRow
+            label="Heat"
+            value={desk?.metrics.heatP70Atr == null ? "not enough swings" : `${desk.metrics.heatP70Atr.toFixed(2)} ATR`}
+          />
         </Section>
         {error ? <Box sx={{ color: "#f23645", fontSize: 12, mt: 1 }}>{error}</Box> : null}
       </Box>
@@ -371,7 +402,7 @@ export function SeatPanel({ onClose }: SeatPanelProps) {
         <Button
           fullWidth
           variant="contained"
-          onClick={() => void place(armed)}
+          onClick={() => void reviewSetup()}
           sx={{
             textTransform: "none",
             minHeight: 44,
@@ -470,7 +501,11 @@ function Section({
       >
         <Box sx={{ fontWeight: 700, fontSize: 14 }}>{title}</Box>
         <Box sx={{ flex: 1 }} />
-        {meta ? <Box sx={{ color: "#787b86", fontSize: 12 }}>{meta}</Box> : null}
+        {meta ? (
+          <Box sx={{ color: "#787b86", fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {meta}
+          </Box>
+        ) : null}
         <Box sx={{ color: "#787b86", fontSize: 12, transform: open ? "rotate(180deg)" : "none" }}>⌃</Box>
       </Box>
       {open ? <Box sx={{ pb: 0.75 }}>{children}</Box> : null}
@@ -505,8 +540,8 @@ function CheckRow({ tone, label }: { tone: SeatReason["tone"]; label: string }) 
 
 function ContextRow({ label, value }: { label: string; value: string }) {
   return (
-    <Box sx={{ display: "flex", justifyContent: "space-between", gap: 1, py: 0.35, fontSize: 13 }}>
-      <Box sx={{ color: "#787b86" }}>{label}</Box>
+    <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.2fr)", gap: 1, py: 0.35, fontSize: 13 }}>
+      <Box sx={{ color: "#787b86", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</Box>
       <Box sx={{ fontWeight: 600, textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{value}</Box>
     </Box>
   );
