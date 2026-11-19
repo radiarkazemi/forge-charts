@@ -83,10 +83,10 @@ function checkLabel(reason: SeatReason, side: PositionSide): string {
   if (text.includes("discount half") && !text.includes("expensive")) return "Price is in discount";
   if (text.includes("equilibrium")) return "Price is on equilibrium";
   if (text.includes("expensive")) return "Price is on the expensive side";
+  if (text.includes("not inside")) return "No unfilled imbalance";
   if (text.includes("unfilled") && text.includes("inside")) {
     return side === "short" ? "Short imbalance / order block" : "Long imbalance / order block";
   }
-  if (text.includes("not inside an unfilled")) return "No unfilled imbalance";
   if (text.includes("diverges")) return "Bar delta diverges";
   if (text.includes("delta") && text.includes("agrees")) return "Recent bar delta aligns";
   if (text.includes("balanced")) return "Bar delta is balanced";

@@ -182,6 +182,32 @@ function atr(bars: readonly Bar[], n = 14): number | null {
   return value;
 }
 
+function scanProgress(
+  bars: readonly Bar[],
+  side: "long" | "short",
+  entry: number,
+  stop: number,
+  target: number,
+): "target" | "stop" | "open" {
+  let start = -1;
+  for (let index = bars.length - 1; index >= 0; index -= 1) {
+    const bar = bars[index];
+    if (bar.low <= entry && bar.high >= entry) {
+      start = index;
+      break;
+    }
+  }
+  if (start < 0) return "open";
+  for (const bar of bars.slice(start)) {
+    const hitStop = side === "short" ? bar.high >= stop : bar.low <= stop;
+    const hitTarget = side === "short" ? bar.low <= target : bar.high >= target;
+    if (hitStop && hitTarget) continue;
+    if (hitStop) return "stop";
+    if (hitTarget) return "target";
+  }
+  return "open";
+}
+
 function tradeProgress(
   bars: readonly Bar[],
   side: "long" | "short",
@@ -190,31 +216,13 @@ function tradeProgress(
   target: number,
   fromTime: number | null,
 ): "target" | "stop" | "open" {
-  const scoped = fromTime == null ? bars : bars.filter((bar) => bar.time >= fromTime - 300);
-  let last: "target" | "stop" | null = null;
-  let active = false;
-  for (const bar of scoped) {
-    const hitStop = side === "short" ? bar.high >= stop : bar.low <= stop;
-    const hitTarget = side === "short" ? bar.low <= target : bar.high >= target;
-    if (!active) {
-      if (bar.low <= entry && bar.high >= entry) active = true;
-      else continue;
-    }
-    if (hitStop && hitTarget) {
-      active = false;
-      continue;
-    }
-    if (hitStop) {
-      last = "stop";
-      active = false;
-      continue;
-    }
-    if (hitTarget) {
-      last = "target";
-      active = false;
-    }
-  }
-  return last ?? "open";
+  if (fromTime == null) return scanProgress(bars, side, entry, stop, target);
+  const scoped = bars.filter((bar) => bar.time >= fromTime - 300);
+  const scopedResult = scanProgress(scoped, side, entry, stop, target);
+  if (scopedResult !== "open") return scopedResult;
+  const sawEntry = scoped.some((bar) => bar.low <= entry && bar.high >= entry);
+  if (sawEntry) return "open";
+  return scanProgress(bars, side, entry, stop, target);
 }
 
 function efficiencyRatio(closes: readonly number[], n = 10): number | null {
