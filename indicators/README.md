@@ -1,37 +1,35 @@
-# TRH | Trading Room Hunter
+# TradingView Pine — models
 
-Classic **SWEEP** model from the real XAUUSD sample: Tue 25 Aug 2026 **04:19 UTC-4**.
+| # | Model | Status | File | Raw |
+|---|-------|--------|------|-----|
+| 1 | **TRH** (Modes A/B/C) | active | `TRH_Trading_Room_Hunter.pine` | below |
+| 2 | **ICT** Liquidity Expansion | **parked** | `ICT_Liquidity_Expansion.pine` | — |
+| 3 | **CRT** OrderFlow | active · exact source model | `CRT_OrderFlow.pine` | below |
 
-## Sample geometry (FxPro)
+Paste into Pine Editor → Add to chart.
 
-| Level | Price | Meaning |
-|---|---|---|
-| SL | **4620.23** | Just under sweep low |
-| ENTRY | **4627.84** | Mid of room (sweep low → base high) |
-| TP | **4645.99** | ~2.39R / opposing liquidity |
+## #3 CRT OrderFlow — exact source sequence
 
-## Model
+From the STRATEGY / Instagram Jul 29 graphics:
 
-1. Large selloff/rally into a **major pivot**
-2. **Sweep** that pivot + reclaim close
-3. Build base for ≥ N bars → room = sweep extreme ↔ base extreme
-4. **ENTRY = mid-room**, **SL = distal ± pad**, **TP = R:R (default 2.4)** or next opposing pivot
+1. **Structure** (swing high / low)
+2. **BOS** (break of structure)
+3. **FVG** = Area of Interest after the break (MTF: 15m / 30m / 1H)
+4. **CRT Bias** = ≥N CRT models same direction into that FVG (numbered dots)
+5. **Entry** on CRT confirm inside FVG → delivery (SL beyond sweep, TP structure / R:R)
 
-## Install
+## RunRox on the source images (viz tools only)
 
-1. Remove any older TRH from the chart  
-2. Paste [`TRH_Trading_Room_Hunter.pine`](./TRH_Trading_Room_Hunter.pine) → Add to chart  
-3. XAUUSD **1m**
+The Jul 29 charts used **RunRox** invite-only overlays to *draw* structure pieces. They are **not** the strategy and this repo does **not** ship RunRox code.
 
-**Raw link:** https://raw.githubusercontent.com/radiarkazemi/forge-charts/master/indicators/TRH_Trading_Room_Hunter.pine
+| Overlay seen on images | What it is | Role vs CRT OrderFlow |
+|------------------------|------------|------------------------|
+| **MTF FVG / Advanced SMC HTF FVG** | RunRox [Advanced SMC](https://runrox.com/advanced_smc) multi-TF FVG boxes (e.g. 15m/30m/1H on LTF) | Our Pine rebuilds the same *idea*: MTF FVG AOI after BOS |
+| **RunRox Entry Model** | [Entry Model](https://www.tradingview.com/script/fGLb404v-RunRox-Entry-Model/) — M1/M2/M3 reverse zones, HTF candles, entry areas | Separate product; dots/zones on images are *their* entry models, not CRT Bias |
+
+Vendor: [runrox.com](https://runrox.com/) · invite-only via TradingView.  
+**CRT OrderFlow** here = Structure → BOS → FVG AOI → CRT Bias → entry (strategy logic only).
 
 ## Defaults
 
-- Pivot `5` · Context `1.2 ATR` · Base bars `8`  
-- Room width `0.8–3.5 ATR` · R:R **`2.4`** · SL pad `0.02 ATR`  
-- Only last setup ON  
-
-## Alerts
-
-TradingView chart alerts need a paid plan.  
-Free phone push → [`FREE-ALERTS.md`](./FREE-ALERTS.md)
+**Only Last Setup**, fill markers on, panel on. CRT: min bias ≥2, MTF FVG AOI on, close-only FVG mitigate.
