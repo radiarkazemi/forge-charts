@@ -41,6 +41,17 @@ function formatPrice(value: number, digits: number): string {
   return value.toFixed(digits);
 }
 
+function alignedDetail(reasons: readonly SeatReason[]): string {
+  const premium = reasons.some((reason) => reason.tone === "good" && reason.text.includes("premium half"));
+  const discount = reasons.some((reason) => reason.tone === "good" && reason.text.includes("discount half"));
+  const zone = reasons.some((reason) => reason.tone === "good" && reason.text.includes("Price is inside an unfilled"));
+  const half = premium ? "premium" : discount ? "discount" : "";
+  if (half && zone) return `Structure, ${half}, and the zone agree.`;
+  if (half) return `Structure and ${half} agree.`;
+  if (zone) return "Structure and the zone agree.";
+  return "Structure agrees with this side.";
+}
+
 function verdictTitle(verdict: string): string {
   switch (verdict) {
     case "REVIEW_STOP":
@@ -90,8 +101,9 @@ function checkLabel(reason: SeatReason, side: PositionSide): string {
   if (text.includes("diverges")) return "Bar delta diverges";
   if (text.includes("delta") && text.includes("agrees")) return "Recent bar delta aligns";
   if (text.includes("balanced")) return "Bar delta is balanced";
-  if (text.includes("rotating")) return "Low hourly efficiency";
-  if (text.includes("covering ground")) return "Hourly efficiency is healthy";
+  if (text.includes("rotating")) return "Low 15m efficiency";
+  if (text.includes("covering ground")) return "15m efficiency is healthy";
+  if (text.includes("working range")) return "Stop is in the working range";
   if (text.includes("not enough completed swings") && text.includes("only")) return "Tight stop · limited swing history";
   if (text.includes("unusually wild")) return "Volatility is elevated";
   if (text.includes("vwap")) return "Extended from session value";
@@ -290,7 +302,7 @@ export function SeatPanel({ onClose }: SeatPanelProps) {
         : desk.verdict === "SEAT_OK" && working
           ? "Open profit is past 1 ATR"
           : desk.verdict === "SEAT_OK"
-            ? "Structure and the zone agree."
+            ? alignedDetail(desk.reasons)
             : lead
               ? checkLabel(lead, draft?.side ?? armed)
               : "The live numbers agree with this location.";
@@ -398,7 +410,7 @@ export function SeatPanel({ onClose }: SeatPanelProps) {
           <ContextRow label="Profile" value={desk?.metrics.profileWhere ?? "—"} />
           <ContextRow label="Equilibrium" value={desk?.metrics.dealingEq == null ? "—" : formatPrice(desk.metrics.dealingEq, digits)} />
           <ContextRow label="VWAP z" value={desk?.metrics.vwapZ == null ? "—" : desk.metrics.vwapZ.toFixed(2)} />
-          <ContextRow label="Efficiency" value={desk?.metrics.efficiencyH1 == null ? "—" : desk.metrics.efficiencyH1.toFixed(2)} />
+          <ContextRow label="15m efficiency" value={desk?.metrics.efficiencyM15 == null ? "—" : desk.metrics.efficiencyM15.toFixed(2)} />
           <ContextRow
             label="Vol rank"
             value={desk?.metrics.rvPercentile == null ? "—" : `${Math.round(desk.metrics.rvPercentile * 100)}th`}

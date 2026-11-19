@@ -597,10 +597,9 @@ function scoreSide(input: {
   }
   if (input.erH1 != null && input.erH1 >= 0.35 && input.structure === direction) {
     score += 10;
-    reasons.push({ tone: "good", text: `Hourly efficiency is ${input.erH1.toFixed(2)}, so the trend is covering ground rather than chopping.` });
+    reasons.push({ tone: "good", text: `15-minute efficiency is ${input.erH1.toFixed(2)}, so the trend is covering ground rather than chopping.` });
   } else if (input.erH1 != null && input.erH1 < 0.18) {
-    score -= 8;
-    reasons.push({ tone: "bad", text: `Hourly efficiency is ${input.erH1.toFixed(2)}. Price is rotating more than it is travelling.` });
+    reasons.push({ tone: "neutral", text: `15-minute efficiency is ${input.erH1.toFixed(2)}. Price is rotating more than it is travelling.` });
   }
   if (input.rvPct != null && input.rvPct >= 0.92) {
     score -= 8;
@@ -643,7 +642,7 @@ function scoreSide(input: {
         tone: "bad",
         text: `Stop is only ${input.stopDistanceAtr.toFixed(2)} ATR away, and there are not enough completed swings yet to justify anything tighter than 0.8 ATR.`,
       });
-    } else if (input.stopDistanceAtr <= 3.2) {
+    } else if (input.stopDistanceAtr <= 5.5) {
       score += 6;
       reasons.push({
         tone: "neutral",
@@ -763,6 +762,7 @@ export function analyzeSeat(
   const pressure = buyPressure(execution, 12);
   const erH1 = efficiencyRatio(higher.map((bar) => bar.close), 10);
   const erM15 = efficiencyRatio((frames.M15.length ? frames.M15 : execution).map((bar) => bar.close), 10);
+  const erTrade = erM15 ?? efficiencyRatio(execution.map((bar) => bar.close), 10);
   const rvPct = realizedVolPercentile(execution);
   const day = sessionBars(frames.M1.length ? frames.M1 : execution);
   const { vwap, std } = anchoredVwap(day);
@@ -804,7 +804,7 @@ export function analyzeSeat(
     dealing,
     pressure,
     divergence,
-    erH1,
+    erH1: erTrade,
     rvPct,
     vwapZ,
   };
