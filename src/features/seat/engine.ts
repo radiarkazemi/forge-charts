@@ -554,33 +554,44 @@ function scoreSide(input: {
   stopValid: boolean | null;
 }): SideRead {
   const direction = input.side === "long" ? 1 : -1;
-  let score = 42;
+  let score = 20;
   const reasons: SeatReason[] = [];
   let inCorrectHalf = false;
   if (input.structure === direction) {
-    score += 24;
+    score += 25;
     reasons.push({ tone: "good", text: "Confirmed swings agree with this side." });
   } else if (input.structure === -direction) {
-    score -= 24;
+    score -= 25;
     reasons.push({ tone: "bad", text: "Confirmed swings point the other way." });
   } else {
     reasons.push({ tone: "neutral", text: "Swings are mixed or not confirmed yet, so structure is not backing the trade." });
   }
   if (input.dealing && input.dealing.high > input.dealing.low) {
     const location = (input.price - input.dealing.low) / (input.dealing.high - input.dealing.low);
-    if (input.side === "long" && location <= 0.48) {
+    const ote = input.side === "short" ? location >= 0.62 && location <= 0.79 : location >= 0.21 && location <= 0.38;
+    if (input.side === "long" && location < 0.5) {
       inCorrectHalf = true;
-      score += 16;
-      reasons.push({ tone: "good", text: "Price is in the discount half of the latest swing." });
-    } else if (input.side === "short" && location >= 0.52) {
+      score += 25;
+      reasons.push({
+        tone: "good",
+        text: ote
+          ? "Entry is in the 0.62 to 0.79 optimal trade entry band, in discount."
+          : "Price is in the discount half of the latest swing.",
+      });
+      if (ote) score += 10;
+    } else if (input.side === "short" && location > 0.5) {
       inCorrectHalf = true;
-      score += 16;
-      reasons.push({ tone: "good", text: "Price is in the premium half of the latest swing." });
-    } else if (Math.abs(location - 0.5) <= 0.08) {
-      score += 4;
-      reasons.push({ tone: "neutral", text: "Price is sitting on equilibrium, not clearly in the better half." });
+      score += 25;
+      reasons.push({
+        tone: "good",
+        text: ote
+          ? "Entry is in the 0.62 to 0.79 optimal trade entry band, in premium."
+          : "Price is in the premium half of the latest swing.",
+      });
+      if (ote) score += 10;
+    } else if (location === 0.5) {
+      reasons.push({ tone: "neutral", text: "Entry is on the 0.50 equilibrium of the latest swing." });
     } else {
-      score -= 12;
       const half = location > 0.5 ? "premium" : "discount";
       reasons.push({ tone: "bad", text: `Price is in the ${half} half, which is the expensive side for a ${input.side}.` });
     }
@@ -588,7 +599,7 @@ function scoreSide(input: {
     reasons.push({ tone: "neutral", text: "No confirmed swing range yet, so discount and premium are unknown." });
   }
   if (input.zone) {
-    score += 18;
+    score += 10;
     reasons.push({ tone: "good", text: `Price is inside an unfilled ${input.side} imbalance or the order block that created it.` });
   } else {
     reasons.push({ tone: "neutral", text: "Price is not inside an unfilled imbalance in this direction." });
@@ -596,79 +607,58 @@ function scoreSide(input: {
   const against = input.divergence === -direction;
   const withFlow =
     input.pressure != null &&
-    ((input.side === "long" && input.pressure >= 0.56) || (input.side === "short" && input.pressure <= 0.44));
+    ((input.side === "long" && input.pressure > 0.5) || (input.side === "short" && input.pressure < 0.5));
   if (against) {
-    score -= 14;
-    reasons.push({ tone: "bad", text: "Close-location delta diverges against this side at the last two swings." });
+    reasons.push({ tone: "neutral", text: "Close-location delta diverges against this side at the last two swings." });
   } else if (withFlow) {
-    score += 12;
     reasons.push({ tone: "good", text: "Recent bar delta, from where the close sat in each bar, agrees with this side." });
   } else {
     reasons.push({ tone: "neutral", text: "Recent bar delta is balanced, so flow is not confirming." });
   }
-  if (input.erH1 != null && input.erH1 >= 0.35 && input.structure === direction) {
-    score += 10;
+  if (input.erH1 != null && input.erH1 >= 0.6 && input.structure === direction) {
     reasons.push({ tone: "good", text: `15-minute efficiency is ${input.erH1.toFixed(2)}, so the trend is covering ground rather than chopping.` });
-  } else if (input.erH1 != null && input.erH1 < 0.175) {
+  } else if (input.erH1 != null && input.erH1 < 0.3) {
     reasons.push({ tone: "neutral", text: `15-minute efficiency is ${input.erH1.toFixed(2)}. Price is rotating more than it is travelling.` });
   }
-  if (input.rvPct != null && input.rvPct >= 0.92) {
-    score -= 8;
+  if (input.rvPct != null && input.rvPct >= 0.9) {
     reasons.push({
-      tone: "bad",
+      tone: "neutral",
       text: `Realized volatility is in the ${ordinal(Math.round(input.rvPct * 100))} percentile of its own history. The tape is unusually wild.`,
     });
   }
-  if (input.vwapZ != null && ((input.side === "long" && input.vwapZ > 1.75) || (input.side === "short" && input.vwapZ < -1.75))) {
-    score -= 20;
+  if (input.vwapZ != null && ((input.side === "long" && input.vwapZ >= 2) || (input.side === "short" && input.vwapZ <= -2))) {
     reasons.push({ tone: "bad", text: `Session VWAP z-score is ${signed(input.vwapZ)}. This side is extended away from value.` });
   }
   let stopInsideHeat = false;
+  const dist = input.stopDistanceAtr;
   if (input.stopValid === false) {
     score -= 30;
     reasons.push({ tone: "bad", text: "The stop is on the wrong side of the entry." });
-  } else if (input.stopDistanceAtr != null && input.heatKnown && input.heatP70 != null) {
-    if (input.stopDistanceAtr + 1e-9 < input.heatP70) {
+  } else if (dist != null) {
+    const heatFloor = input.heatKnown && input.heatP70 != null ? Math.max(1, input.heatP70) : 1;
+    if (dist < heatFloor) {
       stopInsideHeat = true;
-      score -= 18;
       reasons.push({
         tone: "bad",
-        text: `Stop is ${input.stopDistanceAtr.toFixed(2)} ATR away. Completed swings on this feed usually ran ${input.heatP70.toFixed(2)} ATR against the trade before making +1 ATR.`,
+        text:
+          input.heatKnown && input.heatP70 != null
+            ? `Stop is ${dist.toFixed(2)} ATR away, inside the ${input.heatP70.toFixed(2)} ATR already seen against this side.`
+            : `Stop is only ${dist.toFixed(2)} ATR away, inside one average true range.`,
       });
-    } else if (input.stopDistanceAtr <= 3.5) {
-      score += 12;
+    } else if (dist <= 3) {
+      score += 10;
       reasons.push({
         tone: "good",
-        text: `Stop is ${input.stopDistanceAtr.toFixed(2)} ATR away, beyond the ${input.heatP70.toFixed(2)} ATR heat seen on completed swings, and still inside 3.5 ATR.`,
+        text: `Stop is ${dist.toFixed(2)} ATR away, inside the 1 to 3 ATR band.`,
       });
     } else {
-      score -= 6;
-      reasons.push({ tone: "neutral", text: `Stop is ${input.stopDistanceAtr.toFixed(2)} ATR away. It clears the noise, but the risk is wide.` });
-    }
-  } else if (input.stopDistanceAtr != null) {
-    if (input.stopDistanceAtr < 0.8) {
-      stopInsideHeat = true;
-      score -= 16;
-      reasons.push({
-        tone: "bad",
-        text: `Stop is only ${input.stopDistanceAtr.toFixed(2)} ATR away, and there are not enough completed swings yet to justify anything tighter than 0.8 ATR.`,
-      });
-    } else if (input.stopDistanceAtr <= 5.5) {
-      score += 6;
       reasons.push({
         tone: "neutral",
-        text: `Stop is ${input.stopDistanceAtr.toFixed(2)} ATR away. Swing-heat history is still short, so this is only a working range.`,
-      });
-    } else {
-      score -= 6;
-      reasons.push({
-        tone: "neutral",
-        text: `Stop is ${input.stopDistanceAtr.toFixed(2)} ATR away. It clears the noise, but the risk is wide.`,
+        text: `Stop is ${dist.toFixed(2)} ATR away, beyond the 3 ATR buffer.`,
       });
     }
   }
-  let capped = Math.max(0, Math.min(100, Math.round(score)));
-  if (reasons.some((reason) => reason.tone !== "good")) capped = Math.min(capped, 88);
+  const capped = Math.max(0, Math.min(100, Math.round(score)));
   return {
     score: capped,
     reasons,
@@ -739,7 +729,6 @@ export function analyzeSeat(
   let higher = execution;
   let structureK = 2;
   for (const [timeframe, pivotK] of [
-    ["H1", 3],
     ["M15", 2],
     ["M5", 2],
   ] as const) {
@@ -859,7 +848,7 @@ export function analyzeSeat(
   const banked = checked === "long" ? longGeo.banked : shortGeo.banked;
   const heatKnown = checked === "long" ? longHeatKnown : shortHeatKnown;
   const located = read.inCorrectHalf || read.atZone;
-  const chased = vwapZ != null && ((checked === "long" && vwapZ > 1.75) || (checked === "short" && vwapZ < -1.75));
+  const chased = vwapZ != null && ((checked === "long" && vwapZ >= 2) || (checked === "short" && vwapZ <= -2));
   const throughStop = (side === "long" && stop != null && price < stop) || (side === "short" && stop != null && price > stop);
   const lostSwing =
     (side === "long" && dealing != null && price < dealing.low) || (side === "short" && dealing != null && price > dealing.high);
@@ -923,8 +912,8 @@ export function analyzeSeat(
     reasons = [...reasons, { tone: "bad", text: "Take profit is on the wrong side of the entry." }];
   } else if (reward != null && risk != null && risk > 0) {
     rr = reward / risk;
-    if ((side === "long" || side === "short") && rr < 1.2) {
-      reasons = [...reasons, { tone: "neutral", text: `Reward to risk against your target is ${rr.toFixed(2)}.` }];
+    if ((side === "long" || side === "short") && rr < 1.63) {
+      reasons = [...reasons, { tone: "neutral", text: `Reward to risk against your target is ${rr.toFixed(2)}, below 1.63 at the 0.62 retracement.` }];
     }
   }
   if (throughStop) reasons = [{ tone: "bad", text: "Live price is already through your stop." }, ...reasons];

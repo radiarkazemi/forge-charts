@@ -42,8 +42,8 @@ function formatPrice(value: number, digits: number): string {
 }
 
 function alignedDetail(reasons: readonly SeatReason[]): string {
-  const premium = reasons.some((reason) => reason.tone === "good" && reason.text.includes("premium half"));
-  const discount = reasons.some((reason) => reason.tone === "good" && reason.text.includes("discount half"));
+  const premium = reasons.some((reason) => reason.tone === "good" && (reason.text.includes("premium half") || reason.text.includes("in premium")));
+  const discount = reasons.some((reason) => reason.tone === "good" && (reason.text.includes("discount half") || reason.text.includes("in discount")));
   const zone = reasons.some((reason) => reason.tone === "good" && reason.text.includes("Price is inside an unfilled"));
   const half = premium ? "premium" : discount ? "discount" : "";
   if (half && zone) return `Structure, ${half}, and the zone agree.`;
@@ -90,6 +90,8 @@ function checkLabel(reason: SeatReason, side: PositionSide): string {
   if (text.includes("swings agree")) return "Swing structure aligns";
   if (text.includes("point the other")) return "Swings point the other way";
   if (text.includes("mixed") || text.includes("not confirmed")) return "Swings are not confirmed";
+  if (text.includes("optimal trade entry") && text.includes("premium")) return "Entry is in premium OTE";
+  if (text.includes("optimal trade entry") && text.includes("discount")) return "Entry is in discount OTE";
   if (text.includes("premium half") && !text.includes("expensive")) return "Price is in premium";
   if (text.includes("discount half") && !text.includes("expensive")) return "Price is in discount";
   if (text.includes("equilibrium")) return "Price is on equilibrium";
@@ -101,9 +103,12 @@ function checkLabel(reason: SeatReason, side: PositionSide): string {
   if (text.includes("diverges")) return "Bar delta diverges";
   if (text.includes("delta") && text.includes("agrees")) return "Recent bar delta aligns";
   if (text.includes("balanced")) return "Bar delta is balanced";
-  if (text.includes("rotating")) return "Low 15m efficiency";
-  if (text.includes("covering ground")) return "15m efficiency is healthy";
-  if (text.includes("working range")) return "Stop is in the working range";
+  if (text.includes("rotating")) return "15m efficiency is below 0.30";
+  if (text.includes("covering ground")) return "15m efficiency is above 0.60";
+  if (text.includes("1 to 3 atr")) return "Stop is inside 1–3 ATR";
+  if (text.includes("already seen")) return "Stop is inside swing heat";
+  if (text.includes("one average true range")) return "Stop is inside 1 ATR";
+  if (text.includes("3 atr buffer")) return "Stop is beyond 3 ATR";
   if (text.includes("not enough completed swings") && text.includes("only")) return "Tight stop · limited swing history";
   if (text.includes("unusually wild")) return "Volatility is elevated";
   if (text.includes("vwap")) return "Extended from session value";
