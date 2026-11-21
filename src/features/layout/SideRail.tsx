@@ -17,6 +17,7 @@ import {
   NotificationsRailIcon,
   ObjectTreeRailIcon,
   PineRailIcon,
+  SeatRailIcon,
   ScreenerRailIcon,
   WatchlistRailIcon,
 } from "./rail-icons";
@@ -57,6 +58,7 @@ interface RailItem {
 const ITEMS: readonly RailItem[] = [
   { id: "watchlist", label: "Watchlist, details, and news", icon: WatchlistRailIcon, group: "top", mobile: true },
   { id: "alerts", label: "Alerts", icon: AlertsRailIcon, group: "top", mobile: true },
+  { id: "seat", label: "Setup Review", icon: SeatRailIcon, group: "top", mobile: true },
   { label: "Object tree and data window", icon: ObjectTreeRailIcon, action: "objectTree", group: "top", mobile: true },
   { label: "Hotlists", icon: HotlistsRailIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },
   { label: "Screener", icon: ScreenerRailIcon, action: "external", href: "https://forgechart.ir/", group: "mid" },

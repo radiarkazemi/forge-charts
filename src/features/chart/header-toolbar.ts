@@ -22,6 +22,9 @@ const ALERT_ICON =
 const REPLAY_ICON =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28" fill="currentColor"><path d="M13 7.2 5.8 14 13 20.8V7.2zm9 0L14.8 14 22 20.8V7.2z"/></svg>';
 
+const SETUP_ICON =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M7 9h8M7 14h8M7 19h5"/><path d="M17.5 17.2 19.4 19l3.6-4.2"/></svg>';
+
 const SEARCH_ICON =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" width="28" height="28"><path fill="currentColor" d="M12.5 5a7.5 7.5 0 1 0 4.74 13.3l4.23 4.24 1.06-1.06-4.24-4.23A7.5 7.5 0 0 0 12.5 5zm0 1.5a6 6 0 1 1 0 12 6 6 0 0 1 0-12z"/></svg>';
 
@@ -224,6 +227,23 @@ export function mountHeaderToolbar(
 
   // Desktop header: icon + label, same place as TradingView (after Indicators).
   if (!handlers.mobile) {
+    const seatBtn = widget.createButton({ align: "left", useTradingViewStyle: false });
+    paintActionButton(seatBtn, SETUP_ICON, "Setup Review", "Review the position on the chart");
+    const paintSeat = (open: boolean) => {
+      seatBtn.style.color = open ? "#2962ff" : "";
+      seatBtn.style.background = open ? "rgba(41,98,255,0.12)" : "transparent";
+      seatBtn.style.borderRadius = "6px";
+    };
+    const onSeatPanel = (event: Event) => {
+      paintSeat(Boolean((event as CustomEvent<{ open?: boolean }>).detail?.open));
+    };
+    window.addEventListener("forge:seat-panel", onSeatPanel);
+    seatBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      window.dispatchEvent(new Event("forge:open-seat"));
+    });
+
     const alertBtn = widget.createButton({ align: "left", useTradingViewStyle: false });
     paintActionButton(alertBtn, ALERT_ICON, "Alert", "Create a price alert");
     alertBtn.addEventListener("click", (event) => {
