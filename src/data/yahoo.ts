@@ -1,5 +1,7 @@
 import type { Bar, Interval, SymbolInfo } from "../engine/types";
+import { INTERVAL_SEC } from "./feed";
 import { FOREXCOM_YAHOO } from "./forexcom";
+import { aggregateBars, foldLiveBar } from "./session-bars";
 
 export const YAHOO_IV: Record<Interval, { interval: string; range: string }> = {
   "1": { interval: "1m", range: "1d" },
@@ -44,6 +46,8 @@ export async function fetchYahooHistory(ticker: string, interval: Interval): Pro
       volume: q.volume?.[i] || 0,
     });
   }
+  if (interval === "120") return aggregateBars(bars, 2, 3600, true);
+  if (interval === "240") return aggregateBars(bars, 4, 3600, true);
   return bars;
 }
 
@@ -103,14 +107,21 @@ export function subscribeYahooBar(
       const open = q.open?.[i];
       const close = q.close?.[i];
       if (!Number.isFinite(open) || !Number.isFinite(close) || closed) return;
-      onBar({
-        time: ts[i],
-        open,
-        high: q.high?.[i] ?? Math.max(open, close),
-        low: q.low?.[i] ?? Math.min(open, close),
-        close,
-        volume: q.volume?.[i] || 0,
-      });
+      onBar(
+        foldLiveBar(
+          undefined,
+          {
+            time: ts[i],
+            open,
+            high: q.high?.[i] ?? Math.max(open, close),
+            low: q.low?.[i] ?? Math.min(open, close),
+            close,
+            volume: q.volume?.[i] || 0,
+          },
+          INTERVAL_SEC[interval],
+          true,
+        ),
+      );
     } catch {
       /* keep previous */
     }

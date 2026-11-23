@@ -305,7 +305,17 @@ export class ChartEngine {
     const last = this.bars.at(-1);
     const follow = this.viewEnd >= this.bars.length - 1;
     if (last && bar.time === last.time) {
-      this.bars = [...this.bars.slice(0, -1), bar];
+      this.bars = [
+        ...this.bars.slice(0, -1),
+        {
+          time: last.time,
+          open: last.open,
+          high: Math.max(last.high, bar.high),
+          low: Math.min(last.low, bar.low),
+          close: bar.close,
+          volume: last.volume,
+        },
+      ];
     } else if (!last || bar.time > last.time) {
       this.bars = [...this.bars, bar];
     } else {

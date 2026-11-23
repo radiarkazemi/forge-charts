@@ -18,7 +18,9 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import websockets
 from aiohttp import web
@@ -60,6 +62,21 @@ INTERVAL_ALIAS = {
     "1M": "1d",
 }
 STEP_SEC = {"1m": 60, "1h": 3600, "1d": 86400}
+NY = ZoneInfo("America/New_York")
+FX_SESSION_OPEN_HOUR = 18
+
+
+def fx_session_bucket(t: int, bucket: int, open_hour: int = FX_SESSION_OPEN_HOUR) -> int:
+    """TradingView FX 4H grid: 18:00 America/New_York, DST-aware."""
+    dt = datetime.fromtimestamp(int(t), tz=NY)
+    year, month, day, hour = dt.year, dt.month, dt.day, dt.hour
+    if hour < open_hour:
+        prev = dt - timedelta(days=1)
+        year, month, day = prev.year, prev.month, prev.day
+    session_open = datetime(year, month, day, open_hour, 0, 0, tzinfo=NY)
+    start_ts = int(session_open.timestamp())
+    n = (int(t) - start_ts) // bucket
+    return start_ts + n * bucket
 
 
 def normalize_symbol(symbol: str) -> str:
@@ -104,15 +121,16 @@ def to_unix(value: Any) -> int | None:
     return None
 
 
-def aggregate(bars: list[list[float]], group: int, step: int) -> list[list[float]]:
+def aggregate(bars: list[list[float]], group: int, step: int, align: str = "utc") -> list[list[float]]:
     if group <= 1 or not bars:
         return bars
     bucket = step * group
+    use_fx = align in ("fx", "forex", "ny", "session")
     out: list[list[float]] = []
     cur: list[float] | None = None
     bucket_start = -1
     for t, o, h, l, c, v in bars:
-        start = int(t // bucket) * bucket
+        start = fx_session_bucket(int(t), bucket) if use_fx else int(t // bucket) * bucket
         if cur is None or start != bucket_start:
             if cur is not None:
                 out.append(cur)
@@ -159,8 +177,8 @@ class PriceHub:
             "pc": doc.get("pc") or 0,
         }
 
-    def read_history(self, symbol: str, timeframe: str, limit: int, group: int) -> dict[str, Any]:
-        cache_key = f"{symbol}|{timeframe}|{limit}|{group}"
+    def read_history(self, symbol: str, timeframe: str, limit: int, group: int, align: str = "utc") -> dict[str, Any]:
+        cache_key = f"{symbol}|{timeframe}|{limit}|{group}|{align}"
         now = time.time()
         hit = self._cache.get(cache_key)
         if hit and now - hit[0] <= CACHE_TTL:
@@ -189,7 +207,7 @@ class PriceHub:
         bars.reverse()
         step = STEP_SEC[timeframe]
         if group > 1:
-            bars = aggregate(bars, group, step)
+            bars = aggregate(bars, group, step, align)
             if len(bars) > limit:
                 bars = bars[-limit:]
         elif len(bars) > limit:
@@ -199,6 +217,7 @@ class PriceHub:
             "symbol": symbol,
             "timeframe": timeframe,
             "group": group,
+            "align": align,
             "count": len(bars),
             "bars": bars,
         }
@@ -318,10 +337,11 @@ async def http_history(request: web.Request) -> web.Response:
         group = 1
     limit = max(1, min(limit, 2000))
     group = max(1, min(group, 60))
+    align = str(request.query.get("align") or "utc").strip().lower() or "utc"
     if not symbol:
         return web.json_response({"detail": "symbol required"}, status=400)
     try:
-        payload = await asyncio.to_thread(hub.read_history, symbol, timeframe, limit, group)
+        payload = await asyncio.to_thread(hub.read_history, symbol, timeframe, limit, group, align)
     except Exception as exc:
         LOG.exception("history failed")
         return web.json_response({"detail": str(exc)}, status=500)

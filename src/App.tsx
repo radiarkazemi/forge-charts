@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { findSymbol, UNIVERSE } from "./data/feed";
-import { fetchHistory, fetchQuotes, loadCatalog, subscribeLive } from "./data/market";
+import { fetchHistory, fetchQuotes, instantHistory, loadCatalog, subscribeLive } from "./data/market";
 import { ChartEngine } from "./engine/ChartEngine";
 import type { Interval, SymbolInfo } from "./engine/types";
 import { BottomDock } from "./ui/BottomDock";
@@ -36,7 +36,8 @@ export default function App() {
     if (!eng) return;
     unsubRef.current();
     const gen = ++feedGen.current;
-    setStatus(`Loading ${symbol.exchange}:${symbol.ticker}…`);
+    const painted = mode === "interval" && (instantHistory(symbol, interval)?.length ?? 0) > 0;
+    if (!painted) setStatus(`Loading ${symbol.exchange}:${symbol.ticker}…`);
     const { bars, live: isLive, source: feed } = await fetchHistory(symbol, interval);
     if (gen !== feedGen.current || engineRef.current !== eng) return;
     if (mode === "symbol") eng.setSymbol(symbol, bars);
@@ -102,7 +103,10 @@ export default function App() {
   const loadInterval = (interval: Interval) => {
     const eng = engineRef.current;
     if (!eng) return;
-    void attachFeed(eng.getSnapshot().symbol, interval, "interval");
+    const symbol = eng.getSnapshot().symbol;
+    const instant = instantHistory(symbol, interval);
+    if (instant?.length) eng.setInterval(interval, instant);
+    void attachFeed(symbol, interval, "interval");
   };
 
   const counts = useMemo(() => {
