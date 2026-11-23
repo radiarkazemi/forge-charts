@@ -872,12 +872,16 @@ function ensureMenuStyles(doc: Document): void {
   const style = doc.createElement("style");
   style.id = "forge-header-menu-style";
   style.textContent = `
+    .forge-save-menu, .forge-ind-menu, .forge-layout-menu,
+    .forge-save-menu *, .forge-ind-menu *, .forge-layout-menu * {
+      box-sizing: border-box;
+    }
     .forge-save-menu, .forge-ind-menu, .forge-layout-menu {
       position: fixed; z-index: 2147483646;
       background: #fff; color: #131722; border: 1px solid #e0e3eb; border-radius: 6px;
       box-shadow: 0 8px 28px rgba(0,0,0,0.28); padding: 6px 0;
       font-family: -apple-system, BlinkMacSystemFont, Trebuchet MS, Roboto, Ubuntu, sans-serif;
-      font-size: 14px; box-sizing: border-box;
+      font-size: 14px; overflow: hidden;
     }
     .forge-save-menu { width: 292px; }
     .forge-layout-menu { width: 312px; padding-top: 8px; }
@@ -894,15 +898,16 @@ function ensureMenuStyles(doc: Document): void {
     .flm-cell svg { width: 28px; height: 28px; display: block; }
     .flm-cell.is-on, .flm-cell:hover { background: rgba(41, 98, 255, 0.16); color: #2962ff; }
     .fsm-item, .fim-row, .fsm-recent {
-      width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      width: 100%; max-width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px;
       border: 0; background: transparent; color: inherit; cursor: pointer;
       padding: 8px 16px; text-align: left; font: inherit;
     }
+    .fsm-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .fsm-item:hover, .fim-row:hover, .fsm-recent:hover { background: rgba(120,123,134,0.14); }
     .fsm-item kbd { color: #787b86; font-family: inherit; font-size: 12px; }
     .fsm-switch {
-      width: 34px; height: 18px; border-radius: 99px; border: 0; padding: 0; cursor: pointer;
-      background: #d1d4dc; position: relative;
+      flex: 0 0 34px; width: 34px; height: 18px; border-radius: 99px; border: 0; padding: 0; cursor: pointer;
+      background: #d1d4dc; position: relative; margin-left: auto;
     }
     .fsm-switch::after {
       content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
