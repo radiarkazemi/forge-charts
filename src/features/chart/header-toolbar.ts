@@ -166,6 +166,7 @@ function mountLayersMenu(widget: IChartingLibraryWidget, handlers: HeaderToolbar
     ensureMenuStyles(doc);
     menu = doc.createElement("div");
     menu.className = "forge-save-menu forge-layout-menu";
+    menu.setAttribute("data-name", "layout-menu");
     if (doc.documentElement.classList.contains("theme-dark")) menu.classList.add("is-dark");
     const box = button.getBoundingClientRect();
     menu.style.top = `${Math.round(box.bottom + 4)}px`;
@@ -645,6 +646,7 @@ function mountSaveMenu(doc: Document, widget: IChartingLibraryWidget, handlers: 
     mode = "list";
     menu = doc.createElement("div");
     menu.className = "forge-save-menu";
+    menu.setAttribute("data-name", "forge-save-menu");
     if (doc.documentElement.classList.contains("theme-dark")) menu.classList.add("is-dark");
     const anchor = (event.currentTarget as HTMLElement | null) ?? chevron;
     const box = anchor.getBoundingClientRect();
@@ -799,6 +801,7 @@ function mountIndicatorMenu(doc: Document, widget: IChartingLibraryWidget, handl
     tab = "indicators";
     menu = doc.createElement("div");
     menu.className = "forge-ind-menu";
+    menu.setAttribute("data-name", "forge-indicators-menu");
     if (doc.documentElement.classList.contains("theme-dark")) menu.classList.add("is-dark");
     const anchor = (event.currentTarget as HTMLElement | null) ?? button;
     const box = anchor.getBoundingClientRect();
@@ -884,7 +887,7 @@ function ensureMenuStyles(doc: Document): void {
       font-size: 14px; overflow: hidden;
     }
     .forge-save-menu { width: 292px; }
-    .forge-layout-menu { width: 312px; padding-top: 8px; }
+    .forge-layout-menu { width: 312px; padding-top: 8px; overflow-x: hidden; overflow-y: auto; max-height: calc(100vh - 56px); }
     .forge-ind-menu { min-width: 280px; max-width: 360px; }
     .forge-save-menu.is-dark, .forge-ind-menu.is-dark, .forge-layout-menu.is-dark { background: #1e222d; color: #d1d4dc; border-color: #434651; }
     .fsm-name { display: flex; flex-direction: column; gap: 2px; padding: 8px 16px 10px; border-bottom: 1px solid rgba(120,123,134,0.28); }
