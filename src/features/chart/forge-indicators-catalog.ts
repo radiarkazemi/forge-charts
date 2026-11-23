@@ -454,6 +454,17 @@ export const BUILTIN_INDICATORS: readonly ForgeIndicatorEntry[] = [
 
 export const FORGE_INDICATORS: readonly ForgeIndicatorEntry[] = [
   {
+    id: "forge-fractal-time",
+    name: FRACTAL_TIME_STUDY_NAME,
+    studyId: FRACTAL_TIME_STUDY_ID,
+    author: "Forge VIP",
+    shortDescription: "NY 17:00 C1–C6 · Phase Match · macros",
+    tags: ["fractal", "time", "alignment", "phase", "match", "ny", "ict", "c1", "fta"],
+    favorite: true,
+    usesLabel: "Forge VIP",
+    section: "forge",
+  },
+  {
     id: "forge-ifvg-bpr",
     name: IFVG_BPR_STUDY_NAME,
     studyId: IFVG_BPR_STUDY_ID,
@@ -537,17 +548,6 @@ export const FORGE_INDICATORS: readonly ForgeIndicatorEntry[] = [
     author: "Forge VIP",
     shortDescription: "Structure Intelligence POI 1:3",
     tags: ["structure", "poi", "si", "fvg", "ob"],
-    favorite: true,
-    usesLabel: "Forge VIP",
-    section: "forge",
-  },
-  {
-    id: "forge-fractal-time",
-    name: FRACTAL_TIME_STUDY_NAME,
-    studyId: FRACTAL_TIME_STUDY_ID,
-    author: "Forge VIP",
-    shortDescription: "NY 17:00 fractal layers · Phase Match",
-    tags: ["fractal", "time", "alignment", "ny", "ict"],
     favorite: true,
     usesLabel: "Forge VIP",
     section: "forge",

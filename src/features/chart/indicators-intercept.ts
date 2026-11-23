@@ -398,9 +398,10 @@ function paintList(listEl: HTMLElement, nav: NavId, q: string): void {
 async function addStudy(widget: IChartingLibraryWidget, studyId: string, name: string): Promise<void> {
   try {
     const chart = widget.activeChart();
+    const overlay = /@tv-basicstudies-1$/i.test(studyId);
     const tryCreate = async (id: string) => {
       try {
-        const entity = await chart.createStudy(id, false, false);
+        const entity = await chart.createStudy(id, overlay, false);
         return entity != null;
       } catch {
         return false;
@@ -589,7 +590,7 @@ function openOverlay(doc: Document, widget: IChartingLibraryWidget): void {
 }
 
 function openDesktopOverlay(doc: Document, widget: IChartingLibraryWidget, root: HTMLElement): void {
-  let nav: NavId = "favorites";
+  let nav: NavId = "myScripts";
   let query = "";
 
   root.innerHTML = `
@@ -600,7 +601,7 @@ function openDesktopOverlay(doc: Document, widget: IChartingLibraryWidget, root:
       </div>
       <div class="fi-body">
         <div class="fi-side">
-          ${navButtons(DESKTOP_GROUPS, "favorites", false)}
+          ${navButtons(DESKTOP_GROUPS, "myScripts", false)}
           <div class="fi-foot"><button type="button" class="fi-full">Full library…</button></div>
         </div>
         <div class="fi-main">

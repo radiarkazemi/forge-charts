@@ -32,11 +32,13 @@ sed -e 's|/assets/forge/|/assets/forge-dev/|g' dist/index.html > "$STAGE/index.h
 echo "Deploying /dev/ only → ${USER}@${HOST}:${WEB}"
 tar -C "$STAGE" -cf - assets index.html | "${SSH[@]}" "${USER}@${HOST}" \
   "python3 -c \"
-import os, sys, tarfile
+import os, shutil, sys, tarfile
 web = sys.argv[1]
 dev = os.path.join(web, 'dev')
+team = os.path.join(web, 'team')
 assets = os.path.join(web, 'assets', 'forge-dev')
 os.makedirs(dev, exist_ok=True)
+os.makedirs(team, exist_ok=True)
 os.makedirs(assets, exist_ok=True)
 tf = tarfile.open(fileobj=sys.stdin.buffer, mode='r|')
 for m in tf:
@@ -55,7 +57,10 @@ for m in tf:
         continue
     with open(dest, 'wb') as out:
         out.write(src.read())
-print('ok', dev, assets)
+idx = os.path.join(dev, 'index.html')
+if os.path.isfile(idx):
+    shutil.copyfile(idx, os.path.join(team, 'index.html'))
+print('ok', dev, team, assets)
 \" '${WEB}'"
 
 echo "OK ${USER}@${HOST} /dev/"
