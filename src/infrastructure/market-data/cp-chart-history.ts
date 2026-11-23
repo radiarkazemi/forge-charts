@@ -142,7 +142,9 @@ export async function fetchCpChartHistory(
   if (!plan) throw new Error(`cp-chart-history: unsupported interval ${interval}`);
 
   const target = targetHistoryDepth(interval);
-  const limit = Math.min(target, Math.max(range.countBack + 100, 2_000));
+  // Honor TV's page size. Forcing 2k–20k on every first paint made /dev/ wait on the
+  // Germany→mongo hop before a single candle showed.
+  const limit = Math.min(target, Math.max(range.countBack + 40, 300));
 
   // Pass TV interval so the server can resolve parent+group (and still accept explicit group).
   const before = range.to > 0 ? range.to : Number.POSITIVE_INFINITY;
