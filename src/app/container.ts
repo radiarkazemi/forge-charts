@@ -26,6 +26,7 @@ import {
   YahooProvider,
   type IExternalSaveLoadAdapter,
 } from "@/infrastructure";
+import { hydrateTsetmcBoard } from "@/infrastructure/market-data/tsetmc-catalog";
 import { ChartController } from "@/features/chart/chart-controller";
 import { BarReplayController } from "@/features/chart/bar-replay/bar-replay-controller";
 import { DemoSpaceController, DemoTradingService } from "@/features/demo-trading";
@@ -88,6 +89,7 @@ export function createServices(
 ): Services {
   const notifier = new BrowserNotifier();
   const symbols = new StaticSymbolRepository();
+  hydrateTsetmcBoard(symbols);
   const providers = buildProviders(config);
 
   const marketData = new MarketDataService(providers);
