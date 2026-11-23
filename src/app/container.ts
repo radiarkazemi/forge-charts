@@ -132,7 +132,14 @@ export function createServices(
   disposers.push(alerts.alerts.subscribe(syncTrackedSymbols));
   disposers.push(chart.state.subscribe(syncTrackedSymbols));
   syncTrackedSymbols();
-  quotes.start();
+  // Let the first getBars own the TV/Mongo sockets (Chartix-style). Quotes
+  // after 2.5s is enough for the watchlist and does not stall first paint.
+  if (typeof window !== "undefined") {
+    const quoteBoot = window.setTimeout(() => quotes.start(), 2_500);
+    disposers.push(() => window.clearTimeout(quoteBoot));
+  } else {
+    quotes.start();
+  }
 
   // Remember the last charted symbol/interval for the next session.
   disposers.push(

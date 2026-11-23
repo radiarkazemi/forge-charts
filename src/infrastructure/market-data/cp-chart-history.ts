@@ -1,9 +1,10 @@
 import { intervalSeconds, parseInterval, type Bar, type BarRange, type Interval } from "@/domain";
 import { buildUrl, fetchJson } from "../http/fetch-json";
+import { historyFetchLimit, historyTimeoutMs } from "./history-page";
 
 /** VPS cp_fetcher chart_ws HTTP (nginx `/crypto-chart/` → :8003). */
 const CHART_HISTORY_BASE = "/crypto-chart/history";
-const REQUEST_TIMEOUT_MS = 45_000;
+const REQUEST_TIMEOUT_MS = 22_000;
 
 /** Target depths for TradingView scroll-back (as many as Mongo can serve). */
 export function targetHistoryDepth(interval: Interval): number {
@@ -142,7 +143,7 @@ export async function fetchCpChartHistory(
   if (!plan) throw new Error(`cp-chart-history: unsupported interval ${interval}`);
 
   const target = targetHistoryDepth(interval);
-  const limit = Math.min(target, Math.max(range.countBack + 100, 2_000));
+  const limit = Math.min(target, historyFetchLimit(range.countBack));
 
   // Pass TV interval so the server can resolve parent+group (and still accept explicit group).
   const before = range.to > 0 ? range.to : Number.POSITIVE_INFINITY;
@@ -155,7 +156,9 @@ export async function fetchCpChartHistory(
     before: range.to > 0 ? range.to : undefined,
   });
 
-  const json = await fetchJson<ChartHistoryResponse>(url, { timeoutMs: REQUEST_TIMEOUT_MS });
+  const json = await fetchJson<ChartHistoryResponse>(url, {
+    timeoutMs: Math.min(REQUEST_TIMEOUT_MS, historyTimeoutMs(limit)),
+  });
   if (json.detail) throw new Error(json.detail);
 
   let bars = (json.bars ?? [])

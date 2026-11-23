@@ -21,6 +21,19 @@ let pending: Promise<WidgetConstructor> | null = null;
  * and never exposes `TradingView.widget` (blank chart / banner error).
  * Keeping the library outside the Vite module graph leaves `bundles/` intact.
  */
+/** Start the library download during React boot so first paint is not waiting on MUI. */
+export function preloadChartingLibrary(libraryPath: string): void {
+  if (typeof document === "undefined") return;
+  const href = `${libraryPath}charting_library.js`;
+  if (document.querySelector(`link[data-forge-cl="${href}"]`)) return;
+  const link = document.createElement("link");
+  link.rel = "preload";
+  link.as = "script";
+  link.href = href;
+  link.dataset.forgeCl = href;
+  document.head.appendChild(link);
+}
+
 export function loadChartingLibrary(libraryPath: string): Promise<WidgetConstructor> {
   if (window.TradingView?.widget) return Promise.resolve(window.TradingView.widget);
   if (pending) return pending;

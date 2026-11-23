@@ -2,6 +2,8 @@ import "./dev-site";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
+import { readConfig } from "./app/config";
+import { loadChartingLibrary, preloadChartingLibrary } from "./infrastructure/tradingview/library-loader";
 
 /**
  * Soft settings migration only (pre-auth global keys).
@@ -160,6 +162,12 @@ function runBootRecovery(): void {
 }
 
 runBootRecovery();
+
+const libraryPath = readConfig().tvLibraryPath;
+preloadChartingLibrary(libraryPath);
+void loadChartingLibrary(libraryPath).catch(() => {
+  /* widget hook retries */
+});
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
