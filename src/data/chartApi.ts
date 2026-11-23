@@ -244,6 +244,18 @@ export async function fetchChartApiHistory(symbol: SymbolInfo, interval: Interva
   const cached = historyCache.get(cacheKey);
   if (cached && Date.now() - cached.at < HISTORY_CACHE_MS) return cached.bars;
 
+  const { tf, group } = HISTORY_TF[interval];
+  // FOREXCOM 2H/4H must be built from 1h on the NY 18:00 grid even if the
+  // history sidecar still UTC-buckets group=4.
+  if (fxAlign(symbol) && tf === "1h" && group > 1) {
+    await prefetchParent(symbol, "1h");
+    const local = barsFromParentCache(symbol, interval);
+    if (local?.length) {
+      historyCache.set(cacheKey, { at: Date.now(), bars: local });
+      return local;
+    }
+  }
+
   let bars: Bar[] = [];
   try {
     bars = (await fetchCompactHistory(symbol, interval)) ?? [];
@@ -254,9 +266,8 @@ export async function fetchChartApiHistory(symbol: SymbolInfo, interval: Interva
     bars = await fetchVerboseHistory(symbol, interval);
   }
   if (bars.length) historyCache.set(cacheKey, { at: Date.now(), bars });
-  const parent = HISTORY_TF[interval].tf;
-  if (parent === "1m") void prefetchParent(symbol, "1m");
-  if (parent === "1h" || fxAlign(symbol)) void prefetchParent(symbol, "1h");
+  if (tf === "1m") void prefetchParent(symbol, "1m");
+  if (tf === "1h" || fxAlign(symbol)) void prefetchParent(symbol, "1h");
   return bars;
 }
 
