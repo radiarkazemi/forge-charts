@@ -13,6 +13,7 @@ import type {
 } from "./types";
 import { createDealingRangesIndicator } from "@/features/chart/dealing-ranges-indicator";
 import { createSessionsIndicator } from "@/features/chart/sessions-indicator";
+import { createFractalTimeIndicator } from "@/features/chart/fractal-time-indicator";
 import { createHtfCandlesIndicator } from "@/features/chart/htf-candles-indicator";
 import { createStructureIntelligenceIndicator } from "@/features/chart/structure-intelligence-indicator";
 import { createReplayMentorIndicator } from "@/features/chart/replay-mentor-indicator";
@@ -423,6 +424,7 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
         createDealingRangesIndicator(PineJS as never) as CustomIndicator,
         createStructureIntelligenceIndicator(PineJS as never) as CustomIndicator,
         createSessionsIndicator(PineJS as never) as CustomIndicator,
+        createFractalTimeIndicator(PineJS as never) as CustomIndicator,
         createHtfCandlesIndicator(PineJS as never) as CustomIndicator,
         createReplayMentorIndicator(PineJS as never) as CustomIndicator,
         createForgeTradingAssistantIndicator(PineJS as never) as CustomIndicator,

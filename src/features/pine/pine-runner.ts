@@ -95,6 +95,19 @@ export function resolvePineStudy(code: string): PineResolveResult {
     };
   }
 
+  if (/Fractal\s*&\s*Time|Fractal\s*Time\s*Alignment/i.test(code)) {
+    return {
+      ok: true,
+      kind: "study",
+      study: {
+        studyName: "ForgeFractalTime@tv-basicstudies-1",
+        forceOverlay: true,
+        inputs: {},
+        label: "Fractal & Time Alignment",
+      },
+    };
+  }
+
   if (
     /Sessions\s*\[\s*LuxAlgo\s*\]/i.test(code) ||
     /LuxAlgo\s*-\s*Sessions/i.test(code) ||

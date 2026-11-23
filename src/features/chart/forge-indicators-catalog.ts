@@ -15,6 +15,7 @@ import { IRL_ERL_STUDY_ID, IRL_ERL_STUDY_NAME } from "./irl-erl-indicator";
 import { REAL_SWINGS_STUDY_ID, REAL_SWINGS_STUDY_NAME } from "./real-swings-indicator";
 import { REPLAY_MENTOR_STUDY_ID, REPLAY_MENTOR_STUDY_NAME } from "./replay-mentor-indicator";
 import { SESSIONS_STUDY_ID, SESSIONS_STUDY_NAME } from "./sessions-indicator";
+import { FRACTAL_TIME_STUDY_ID, FRACTAL_TIME_STUDY_NAME } from "./fractal-time-indicator";
 import { SI_STUDY_ID, SI_STUDY_NAME } from "./structure-intelligence-indicator";
 import { WATERMARK_STUDY_ID, WATERMARK_STUDY_NAME } from "./watermark-indicator";
 
@@ -536,6 +537,17 @@ export const FORGE_INDICATORS: readonly ForgeIndicatorEntry[] = [
     author: "Forge VIP",
     shortDescription: "Structure Intelligence POI 1:3",
     tags: ["structure", "poi", "si", "fvg", "ob"],
+    favorite: true,
+    usesLabel: "Forge VIP",
+    section: "forge",
+  },
+  {
+    id: "forge-fractal-time",
+    name: FRACTAL_TIME_STUDY_NAME,
+    studyId: FRACTAL_TIME_STUDY_ID,
+    author: "Forge VIP",
+    shortDescription: "NY 17:00 fractal layers · Phase Match",
+    tags: ["fractal", "time", "alignment", "ny", "ict"],
     favorite: true,
     usesLabel: "Forge VIP",
     section: "forge",
