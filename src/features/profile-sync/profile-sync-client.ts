@@ -187,8 +187,9 @@ function absorbRemoteEdits(storage: KeyValueStorage, payload: ProfilePayload | n
   };
 }
 
-async function fetchRemote(creds: ProfileSyncCredentials): Promise<RemoteProfile | null> {
-  const url = `${apiBase()}/v1/profile?accountKey=${encodeURIComponent(creds.accountKey)}`;
+async function fetchRemote(creds: ProfileSyncCredentials, meta = false): Promise<RemoteProfile | null> {
+  const stamp = meta ? "&meta=1" : "";
+  const url = `${apiBase()}/v1/profile?accountKey=${encodeURIComponent(creds.accountKey)}${stamp}`;
   const res = await fetch(url, {
     method: "GET",
     headers: {
@@ -205,6 +206,7 @@ async function fetchRemote(creds: ProfileSyncCredentials): Promise<RemoteProfile
   };
   return {
     updatedAt: Number(data.updatedAt) || 0,
+    // meta=1 omits the layout blob. An older server still sends it; keep it so we don't download twice.
     payload: data.payload ?? null,
   };
 }
@@ -319,7 +321,9 @@ export async function pullProfileIfNewer(
   const unchanged: ProfilePullResult = { appliedRemote: false, drawingsChanged: false, settingsChanged: false };
   let remote: RemoteProfile | null = null;
   try {
-    remote = await fetchRemote(creds);
+    const head = await fetchRemote(creds, true);
+    if (!head || !(head.updatedAt > readLocalStamp(storage))) return unchanged;
+    remote = head.payload ? head : await fetchRemote(creds);
   } catch {
     return unchanged;
   }
@@ -356,6 +360,7 @@ export function createProfileSyncPusher(storage: KeyValueStorage): {
   let disposed = false;
   let flushing = false;
   let queued = false;
+  let lastSent = "";
 
   const flush = () => {
     if (disposed) return;
@@ -370,12 +375,18 @@ export function createProfileSyncPusher(storage: KeyValueStorage): {
         if (!creds) return;
         let remote: RemoteProfile | null = null;
         try {
-          remote = await fetchRemote(creds);
+          const head = await fetchRemote(creds, true);
+          const remoteNewer = Boolean(head && head.updatedAt > readLocalStamp(storage));
+          if (head?.payload) remote = head;
+          else if (remoteNewer) remote = await fetchRemote(creds);
         } catch {
           remote = null;
         }
         // Keep the other device's drawings and the settings this device did not edit.
         const absorbed = absorbRemoteEdits(storage, remote?.payload);
+        const payload = collectProfilePayload(storage);
+        const packed = JSON.stringify(payload);
+        if (packed === lastSent && !remote) return;
         if (absorbed.settingsChanged) {
           holdProfilePersist();
           window.dispatchEvent(new CustomEvent(SETTINGS_UPDATED_EVENT));
@@ -397,7 +408,9 @@ export function createProfileSyncPusher(storage: KeyValueStorage): {
           else if (before !== after) window.dispatchEvent(new CustomEvent(DRAWINGS_UPDATED_EVENT));
         } else if (result.ok) {
           touchLocalStamp(storage, result.updatedAt);
+          lastSent = packed;
         }
+        if (result.conflict) lastSent = JSON.stringify(collectProfilePayload(storage));
       } catch {
         /* offline */
       } finally {
