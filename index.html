@@ -41,8 +41,12 @@
         "error",
         function (ev) {
           try {
-            var src = (ev && (ev.filename || (ev.target && ev.target.src))) || "";
-            if (!src || src.indexOf("/assets/forge/") === -1) return;
+            // Script-tag load failures only. Runtime errors must not wipe the page.
+            // Match /assets/forge/forge-main.js, not /assets/forge-dev/ (substring trap).
+            var t = ev && ev.target;
+            if (!t || t.tagName !== "SCRIPT") return;
+            var src = String(t.src || "");
+            if (!/\/assets\/forge(?:-dev)?\/forge-main\.js(?:\?|$)/.test(src)) return;
             var root = document.getElementById("root");
             if (!root || root.dataset.bootErr) return;
             root.dataset.bootErr = "1";
