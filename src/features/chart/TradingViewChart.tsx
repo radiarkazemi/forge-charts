@@ -13,6 +13,7 @@ import { layoutSyncBus } from "./layout-sync";
 import { useChartAlertLines } from "./useChartAlertLines";
 import { useDealingRangesStudy } from "./useDealingRangesStudy";
 import { useSessionsStudy } from "./useSessionsStudy";
+import { useFractalTimeStudy } from "./useFractalTimeStudy";
 import { useHtfCandlesStudy } from "./useHtfCandlesStudy";
 import { useStructureIntelligenceStudy } from "./useStructureIntelligenceStudy";
 import { useReplayMentorStudy } from "./useReplayMentorStudy";
@@ -25,6 +26,7 @@ import { useOrderBlockCisdStudy } from "./useOrderBlockCisdStudy";
 import { useIfvgBprStudy } from "./useIfvgBprStudy";
 import { useIrlErlStudy } from "./useIrlErlStudy";
 import { SessionsDashboard } from "@/features/sessions/SessionsDashboard";
+import { FractalTimeDashboard } from "@/features/fractal-time/FractalTimeDashboard";
 import { WatermarkOverlay } from "@/features/watermark/WatermarkOverlay";
 import { useWatermarkStudy } from "./useWatermarkStudy";
 import { useTradingViewWidget } from "./useTradingViewWidget";
@@ -278,6 +280,7 @@ export function TradingViewChart({
   useDealingRangesStudy(controller);
   useStructureIntelligenceStudy(controller);
   useSessionsStudy(controller);
+  useFractalTimeStudy(controller);
   useHtfCandlesStudy(controller);
   useReplayMentorStudy(controller);
   useForgeTradingAssistantStudy(controller);
@@ -312,6 +315,7 @@ export function TradingViewChart({
       {/* Main candle countdown = TV native price-scale countdown (showCountdown).
           Do NOT mount blue overlay / HTF remain strip — they duplicate & bleed into OHLC. */}
       <SessionsDashboard />
+      <FractalTimeDashboard />
       <WatermarkOverlay />
 
       {!ready && !error ? (
