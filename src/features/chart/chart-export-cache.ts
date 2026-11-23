@@ -7,6 +7,7 @@
 
 import type { IChartWidgetApi } from "@/infrastructure/tradingview";
 import { barsFromChartExport, type OrcaBar } from "@/features/pine/orca-runtime";
+import { isTfSwitching } from "@/infrastructure/market-data/history-page";
 
 /** Soft cap for structure painters — enough history, far less main-thread work. */
 export const STUDY_MAX_BARS = 1_200;
@@ -34,6 +35,11 @@ export async function exportChartBarsCached(
 ): Promise<OrcaBar[]> {
   const limit = Math.max(200, Math.min(5_000, Math.floor(maxBars)));
   const now = Date.now();
+  if (isTfSwitching()) {
+    if (!cached?.bars.length) return [];
+    const bars = cached.bars;
+    return bars.length > limit ? bars.slice(bars.length - limit) : [...bars];
+  }
   if (cached && now - cached.at < EXPORT_TTL_MS) {
     const bars = cached.bars;
     return bars.length > limit ? bars.slice(bars.length - limit) : [...bars];

@@ -28,6 +28,7 @@ import { SI_STUDY_ID } from "@/features/chart/structure-intelligence-indicator";
 import { WATERMARK_STUDY_ID } from "@/features/chart/watermark-indicator";
 import { allowNativeIndicatorsOnce } from "@/features/chart/indicators-intercept";
 import { invalidateChartExportCache } from "@/features/chart/chart-export-cache";
+import { markTfSwitch } from "@/infrastructure/market-data/history-page";
 import {
   isTextMenuDrawingTool,
   shouldSkipDrawingOneShot,
@@ -159,6 +160,7 @@ export class ChartController {
     };
     chart.onSymbolChanged().subscribe(null, syncSymbol);
     chart.onIntervalChanged().subscribe(null, (interval) => {
+      markTfSwitch();
       const previous = this.state.get().interval;
       this.patch({ interval });
       forceCountdown();
@@ -360,6 +362,7 @@ export class ChartController {
   }
 
   setInterval(interval: Interval): void {
+    markTfSwitch();
     invalidateChartExportCache();
     void this.activeChart()?.setResolution(interval as ResolutionString, { doNotActivateChart: true });
   }
@@ -369,6 +372,7 @@ export class ChartController {
    * Updates the widget and local store without relying on the async CL event.
    */
   restoreInterval(interval: Interval): void {
+    markTfSwitch();
     invalidateChartExportCache();
     this.patch({ interval });
     void this.activeChart()?.setResolution(interval as ResolutionString, { doNotActivateChart: true });
