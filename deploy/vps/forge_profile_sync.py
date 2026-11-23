@@ -36,6 +36,24 @@ _client: MongoClient | None = None
 # at most this often per account; the timestamp check is always allowed.
 _FULL_MIN_SEC = 15.0
 _last_full: dict[str, float] = {}
+_GET_IP: dict[str, list[float]] = {}
+_PUT_IP: dict[str, list[float]] = {}
+
+
+def _client_ip(request: web.Request) -> str:
+    forwarded = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+    return forwarded or request.remote or "0.0.0.0"
+
+
+def _ip_burst_ok(bucket: dict[str, list[float]], ip: str, window: float, burst: int) -> bool:
+    now = time.monotonic()
+    recent = [stamp for stamp in bucket.get(ip, []) if now - stamp < window]
+    if len(recent) >= burst:
+        bucket[ip] = recent
+        return False
+    recent.append(now)
+    bucket[ip] = recent[-burst * 2 :]
+    return True
 
 
 def coll():
@@ -72,6 +90,8 @@ async def health(_: web.Request) -> web.Response:
 
 
 async def get_profile(request: web.Request) -> web.Response:
+    if not _ip_burst_ok(_GET_IP, _client_ip(request), 1.0, 8):
+        return web.json_response({"error": "too_many_requests"}, status=429)
     sync_key = bearer(request)
     account_key = (request.rel_url.query.get("accountKey") or "").strip().lower()
     if not sync_key or not valid_hex(sync_key) or not valid_hex(account_key):
@@ -105,6 +125,8 @@ async def get_profile(request: web.Request) -> web.Response:
 
 
 async def put_profile(request: web.Request) -> web.Response:
+    if not _ip_burst_ok(_PUT_IP, _client_ip(request), 10.0, 4):
+        return web.json_response({"error": "too_many_requests"}, status=429)
     sync_key = bearer(request)
     if not sync_key or not valid_hex(sync_key):
         return web.json_response({"error": "unauthorized"}, status=401)

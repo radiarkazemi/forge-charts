@@ -41,8 +41,8 @@ HTTP_PORT = int(os.environ.get("CHART_HTTP_PORT", "8003"))
 POLL_SEC = float(os.environ.get("CHART_WS_POLL_SEC", "1.0"))
 CACHE_TTL = float(os.environ.get("CHART_HIST_CACHE_TTL", "15"))
 
-MAX_HISTORY_LIMIT = int(os.environ.get("CHART_HIST_MAX_LIMIT", "25000"))
-MAX_RAW_LIMIT = int(os.environ.get("CHART_HIST_MAX_RAW", "60000"))
+MAX_HISTORY_LIMIT = int(os.environ.get("CHART_HIST_MAX_LIMIT", "8000"))
+MAX_RAW_LIMIT = int(os.environ.get("CHART_HIST_MAX_RAW", "24000"))
 # Soft cap for on-read coarser→finer expand (avoid OOM on small VPS).
 BACKFILL_MAX_NEED = int(os.environ.get("CHART_BACKFILL_MAX_NEED", "4000"))
 
@@ -799,7 +799,24 @@ def _ws_process_request(path, request_headers):
     return (403, [("Content-Type", "text/plain")], b"origin not allowed\n")
 
 
+_HIST_SEM = asyncio.Semaphore(int(os.environ.get("CHART_HIST_CONCURRENCY", "3")))
+_HIST_IP: dict[str, list[float]] = {}
+
+
+def _client_ip(request: web.Request) -> str:
+    forwarded = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+    return forwarded or request.remote or "0.0.0.0"
+
+
 async def http_history(request: web.Request) -> web.Response:
+    ip = _client_ip(request)
+    now = time.monotonic()
+    recent = [stamp for stamp in _HIST_IP.get(ip, []) if now - stamp < 2.0]
+    if len(recent) >= 10:
+        _HIST_IP[ip] = recent
+        return web.json_response({"detail": "too many history requests"}, status=429)
+    recent.append(now)
+    _HIST_IP[ip] = recent
     symbol = normalize_symbol(str(request.query.get("symbol") or ""))
     # Prefer explicit timeframe+group; else derive from TV `interval`.
     raw_interval = request.query.get("interval") or request.query.get("resolution")
@@ -836,10 +853,16 @@ async def http_history(request: web.Request) -> web.Response:
     if not symbol:
         return web.json_response({"detail": "symbol required"}, status=400)
     try:
+        await asyncio.wait_for(_HIST_SEM.acquire(), timeout=8)
+    except asyncio.TimeoutError:
+        return web.json_response({"detail": "history busy"}, status=503)
+    try:
         payload = await asyncio.to_thread(hub.read_history, symbol, parent, limit, group, before)
     except Exception as exc:
         LOG.exception("history failed")
+        _HIST_SEM.release()
         return web.json_response({"detail": str(exc)}, status=500)
+    _HIST_SEM.release()
     body = json.dumps(payload, separators=(",", ":"))
     return web.Response(
         text=body,
