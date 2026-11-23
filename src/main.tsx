@@ -164,10 +164,19 @@ function runBootRecovery(): void {
 runBootRecovery();
 
 const libraryPath = readConfig().tvLibraryPath;
-preloadChartingLibrary(libraryPath);
-void loadChartingLibrary(libraryPath).catch(() => {
-  /* widget hook retries */
-});
+const isLoginView = (() => {
+  try {
+    return new URLSearchParams(window.location.search).get("view") === "login";
+  } catch {
+    return false;
+  }
+})();
+if (!isLoginView) {
+  preloadChartingLibrary(libraryPath);
+  void loadChartingLibrary(libraryPath).catch(() => {
+    /* widget hook retries */
+  });
+}
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

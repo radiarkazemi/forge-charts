@@ -27,6 +27,7 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/assets"
 cp -a dist/assets/. "$STAGE/assets/"
+gzip -kf -9 "$STAGE/assets/"*.js 2>/dev/null || true
 sed -e 's|/assets/forge/|/assets/forge-dev/|g' dist/index.html > "$STAGE/index.html"
 
 echo "Deploying /dev/ only → ${USER}@${HOST}:${WEB}"

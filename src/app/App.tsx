@@ -127,40 +127,16 @@ export function App() {
       setBootDone(true);
       return;
     }
+    // TradingView paints from local layout in ~3s. Do not wait on cloud profile
+    // before mounting the widget — the 20s puller applies remote changes after.
     built = buildSessionServices(existing);
-    const creds = readSyncCredentials();
-    const finish = () => {
-      if (cancelled || !built) {
-        built?.dispose();
-        return;
-      }
-      servicesRef.current = built;
-      setServices(built);
-      setBootDone(true);
-    };
-    if (!creds) {
-      finish();
-      return () => {
-        cancelled = true;
-      };
+    if (cancelled) {
+      built.dispose();
+      return;
     }
-    void (async () => {
-      try {
-        const result = await syncProfileOnLogin(built!.storage, creds);
-        if (result.appliedRemote && built) {
-          built.dispose();
-          built = buildSessionServices(existing);
-        }
-        const shared = activeProfile(built!.settings.settings.get());
-        if (!isPlaceholderAccountName(shared.displayName)) {
-          const renamed = auth.adoptSharedName(shared.displayName);
-          if (renamed) setSession(renamed);
-        }
-      } catch {
-        /* offline — open the local chart */
-      }
-      finish();
-    })();
+    servicesRef.current = built;
+    setServices(built);
+    setBootDone(true);
     return () => {
       cancelled = true;
       built?.dispose();
