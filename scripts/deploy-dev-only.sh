@@ -80,4 +80,20 @@ if os.path.isdir(brand_dev):
 print('ok', dev, team, assets, brand_dev)
 \" '${WEB}'"
 
+echo "Ensuring /charting_library/ is served on this host (does not touch product /charts/ URLs)"
+"${SSH[@]}" "${USER}@${HOST}" 'python3 - <<"PY"
+from pathlib import Path
+src = Path("/var/www/forge-web/charts/charting_library/charting_library.js")
+root_js = Path("/var/www/forge-web/charting_library/charting_library.js")
+if src.is_file() and not root_js.is_file():
+    link = Path("/var/www/forge-web/charting_library")
+    if not link.exists():
+        link.symlink_to("/var/www/forge-web/charts/charting_library")
+        print("symlink /var/www/forge-web/charting_library")
+    else:
+        print("charting_library path exists")
+else:
+    print("charting_library ready" if root_js.is_file() or src.is_file() else "MISSING charting_library")
+PY'
+
 echo "OK ${USER}@${HOST} /dev/"
