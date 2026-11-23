@@ -12,7 +12,10 @@ export type H4Block = "C1" | "C2" | "C3" | "C4" | "C5" | "C6";
 export type Quarter = "Q1" | "Q2" | "Q3" | "Q4";
 export type MonthWeek = "W1" | "W2" | "W3" | "W4" | "W5";
 export type YearQuarter = "YQ1" | "YQ2" | "YQ3" | "YQ4";
-export type MacroName = "London1" | "London2" | "NY1" | "NY2" | null;
+export type SessionName = "Asia" | "London" | "NY AM" | "NY PM";
+
+/** Futures / QT trading day open (NDOG ends, books reopen). */
+export const QT_DAY_HOUR = 18;
 
 export type NyClock = {
   year: number;
@@ -131,20 +134,23 @@ function firstTradingDateOfMonth(year: number, month: number): { year: number; m
   return { year, month, day: 1, weekday: 1 };
 }
 
-/** W1 starts on the first trading date of the month; a new bucket on each Monday trading date. */
+/**
+ * ICT monthly quarters: W1 is the first Monday of the calendar month.
+ * Days before that Monday are a distortion week (folded into W1 when foldW5).
+ */
 export function monthWeek(timeSec: number, foldW5 = true): MonthWeek {
   const td = tradingDate(timeSec);
-  const first = firstTradingDateOfMonth(td.year, td.month);
-  let week = 1;
-  let cursor = first.day;
-  let cursorWd = first.weekday;
-  const dim = new Date(Date.UTC(td.year, td.month, 0)).getUTCDate();
-  while (cursor < td.day) {
-    cursor += 1;
-    cursorWd = (cursorWd + 1) % 7;
-    if (cursor > dim) break;
-    if (cursorWd === 1 && isWeekdayTrading(1)) week += 1;
+  let firstMon = 0;
+  for (let day = 1; day <= 7; day += 1) {
+    const probe = utcAtNewYork(td.year, td.month, day, 12, 0);
+    if (nyClock(probe).weekday === 1) {
+      firstMon = day;
+      break;
+    }
   }
+  if (!firstMon) firstMon = firstTradingDateOfMonth(td.year, td.month).day;
+  if (td.day < firstMon) return foldW5 ? "W1" : "W5";
+  const week = Math.floor((td.day - firstMon) / 7) + 1;
   if (week >= 5) return foldW5 ? "W4" : "W5";
   return `W${week}` as MonthWeek;
 }
@@ -157,11 +163,26 @@ export function yearQuarter(timeSec: number): YearQuarter {
   return "YQ4";
 }
 
+export type MacroName =
+  | "London1"
+  | "London2"
+  | "NY1"
+  | "NY2"
+  | "NY3"
+  | "Lunch"
+  | "NYPM1"
+  | "NYPM2"
+  | null;
+
 export const MACROS: { name: Exclude<MacroName, null>; startMin: number; endMin: number }[] = [
-  { name: "London1", startMin: 2 * 60 + 30, endMin: 3 * 60 },
-  { name: "London2", startMin: 4 * 60, endMin: 4 * 60 + 30 },
+  { name: "London1", startMin: 2 * 60 + 33, endMin: 3 * 60 },
+  { name: "London2", startMin: 4 * 60 + 3, endMin: 4 * 60 + 30 },
   { name: "NY1", startMin: 8 * 60 + 50, endMin: 9 * 60 + 10 },
   { name: "NY2", startMin: 9 * 60 + 50, endMin: 10 * 60 + 10 },
+  { name: "NY3", startMin: 10 * 60 + 50, endMin: 11 * 60 + 10 },
+  { name: "Lunch", startMin: 11 * 60 + 50, endMin: 12 * 60 + 10 },
+  { name: "NYPM1", startMin: 13 * 60 + 10, endMin: 13 * 60 + 40 },
+  { name: "NYPM2", startMin: 15 * 60 + 15, endMin: 15 * 60 + 45 },
 ];
 
 export function activeMacro(timeSec: number): MacroName {
@@ -174,25 +195,109 @@ export function activeMacro(timeSec: number): MacroName {
 }
 
 export function weekPhase(name: WeekdayName): string {
-  if (name === "Mon") return "accumulation";
-  if (name === "Tue") return "manipulation / TWO";
-  if (name === "Wed" || name === "Thu") return "distribution";
-  if (name === "Fri") return "continuation / reversal";
+  if (name === "Mon") return "accumulation · Q1";
+  if (name === "Tue") return "manipulation · Q2 · TWO";
+  if (name === "Wed") return "distribution · Q3";
+  if (name === "Thu") return "continuation / reversal · Q4";
+  if (name === "Fri") return "outside cycle (Friday)";
   return "weekend";
 }
 
 export function weekMappedQ(name: WeekdayName): Quarter | null {
   if (name === "Mon") return "Q1";
   if (name === "Tue") return "Q2";
-  if (name === "Wed" || name === "Thu") return "Q3";
-  if (name === "Fri") return "Q4";
+  if (name === "Wed") return "Q3";
+  if (name === "Thu") return "Q4";
   return null;
 }
 
+export function qtDayOpenSec(timeSec: number): number {
+  const ny = nyClock(timeSec);
+  if (ny.hour >= QT_DAY_HOUR) {
+    return utcAtNewYork(ny.year, ny.month, ny.day, QT_DAY_HOUR, 0);
+  }
+  const prev = addCalendarDays(ny.year, ny.month, ny.day, -1);
+  return utcAtNewYork(prev.year, prev.month, prev.day, QT_DAY_HOUR, 0);
+}
+
+export function session90(timeSec: number): {
+  session: SessionName;
+  quarter: Quarter;
+  label: string;
+  sessionStart: number;
+  quarterStart: number;
+  trueOpen: number;
+} {
+  const open = qtDayOpenSec(timeSec);
+  const elapsed = Math.max(0, timeSec - open);
+  const six = Math.min(3, Math.floor(elapsed / 21_600));
+  const names: SessionName[] = ["Asia", "London", "NY AM", "NY PM"];
+  const inSess = elapsed - six * 21_600;
+  const qIndex = Math.min(3, Math.floor(inSess / 5_400));
+  const sessionStart = open + six * 21_600;
+  const session = names[six]!;
+  const quarter = `Q${qIndex + 1}` as Quarter;
+  return {
+    session,
+    quarter,
+    label: `${session} ${quarter}`,
+    sessionStart,
+    quarterStart: sessionStart + qIndex * 5_400,
+    trueOpen: sessionStart + 5_400,
+  };
+}
+
+/** Monday 18:00 NY — open of Tuesday's daily bar (ICT True Week Open). */
+export function trueWeekOpenSec(timeSec: number): number {
+  let t = qtDayOpenSec(timeSec);
+  for (let i = 0; i < 10; i += 1) {
+    if (nyClock(t).weekday === 1) return t;
+    t -= 86_400;
+  }
+  return t;
+}
+
+/** Sunday 18:00 NY that opens the second full week (ICT True Month Open). */
+export function trueMonthOpenSec(timeSec: number): number {
+  const td = tradingDate(timeSec);
+  let firstMon = 1;
+  for (let day = 1; day <= 7; day += 1) {
+    if (nyClock(utcAtNewYork(td.year, td.month, day, 12, 0)).weekday === 1) {
+      firstMon = day;
+      break;
+    }
+  }
+  const sun = addCalendarDays(td.year, td.month, firstMon + 7, -1);
+  return utcAtNewYork(sun.year, sun.month, sun.day, QT_DAY_HOUR, 0);
+}
+
+/** First Monday of April 18:00 NY (ICT True Year Open / YQ2). */
+export function trueYearOpenSec(timeSec: number): number {
+  const td = tradingDate(timeSec);
+  const year = td.month >= 4 ? td.year : td.year - 1;
+  let firstMon = 1;
+  for (let day = 1; day <= 7; day += 1) {
+    if (nyClock(utcAtNewYork(year, 4, day, 12, 0)).weekday === 1) {
+      firstMon = day;
+      break;
+    }
+  }
+  return utcAtNewYork(year, 4, firstMon, QT_DAY_HOUR, 0);
+}
+
+export const KILLZONES: { name: string; startMin: number; endMin: number }[] = [
+  { name: "Asia KZ", startMin: 19 * 60, endMin: 22 * 60 },
+  { name: "London KZ", startMin: 2 * 60, endMin: 5 * 60 },
+  { name: "NY AM KZ", startMin: 7 * 60, endMin: 10 * 60 },
+  { name: "London Close", startMin: 10 * 60, endMin: 12 * 60 },
+  { name: "NY PM KZ", startMin: 13 * 60 + 30, endMin: 16 * 60 },
+];
+
 export function yearPhase(q: YearQuarter): string {
   if (q === "YQ1") return "accumulation";
-  if (q === "YQ2") return "manipulation";
-  return "distribution";
+  if (q === "YQ2") return "manipulation · TYO";
+  if (q === "YQ3") return "distribution";
+  return "continuation / reversal";
 }
 
 export type FractalSnapshot = {
@@ -200,18 +305,23 @@ export type FractalSnapshot = {
   ny: NyClock;
   trading: ReturnType<typeof tradingDate>;
   h4: ReturnType<typeof h4Block>;
+  session: ReturnType<typeof session90>;
   monthW: MonthWeek;
   yearQ: YearQuarter;
   macro: MacroName;
   sessionOpen: number;
+  qtDayOpen: number;
   asiaTrueOpen: number;
   trueDayOpen: number;
+  trueWeekOpen: number;
+  trueMonthOpen: number;
+  trueYearOpen: number;
 };
 
 export function snapshotAt(timeSec: number, foldW5 = true): FractalSnapshot {
   const sessionOpen = sessionOpenSec(timeSec);
   const ny = nyClock(sessionOpen);
-  const asiaTrueOpen = utcAtNewYork(ny.year, ny.month, ny.day, 19, 0);
+  const asiaTrueOpen = utcAtNewYork(ny.year, ny.month, ny.day, 19, 30);
   const nextCal = addCalendarDays(ny.year, ny.month, ny.day, 1);
   const trueDayOpen = utcAtNewYork(nextCal.year, nextCal.month, nextCal.day, 0, 0);
   return {
@@ -219,12 +329,17 @@ export function snapshotAt(timeSec: number, foldW5 = true): FractalSnapshot {
     ny: nyClock(timeSec),
     trading: tradingDate(timeSec),
     h4: h4Block(timeSec),
+    session: session90(timeSec),
     monthW: monthWeek(timeSec, foldW5),
     yearQ: yearQuarter(timeSec),
     macro: activeMacro(timeSec),
     sessionOpen,
+    qtDayOpen: qtDayOpenSec(timeSec),
     asiaTrueOpen,
     trueDayOpen,
+    trueWeekOpen: trueWeekOpenSec(timeSec),
+    trueMonthOpen: trueMonthOpenSec(timeSec),
+    trueYearOpen: trueYearOpenSec(timeSec),
   };
 }
 
@@ -312,10 +427,19 @@ export function evaluateAlignment(timeSec: number, inputs: AlignmentInputs): Ali
   rows.push({
     layer: "Week",
     current: `${snap.trading.name} · ${weekPhase(snap.trading.name)}`,
-    opensNy: "Tue TWO = Mon 17:00",
+    opensNy: "TWO = Mon 18:00 NY",
     nextNy: "next trading date",
     match: !inputs.enableWeek ? "off" : weekOk ? "yes" : "no",
     eligible: inputs.enableWeek,
+  });
+
+  rows.push({
+    layer: "Session",
+    current: `${snap.session.label} · TSO ${fmtNy(snap.session.trueOpen).slice(11)}`,
+    opensNy: "18:00 NY day · 90m Q2 true open",
+    nextNy: fmtNy(snap.session.quarterStart + 5_400),
+    match: "n/a",
+    eligible: false,
   });
 
   const h4Ok = inputs.h4Allow.includes(snap.h4.quarter);

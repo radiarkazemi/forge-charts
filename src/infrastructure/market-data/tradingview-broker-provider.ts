@@ -14,7 +14,7 @@ import { startPolling } from "./polling";
 import { aggregateBars, synthesizeFromMinuteBars, SYNTH_SECONDS_INTERVALS } from "./synthesize-seconds";
 import { isTvBrokerSymbol, marketTicksChannelFor, tradingViewSymbolFor } from "./tv-broker-symbols";
 import { fetchCpChartHistory, mongoHistoryPlan } from "./cp-chart-history";
-import { historyFetchLimit, historyTimeoutMs } from "./history-page";
+import { historyFetchLimit, historyTimeoutMs, isLiveHistoryPage } from "./history-page";
 import { volumeDelta, type VolumeCursor } from "./volume-delta";
 
 const HISTORY_BASE = "/tv-history";
@@ -23,7 +23,7 @@ const REQUEST_TIMEOUT_MS = 8_000;
 const DEEP_HISTORY_TIMEOUT_MS = 28_000;
 const LIVE_POLL_MS = 15_000;
 /** Brief retries when market_ticks is mid-restart (deploy / OOM) — avoids blank FX charts. */
-const TV_HISTORY_RETRIES = 1;
+const TV_HISTORY_RETRIES = 0;
 const TV_HISTORY_RETRY_MS = 280;
 
 const NATIVE_INTERVALS: readonly Interval[] = [
@@ -247,7 +247,11 @@ export class TradingViewBrokerProvider implements MarketDataProvider {
       if (!bars.length) throw new Error("empty");
       return bars;
     };
-    // First paint: take Mongo or TV, whichever returns bars first (TV via DE→IR is often 3s).
+    // TF switch / first paint: Mongo only. Starting /tv-history here is a 3s stall.
+    if (isLiveHistoryPage(range)) {
+      const mongo = await this.fetchMongoFallback(symbol, interval, range);
+      if (mongo.length) return mongo;
+    }
     try {
       return await Promise.any([nonempty(fromTv()), nonempty(this.fetchMongoFallback(symbol, interval, range))]);
     } catch {

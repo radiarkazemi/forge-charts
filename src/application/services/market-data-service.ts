@@ -1,4 +1,12 @@
-import { normalizeBars, type Bar, type BarRange, type Interval, type SymbolInfo } from "@/domain";
+import {
+  intervalSeconds,
+  normalizeBars,
+  resampleBars,
+  type Bar,
+  type BarRange,
+  type Interval,
+  type SymbolInfo,
+} from "@/domain";
 import type { MarketDataProvider, Unsubscribe } from "../ports";
 
 export interface HistoryResult {
@@ -25,6 +33,10 @@ export class MarketDataService {
   private readonly inflight = new Map<string, Promise<HistoryResult>>();
   /** Short memory of the last page — Chartix-style; CL also caches in the widget. */
   private readonly memo = new Map<string, { at: number; value: HistoryResult }>();
+  /** Per-symbol OHLC by bar step so TF switches never wait on the network. */
+  private readonly byStep = new Map<string, Bar[]>();
+  private readonly warming = new Set<string>();
+  private static readonly ROLL_STEPS = [60, 300, 900, 1_800, 3_600, 7_200, 14_400, 86_400] as const;
 
   constructor(providers: readonly MarketDataProvider[], logger: MarketDataLogger = console) {
     if (providers.length === 0) throw new Error("MarketDataService requires at least one provider");
@@ -54,7 +66,74 @@ export class MarketDataService {
     return { provider: fallback, nativeIntervals: fallback.nativeIntervals(symbol) };
   }
 
+  private seriesKey(symbol: SymbolInfo): string {
+    return `${symbol.exchange}:${symbol.ticker}`;
+  }
+
+  private stepKey(symbol: SymbolInfo, step: number): string {
+    return `${this.seriesKey(symbol)}|${step}`;
+  }
+
+  private rememberSeries(symbol: SymbolInfo, interval: Interval, bars: Bar[]): void {
+    if (bars.length < 8) return;
+    const step = intervalSeconds(interval);
+    this.byStep.set(this.stepKey(symbol, step), bars.slice(-12_000));
+    for (const roll of MarketDataService.ROLL_STEPS) {
+      if (roll < step || roll % step !== 0) continue;
+      const rolled = roll === step ? bars : resampleBars(bars, roll);
+      if (rolled.length >= 8) this.byStep.set(this.stepKey(symbol, roll), rolled.slice(-4_000));
+    }
+  }
+
+  private resampleCached(symbol: SymbolInfo, interval: Interval, range: BarRange): HistoryResult | null {
+    const want = intervalSeconds(interval);
+    if (want < 60) return null;
+    const before = range.to > 0 ? range.to : Number.POSITIVE_INFINITY;
+    const need = Math.max(1, range.countBack);
+    const exact = this.byStep.get(this.stepKey(symbol, want));
+    if (exact && exact.length >= 8) {
+      const filtered = exact.filter((b) => b.time < before);
+      if (filtered.length >= 8) {
+        return { bars: filtered.slice(-need), providerId: "tf-cache", isSynthetic: false };
+      }
+    }
+    let best: Bar[] | null = null;
+    let bestStep = Number.POSITIVE_INFINITY;
+    const prefix = `${this.seriesKey(symbol)}|`;
+    for (const [key, bars] of this.byStep) {
+      if (!key.startsWith(prefix)) continue;
+      const step = Number(key.slice(prefix.length));
+      if (!Number.isFinite(step) || step <= 0 || want < step || want % step !== 0) continue;
+      if (step < bestStep && bars.length >= 8) {
+        best = bars;
+        bestStep = step;
+      }
+    }
+    if (!best) return null;
+    const src = bestStep === want ? best : resampleBars(best, want);
+    const filtered = src.filter((b) => b.time < before);
+    if (filtered.length < 8) return null;
+    return { bars: filtered.slice(-need), providerId: "tf-cache", isSynthetic: false };
+  }
+
+  private warmMinuteHistory(symbol: SymbolInfo): void {
+    const key = `${this.seriesKey(symbol)}|1`;
+    if (this.warming.has(key)) return;
+    if ((this.byStep.get(this.stepKey(symbol, 60))?.length ?? 0) >= 200) return;
+    this.warming.add(key);
+    const to = Math.floor(Date.now() / 1000) + 60;
+    void this.fetchHistory(symbol, "1", { from: 0, to, countBack: 2_000 }).catch(() => {
+      this.warming.delete(key);
+    });
+  }
+
   async fetchHistory(symbol: SymbolInfo, interval: Interval, range: BarRange): Promise<HistoryResult> {
+    const cachedTf = range.countBack > 24 ? this.resampleCached(symbol, interval, range) : null;
+    if (cachedTf) {
+      if (intervalSeconds(interval) > 60) this.warmMinuteHistory(symbol);
+      return cachedTf;
+    }
+
     const key = this.historyKey(symbol, interval, range);
     const hit = this.memo.get(key);
     const ttl = range.countBack <= 24 ? 4_000 : 12_000;
@@ -65,8 +144,12 @@ export class MarketDataService {
     if (pending) return pending;
 
     const run = this.fetchHistoryUncached(symbol, interval, range).then((value) => {
-      if (value.bars.length > 0) this.memo.set(key, { at: Date.now(), value });
-      if (this.memo.size > 48) {
+      if (value.bars.length > 0) {
+        this.memo.set(key, { at: Date.now(), value });
+        this.rememberSeries(symbol, interval, value.bars);
+        if (intervalSeconds(interval) > 60) this.warmMinuteHistory(symbol);
+      }
+      if (this.memo.size > 64) {
         const oldest = this.memo.keys().next().value;
         if (oldest) this.memo.delete(oldest);
       }

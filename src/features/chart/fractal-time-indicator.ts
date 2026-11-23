@@ -41,7 +41,7 @@ const STYLE_SPECS = [
   { id: FT_STYLE_C, title: "H4 C1–C6", color: FRACTAL_TIME_DEFAULTS.cColor, visible: true, transparency: 0, linewidth: 1, legendHidden: false },
   { id: FT_STYLE_Q, title: "Hourly Q1–Q4", color: FRACTAL_TIME_DEFAULTS.qColor, visible: true, transparency: 20, linewidth: 1, legendHidden: false },
   { id: FT_STYLE_MACRO, title: "Macro windows", color: FRACTAL_TIME_DEFAULTS.macroColor, visible: true, transparency: 70, linewidth: 1, legendHidden: false },
-  { id: FT_STYLE_OPEN, title: "17:00 / Asia TO / TDO", color: FRACTAL_TIME_DEFAULTS.openColor, visible: true, transparency: 0, linewidth: 2, legendHidden: false },
+  { id: FT_STYLE_OPEN, title: "FX 17:00 / 18:00 / TWO / TDO", color: FRACTAL_TIME_DEFAULTS.openColor, visible: true, transparency: 0, linewidth: 2, legendHidden: false },
   { id: FT_STYLE_ALIGN, title: "Alignment", color: FRACTAL_TIME_DEFAULTS.alignColor, visible: true, transparency: 60, linewidth: 1, legendHidden: false },
 ] as const;
 
@@ -57,7 +57,7 @@ export function createFractalTimeIndicator(PineJS: {
       id: FRACTAL_TIME_STUDY_ID as never,
       name: FRACTAL_TIME_STUDY_NAME,
       description: FRACTAL_TIME_STUDY_NAME,
-      shortDescription: "NY 17:00 fractal layers · Phase Match",
+      shortDescription: "ICT fractal time · 17:00 FX / 18:00 QT · TWO TDO TSO",
       isCustomIndicator: true,
       is_price_study: true,
       linkedToSeries: true,
@@ -90,7 +90,7 @@ export function createFractalTimeIndicator(PineJS: {
         { id: "showCBlocks", name: "Show C1–C6 separators", defval: FRACTAL_TIME_STUDY_DEFAULTS.showCBlocks, type: "bool" },
         { id: "showHourQuarters", name: "Show hourly Q on ≤15m", defval: FRACTAL_TIME_STUDY_DEFAULTS.showHourQuarters, type: "bool" },
         { id: "showMacros", name: "Show London / NY macros", defval: FRACTAL_TIME_STUDY_DEFAULTS.showMacros, type: "bool" },
-        { id: "showOpens", name: "Show 17:00 · Asia TO · TDO", defval: FRACTAL_TIME_STUDY_DEFAULTS.showOpens, type: "bool" },
+        { id: "showOpens", name: "Show FX 17:00 · 18:00 QT · TWO · TDO", defval: FRACTAL_TIME_STUDY_DEFAULTS.showOpens, type: "bool" },
         { id: "showAlignment", name: "Highlight alignment", defval: FRACTAL_TIME_STUDY_DEFAULTS.showAlignment, type: "bool" },
         { id: "showDashboard", name: "Dashboard table", defval: FRACTAL_TIME_STUDY_DEFAULTS.showDashboard, type: "bool" },
         { id: "showPhaseLabels", name: "Phase labels in table", defval: FRACTAL_TIME_STUDY_DEFAULTS.showPhaseLabels, type: "bool" },

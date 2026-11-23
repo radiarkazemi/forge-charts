@@ -26,6 +26,33 @@ export function isValidBar(bar: Bar): boolean {
   );
 }
 
+/** Aggregate lower-TF candles into `stepSec` bars (OHLCV rollup). */
+export function resampleBars(bars: readonly Bar[], stepSec: number): Bar[] {
+  if (stepSec <= 1 || bars.length === 0) return [...bars];
+  const out: Bar[] = [];
+  let cur: Bar | null = null;
+  let bucket = -1;
+  for (const bar of bars) {
+    const start = Math.floor(bar.time / stepSec) * stepSec;
+    if (!cur || start !== bucket) {
+      if (cur) out.push(cur);
+      bucket = start;
+      cur = { time: start, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume };
+    } else {
+      cur = {
+        time: start,
+        open: cur.open,
+        high: Math.max(cur.high, bar.high),
+        low: Math.min(cur.low, bar.low),
+        close: bar.close,
+        volume: cur.volume + bar.volume,
+      };
+    }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
 /** Sort ascending by time and drop duplicates, keeping the last occurrence. */
 export function normalizeBars(bars: readonly Bar[]): Bar[] {
   const byTime = new Map<number, Bar>();

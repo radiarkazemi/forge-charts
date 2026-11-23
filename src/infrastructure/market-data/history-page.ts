@@ -5,7 +5,7 @@
  */
 
 /** Typical Charting Library first `getBars` (viewport + indicator warmup). */
-export const FIRST_HISTORY_PAGE = 360;
+export const FIRST_HISTORY_PAGE = 240;
 /** Extra bars when the user scrolls left. */
 export const SCROLL_HISTORY_PAGE = 1_200;
 
@@ -21,5 +21,20 @@ export function historyFetchLimit(countBack: number | undefined): number {
 }
 
 export function historyTimeoutMs(limit: number): number {
-  return limit <= FIRST_HISTORY_PAGE + 40 ? 8_000 : 22_000;
+  return limit <= FIRST_HISTORY_PAGE + 40 ? 2_500 : 14_000;
+}
+
+/** Latest visible page (TF switch / first paint) — do not run hole-repair fetches. */
+export function isLiveHistoryPage(range: { to: number; countBack: number }): boolean {
+  const now = Math.floor(Date.now() / 1000);
+  const to = range.to > 0 ? range.to : now;
+  return range.countBack <= 600 && now - to < 4 * 3_600;
+}
+
+let tfSwitchUntil = 0;
+export function markTfSwitch(): void {
+  tfSwitchUntil = Date.now() + 1_200;
+}
+export function isTfSwitching(): boolean {
+  return Date.now() < tfSwitchUntil;
 }

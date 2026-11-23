@@ -8,6 +8,7 @@ import {
   fetchCpChartHistory,
   mongoHistoryPlan,
 } from "./cp-chart-history";
+import { isLiveHistoryPage } from "./history-page";
 import { aggregateBars, liveSecondUpdate, synthesizeFromMinuteBars } from "./synthesize-seconds";
 import { volumeDelta, type VolumeCursor } from "./volume-delta";
 
@@ -766,7 +767,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
           bars = [];
         }
       }
-      if ((route.kind === "metal" || route.kind === "forex") && bars.length) {
+      if ((route.kind === "metal" || route.kind === "forex") && bars.length && !isLiveHistoryPage(range)) {
         bars = await spliceBrokerHoles(route.apiSymbol, bars, step);
         bars = await repairBrokerPriceGaps(route.apiSymbol, bars, step);
       }
