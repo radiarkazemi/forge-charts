@@ -21,11 +21,20 @@ export interface MarketDataLogger {
 export class MarketDataService {
   private readonly providers: readonly MarketDataProvider[];
   private readonly logger: MarketDataLogger;
+  /** Dedupe parallel getBars (TF switch / quotes vs chart). */
+  private readonly inflight = new Map<string, Promise<HistoryResult>>();
+  /** Short memory of the last page — Chartix-style; CL also caches in the widget. */
+  private readonly memo = new Map<string, { at: number; value: HistoryResult }>();
 
   constructor(providers: readonly MarketDataProvider[], logger: MarketDataLogger = console) {
     if (providers.length === 0) throw new Error("MarketDataService requires at least one provider");
     this.providers = providers;
     this.logger = logger;
+  }
+
+  private historyKey(symbol: SymbolInfo, interval: Interval, range: BarRange): string {
+    const toBucket = range.to > 0 ? Math.floor(range.to / 20) : Math.floor(Date.now() / 20_000);
+    return `${symbol.exchange}:${symbol.ticker}|${interval}|${toBucket}|${range.countBack}|${Math.floor(range.from / 3_600)}`;
   }
 
   /** The provider that would currently serve `symbol` (used for streaming). */
@@ -46,6 +55,36 @@ export class MarketDataService {
   }
 
   async fetchHistory(symbol: SymbolInfo, interval: Interval, range: BarRange): Promise<HistoryResult> {
+    const key = this.historyKey(symbol, interval, range);
+    const hit = this.memo.get(key);
+    const ttl = range.countBack <= 24 ? 4_000 : 12_000;
+    if (hit && Date.now() - hit.at < ttl && hit.value.bars.length > 0) {
+      return hit.value;
+    }
+    const pending = this.inflight.get(key);
+    if (pending) return pending;
+
+    const run = this.fetchHistoryUncached(symbol, interval, range).then((value) => {
+      if (value.bars.length > 0) this.memo.set(key, { at: Date.now(), value });
+      if (this.memo.size > 48) {
+        const oldest = this.memo.keys().next().value;
+        if (oldest) this.memo.delete(oldest);
+      }
+      return value;
+    });
+    this.inflight.set(key, run);
+    try {
+      return await run;
+    } finally {
+      this.inflight.delete(key);
+    }
+  }
+
+  private async fetchHistoryUncached(
+    symbol: SymbolInfo,
+    interval: Interval,
+    range: BarRange,
+  ): Promise<HistoryResult> {
     let lastError: unknown = null;
     let sawRealProvider = false;
     let emptyRealId: string | null = null;

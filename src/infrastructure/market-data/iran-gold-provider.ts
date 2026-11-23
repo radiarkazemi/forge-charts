@@ -11,6 +11,7 @@ import {
 import type { MarketDataProvider, Unsubscribe } from "@/application";
 import { buildUrl, fetchJson } from "../http/fetch-json";
 import { targetHistoryDepth } from "./cp-chart-history";
+import { FIRST_HISTORY_PAGE, historyFetchLimit, historyTimeoutMs } from "./history-page";
 
 /**
  * Iran domestic gold from Faraz (native symbols):
@@ -26,7 +27,7 @@ import { targetHistoryDepth } from "./cp-chart-history";
 
 const HISTORY_BASE = "/iran-gold/history";
 const QUOTE_BASE = "/iran-gold/quote";
-const REQUEST_TIMEOUT_MS = 45_000;
+const REQUEST_TIMEOUT_MS = 22_000;
 
 export const IRAN_NATIVE_INTERVALS: readonly Interval[] = [
   "1S",
@@ -372,7 +373,7 @@ export class IranGoldProvider implements MarketDataProvider {
     const step = intervalSeconds(interval);
     // Same depth targets as cp_fetcher chart history (1m=20k, 5m=10k, else 5k).
     const target = targetHistoryDepth(interval);
-    const limit = Math.min(target, Math.max(range.countBack + 100, 2_000));
+    const limit = Math.min(target, historyFetchLimit(range.countBack));
     const json = await fetchJson<HistoryResponse>(
       buildUrl(HISTORY_BASE, {
         symbol: route.ticker,
@@ -380,7 +381,7 @@ export class IranGoldProvider implements MarketDataProvider {
         limit,
         before: range.to > 0 ? range.to : undefined,
       }),
-      { timeoutMs: REQUEST_TIMEOUT_MS },
+      { timeoutMs: Math.min(REQUEST_TIMEOUT_MS, historyTimeoutMs(limit)) },
     );
     if (json.detail) throw new Error(json.detail);
     const before = range.to > 0 ? range.to : Number.POSITIVE_INFINITY;
@@ -404,7 +405,12 @@ export class IranGoldProvider implements MarketDataProvider {
 
     // G18/ABSHODE 1H (and 2H/4H) often arrive sparse from Faraz — rebuild missing
     // cash-session hours from dense 1m history so the chart is continuous.
-    if (step >= 3600 && step < 86_400 && countSessionHoles(merged, step) > 0) {
+    if (
+      step >= 3600 &&
+      step < 86_400 &&
+      limit > FIRST_HISTORY_PAGE &&
+      countSessionHoles(merged, step) > 0
+    ) {
       try {
         const m1Limit = Math.min(
           20_000,

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import Box from "@mui/material/Box";
-import { devLandingUrl, isDevSite } from "@/dev-site";
+import { devLandingUrl, devRoot, isDevSite } from "@/dev-site";
 import {
   YEAR_AT_MONTHLY,
   formatPrice,
@@ -18,6 +18,7 @@ type Lang = "en" | "fa";
 const SETTINGS_KEY = "forge.settings.v1";
 
 function brandSrc(file: string): string {
+  if (isDevSite()) return `${devRoot()}/brand/${file}`;
   const base = import.meta.env.BASE_URL || "/";
   const root = base.endsWith("/") ? base : `${base}/`;
   return `${root}brand/${file}`;
@@ -140,7 +141,7 @@ export function SubscriptionPage({ signedIn, onBack, onSignIn }: SubscriptionPag
     >
       <Box
         component="img"
-        src={brandSrc("forge-background-hi.webp")}
+        src={brandSrc("forge-background-hi-fast.webp")}
         alt=""
         sx={{
           position: "fixed",

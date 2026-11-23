@@ -780,7 +780,7 @@ export class ChartController {
     if (/^watermark$/i.test(name) || /forge\s*watermark/i.test(name)) return WATERMARK_STUDY_ID;
     if (/forge\s*structure\s*intelligence|forge\s*si/i.test(name)) return SI_STUDY_ID;
     if (/forge\s*sessions|sessions\s*\[luxalgo\]/i.test(name)) return SESSIONS_STUDY_ID;
-    if (/fractal\s*&\s*time|fractal\s*time\s*alignment/i.test(name)) return FRACTAL_TIME_STUDY_ID;
+    if (/fractal\s*(&|and)?\s*time|fractal\s*time\s*alignment/i.test(name)) return FRACTAL_TIME_STUDY_ID;
     if (/forge\s*trading\s*assistant|forge\s*ta\b/i.test(name)) return FTA_STUDY_ID;
     if (/forge\s*certainty/i.test(name)) return CERTAINTY_STUDY_ID;
     if (/forge\s*replay\s*mentor|replay\s*mentor/i.test(name)) return REPLAY_MENTOR_STUDY_ID;
@@ -1001,7 +1001,7 @@ export class ChartController {
               ? SI_STUDY_ID
               : /forge\s*sessions|sessions\s*\[luxalgo\]/i.test(name)
                 ? SESSIONS_STUDY_ID
-              : /fractal\s*&\s*time|fractal\s*time\s*alignment/i.test(name)
+              : /fractal\s*(&|and)?\s*time|fractal\s*time\s*alignment/i.test(name)
                 ? FRACTAL_TIME_STUDY_ID
                 : /forge\s*trading\s*assistant|forge\s*ta\b/i.test(name)
                   ? FTA_STUDY_ID

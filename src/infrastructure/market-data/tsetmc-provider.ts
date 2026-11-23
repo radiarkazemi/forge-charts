@@ -11,6 +11,7 @@ import type { MarketDataProvider, Unsubscribe } from "@/application";
 import { buildUrl, fetchJson } from "../http/fetch-json";
 import { sessionDailyOpen } from "./session-bars";
 import { volumeDelta, type VolumeCursor } from "./volume-delta";
+import { historyFetchLimit, historyTimeoutMs } from "./history-page";
 
 /**
  * Tehran Stock Exchange via the Iran VPS.
@@ -126,14 +127,17 @@ export class TsetmcProvider implements MarketDataProvider {
 
   async fetchBars(symbol: SymbolInfo, interval: Interval, range: BarRange): Promise<Bar[]> {
     const adjust = symbol.ticker.endsWith(".U") ? 0 : 1;
+    const limit = Math.min(5_000, historyFetchLimit(range.countBack || 300));
     const url = buildUrl(HISTORY_BASE, {
       symbol: symbol.ticker,
       interval: intervalParam(interval),
-      limit: Math.min(5000, Math.max(range.countBack || 300, 300)),
+      limit,
       adjust,
       before: range.to > 0 ? range.to : undefined,
     });
-    const payload = await fetchJson<HistoryPayload>(url, { timeoutMs: REQUEST_TIMEOUT_MS });
+    const payload = await fetchJson<HistoryPayload>(url, {
+      timeoutMs: Math.min(REQUEST_TIMEOUT_MS, historyTimeoutMs(limit)),
+    });
     const before = range.to > 0 ? range.to : Number.POSITIVE_INFINITY;
     const bars: Bar[] = [];
     for (const row of payload.bars ?? []) {

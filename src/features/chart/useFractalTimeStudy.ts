@@ -116,7 +116,7 @@ export function useFractalTimeStudy(chart: ChartController | null): void {
         return studies
           .filter((s: { name?: string; id?: string | EntityId }) => {
             const name = `${s.name ?? ""} ${s.id ?? ""}`;
-            return /fractal\s*&\s*time|ForgeFractalTime@/i.test(name);
+            return /fractal\s*(&|and)?\s*time|ForgeFractalTime@/i.test(name);
           })
           .map((s: { id?: string | EntityId }) => s.id as EntityId);
       } catch {

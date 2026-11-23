@@ -24,8 +24,8 @@ export const DEFAULT_FAVORITE_INDICATORS = [
   "Forge Structure Intelligence",
   "Dealing Ranges",
   "ICT HTF Candles",
+  "Fractal Time Alignment",
   "Forge Sessions",
-  "Fractal & Time Alignment",
   "Watermark",
 ] as const;
 

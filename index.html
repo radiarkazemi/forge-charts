@@ -10,6 +10,25 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <title>Forge Charts</title>
+    <script>
+      // Login must not download the 2.5MB Charting Library. Chart routes preload it.
+      (function () {
+        try {
+          if (new URLSearchParams(location.search).get("view") === "login") return;
+        } catch (e) {}
+        [
+          "/charting_library/charting_library.js",
+          "/charting_library/bundles/runtime.528f81f7a425983444d8.js",
+          "/charting_library/bundles/library.2a35263e52ab75f5729a.js",
+        ].forEach(function (href) {
+          var l = document.createElement("link");
+          l.rel = "preload";
+          l.as = "script";
+          l.href = href;
+          document.head.appendChild(l);
+        });
+      })();
+    </script>
     <!--
       Do NOT load fonts.googleapis.com / fonts.gstatic.com here.
       Many IR networks block Google; preconnect+stylesheet stalls boot for those
@@ -22,8 +41,12 @@
         "error",
         function (ev) {
           try {
-            var src = (ev && (ev.filename || (ev.target && ev.target.src))) || "";
-            if (!src || src.indexOf("/assets/forge/") === -1) return;
+            // Script-tag load failures only. Runtime errors must not wipe the page.
+            // Match /assets/forge/forge-main.js, not /assets/forge-dev/ (substring trap).
+            var t = ev && ev.target;
+            if (!t || t.tagName !== "SCRIPT") return;
+            var src = String(t.src || "");
+            if (!/\/assets\/forge(?:-dev)?\/forge-main[^/]*\.js(?:\?|$)/.test(src)) return;
             var root = document.getElementById("root");
             if (!root || root.dataset.bootErr) return;
             root.dataset.bootErr = "1";

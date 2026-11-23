@@ -7,7 +7,7 @@ import type { CustomIndicator } from "@/infrastructure/tradingview";
 import { FRACTAL_TIME_DEFAULTS } from "@/features/fractal-time/runtime";
 import { buildStylePlots, stylePlotNaNs } from "./study-style-plots";
 
-export const FRACTAL_TIME_STUDY_NAME = "Fractal & Time Alignment";
+export const FRACTAL_TIME_STUDY_NAME = "Fractal Time Alignment";
 export const FRACTAL_TIME_STUDY_ID = "ForgeFractalTime@tv-basicstudies-1";
 
 export const FT_STYLE_C = "plot_c";
