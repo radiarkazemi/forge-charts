@@ -1,8 +1,49 @@
 /* Forge header + chart chrome (Charting Library iframe). Keep overrides light. */
 
-/* Hide only the extra "Save" caption. The layout name sits in the same button. */
-#header-toolbar-save-load [data-forge-save-caption="1"] {
+/* TradingView save button: layout name on the first line, Save under it. */
+#header-toolbar-save-load {
+  display: inline-flex !important;
+  align-items: center !important;
+  min-width: 104px !important;
+  max-width: 200px !important;
+  height: 38px !important;
+  padding: 0 10px !important;
+  overflow: hidden !important;
+}
+#header-toolbar-save-load .js-button-text {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  justify-content: center !important;
+  min-width: 72px !important;
+  line-height: 1.15 !important;
+}
+#header-toolbar-save-load [data-forge-library-label] {
   display: none !important;
+}
+#header-toolbar-save-load [data-forge-layout-label] {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  max-width: 168px !important;
+}
+#header-toolbar-save-load [data-forge-layout-title] {
+  display: block !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  line-height: 16px !important;
+  color: inherit !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  max-width: 168px !important;
+}
+#header-toolbar-save-load [data-forge-layout-sub] {
+  display: block !important;
+  font-size: 11px !important;
+  font-weight: 400 !important;
+  line-height: 14px !important;
+  color: #787b86 !important;
 }
 
 .tv-header {
