@@ -1,5 +1,7 @@
 import type { Bar, Interval, SymbolInfo } from "../engine/types";
 import { chartApiBase, chartApiWsUrl, chartFastBase } from "./config";
+import { INTERVAL_SEC } from "./feed";
+import { aggregateBars, foldLiveBar } from "./session-bars";
 
 export type Quote = { price: number; change: number };
 
@@ -30,11 +32,14 @@ const LIVE_TF: Record<Interval, "1m" | "1h" | "1d"> = {
   "1M": "1d",
 };
 
-/** Target candles on screen — server aggregates, so payload stays tiny. */
-const DISPLAY_BARS = 350;
+/** Candles to paint immediately. Extra history pages in after the first frame. */
+const DISPLAY_BARS = 220;
 
 const historyCache = new Map<string, { at: number; bars: Bar[] }>();
-const HISTORY_CACHE_MS = 15_000;
+const HISTORY_CACHE_MS = 45_000;
+/** Raw 1m / 1h parents so 5m–4h switches do not wait on a new download. */
+const parentCache = new Map<string, { at: number; bars: Bar[] }>();
+const PARENT_CACHE_MS = 120_000;
 
 function num(v: unknown): number {
   const n = typeof v === "number" ? v : Number(v);
@@ -111,27 +116,27 @@ function compactToBars(rows: unknown[]): Bar[] {
   return bars;
 }
 
-function aggregateBars(bars: Bar[], group: number, stepSec: number): Bar[] {
-  if (group <= 1 || bars.length === 0) return bars;
-  const bucket = stepSec * group;
-  const out: Bar[] = [];
-  let cur: Bar | null = null;
-  let bucketStart = -1;
-  for (const b of bars) {
-    const start = Math.floor(b.time / bucket) * bucket;
-    if (!cur || start !== bucketStart) {
-      if (cur) out.push(cur);
-      bucketStart = start;
-      cur = { time: start, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume };
-    } else {
-      cur.high = Math.max(cur.high, b.high);
-      cur.low = Math.min(cur.low, b.low);
-      cur.close = b.close;
-      cur.volume += b.volume;
-    }
-  }
-  if (cur) out.push(cur);
-  return out;
+function parentKey(symbol: SymbolInfo, tf: "1m" | "1h" | "1d"): string {
+  return `${symbol.exchange}:${symbol.ticker}:${tf}`;
+}
+
+function rememberParent(symbol: SymbolInfo, tf: "1m" | "1h" | "1d", bars: Bar[]): void {
+  if (!bars.length) return;
+  parentCache.set(parentKey(symbol, tf), { at: Date.now(), bars });
+}
+
+function fxAlign(symbol: SymbolInfo): boolean {
+  return symbol.exchange.toUpperCase() === "FOREXCOM";
+}
+
+/** Build 5m–4h from a parent already on this device (no network). */
+export function barsFromParentCache(symbol: SymbolInfo, interval: Interval): Bar[] | null {
+  const { tf, group } = HISTORY_TF[interval];
+  const hit = parentCache.get(parentKey(symbol, tf));
+  if (!hit || Date.now() - hit.at > PARENT_CACHE_MS || hit.bars.length < 8) return null;
+  const step = tf === "1m" ? 60 : tf === "1h" ? 3600 : 86_400;
+  const out = aggregateBars(hit.bars, group, step, fxAlign(symbol) && tf !== "1d");
+  return out.length ? out.slice(-DISPLAY_BARS) : null;
 }
 
 function precisionFromPrice(price: number, exchange: string): number {
@@ -193,13 +198,31 @@ export async function fetchChartApiSymbols(exchanges: string[]): Promise<SymbolI
 
 async function fetchCompactHistory(symbol: SymbolInfo, interval: Interval): Promise<Bar[] | null> {
   const { tf, group } = HISTORY_TF[interval];
+  const fx = fxAlign(symbol) && tf !== "1d";
   const limit = DISPLAY_BARS;
   const url =
     `${chartFastBase()}/history?symbol=${encodeURIComponent(symbol.ticker.toLowerCase())}` +
-    `&timeframe=${tf}&limit=${limit}&group=${group}`;
-  const json = (await getJson(url, 6000)) as { bars?: unknown[] };
+    `&timeframe=${tf}&limit=${limit}&group=${group}` +
+    (fx ? "&align=fx" : "");
+  const json = (await getJson(url, 5000)) as { bars?: unknown[] };
   const bars = compactToBars(json.bars ?? []);
+  if (group === 1 && bars.length) rememberParent(symbol, tf, bars);
   return bars.length ? bars : null;
+}
+
+async function prefetchParent(symbol: SymbolInfo, tf: "1m" | "1h"): Promise<void> {
+  const hit = parentCache.get(parentKey(symbol, tf));
+  if (hit && Date.now() - hit.at < PARENT_CACHE_MS) return;
+  const limit = tf === "1h" ? 900 : 1200;
+  const url =
+    `${chartFastBase()}/history?symbol=${encodeURIComponent(symbol.ticker.toLowerCase())}` +
+    `&timeframe=${tf}&limit=${limit}&group=1`;
+  try {
+    const json = (await getJson(url, 5000)) as { bars?: unknown[] };
+    rememberParent(symbol, tf, compactToBars(json.bars ?? []));
+  } catch {
+    /* keep whatever we have */
+  }
 }
 
 async function fetchVerboseHistory(symbol: SymbolInfo, interval: Interval): Promise<Bar[]> {
@@ -212,7 +235,8 @@ async function fetchVerboseHistory(symbol: SymbolInfo, interval: Interval): Prom
   )) as { results?: unknown[] };
   const raw = historyToBars(json.results ?? []);
   const step = tf === "1m" ? 60 : tf === "1h" ? 3600 : 86400;
-  return aggregateBars(raw, group, step);
+  if (group === 1) rememberParent(symbol, tf, raw);
+  return aggregateBars(raw, group, step, fxAlign(symbol) && tf !== "1d");
 }
 
 export async function fetchChartApiHistory(symbol: SymbolInfo, interval: Interval): Promise<Bar[]> {
@@ -230,6 +254,9 @@ export async function fetchChartApiHistory(symbol: SymbolInfo, interval: Interva
     bars = await fetchVerboseHistory(symbol, interval);
   }
   if (bars.length) historyCache.set(cacheKey, { at: Date.now(), bars });
+  const parent = HISTORY_TF[interval].tf;
+  if (parent === "1m") void prefetchParent(symbol, "1m");
+  if (parent === "1h" || fxAlign(symbol)) void prefetchParent(symbol, "1h");
   return bars;
 }
 
@@ -298,6 +325,9 @@ export function subscribeChartApi(
   let retry = 0;
   let timer = 0;
   let poll = 0;
+  const fx = fxAlign(symbol);
+  const step = INTERVAL_SEC[interval];
+  const emit = (bar: Bar) => onBar(foldLiveBar(undefined, bar, step, fx));
 
   const startPoll = () => {
     window.clearInterval(poll);
@@ -312,7 +342,7 @@ export function subscribeChartApi(
         const close = num(json.price);
         if (!Number.isFinite(time) || !Number.isFinite(close)) return;
         const open = num(json.open);
-        onBar({
+        emit({
           time,
           open: Number.isFinite(open) ? open : close,
           high: num(json.high) || Math.max(open || close, close),
@@ -350,7 +380,7 @@ export function subscribeChartApi(
       try {
         const data = JSON.parse(String(ev.data));
         const bar = barFromWs(data);
-        if (bar) onBar(bar);
+        if (bar) emit(bar);
       } catch {
         /* ignore */
       }

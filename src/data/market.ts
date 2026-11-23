@@ -1,6 +1,7 @@
 import type { Bar, Interval, SymbolInfo } from "../engine/types";
 import { BINANCE_UNIVERSE, BINANCE_WATCH, fetchBinanceHistory, fetchBinanceQuotes, subscribeBinanceKline } from "./binance";
 import {
+  barsFromParentCache,
   chartApiHealth,
   fetchChartApiHistory,
   fetchChartApiQuotes,
@@ -68,6 +69,10 @@ export async function loadCatalog(): Promise<SymbolInfo[]> {
     }
   }
   return UNIVERSE;
+}
+
+export function instantHistory(symbol: SymbolInfo, interval: Interval): Bar[] | null {
+  return barsFromParentCache(symbol, interval);
 }
 
 export async function fetchHistory(symbol: SymbolInfo, interval: Interval): Promise<FeedMeta> {

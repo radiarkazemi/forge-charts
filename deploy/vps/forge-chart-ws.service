@@ -1,0 +1,21 @@
+[Unit]
+Description=Forge compact chart history + websocket
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/forge-chart-ws
+Environment=CHART_WS_HOST=127.0.0.1
+Environment=CHART_WS_PORT=8002
+Environment=CHART_HTTP_PORT=8003
+Environment=CHART_HIST_CACHE_TTL=20
+EnvironmentFile=-/etc/forge-chart-ws.env
+ExecStart=/opt/forge-chart-ws/venv/bin/python /opt/forge-chart-ws/chart_ws.py
+Restart=always
+RestartSec=2
+MemoryMax=400M
+CPUQuota=80%
+
+[Install]
+WantedBy=multi-user.target
