@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CssBaseline from "@mui/material/CssBaseline";
 import { ThemeProvider } from "@mui/material/styles";
 import {
@@ -26,12 +26,9 @@ import { AppThemeProvider } from "./AppThemeProvider";
 import { createServices, type Services } from "./container";
 import { devAdminUrl, devLandingUrl, isDevSite } from "../dev-site";
 import { isPlaceholderAccountName } from "@/features/profile/account-label";
+import { AppShell } from "@/features/layout/AppShell";
 import { SubscriptionPage } from "@/features/billing/SubscriptionPage";
 import { ServicesProvider } from "./ServicesProvider";
-
-const AppShell = lazy(() =>
-  import("@/features/layout/AppShell").then((m) => ({ default: m.AppShell })),
-);
 
 function buildSessionServices(session: AuthSession): Services {
   const raw = new LocalStorageAdapter();
@@ -346,17 +343,15 @@ export function App() {
   return (
     <ServicesProvider services={services}>
       <AppThemeProvider>
-        <Suspense fallback={null}>
-          <AppShell
-            onSignOut={signOut}
-            account={{
-              userId: session.userId,
-              displayName: session.displayName,
-              username: session.username,
-              safetyName: auth.getSafetyProfile(session.userId)?.fullName ?? "",
-            }}
-          />
-        </Suspense>
+        <AppShell
+          onSignOut={signOut}
+          account={{
+            userId: session.userId,
+            displayName: session.displayName,
+            username: session.username,
+            safetyName: auth.getSafetyProfile(session.userId)?.fullName ?? "",
+          }}
+        />
       </AppThemeProvider>
     </ServicesProvider>
   );
