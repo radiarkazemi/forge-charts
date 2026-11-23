@@ -1,9 +1,13 @@
 import type { DrawCmd } from "@/features/pine/orca-runtime";
 import {
   DEFAULT_ALIGNMENT,
+  KILLZONES,
+  MACROS,
   evaluateAlignment,
   h4Block,
   nyClock,
+  qtDayOpenSec,
+  session90,
   sessionOpenSec,
   snapshotAt,
   utcAtNewYork,
@@ -74,6 +78,11 @@ export function subscribeFractalTimeDashboard(fn: () => void): () => void {
   };
 }
 
+function addUtcDay(year: number, month: number, day: number, delta: number): { y: number; mo: number; d: number } {
+  const dt = new Date(Date.UTC(year, month - 1, day + delta));
+  return { y: dt.getUTCFullYear(), mo: dt.getUTCMonth() + 1, d: dt.getUTCDate() };
+}
+
 function rgba(hex: string, a: number): string {
   const h = hex.replace("#", "");
   const n = Number.parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h.slice(0, 6), 16);
@@ -95,8 +104,8 @@ export function computeFractalTimeDraws(
   const result = evaluateAlignment(last, options);
   const snap = result.snap;
   const cmds: DrawCmd[] = [];
-  const lo = Math.max(first, last - 14 * 86_400);
-  const hi = last + chartSec;
+  const lo = Math.max(first, last - 10 * 86_400);
+  const hi = last + Math.max(chartSec, 3_600);
   const pLo = Number.isFinite(priceLow) ? priceLow : 1;
   const pHi = Number.isFinite(priceHigh) && priceHigh > pLo ? priceHigh : pLo * 1.002;
 
@@ -118,7 +127,7 @@ export function computeFractalTimeDraws(
           text: h.block,
         });
       }
-      if (options.showHourQuarters && chartSec <= 15 * 60) {
+      if (options.showHourQuarters && chartSec <= 60 * 60) {
         cmds.push({
           kind: "vline",
           t1: h.quarterStart,
@@ -129,6 +138,25 @@ export function computeFractalTimeDraws(
         });
       }
       t += 3_600;
+    }
+  }
+
+  if (options.showHourQuarters && chartSec <= 4 * 3_600) {
+    let t = qtDayOpenSec(lo);
+    let guard = 0;
+    while (t <= hi && guard < 80) {
+      guard += 1;
+      const s = session90(t + 1);
+      cmds.push({
+        kind: "vline",
+        t1: s.quarterStart,
+        p1: 0,
+        color: options.qColor,
+        width: s.quarter === "Q1" ? 2 : 1,
+        style: s.quarter === "Q1" ? "dashed" : "dotted",
+        text: s.quarter === "Q1" ? s.session : s.quarter,
+      });
+      t += 5_400;
     }
   }
 
@@ -145,7 +173,16 @@ export function computeFractalTimeDraws(
         color: options.openColor,
         width: 2,
         style: "solid",
-        text: "17:00 NY",
+        text: "FX 17:00",
+      });
+      cmds.push({
+        kind: "vline",
+        t1: s.qtDayOpen,
+        p1: 0,
+        color: options.openColor,
+        width: 2,
+        style: "solid",
+        text: "18:00 QT",
       });
       cmds.push({
         kind: "vline",
@@ -154,7 +191,7 @@ export function computeFractalTimeDraws(
         color: options.openColor,
         width: 1,
         style: "dashed",
-        text: "Asia TO 19:00",
+        text: "Asia TSO 19:30",
       });
       cmds.push({
         kind: "vline",
@@ -167,6 +204,24 @@ export function computeFractalTimeDraws(
       });
       t += 86_400;
     }
+    cmds.push({
+      kind: "vline",
+      t1: snap.trueWeekOpen,
+      p1: 0,
+      color: options.openColor,
+      width: 2,
+      style: "solid",
+      text: "TWO",
+    });
+    cmds.push({
+      kind: "vline",
+      t1: snap.trueMonthOpen,
+      p1: 0,
+      color: options.openColor,
+      width: 1,
+      style: "dashed",
+      text: "TMO",
+    });
   }
 
   if (options.showMacros) {
@@ -175,18 +230,12 @@ export function computeFractalTimeDraws(
     while (day <= hi && guard < 16) {
       guard += 1;
       const openNy = nyClock(day);
-      const next = new Date(Date.UTC(openNy.year, openNy.month - 1, openNy.day + 1));
-      const y = next.getUTCFullYear();
-      const mo = next.getUTCMonth() + 1;
-      const d = next.getUTCDate();
-      for (const m of [
-        { name: "London1" as const, sh: 2, sm: 30, eh: 3, em: 0 },
-        { name: "London2" as const, sh: 4, sm: 0, eh: 4, em: 30 },
-        { name: "NY1" as const, sh: 8, sm: 50, eh: 9, em: 10 },
-        { name: "NY2" as const, sh: 9, sm: 50, eh: 10, em: 10 },
-      ]) {
-        const t1 = utcAtNewYork(y, mo, d, m.sh, m.sm);
-        const t2 = utcAtNewYork(y, mo, d, m.eh, m.em);
+      const next = addUtcDay(openNy.year, openNy.month, openNy.day, 1);
+      const cal = (mins: number) => (mins >= 17 * 60 ? { y: openNy.year, mo: openNy.month, d: openNy.day } : next);
+      for (const m of MACROS) {
+        const c = cal(m.startMin);
+        const t1 = utcAtNewYork(c.y, c.mo, c.d, Math.floor(m.startMin / 60), m.startMin % 60);
+        const t2 = utcAtNewYork(c.y, c.mo, c.d, Math.floor(m.endMin / 60), m.endMin % 60);
         if (t2 < lo || t1 > hi) continue;
         cmds.push({
           kind: "rect",
@@ -195,8 +244,24 @@ export function computeFractalTimeDraws(
           t2,
           p2: pHi,
           color: options.macroColor,
-          fill: rgba(options.macroColor, m.name === "NY2" ? 0.18 : 0.1),
+          fill: rgba(options.macroColor, m.name === "NY2" || m.name === "NYPM1" ? 0.18 : 0.09),
           text: m.name,
+        });
+      }
+      for (const z of KILLZONES) {
+        const c = cal(z.startMin);
+        const t1 = utcAtNewYork(c.y, c.mo, c.d, Math.floor(z.startMin / 60), z.startMin % 60);
+        const t2 = utcAtNewYork(c.y, c.mo, c.d, Math.floor(z.endMin / 60), z.endMin % 60);
+        if (t2 < lo || t1 > hi) continue;
+        cmds.push({
+          kind: "rect",
+          t1,
+          p1: pLo,
+          t2,
+          p2: pHi,
+          color: options.cColor,
+          fill: rgba(options.cColor, 0.05),
+          text: z.name,
         });
       }
       day += 86_400;
@@ -224,7 +289,7 @@ export function computeFractalTimeDraws(
     });
   }
 
-  const capped = cmds.length > 220 ? cmds.slice(-220) : cmds;
+  const capped = cmds.length > 420 ? cmds.slice(-420) : cmds;
   return { cmds: capped, result, snap };
 }
 

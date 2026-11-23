@@ -10,10 +10,10 @@ import { barsFromChartExport, type OrcaBar } from "@/features/pine/orca-runtime"
 
 /** Soft cap for structure painters — enough history, far less main-thread work. */
 export const STUDY_MAX_BARS = 1_200;
-export const STUDY_DEBOUNCE_MS = 1_100;
+export const STUDY_DEBOUNCE_MS = 280;
 export const STUDY_PRESENCE_POLL_MS = 5_000;
 export const STUDY_LIVE_REFRESH_MS = 90_000;
-export const STUDY_PAINT_MUTE_MS = 2_800;
+export const STUDY_PAINT_MUTE_MS = 900;
 
 const EXPORT_TTL_MS = 1_800;
 

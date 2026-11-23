@@ -1,5 +1,5 @@
 /**
- * Watches Indicators “Fractal & Time Alignment” and paints NY 17:00 grid + macros.
+ * Watches Indicators “Fractal Time Alignment” and paints ICT fractal time overlays.
  */
 
 import { useEffect, useRef } from "react";
@@ -68,7 +68,7 @@ function parseList(raw: unknown, fallback: readonly string[]): string[] {
 
 export function useFractalTimeStudy(chart: ChartController | null): void {
   const { chart: primaryChart } = useServices();
-  const { ready, symbol, interval } = useBoundChartState(chart);
+  const { ready, symbol } = useBoundChartState(chart);
   const isPrimaryPane = chart != null && chart === primaryChart;
   const idsRef = useRef<EntityId[]>([]);
   const busyRef = useRef(false);
@@ -86,8 +86,6 @@ export function useFractalTimeStudy(chart: ChartController | null): void {
 
     let cancelled = false;
     let studyTimer: number | undefined;
-    genRef.current += 1;
-    clearDrawings();
     lastKeyRef.current = "";
     lastFpRef.current = "";
 
@@ -212,7 +210,7 @@ export function useFractalTimeStudy(chart: ChartController | null): void {
       const studyApi = widget.activeChart()?.getStudyById(studyId);
       const opts = readOptions(studyId);
       if (!opts) return;
-      const res = liveChartResolution(widget) || String(interval || "");
+      const res = liveChartResolution(widget) || "";
       if (!studyIsVisible(studyApi)) {
         if (idsRef.current.length || lastKeyRef.current) {
           genRef.current += 1;
@@ -230,7 +228,6 @@ export function useFractalTimeStudy(chart: ChartController | null): void {
         if (!api) return;
         const bars = await exportChartBarsCached(api, MAX_BARS);
         if (cancelled || myGen !== genRef.current) return;
-        if (bars.length < 3) return;
         let lo = Infinity;
         let hi = -Infinity;
         const times: number[] = [];
@@ -238,6 +235,10 @@ export function useFractalTimeStudy(chart: ChartController | null): void {
           times.push(b.time);
           if (b.low < lo) lo = b.low;
           if (b.high > hi) hi = b.high;
+        }
+        if (times.length < 2) {
+          const now = Math.floor(Date.now() / 1000);
+          times.push(now - 86_400 * 3, now);
         }
         const chartSec = chartIntervalSeconds(res);
         const { cmds, result } = computeFractalTimeDraws(times, opts, chartSec, lo, hi);
@@ -323,6 +324,28 @@ export function useFractalTimeStudy(chart: ChartController | null): void {
     };
 
     const unStudy = paneChart.onStudyEvent(() => schedule());
+    const onIntervalChanged = () => {
+      lastKeyRef.current = "";
+      lastFpRef.current = "";
+      window.clearTimeout(studyTimer);
+      studyTimer = window.setTimeout(() => {
+        void repaint();
+      }, 40);
+    };
+    const onDataLoaded = () => {
+      if (findStudyIds().length === 0) return;
+      schedule();
+    };
+    try {
+      widget.activeChart()?.onIntervalChanged()?.subscribe(null, onIntervalChanged);
+    } catch {
+      /* ignore */
+    }
+    try {
+      widget.activeChart()?.onDataLoaded()?.subscribe(null, onDataLoaded);
+    } catch {
+      /* ignore */
+    }
     void repaint();
     const live = window.setInterval(() => {
       void repaint();
@@ -340,7 +363,17 @@ export function useFractalTimeStudy(chart: ChartController | null): void {
       window.clearInterval(live);
       window.clearInterval(presence);
       unStudy();
+      try {
+        widget.activeChart()?.onIntervalChanged()?.unsubscribe(null, onIntervalChanged);
+      } catch {
+        /* ignore */
+      }
+      try {
+        widget.activeChart()?.onDataLoaded()?.unsubscribe(null, onDataLoaded);
+      } catch {
+        /* ignore */
+      }
       clearDrawings();
     };
-  }, [chart, ready, symbol, interval, isPrimaryPane]);
+  }, [chart, ready, symbol, isPrimaryPane]);
 }

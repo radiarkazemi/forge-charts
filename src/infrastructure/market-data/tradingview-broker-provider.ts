@@ -23,7 +23,7 @@ const REQUEST_TIMEOUT_MS = 8_000;
 const DEEP_HISTORY_TIMEOUT_MS = 28_000;
 const LIVE_POLL_MS = 15_000;
 /** Brief retries when market_ticks is mid-restart (deploy / OOM) — avoids blank FX charts. */
-const TV_HISTORY_RETRIES = 1;
+const TV_HISTORY_RETRIES = 0;
 const TV_HISTORY_RETRY_MS = 280;
 
 const NATIVE_INTERVALS: readonly Interval[] = [

@@ -27,6 +27,7 @@ import { FRACTAL_TIME_STUDY_ID } from "@/features/chart/fractal-time-indicator";
 import { SI_STUDY_ID } from "@/features/chart/structure-intelligence-indicator";
 import { WATERMARK_STUDY_ID } from "@/features/chart/watermark-indicator";
 import { allowNativeIndicatorsOnce } from "@/features/chart/indicators-intercept";
+import { invalidateChartExportCache } from "@/features/chart/chart-export-cache";
 import {
   isTextMenuDrawingTool,
   shouldSkipDrawingOneShot,
@@ -359,6 +360,7 @@ export class ChartController {
   }
 
   setInterval(interval: Interval): void {
+    invalidateChartExportCache();
     void this.activeChart()?.setResolution(interval as ResolutionString, { doNotActivateChart: true });
   }
 
@@ -367,6 +369,7 @@ export class ChartController {
    * Updates the widget and local store without relying on the async CL event.
    */
   restoreInterval(interval: Interval): void {
+    invalidateChartExportCache();
     this.patch({ interval });
     void this.activeChart()?.setResolution(interval as ResolutionString, { doNotActivateChart: true });
   }

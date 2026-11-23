@@ -21,5 +21,5 @@ export function historyFetchLimit(countBack: number | undefined): number {
 }
 
 export function historyTimeoutMs(limit: number): number {
-  return limit <= FIRST_HISTORY_PAGE + 40 ? 8_000 : 22_000;
+  return limit <= FIRST_HISTORY_PAGE + 40 ? 4_000 : 18_000;
 }

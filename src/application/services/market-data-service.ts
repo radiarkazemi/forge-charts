@@ -1,4 +1,12 @@
-import { normalizeBars, type Bar, type BarRange, type Interval, type SymbolInfo } from "@/domain";
+import {
+  intervalSeconds,
+  normalizeBars,
+  resampleBars,
+  type Bar,
+  type BarRange,
+  type Interval,
+  type SymbolInfo,
+} from "@/domain";
 import type { MarketDataProvider, Unsubscribe } from "../ports";
 
 export interface HistoryResult {
@@ -25,6 +33,9 @@ export class MarketDataService {
   private readonly inflight = new Map<string, Promise<HistoryResult>>();
   /** Short memory of the last page — Chartix-style; CL also caches in the widget. */
   private readonly memo = new Map<string, { at: number; value: HistoryResult }>();
+  /** Finest recent series per symbol so TF switches resample locally (TV-like). */
+  private readonly series = new Map<string, { step: number; bars: Bar[]; at: number }>();
+  private readonly warming = new Set<string>();
 
   constructor(providers: readonly MarketDataProvider[], logger: MarketDataLogger = console) {
     if (providers.length === 0) throw new Error("MarketDataService requires at least one provider");
@@ -54,7 +65,54 @@ export class MarketDataService {
     return { provider: fallback, nativeIntervals: fallback.nativeIntervals(symbol) };
   }
 
+  private seriesKey(symbol: SymbolInfo): string {
+    return `${symbol.exchange}:${symbol.ticker}`;
+  }
+
+  private rememberSeries(symbol: SymbolInfo, interval: Interval, bars: Bar[]): void {
+    if (bars.length < 20) return;
+    const step = intervalSeconds(interval);
+    const key = this.seriesKey(symbol);
+    const prev = this.series.get(key);
+    if (prev && prev.step < step) return;
+    this.series.set(key, { step, bars: bars.slice(-12_000), at: Date.now() });
+  }
+
+  /** Instant higher-TF page from a cached finer series (15m→1H/4H, 1m→15m, …). */
+  private resampleCached(symbol: SymbolInfo, interval: Interval, range: BarRange): HistoryResult | null {
+    const want = intervalSeconds(interval);
+    if (want < 60) return null;
+    const prev = this.series.get(this.seriesKey(symbol));
+    if (!prev || prev.bars.length < 40 || want < prev.step) return null;
+    if (want % prev.step !== 0) return null;
+    const src = want === prev.step ? prev.bars : resampleBars(prev.bars, want);
+    const before = range.to > 0 ? range.to : Number.POSITIVE_INFINITY;
+    const filtered = src.filter((b) => b.time < before);
+    const need = Math.max(1, range.countBack);
+    if (filtered.length < Math.min(48, need)) return null;
+    return {
+      bars: filtered.slice(-need),
+      providerId: "tf-cache",
+      isSynthetic: false,
+    };
+  }
+
+  private warmMinuteHistory(symbol: SymbolInfo): void {
+    const key = `${this.seriesKey(symbol)}|1`;
+    if (this.warming.has(key)) return;
+    const prev = this.series.get(this.seriesKey(symbol));
+    if (prev && prev.step <= 60) return;
+    this.warming.add(key);
+    const to = Math.floor(Date.now() / 1000) + 60;
+    void this.fetchHistory(symbol, "1", { from: 0, to, countBack: 1_500 }).catch(() => {
+      this.warming.delete(key);
+    });
+  }
+
   async fetchHistory(symbol: SymbolInfo, interval: Interval, range: BarRange): Promise<HistoryResult> {
+    const cachedTf = range.countBack > 24 ? this.resampleCached(symbol, interval, range) : null;
+    if (cachedTf) return cachedTf;
+
     const key = this.historyKey(symbol, interval, range);
     const hit = this.memo.get(key);
     const ttl = range.countBack <= 24 ? 4_000 : 12_000;
@@ -65,8 +123,12 @@ export class MarketDataService {
     if (pending) return pending;
 
     const run = this.fetchHistoryUncached(symbol, interval, range).then((value) => {
-      if (value.bars.length > 0) this.memo.set(key, { at: Date.now(), value });
-      if (this.memo.size > 48) {
+      if (value.bars.length > 0) {
+        this.memo.set(key, { at: Date.now(), value });
+        this.rememberSeries(symbol, interval, value.bars);
+        if (intervalSeconds(interval) > 60) this.warmMinuteHistory(symbol);
+      }
+      if (this.memo.size > 64) {
         const oldest = this.memo.keys().next().value;
         if (oldest) this.memo.delete(oldest);
       }
