@@ -21,7 +21,7 @@ import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import CreditCardOutlinedIcon from "@mui/icons-material/CreditCardOutlined";
 import StorageOutlinedIcon from "@mui/icons-material/StorageOutlined";
 import type { UiLanguage, UserProfile } from "@/application";
-import { isDevSite } from "@/dev-site";
+import { devLandingUrl, isDevSite } from "@/dev-site";
 import { formatPrice, readPlanChoice } from "@/features/billing/plans";
 import { menuAccountLabel, type SignedInAccount } from "./account-label";
 
@@ -58,7 +58,7 @@ const COPY = {
     night: "Dark theme",
     language: "Language",
     langValue: "English",
-    admin: "Data",
+    admin: "Admin",
     signOut: "Sign out",
     watchlist: "Watchlist",
     alerts: "Alerts",
@@ -81,7 +81,7 @@ const COPY = {
     night: "حالت شب",
     language: "زبان",
     langValue: "فارسی",
-    admin: "داده‌ها",
+    admin: "مدیریت",
     signOut: "خروج از حساب",
     watchlist: "دیده‌بان",
     alerts: "هشدارها",
@@ -274,7 +274,7 @@ export function ProfileMenu({
       <List dense disablePadding>
         <ListItemButton
           component="a"
-          href={isDevSite() ? "?view=landing" : "https://forgechart.ir/"}
+          href={isDevSite() ? devLandingUrl() : "https://forgechart.ir/"}
           target={isDevSite() ? undefined : "_blank"}
           rel={isDevSite() ? undefined : "noopener"}
           sx={{ py: 1.1, "&:hover": { bgcolor: hover } }}

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import Box from "@mui/material/Box";
-import { isDevSite } from "@/dev-site";
+import { devLandingUrl, isDevSite } from "@/dev-site";
 import {
   YEAR_AT_MONTHLY,
   formatPrice,
@@ -106,7 +106,7 @@ export function SubscriptionPage({ signedIn, onBack, onSignIn }: SubscriptionPag
   const [notice, setNotice] = useState<string | null>(null);
   const fa = lang === "fa";
   const t = COPY[lang];
-  const home = isDevSite() ? "?view=landing" : "https://forgechart.ir/";
+  const home = isDevSite() ? devLandingUrl() : "https://forgechart.ir/";
 
   const chooseLanguage = (next: Lang) => {
     setLang(next);
