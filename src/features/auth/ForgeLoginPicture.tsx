@@ -7,6 +7,7 @@ import { fetchTapeQuotes, placeholderTape, type TapeQuote } from "./login-quotes
 import { LoginInfoPage, type InfoPageId } from "./login-pages";
 
 function brandSrc(file: string): string {
+  if (isDevSite()) return `${devRoot()}/brand/${file}`;
   const base = import.meta.env.BASE_URL || "/";
   const root = base.endsWith("/") ? base : `${base}/`;
   return `${root}brand/${file}`;
@@ -484,7 +485,8 @@ function ArtCard({
     <Box dir="ltr" sx={{ position: "relative", width: "100%", containerType: "inline-size" }}>
       <Box
         component="img"
-        src={brandSrc(fa ? "forge-signin-fa.png?v=2" : "forge-mobile-v2-form.png")}
+        src={brandSrc(fa ? "forge-signin-fa.webp" : "forge-mobile-v2-form.webp")}
+        fetchPriority="high"
         alt=""
         sx={{ width: "100%", height: "auto", display: "block", pointerEvents: "none", userSelect: "none" }}
       />
@@ -694,7 +696,8 @@ function SignupCard({
     <Box dir="ltr" sx={{ position: "relative", width: "100%", containerType: "inline-size" }}>
       <Box
         component="img"
-        src={`${brandSrc("forge-signup-form.png")}?v=3`}
+        src={brandSrc("forge-signup-form.webp")}
+        fetchPriority="high"
         alt=""
         sx={{ width: "100%", height: "auto", display: "block", pointerEvents: "none", userSelect: "none" }}
       />
@@ -938,7 +941,7 @@ export function ForgeLoginPicture({
         fontFamily: '"Segoe UI", Tahoma, "Helvetica Neue", Arial, sans-serif',
         touchAction: "manipulation",
       }}>
-        <Box component="img" src={brandSrc("forge-mobile-v2-background.png")} alt="" sx={{
+        <Box component="img" src={brandSrc("forge-mobile-v2-background.webp")} alt="" sx={{
           position: "absolute",
           inset: 0,
           width: "100%",
@@ -1025,7 +1028,7 @@ export function ForgeLoginPicture({
       >
         <Box component="img" src={brandSrc("forge-f.png")} alt="" sx={{ height: 46, width: "auto" }} />
       </Box>
-      <Box component="img" src={brandSrc("forge-background-hi.webp")} alt="" sx={{
+      <Box component="img" src={brandSrc("forge-background-hi-fast.webp")} alt="" sx={{
         position: "absolute",
         inset: 0,
         width: "100%",

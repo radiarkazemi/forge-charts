@@ -25,22 +25,31 @@ fi
 
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
-mkdir -p "$STAGE/assets"
+mkdir -p "$STAGE/assets" "$STAGE/brand"
 cp -a dist/assets/. "$STAGE/assets/"
 gzip -kf -9 "$STAGE/assets/"*.js 2>/dev/null || true
+# Login art for /dev/ and /team/ only — never /charts/brand/.
+if [[ -d "$ROOT/public/brand" ]]; then
+  cp -a "$ROOT/public/brand/"*.webp "$STAGE/brand/" 2>/dev/null || true
+  cp -a "$ROOT/public/brand/forge-f.png" "$STAGE/brand/" 2>/dev/null || true
+fi
 sed -e 's|/assets/forge/|/assets/forge-dev/|g' dist/index.html > "$STAGE/index.html"
 
 echo "Deploying /dev/ only → ${USER}@${HOST}:${WEB}"
-tar -C "$STAGE" -cf - assets index.html | "${SSH[@]}" "${USER}@${HOST}" \
+tar -C "$STAGE" -cf - assets index.html brand | "${SSH[@]}" "${USER}@${HOST}" \
   "python3 -c \"
 import os, shutil, sys, tarfile
 web = sys.argv[1]
 dev = os.path.join(web, 'dev')
 team = os.path.join(web, 'team')
 assets = os.path.join(web, 'assets', 'forge-dev')
+brand_dev = os.path.join(dev, 'brand')
+brand_team = os.path.join(team, 'brand')
 os.makedirs(dev, exist_ok=True)
 os.makedirs(team, exist_ok=True)
 os.makedirs(assets, exist_ok=True)
+os.makedirs(brand_dev, exist_ok=True)
+os.makedirs(brand_team, exist_ok=True)
 tf = tarfile.open(fileobj=sys.stdin.buffer, mode='r|')
 for m in tf:
     name = m.name.lstrip('./')
@@ -48,6 +57,8 @@ for m in tf:
         continue
     if name.startswith('assets/'):
         dest = os.path.join(assets, name[len('assets/'):])
+    elif name.startswith('brand/'):
+        dest = os.path.join(brand_dev, name[len('brand/'):])
     elif name == 'index.html':
         dest = os.path.join(dev, 'index.html')
     else:
@@ -61,7 +72,12 @@ for m in tf:
 idx = os.path.join(dev, 'index.html')
 if os.path.isfile(idx):
     shutil.copyfile(idx, os.path.join(team, 'index.html'))
-print('ok', dev, team, assets)
+if os.path.isdir(brand_dev):
+    for fn in os.listdir(brand_dev):
+        src = os.path.join(brand_dev, fn)
+        if os.path.isfile(src):
+            shutil.copyfile(src, os.path.join(brand_team, fn))
+print('ok', dev, team, assets, brand_dev)
 \" '${WEB}'"
 
 echo "OK ${USER}@${HOST} /dev/"

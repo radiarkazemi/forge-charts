@@ -1,4 +1,5 @@
 import Box from "@mui/material/Box";
+import { devRoot, isDevSite } from "@/dev-site";
 
 export type InfoPageId = "about" | "terms" | "privacy" | "help";
 
@@ -295,6 +296,7 @@ const PAGES: Record<Lang, Record<InfoPageId, PageCopy>> = {
 };
 
 function brandSrc(file: string): string {
+  if (isDevSite()) return `${devRoot()}/brand/${file}`;
   const base = import.meta.env.BASE_URL || "/";
   const root = base.endsWith("/") ? base : `${base}/`;
   return `${root}brand/${file}`;
@@ -326,7 +328,7 @@ export function LoginInfoPage({
       color: "#f4f0ea",
       fontFamily: '"Segoe UI", Tahoma, "Helvetica Neue", Arial, sans-serif',
     }}>
-      <Box component="img" src={brandSrc("forge-background-hi.webp")} alt="" sx={{
+      <Box component="img" src={brandSrc("forge-background-hi-fast.webp")} alt="" sx={{
         position: "fixed",
         inset: 0,
         width: "100%",

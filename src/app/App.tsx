@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CssBaseline from "@mui/material/CssBaseline";
 import { ThemeProvider } from "@mui/material/styles";
 import {
@@ -9,7 +9,6 @@ import {
   type AuthSession,
 } from "@/features/auth";
 import type { SafetyAuthorizationProfile } from "@/features/auth/safety-profile";
-import { AppShell } from "@/features/layout/AppShell";
 import { LocalStorageAdapter, ScopedStorage } from "@/infrastructure";
 import { createAppTheme } from "@/shared/theme/create-app-theme";
 import { activeProfile } from "@/application";
@@ -29,6 +28,10 @@ import { devAdminUrl, devLandingUrl, isDevSite } from "../dev-site";
 import { isPlaceholderAccountName } from "@/features/profile/account-label";
 import { SubscriptionPage } from "@/features/billing/SubscriptionPage";
 import { ServicesProvider } from "./ServicesProvider";
+
+const AppShell = lazy(() =>
+  import("@/features/layout/AppShell").then((m) => ({ default: m.AppShell })),
+);
 
 function buildSessionServices(session: AuthSession): Services {
   const raw = new LocalStorageAdapter();
@@ -185,28 +188,33 @@ export function App() {
   const enter = useCallback(async (next: AuthSession, syncCreds: ProfileSyncCredentials) => {
     storeSyncCredentials(syncCreds);
     servicesRef.current?.dispose();
-    // Build once into scoped storage, pull remote if newer, rebuild if applied.
+    // Paint the chart immediately (TV ~3s). Cloud profile applies after.
     let built = buildSessionServices(next);
-    try {
-      const result = await syncProfileOnLogin(built.storage, syncCreds);
-      if (result.appliedRemote) {
-        built.dispose();
-        built = buildSessionServices(next);
-      }
-      const shared = activeProfile(built.settings.settings.get());
-      if (!isPlaceholderAccountName(shared.displayName)) {
-        const renamed = auth.adoptSharedName(shared.displayName);
-        if (renamed) next = renamed;
-      }
-    } catch {
-      /* offline — local chart still works */
-    }
     servicesRef.current = built;
     setServices(built);
     setNeedsSafetyBoot(false);
     clearPageView();
     setView(null);
     setSession(next);
+    try {
+      const result = await syncProfileOnLogin(built.storage, syncCreds);
+      if (result.appliedRemote && servicesRef.current === built) {
+        built.dispose();
+        built = buildSessionServices(next);
+        servicesRef.current = built;
+        setServices(built);
+      }
+      const shared = activeProfile(built.settings.settings.get());
+      if (!isPlaceholderAccountName(shared.displayName)) {
+        const renamed = auth.adoptSharedName(shared.displayName);
+        if (renamed) {
+          next = renamed;
+          setSession(renamed);
+        }
+      }
+    } catch {
+      /* offline — local chart still works */
+    }
   }, [auth]);
 
   const completeBootSafety = useCallback(
@@ -338,15 +346,17 @@ export function App() {
   return (
     <ServicesProvider services={services}>
       <AppThemeProvider>
-        <AppShell
-          onSignOut={signOut}
-          account={{
-            userId: session.userId,
-            displayName: session.displayName,
-            username: session.username,
-            safetyName: auth.getSafetyProfile(session.userId)?.fullName ?? "",
-          }}
-        />
+        <Suspense fallback={null}>
+          <AppShell
+            onSignOut={signOut}
+            account={{
+              userId: session.userId,
+              displayName: session.displayName,
+              username: session.username,
+              safetyName: auth.getSafetyProfile(session.userId)?.fullName ?? "",
+            }}
+          />
+        </Suspense>
       </AppThemeProvider>
     </ServicesProvider>
   );
