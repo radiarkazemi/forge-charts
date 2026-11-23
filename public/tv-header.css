@@ -1,7 +1,7 @@
 /* Forge header + chart chrome (Charting Library iframe). Keep overrides light. */
 
-/* The library keeps a second "Save" in the button for the saved flash. Hide it until then. */
-#header-toolbar-save-load [class*="saveString"] {
+/* Hide only the extra "Save" caption. The layout name sits in the same button. */
+#header-toolbar-save-load [data-forge-save-caption="1"] {
   display: none !important;
 }
 
