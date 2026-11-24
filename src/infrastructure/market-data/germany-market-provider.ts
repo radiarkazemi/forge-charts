@@ -1,4 +1,4 @@
-import { intervalSeconds, parseInterval, isFxDailyBreak, isMarketSessionOpen, type Bar, type BarRange, type Interval, type Quote, type SymbolInfo } from "@/domain";
+import { intervalSeconds, parseInterval, isFxDailyBreak, isMarketSessionOpen, SESSION_FX, type Bar, type BarRange, type Interval, type Quote, type SymbolInfo } from "@/domain";
 import type { MarketDataProvider, Unsubscribe } from "@/application";
 import { buildUrl, fetchJson } from "../http/fetch-json";
 import { startPolling } from "./polling";
@@ -1378,7 +1378,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
           exchange: route.exchange,
           type: "forex",
           pricePrecision: 2,
-          session: "1800-1700:123456",
+          session: SESSION_FX,
           timezone: "America/New_York",
         },
         parents,

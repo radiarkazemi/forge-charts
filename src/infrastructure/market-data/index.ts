@@ -14,7 +14,7 @@ export {
   targetHistoryDepth,
   mongoHistoryPlan,
 } from "./cp-chart-history";
-export { historyFetchLimit, FIRST_HISTORY_PAGE } from "./history-page";
+export { historyFetchLimit, firstHistoryPage, FIRST_HISTORY_PAGE } from "./history-page";
 export { startPolling } from "./polling";
 export {
   aggregateBars,

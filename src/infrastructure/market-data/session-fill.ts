@@ -7,7 +7,27 @@ import { isMarketSessionOpen, type Bar, type SymbolInfo } from "@/domain";
  * traded slot when Mongo or the price API skipped a writer cycle.
  */
 export function densifySessionBars(symbol: SymbolInfo, bars: readonly Bar[], stepSec: number): Bar[] {
-  if (bars.length < 2 || stepSec < 1 || stepSec >= 86_400) return [...bars];
+  if (bars.length < 2 || stepSec < 1) return [...bars];
+  // Daily+: only fill weekday session days (never invent Saturday/Sunday).
+  if (stepSec >= 86_400) {
+    const ordered = [...bars].sort((a, b) => a.time - b.time);
+    const out: Bar[] = [];
+    for (const bar of ordered) {
+      const prev = out[out.length - 1];
+      if (prev) {
+        let cursor = prev.time + stepSec;
+        while (cursor < bar.time) {
+          if (isMarketSessionOpen(symbol, cursor * 1000)) {
+            const px = prev.close;
+            out.push({ time: cursor, open: px, high: px, low: px, close: px, volume: 0 });
+          }
+          cursor += stepSec;
+        }
+      }
+      out.push(bar);
+    }
+    return out;
+  }
   const ordered = [...bars].sort((a, b) => a.time - b.time);
   const out: Bar[] = [];
   const nowSec = Math.floor(Date.now() / 1000);

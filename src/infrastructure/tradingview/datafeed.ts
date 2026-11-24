@@ -2,7 +2,7 @@ import { normalizeTicker, parseInterval, intervalSeconds, isMarketSessionOpen, S
 import { createStore, type MarketDataService, type Store, type SymbolRepository, type Unsubscribe } from "@/application";
 import { EXCHANGE_PRIORITY } from "@/infrastructure/symbols/static-symbol-repository";
 import { presentCandleSeries } from "@/infrastructure/market-data/candle-series";
-import { FIRST_HISTORY_PAGE, markTfSwitch } from "@/infrastructure/market-data/history-page";
+import { firstHistoryPage, markTfSwitch } from "@/infrastructure/market-data/history-page";
 import { canonicalizeBar } from "@/infrastructure/market-data/session-bars";
 import {
   appendLive,
@@ -449,7 +449,8 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       let countBack = periodParams.countBack;
       if (periodParams.firstDataRequest) {
         markTfSwitch();
-        countBack = Math.min(Math.max(countBack || 200, 1), FIRST_HISTORY_PAGE);
+        const step = barStep(String(resolution));
+        countBack = firstHistoryPage(step);
       }
       if (cutoffOn) {
         if (from > cutoff!) {

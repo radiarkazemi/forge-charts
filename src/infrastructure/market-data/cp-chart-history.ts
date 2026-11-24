@@ -143,7 +143,7 @@ export async function fetchCpChartHistory(
   if (!plan) throw new Error(`cp-chart-history: unsupported interval ${interval}`);
 
   const target = targetHistoryDepth(interval);
-  const limit = Math.min(target, historyFetchLimit(range.countBack));
+  const limit = Math.min(target, historyFetchLimit(range.countBack, intervalSeconds(interval)));
 
   // Pass TV interval so the server can resolve parent+group (and still accept explicit group).
   const before = range.to > 0 ? range.to : Number.POSITIVE_INFINITY;
