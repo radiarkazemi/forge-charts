@@ -1,0 +1,3 @@
+# On 91.107.171.162 copy to /etc/nginx/snippets/forge-market-api-key.conf
+# Use DEFAULT_API_KEY from the Falkenstein market-api host. Do not commit the value.
+# proxy_set_header X-API-Key "…";
