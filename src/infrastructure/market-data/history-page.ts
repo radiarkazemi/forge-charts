@@ -13,7 +13,7 @@ export const SCROLL_HISTORY_PAGE = 2_400;
 export function firstHistoryPage(stepSec: number): number {
   if (stepSec >= 86_400) return 600;
   if (stepSec >= 14_400) return 1_200;
-  if (stepSec >= 3_600) return 1_500;
+  if (stepSec >= 3_600) return 2_400;
   if (stepSec >= 900) return 600;
   return FIRST_HISTORY_PAGE;
 }
@@ -37,7 +37,7 @@ export function historyTimeoutMs(limit: number): number {
 export function isLiveHistoryPage(range: { to: number; countBack: number }): boolean {
   const now = Math.floor(Date.now() / 1000);
   const to = range.to > 0 ? range.to : now;
-  return range.countBack <= 2_000 && now - to < 4 * 3_600;
+  return range.countBack <= 3_000 && now - to < 4 * 3_600;
 }
 
 let tfSwitchUntil = 0;
