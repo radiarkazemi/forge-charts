@@ -14,7 +14,9 @@ export function firstHistoryPage(stepSec: number): number {
   if (stepSec >= 86_400) return 600;
   if (stepSec >= 14_400) return 1_200;
   if (stepSec >= 3_600) return 2_400;
-  if (stepSec >= 900) return 600;
+  if (stepSec >= 900) return 800;
+  if (stepSec >= 300) return 1_800;
+  if (stepSec >= 60) return 500;
   return FIRST_HISTORY_PAGE;
 }
 

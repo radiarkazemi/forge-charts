@@ -629,18 +629,13 @@ export class TradingViewDatafeed implements IBasicDataFeed {
           ? { listed_exchange: "TSETMC" }
           : { listed_exchange: symbol.exchange }),
       type: symbol.type,
-      // TSE cash hours (Sat–Wed 09:00–12:30) make the library reserve
-      // empty slots for holidays and missing minutes. 24x7 lets the packed
-      // bars sit on adjacent slots. The cash session stays in the UI label.
-      session: tse ? "24x7" : symbol.session,
-      // The plotted FX session lists Friday so Thursday's overnight candles
-      // survive. The legend still shows the real week: Sunday 18:00 through
-      // Friday 17:00. Saturday, and the 17:00–18:00 break, stay closed.
-      ...(tse
+      // Cash/FX sessions make the library reserve empty wall-clock slots
+      // (weekend, NY 17:00–18:00). 24x7 packs bars next to each other like TV.
+      // The real session stays on the legend; densify still skips those closes.
+      session: tse || symbol.session.startsWith("1800-1700") ? "24x7" : symbol.session,
+      ...(tse || symbol.session.startsWith("1800-1700")
         ? { session_display: symbol.session }
-        : symbol.session.startsWith("1800-1700")
-          ? { session_display: "1800-1700:12345" }
-          : {}),
+        : {}),
       timezone: symbol.timezone as Timezone,
       exchange: symbol.exchange,
       format: "price",
