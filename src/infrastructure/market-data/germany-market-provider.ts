@@ -9,6 +9,7 @@ import {
   mongoHistoryPlan,
 } from "./cp-chart-history";
 import { isLiveHistoryPage } from "./history-page";
+import { densifySessionBars, unionFillBars } from "./session-fill";
 import { aggregateBars, liveSecondUpdate, synthesizeFromMinuteBars } from "./synthesize-seconds";
 import { volumeDelta, type VolumeCursor } from "./volume-delta";
 
@@ -689,7 +690,13 @@ function openCpFetcherSocket(apiSymbol: string, interval: Interval, onBar: (bar:
 }
 
 
-async function fetchOhlc(apiSymbol: string, exchange: string, interval: string, limit: number): Promise<Bar[]> {
+async function fetchOhlc(
+  apiSymbol: string,
+  exchange: string,
+  interval: string,
+  limit: number,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<Bar[]> {
   const json = await fetchJson<OhlcResponse>(
     buildUrl(`${BASE}/ohlc/`, {
       symbol: apiSymbol,
@@ -698,7 +705,7 @@ async function fetchOhlc(apiSymbol: string, exchange: string, interval: string, 
       compat: "forge",
       exchange,
     }),
-    { timeoutMs: REQUEST_TIMEOUT_MS },
+    { timeoutMs },
   );
   if (json.source === "offline" || json.detail) {
     throw new Error(json.detail || `germany-market offline for ${apiSymbol}`);
@@ -756,41 +763,26 @@ export class GermanyMarketProvider implements MarketDataProvider {
       await this.assertHealthy();
       bars = await this.fetchSecondBars(route, step, germanyLimit, range);
     } else {
-      // Prefer VPS Mongo deep history (20k/10k/5k + `before` paging). Germany `/ohlc/`
-      // only returns the latest ~1–2k and cannot page older windows.
-      if (mongoHistoryPlan(interval)) {
-        try {
-          bars = await fetchCpChartHistory(route.apiSymbol, interval, range, {
+      // Mongo deep history in parallel with Germany `/ohlc/` so a slow Iran hop
+      // cannot leave holes. `/ohlc/` only covers the latest ~1k; Mongo pages older.
+      const mongoTask = mongoHistoryPlan(interval)
+        ? fetchCpChartHistory(route.apiSymbol, interval, range, {
             fxSession: route.kind === "forex" || route.kind === "metal",
-          });
-        } catch {
-          bars = [];
-        }
-      }
+          }).catch(() => [] as Bar[])
+        : Promise.resolve([] as Bar[]);
+      const ohlcTask =
+        route.kind === "forex"
+          ? Promise.resolve([] as Bar[])
+          : this.fetchOhlcBars(route, interval, germanyLimit, 2_800).catch(() => [] as Bar[]);
+      const [mongoBars, ohlcBars] = await Promise.all([mongoTask, ohlcTask]);
+      bars = unionFillBars(mongoBars, ohlcBars, step);
       if ((route.kind === "metal" || route.kind === "forex") && bars.length && !isLiveHistoryPage(range)) {
         bars = await spliceBrokerHoles(route.apiSymbol, bars, step);
         bars = await repairBrokerPriceGaps(route.apiSymbol, bars, step);
       }
-      if (!bars.length) {
-        // Forex routes are Mongo-only — Germany `/ohlc/` 502s for EURUSD etc.
-        // Leave empty so TradingViewBroker / Yahoo can answer.
-        if (route.kind !== "forex") {
-          await this.assertHealthy();
-          bars = await this.fetchOhlcBars(route, interval, germanyLimit);
-        }
-      } else if (
-        route.kind !== "forex" &&
-        (bars.length < Math.min(range.countBack, 50) || hasMidSessionHoles(bars, step))
-      ) {
-        // Mongo thin OR missing mid-session minutes (live socket outage) —
-        // splice Germany OHLC so the chart matches TradingView’s continuous candles.
-        try {
-          await this.assertHealthy();
-          const recent = await this.fetchOhlcBars(route, interval, germanyLimit);
-          bars = mergeBarsPreferPrimary(bars, recent);
-        } catch {
-          /* keep mongo bars */
-        }
+      if (!bars.length && route.kind !== "forex") {
+        await this.assertHealthy();
+        bars = ohlcBars.length ? ohlcBars : await this.fetchOhlcBars(route, interval, germanyLimit);
       }
     }
 
@@ -812,6 +804,12 @@ export class GermanyMarketProvider implements MarketDataProvider {
       filtered = alignFxDailyBars(filtered).filter((b) => b.time < before);
     }
     if (!filtered.length) return [];
+    if (route.kind === "metal" || route.kind === "forex" || route.kind === "crypto") {
+      filtered = densifySessionBars(symbol, filtered, step);
+      if (route.kind === "metal" || route.kind === "forex") {
+        filtered = filtered.filter((bar) => !isFxDailyBreak(bar.time));
+      }
+    }
     return filtered.slice(-Math.max(range.countBack, 1));
   }
 
@@ -1337,11 +1335,16 @@ export class GermanyMarketProvider implements MarketDataProvider {
   }
 
   /** Fresh minute+ history from Germany `/ohlc/` — aggregate non-native TFs from parents. */
-  private async fetchOhlcBars(route: Route, interval: Interval, limit: number): Promise<Bar[]> {
+  private async fetchOhlcBars(
+    route: Route,
+    interval: Interval,
+    limit: number,
+    timeoutMs = REQUEST_TIMEOUT_MS,
+  ): Promise<Bar[]> {
     const plan = ohlcPlan(interval);
     const requestLimit =
       plan.aggregateStep > 0 ? Math.min(MAX_BARS, Math.max(limit * 12, limit + 30)) : Math.min(MAX_BARS, limit);
-    const raw = await fetchOhlc(route.apiSymbol, route.exchange, plan.request, requestLimit);
+    const raw = await fetchOhlc(route.apiSymbol, route.exchange, plan.request, requestLimit, timeoutMs);
     if (plan.aggregateStep > 0) return aggregateBars(raw, plan.aggregateStep);
     // Even for "native" Germany intervals, when the request TF differs from what we store
     // deeply in Mongo we already preferred Mongo. Here just return Germany's bars.
@@ -1377,8 +1380,23 @@ export class GermanyMarketProvider implements MarketDataProvider {
       parents = await fetchOhlc(route.apiSymbol, route.exchange, "1", germanyNeed);
     }
     if ((route.kind === "metal" || route.kind === "forex") && parents.length) {
-      parents = await spliceBrokerHoles(route.apiSymbol, parents, 60);
-      parents = await repairBrokerPriceGaps(route.apiSymbol, parents, 60);
+      if (!isLiveHistoryPage(range)) {
+        parents = await spliceBrokerHoles(route.apiSymbol, parents, 60);
+        parents = await repairBrokerPriceGaps(route.apiSymbol, parents, 60);
+      }
+      parents = densifySessionBars(
+        {
+          ticker: route.apiSymbol,
+          name: route.apiSymbol,
+          exchange: route.exchange,
+          type: "forex",
+          pricePrecision: 2,
+          session: "1800-1700:123456",
+          timezone: "America/New_York",
+        },
+        parents,
+        60,
+      );
     }
     if (!parents.length) throw new Error(`germany-market: no 1m parents for ${route.apiSymbol}`);
     const bars = synthesizeFromMinuteBars(parents, step);
