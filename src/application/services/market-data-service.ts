@@ -8,6 +8,7 @@ import {
   type SymbolInfo,
 } from "@/domain";
 import type { MarketDataProvider, Unsubscribe } from "../ports";
+import { isTfSwitching } from "@/infrastructure/market-data/history-page";
 
 export interface HistoryResult {
   readonly bars: Bar[];
@@ -122,7 +123,7 @@ export class MarketDataService {
     if ((this.byStep.get(this.stepKey(symbol, 60))?.length ?? 0) >= 200) return;
     this.warming.add(key);
     const to = Math.floor(Date.now() / 1000) + 60;
-    void this.fetchHistory(symbol, "1", { from: 0, to, countBack: 2_000 }).catch(() => {
+    void this.fetchHistory(symbol, "1", { from: 0, to, countBack: 400 }).catch(() => {
       this.warming.delete(key);
     });
   }
@@ -130,7 +131,7 @@ export class MarketDataService {
   async fetchHistory(symbol: SymbolInfo, interval: Interval, range: BarRange): Promise<HistoryResult> {
     const cachedTf = range.countBack > 24 ? this.resampleCached(symbol, interval, range) : null;
     if (cachedTf) {
-      if (intervalSeconds(interval) > 60) this.warmMinuteHistory(symbol);
+      if (intervalSeconds(interval) > 60 && !isTfSwitching()) this.warmMinuteHistory(symbol);
       return cachedTf;
     }
 
@@ -147,7 +148,7 @@ export class MarketDataService {
       if (value.bars.length > 0) {
         this.memo.set(key, { at: Date.now(), value });
         this.rememberSeries(symbol, interval, value.bars);
-        if (intervalSeconds(interval) > 60) this.warmMinuteHistory(symbol);
+        if (intervalSeconds(interval) > 60 && !isTfSwitching()) this.warmMinuteHistory(symbol);
       }
       if (this.memo.size > 64) {
         const oldest = this.memo.keys().next().value;

@@ -9,7 +9,7 @@ import {
   mongoHistoryPlan,
 } from "./cp-chart-history";
 import { isLiveHistoryPage } from "./history-page";
-import { densifySessionBars, unionFillBars } from "./session-fill";
+import { densifySessionBars } from "./session-fill";
 import { aggregateBars, liveSecondUpdate, synthesizeFromMinuteBars } from "./synthesize-seconds";
 import { volumeDelta, type VolumeCursor } from "./volume-delta";
 
@@ -760,29 +760,22 @@ export class GermanyMarketProvider implements MarketDataProvider {
 
     let bars: Bar[] = [];
     if (unit === "seconds") {
-      await this.assertHealthy();
       bars = await this.fetchSecondBars(route, step, germanyLimit, range);
     } else {
-      // Mongo deep history in parallel with Germany `/ohlc/` so a slow Iran hop
-      // cannot leave holes. `/ohlc/` only covers the latest ~1k; Mongo pages older.
-      const mongoTask = mongoHistoryPlan(interval)
-        ? fetchCpChartHistory(route.apiSymbol, interval, range, {
+      // Mongo only on the paint path (~0.5s). Waiting on `/ohlc/` (1–3s, often 499)
+      // made every TF switch slower than before. In-session holes are filled
+      // locally in presentCandleSeries.
+      if (mongoHistoryPlan(interval)) {
+        try {
+          bars = await fetchCpChartHistory(route.apiSymbol, interval, range, {
             fxSession: route.kind === "forex" || route.kind === "metal",
-          }).catch(() => [] as Bar[])
-        : Promise.resolve([] as Bar[]);
-      const ohlcTask =
-        route.kind === "forex"
-          ? Promise.resolve([] as Bar[])
-          : this.fetchOhlcBars(route, interval, germanyLimit, 2_800).catch(() => [] as Bar[]);
-      const [mongoBars, ohlcBars] = await Promise.all([mongoTask, ohlcTask]);
-      bars = unionFillBars(mongoBars, ohlcBars, step);
-      if ((route.kind === "metal" || route.kind === "forex") && bars.length && !isLiveHistoryPage(range)) {
-        bars = await spliceBrokerHoles(route.apiSymbol, bars, step);
-        bars = await repairBrokerPriceGaps(route.apiSymbol, bars, step);
+          });
+        } catch {
+          bars = [];
+        }
       }
       if (!bars.length && route.kind !== "forex") {
-        await this.assertHealthy();
-        bars = ohlcBars.length ? ohlcBars : await this.fetchOhlcBars(route, interval, germanyLimit);
+        bars = await this.fetchOhlcBars(route, interval, germanyLimit, 800).catch(() => [] as Bar[]);
       }
     }
 
@@ -804,12 +797,6 @@ export class GermanyMarketProvider implements MarketDataProvider {
       filtered = alignFxDailyBars(filtered).filter((b) => b.time < before);
     }
     if (!filtered.length) return [];
-    if (route.kind === "metal" || route.kind === "forex" || route.kind === "crypto") {
-      filtered = densifySessionBars(symbol, filtered, step);
-      if (route.kind === "metal" || route.kind === "forex") {
-        filtered = filtered.filter((bar) => !isFxDailyBreak(bar.time));
-      }
-    }
     return filtered.slice(-Math.max(range.countBack, 1));
   }
 
