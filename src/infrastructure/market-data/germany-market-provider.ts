@@ -25,7 +25,7 @@ const REQUEST_TIMEOUT_MS = 15_000;
 const HEALTH_TTL_MS = 60_000;
 const TICK_POLL_MS = 120;
 /** Browser forex HTTP is fallback only — VPS /market-ticks owns the Germany budget. */
-const FOREX_POLL_MS = 3_500;
+const FOREX_POLL_MS = 900;
 const BAR_RECONCILE_MS = 12_000;
 /** Germany `/ohlc/` hard ceiling (API truncates above this). Deep history uses Mongo. */
 const MAX_BARS = 1_000;
@@ -600,7 +600,9 @@ function openMarketTicksSocket(
         if (String(msg.channel ?? "") !== channel && msg.channel != null) return;
         const price = Number(msg.price);
         if (!Number.isFinite(price)) return;
-        const ts = msg.ts ? Number(msg.ts) : Math.floor(Date.now() / 1000);
+        let ts = Number(msg.ts);
+        if (ts > 1e12) ts = Math.floor(ts / 1000);
+        if (!Number.isFinite(ts) || ts <= 0) ts = Math.floor(Date.now() / 1000);
         onTick(price, ts, Number(msg.volume ?? 0));
       } catch {
         /* ignore */
@@ -973,9 +975,10 @@ export class GermanyMarketProvider implements MarketDataProvider {
           volume: next.volume > 0 ? next.volume : base.volume,
         });
 
-        // Prefer raw ticks when they are fresh — but still allow chart_ws to present
-        // the current wall-clock bucket (required for candle-close countdown).
-        if (lastTickMs > 0 && Date.now() - lastTickMs < 400) {
+        // Live ticks own the forming close. Mongo/chart_ws may open the bucket
+        // or widen wicks, but must not snap the last price backward.
+        const ticksFresh = lastTickMs > 0 && Date.now() - lastTickMs < Math.max(8_000, quietMs);
+        if (ticksFresh) {
           if (aligned.time === wallBucket && (!current || current.time < wallBucket)) {
             emit(aligned);
             return;
@@ -1007,7 +1010,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
           return;
         }
         if (aligned.time === current.time) {
-          emit(mergeSame(current, aligned, "mongo"));
+          emit(mergeSame(current, aligned, ticksFresh ? "tick" : "mongo"));
         }
       }),
     );
@@ -1036,7 +1039,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
       disposers.push(
         startPolling(async () => {
           if (!isMarketSessionOpen(symbol)) return;
-          if (Date.now() - lastTickMs < 1_800) return;
+          if (Date.now() - lastTickMs < 700) return;
           const fx = await this.fetchForexXau();
           const price = +fx.price;
           if (!Number.isFinite(price)) return;
@@ -1224,7 +1227,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
       disposers.push(
         startPolling(async () => {
           if (!isMarketSessionOpen(symbol)) return;
-          if (Date.now() - lastTickMs < 1_800) return;
+          if (Date.now() - lastTickMs < 700) return;
           const fx = await this.fetchForexXau();
           const price = +fx.price;
           if (!Number.isFinite(price)) return;
