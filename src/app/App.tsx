@@ -73,11 +73,8 @@ function buildSessionServices(session: AuthSession): Services {
 }
 
 function resumeSession(auth: AuthService): AuthSession | null {
-  // ?view=login is an explicit sign-out. Do not revive a session the chart copied back.
-  if (isDevSite() && pageView() === "login") {
-    auth.logout();
-    return null;
-  }
+  // Sign-out already writes forge.auth.signedOut. Do not treat ?view=login as
+  // logout — nginx and bookmarks used to add that query on every /dev/ refresh.
   return auth.getSession();
 }
 
@@ -111,7 +108,16 @@ export function App() {
     const existing = resumeSession(auth);
     return Boolean(existing && auth.needsSafety(existing.userId));
   });
-  const [view, setView] = useState<string | null>(() => pageView());
+  const [view, setView] = useState<string | null>(() => {
+    const existing = resumeSession(auth);
+    const current = pageView();
+    // Keep the chart on refresh even if the URL still says ?view=login.
+    if (existing && current === "login") {
+      clearPageView();
+      return null;
+    }
+    return current;
+  });
   const servicesRef = useRef<Services | null>(null);
   const [services, setServices] = useState<Services | null>(null);
   const [bootDone, setBootDone] = useState(false);
@@ -123,7 +129,7 @@ export function App() {
     let cancelled = false;
     let built: Services | null = null;
     const existing = auth.getSession();
-    if (pageView() === "login" || !existing || auth.needsSafety(existing.userId)) {
+    if (!existing || auth.needsSafety(existing.userId)) {
       setBootDone(true);
       return;
     }
@@ -274,8 +280,8 @@ export function App() {
     window.setTimeout(dropSession, 1200);
   }, [auth, devSite]);
 
-  // The dev landing and admin are the design pages. The product root stays the chart sign-in.
-  if (devSite && (view === "landing" || view === "admin" || (!session && view == null))) {
+  // Design pages are explicit. /dev/ without a session is the chart login, not the landing.
+  if (devSite && (view === "landing" || view === "admin")) {
     window.location.replace(view === "admin" ? devAdminUrl() : devLandingUrl());
     return null;
   }
