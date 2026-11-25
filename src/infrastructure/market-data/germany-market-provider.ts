@@ -10,7 +10,7 @@ import {
 } from "./cp-chart-history";
 import { isLiveHistoryPage } from "./history-page";
 import { densifySessionBars, liveCarryBars } from "./session-fill";
-import { aggregateBars, liveSecondUpdate, synthesizeFromMinuteBars } from "./synthesize-seconds";
+import { aggregateBars, synthesizeFromMinuteBars } from "./synthesize-seconds";
 import { volumeDelta, type VolumeCursor } from "./volume-delta";
 
 /**
@@ -1140,19 +1140,39 @@ export class GermanyMarketProvider implements MarketDataProvider {
     let lastSocketMs = 0;
     let lastEmittedTime = -1;
     let lastEmittedKey = "";
+    let liveBar: Bar | null = null;
     const quoteVolume: VolumeCursor = { last: null };
 
-    const project = () => {
-      if (!minute || !isMarketSessionOpen(symbol)) return;
+    let lastPrice = Number.NaN;
+    const paintLive = (price: number) => {
+      if (!Number.isFinite(price) || !isMarketSessionOpen(symbol)) return;
       const nowSec = Math.floor(Date.now() / 1000);
-      const updates = liveSecondUpdate(minute, step, nowSec, lastEmittedTime);
-      for (const bar of updates) {
-        const key = `${bar.time}:${bar.open}:${bar.high}:${bar.low}:${bar.close}`;
-        if (key === lastEmittedKey) continue;
-        lastEmittedKey = key;
-        lastEmittedTime = bar.time;
-        onBar(bar);
+      const bucket = nowSec - (nowSec % Math.max(1, step));
+      if (!liveBar || liveBar.time !== bucket) {
+        const open = liveBar && liveBar.time < bucket ? liveBar.close : price;
+        liveBar = {
+          time: bucket,
+          open,
+          high: Math.max(open, price),
+          low: Math.min(open, price),
+          close: price,
+          volume: 1,
+        };
+      } else {
+        liveBar = {
+          time: bucket,
+          open: liveBar.open,
+          high: Math.max(liveBar.high, price),
+          low: Math.min(liveBar.low, price),
+          close: price,
+          volume: liveBar.volume,
+        };
       }
+      const key = `${liveBar.time}:${liveBar.close}`;
+      if (key === lastEmittedKey) return;
+      lastEmittedKey = key;
+      lastEmittedTime = liveBar.time;
+      onBar(liveBar);
     };
 
     const onTick = (price: number, tsSec: number, volumeDelta = 0) => {
@@ -1161,9 +1181,10 @@ export class GermanyMarketProvider implements MarketDataProvider {
       let ts = tsSec;
       if (!Number.isFinite(ts) || ts <= 0 || ts > nowSec + 2 || nowSec - ts > 180) ts = nowSec;
       lastTickMs = Date.now();
+      lastPrice = price;
       minute = applyTick(minute, price, ts, 60, volumeDelta, false);
       tickClose = true;
-      project();
+      paintLive(price);
     };
 
     const adoptMinute = (bar: Bar) => {
@@ -1186,7 +1207,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
       } else {
         return;
       }
-      project();
+      if (!tickClose && Number.isFinite(minute.close)) paintLive(minute.close);
     };
 
     void (async () => {
@@ -1204,7 +1225,9 @@ export class GermanyMarketProvider implements MarketDataProvider {
     })();
 
     if (typeof window !== "undefined") {
-      const clock = window.setInterval(project, 250);
+      const clock = window.setInterval(() => {
+        if (Number.isFinite(lastPrice)) paintLive(lastPrice);
+      }, 250);
       disposers.push(() => clearInterval(clock));
     }
 

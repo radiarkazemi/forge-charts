@@ -670,11 +670,8 @@ export function watchPrimaryMenusOpen(
   onChange: (state: PrimaryMenuState) => void,
 ): () => void {
   let stopped = false;
-  const observers: MutationObserver[] = [];
   let lastKey = "";
   let poll = 0;
-  let debounce = 0;
-  let boundCount = -1;
 
   const isDrawingChrome = (el: Element): boolean => {
     // Left-toolbar flyouts stay out of the hole. Line/shape edit bars, color
@@ -777,48 +774,16 @@ export function watchPrimaryMenusOpen(
     onChange({ open, hole });
   };
 
-  const scheduleCheck = () => {
-    window.clearTimeout(debounce);
-    debounce = window.setTimeout(check, 80);
-    // A settings card is often inserted empty and sized a moment later.
-    window.setTimeout(() => {
-      if (!stopped) check();
-    }, 320);
-    window.setTimeout(() => {
-      if (!stopped) check();
-    }, 700);
-  };
-
-  const bind = () => {
-    const docs = [...container.querySelectorAll("iframe")]
-      .map((frame) => frame.contentDocument)
-      .filter((doc): doc is Document => Boolean(doc?.body));
-    if (docs.length === 0) return false;
-    if (docs.length === boundCount && observers.length === docs.length) return true;
-    for (const observer of observers) observer.disconnect();
-    observers.length = 0;
-    boundCount = docs.length;
-    // childList only — attribute spam from CL was a major multi-pane lag source.
-    for (const doc of docs) {
-      const observer = new MutationObserver(scheduleCheck);
-      observer.observe(doc.body, { childList: true, subtree: true });
-      observers.push(observer);
-    }
-    check();
-    return true;
-  };
-
-  bind();
-  // Panes mount after the first chart. Keep rebinding when an iframe appears.
+  // Poll. A MutationObserver on the chart body runs on every price tick and
+  // was freezing the forming candle.
+  check();
   poll = window.setInterval(() => {
-    bind();
-  }, 1000);
+    if (!stopped) check();
+  }, 300);
 
   return () => {
     stopped = true;
     window.clearInterval(poll);
-    window.clearTimeout(debounce);
-    for (const observer of observers) observer.disconnect();
   };
 }
 
