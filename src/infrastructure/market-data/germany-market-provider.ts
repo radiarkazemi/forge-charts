@@ -308,10 +308,23 @@ function applyTick(
   const wallBucket = fxDaily ? alignFxSessionDailyTime(nowSec) : alignTime(nowSec, step);
   let t = fxDaily ? alignFxSessionDailyTime(tsSec) : alignTime(tsSec, step);
   if (t > wallBucket) t = wallBucket;
+  // Live carry prints the wall-clock forming bar first. Quote timestamps often
+  // still sit on the previous period — those ticks belong on the forming close.
+  if (current && current.time >= wallBucket) t = current.time;
+  else t = wallBucket;
   if (!current || current.time < t) {
     return { time: t, open: price, high: price, low: price, close: price, volume: Math.max(0, volumeDelta) };
   }
-  if (current.time > t) return current;
+  if (current.time > t) {
+    return {
+      time: current.time,
+      open: current.open,
+      high: Math.max(current.high, price),
+      low: Math.min(current.low, price),
+      close: price,
+      volume: Math.max(0, current.volume + (volumeDelta > 0 ? volumeDelta : 0)),
+    };
+  }
   return {
     time: t,
     open: current.open,
@@ -861,7 +874,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
         if (pendingTicks.length > 50) pendingTicks.shift();
         return;
       }
-      carryTo(Math.min(wallBucketAt(ts), wallBucketAt(nowSec)), false);
+      carryTo(wallBucketAt(nowSec), false);
       emit(applyTick(current, price, ts, step, volumeDelta, fxDaily));
     };
 

@@ -294,6 +294,8 @@ export function chartOverrides(theme: ThemeMode): ChartingLibraryWidgetOptions["
     "scalesProperties.lineColor": t.border,
     "scalesProperties.showSeriesLastValue": true,
     "mainSeriesProperties.showPriceLine": true,
+    "mainSeriesProperties.priceLineColor": theme === "dark" ? "#d1d4dc" : "#000000",
+    "mainSeriesProperties.priceLineWidth": 1,
     "mainSeriesProperties.showCountdown": true,
     "mainSeriesProperties.candleStyle.upColor": t.up,
     "mainSeriesProperties.candleStyle.downColor": t.down,
@@ -402,6 +404,8 @@ export function buildWidgetOptions(input: WidgetOptionsInput): ChartingLibraryWi
     settings_overrides: {
       "mainSeriesProperties.showCountdown": true,
       "mainSeriesProperties.showPriceLine": true,
+      "mainSeriesProperties.priceLineColor": input.theme === "dark" ? "#d1d4dc" : "#000000",
+      "mainSeriesProperties.priceLineWidth": 1,
       "scalesProperties.showSeriesLastValue": true,
     },
     studies_overrides: studiesOverrides(input.theme),
