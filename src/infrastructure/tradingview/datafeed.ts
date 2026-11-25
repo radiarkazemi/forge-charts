@@ -499,8 +499,12 @@ export class TradingViewDatafeed implements IBasicDataFeed {
         painted = kept.length > 0 ? kept : [{ ...ready[ready.length - 1]!, time: wall }];
         const tail = painted[painted.length - 1]!.time;
         const tailKey = `${symbol.exchange}:${symbol.ticker}|${resolution}`;
-        const prevTail = this.seriesTail.get(tailKey) ?? 0;
-        if (tail > prevTail) this.seriesTail.set(tailKey, tail);
+        // The first page is the series the chart actually shows. A live tick
+        // that landed before this must not leave the tail in the future, or
+        // the big pane drops every later candle.
+        if (periodParams.firstDataRequest || tail > (this.seriesTail.get(tailKey) ?? 0)) {
+          this.seriesTail.set(tailKey, tail);
+        }
       }
       onResult(painted.map((bar) => toTvBar(bar, step)), { noData: false });
     } catch (error) {
@@ -550,6 +554,8 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     };
     const unsubscribe = this.marketData.subscribe(symbol, resolution, (bar) => {
       if (this.replayActive) return;
+      const known = this.seriesTail.get(tailKey) ?? 0;
+      if (known > 0 && (chartTime === 0 || known < chartTime)) chartTime = known;
       const wall = wallBucket();
       const price = bar.close;
       if (!Number.isFinite(price)) return;

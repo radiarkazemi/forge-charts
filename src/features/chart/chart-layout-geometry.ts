@@ -400,9 +400,29 @@ function chartOwners(win: Window): { chart: ChartWidget; width: SizeBridge; heig
   }
 }
 
+function holdBridge(bridge: SizeBridge, cap: number): void {
+  const slot = bridge as SizeBridge & {
+    __forgeCap?: number;
+    __forgeOrig?: (next: number) => void;
+  };
+  if (!slot.__forgeOrig) {
+    slot.__forgeOrig = bridge.setValue.bind(bridge);
+    bridge.setValue = (next: number) => {
+      const limit = slot.__forgeCap ?? 0;
+      // The library keeps sizing this widget to the whole window. That parks
+      // the live candle of the big left pane under the charts on the right.
+      const value = limit > 0 && next > limit + 1 ? limit : next;
+      slot.__forgeOrig!(value);
+    };
+  }
+  slot.__forgeCap = cap;
+}
+
 function fitPrimaryChart(win: Window, width: number, height: number): void {
   const owners = chartOwners(win);
   if (!owners || width < 16 || height < 16) return;
+  holdBridge(owners.width, width);
+  holdBridge(owners.height, height);
   let changed = false;
   if (Math.abs(owners.width.value() - width) > 1) {
     owners.width.setValue(width);
