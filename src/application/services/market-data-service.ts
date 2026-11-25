@@ -87,6 +87,9 @@ export class MarketDataService {
   private rememberSeries(symbol: SymbolInfo, interval: Interval, bars: Bar[]): void {
     if (bars.length < 8) return;
     const step = intervalSeconds(interval);
+    // 30s history is a path drawn from 1m. Rolling it back into 1m/30m replaced
+    // the real candles on the other panes of a multi-chart layout.
+    if (step < 60) return;
     this.byStep.set(this.stepKey(symbol, step), bars.slice(-12_000));
     for (const roll of MarketDataService.ROLL_STEPS) {
       if (roll < step || roll % step !== 0) continue;
@@ -116,7 +119,7 @@ export class MarketDataService {
     for (const [key, bars] of this.byStep) {
       if (!key.startsWith(prefix)) continue;
       const step = Number(key.slice(prefix.length));
-      if (!Number.isFinite(step) || step <= 0 || want < step || want % step !== 0) continue;
+      if (!Number.isFinite(step) || step < 60 || want < step || want % step !== 0) continue;
       if (step < bestStep && bars.length >= 8) {
         best = bars;
         bestStep = step;

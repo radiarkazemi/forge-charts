@@ -580,122 +580,186 @@ function openBinanceTickSocket(
   };
 }
 
-/** VPS-side tick push (Germany polled server-side → browser). */
-function openMarketTicksSocket(
-  channel: string,
-  onTick: (price: number, tsSec: number, volume?: number) => void,
-): Unsubscribe {
-  let closed = false;
-  let socket: WebSocket | null = null;
-  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * One `/market-ticks` socket for every pane. A multi-chart layout used to open
+ * a socket per layer; the host caps those connections, and the 30s pane (opened
+ * last) never received a price.
+ */
+type MarketTickFn = (price: number, tsSec: number, volume?: number) => void;
+const marketTickListeners = new Map<string, Set<MarketTickFn>>();
+let marketTickSocket: WebSocket | null = null;
+let marketTickRetry: ReturnType<typeof setTimeout> | null = null;
 
-  const connect = () => {
-    if (closed || typeof window === "undefined") return;
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${proto}//${window.location.host}/market-ticks`;
+function marketTickUrl(): string {
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}/market-ticks`;
+}
+
+function sendMarketTickSubscribes(): void {
+  const socket = marketTickSocket;
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  for (const channel of marketTickListeners.keys()) {
+    socket.send(JSON.stringify({ op: "subscribe", channel }));
+  }
+}
+
+function ensureMarketTickSocket(): void {
+  if (typeof window === "undefined") return;
+  if (
+    marketTickSocket &&
+    (marketTickSocket.readyState === WebSocket.OPEN || marketTickSocket.readyState === WebSocket.CONNECTING)
+  ) {
+    return;
+  }
+  let socket: WebSocket;
+  try {
+    socket = new WebSocket(marketTickUrl());
+  } catch {
+    scheduleMarketTickRetry();
+    return;
+  }
+  marketTickSocket = socket;
+  socket.onopen = () => sendMarketTickSubscribes();
+  socket.onmessage = (event) => {
     try {
-      socket = new WebSocket(url);
+      const msg = JSON.parse(String(event.data)) as Record<string, unknown>;
+      if (String(msg.type ?? "") !== "tick") return;
+      const price = Number(msg.price);
+      if (!Number.isFinite(price)) return;
+      let ts = Number(msg.ts);
+      if (ts > 1e12) ts = Math.floor(ts / 1000);
+      if (!Number.isFinite(ts) || ts <= 0) ts = Math.floor(Date.now() / 1000);
+      const volume = Number(msg.volume ?? 0);
+      const channel = String(msg.channel ?? "");
+      const targets = channel ? marketTickListeners.get(channel) : null;
+      const listeners = targets ?? (channel ? null : new Set([...marketTickListeners.values()].flatMap((set) => [...set])));
+      if (!listeners) return;
+      for (const fn of listeners) fn(price, ts, volume);
     } catch {
-      return;
+      /* ignore */
     }
-    socket.onopen = () => {
-      socket?.send(JSON.stringify({ op: "subscribe", channel }));
-    };
-    socket.onmessage = (event) => {
+  };
+  socket.onclose = () => {
+    if (marketTickSocket === socket) marketTickSocket = null;
+    if (marketTickListeners.size > 0) scheduleMarketTickRetry();
+  };
+}
+
+function scheduleMarketTickRetry(): void {
+  if (marketTickRetry) return;
+  marketTickRetry = setTimeout(() => {
+    marketTickRetry = null;
+    if (marketTickListeners.size > 0) ensureMarketTickSocket();
+  }, 600);
+}
+
+function openMarketTicksSocket(channel: string, onTick: MarketTickFn): Unsubscribe {
+  let set = marketTickListeners.get(channel);
+  if (!set) {
+    set = new Set();
+    marketTickListeners.set(channel, set);
+  }
+  set.add(onTick);
+  ensureMarketTickSocket();
+  if (marketTickSocket?.readyState === WebSocket.OPEN) {
+    marketTickSocket.send(JSON.stringify({ op: "subscribe", channel }));
+  }
+  return () => {
+    set?.delete(onTick);
+    if (set && set.size === 0) marketTickListeners.delete(channel);
+    if (marketTickListeners.size === 0) {
+      if (marketTickRetry) clearTimeout(marketTickRetry);
+      marketTickRetry = null;
       try {
-        const msg = JSON.parse(String(event.data)) as Record<string, unknown>;
-        if (String(msg.type ?? "") !== "tick") return;
-        if (String(msg.channel ?? "") !== channel && msg.channel != null) return;
-        const price = Number(msg.price);
-        if (!Number.isFinite(price)) return;
-        let ts = Number(msg.ts);
-        if (ts > 1e12) ts = Math.floor(ts / 1000);
-        if (!Number.isFinite(ts) || ts <= 0) ts = Math.floor(Date.now() / 1000);
-        onTick(price, ts, Number(msg.volume ?? 0));
+        marketTickSocket?.close();
       } catch {
         /* ignore */
       }
-    };
-    socket.onclose = () => {
-      socket = null;
-      if (!closed) {
-        retryTimer = setTimeout(() => {
-          retryTimer = null;
-          connect();
-        }, 600);
-      }
-    };
-  };
-
-  connect();
-  return () => {
-    closed = true;
-    if (retryTimer) clearTimeout(retryTimer);
-    try {
-      socket?.close();
-    } catch {
-      /* ignore */
+      marketTickSocket = null;
     }
   };
 }
 
-function openCpFetcherSocket(apiSymbol: string, interval: Interval, onBar: (bar: Bar) => void): Unsubscribe {
-  let closed = false;
-  let socket: WebSocket | null = null;
-  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * chart_ws keeps one symbol/interval per connection, so panes on the same
+ * book share a socket and a different timeframe opens its own.
+ */
+type CpBarFn = (bar: Bar) => void;
+interface CpHub {
+  socket: WebSocket | null;
+  listeners: Set<CpBarFn>;
+  retry: ReturnType<typeof setTimeout> | null;
+  symbol: string;
+  interval: string;
+}
+const cpHubs = new Map<string, CpHub>();
 
-  const connect = () => {
-    if (closed || typeof window === "undefined") return;
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${proto}//${window.location.host}/crypto-ws`;
-    try {
-      socket = new WebSocket(url);
-    } catch {
-      return;
-    }
-    socket.onopen = () => {
-      // cp_fetcher chart_ws accepts any symbol id present in Mongo `last`
-      // (btcusdt, xauusd, eurusd, …) — interval aliases map to 1m/1h/1d.
-      socket?.send(JSON.stringify({ op: "subscribe", symbol: apiSymbol, interval }));
-    };
-    socket.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(String(event.data)) as Record<string, unknown>;
-        const src = (msg.bar && typeof msg.bar === "object" ? msg.bar : msg) as Record<string, unknown>;
-        if (String(msg.type ?? src.type ?? "") !== "bar" && src.t == null && src.c == null) return;
-        const bar = parseBar({
-          time: src.t ?? src.time,
-          open: src.o ?? src.open,
-          high: src.h ?? src.high,
-          low: src.l ?? src.low,
-          close: src.c ?? src.close,
-          volume: src.v ?? src.volume,
-        });
-        if (bar) onBar(bar);
-      } catch {
-        /* ignore */
-      }
-    };
-    socket.onclose = () => {
-      socket = null;
-      if (!closed) {
-        retryTimer = setTimeout(() => {
-          retryTimer = null;
-          connect();
-        }, 1_200);
-      }
-    };
+function connectCpHub(key: string, hub: CpHub): void {
+  if (typeof window === "undefined" || hub.listeners.size === 0) return;
+  if (hub.socket && (hub.socket.readyState === WebSocket.OPEN || hub.socket.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  let socket: WebSocket;
+  try {
+    socket = new WebSocket(`${proto}//${window.location.host}/crypto-ws`);
+  } catch {
+    return;
+  }
+  hub.socket = socket;
+  socket.onopen = () => {
+    socket.send(JSON.stringify({ op: "subscribe", symbol: hub.symbol, interval: hub.interval }));
   };
-
-  connect();
-  return () => {
-    closed = true;
-    if (retryTimer) clearTimeout(retryTimer);
+  socket.onmessage = (event) => {
     try {
-      socket?.close();
+      const msg = JSON.parse(String(event.data)) as Record<string, unknown>;
+      const src = (msg.bar && typeof msg.bar === "object" ? msg.bar : msg) as Record<string, unknown>;
+      if (String(msg.type ?? src.type ?? "") !== "bar" && src.t == null && src.c == null) return;
+      const bar = parseBar({
+        time: src.t ?? src.time,
+        open: src.o ?? src.open,
+        high: src.h ?? src.high,
+        low: src.l ?? src.low,
+        close: src.c ?? src.close,
+        volume: src.v ?? src.volume,
+      });
+      if (!bar) return;
+      for (const fn of hub.listeners) fn(bar);
     } catch {
       /* ignore */
     }
+  };
+  socket.onclose = () => {
+    if (hub.socket === socket) hub.socket = null;
+    if (!cpHubs.has(key) || hub.listeners.size === 0 || hub.retry) return;
+    hub.retry = setTimeout(() => {
+      hub.retry = null;
+      connectCpHub(key, hub);
+    }, 1_200);
+  };
+}
+
+function openCpFetcherSocket(apiSymbol: string, interval: Interval, onBar: CpBarFn): Unsubscribe {
+  const key = `${apiSymbol}|${interval}`;
+  let hub = cpHubs.get(key);
+  if (!hub) {
+    hub = { socket: null, listeners: new Set(), retry: null, symbol: apiSymbol, interval: String(interval) };
+    cpHubs.set(key, hub);
+    connectCpHub(key, hub);
+  }
+  hub.listeners.add(onBar);
+  return () => {
+    const current = cpHubs.get(key);
+    if (!current) return;
+    current.listeners.delete(onBar);
+    if (current.listeners.size > 0) return;
+    if (current.retry) clearTimeout(current.retry);
+    try {
+      current.socket?.close();
+    } catch {
+      /* ignore */
+    }
+    cpHubs.delete(key);
   };
 }
 

@@ -652,8 +652,8 @@ export interface MenuHoleRect {
 
 export interface PrimaryMenuState {
   readonly open: boolean;
-  /** Bounding box of the open header menu/dialog in workspace/page coords. */
-  readonly hole: MenuHoleRect | null;
+  /** Every open menu, including a seconds submenu that sticks out of the main list. */
+  readonly holes: readonly MenuHoleRect[];
 }
 
 /**
@@ -702,6 +702,7 @@ export function watchPrimaryMenusOpen(
       '[class*="menuWrap"]',
       '[class*="menuBox"]',
       '[data-name="menu-inner"]',
+      '[data-name="popup-menu-container"]',
       '[class*="popupMenu"]',
       '[role="menu"]',
       '[data-name="layout-menu"]',
@@ -724,8 +725,7 @@ export function watchPrimaryMenusOpen(
       candidates.push(...frameDoc.querySelectorAll(menuSelector));
     }
 
-    let best: DOMRect | null = null;
-    let bestFrame: HTMLIFrameElement | null = null;
+    const found: MenuHoleRect[] = [];
     for (const node of candidates) {
       if (!isHeaderMenu(node)) continue;
       const owner = node.ownerDocument;
@@ -742,36 +742,41 @@ export function watchPrimaryMenusOpen(
       }
       const r = view ? visibleBox(node, owner) : null;
       if (!r || !frame) continue;
-      if (!best || r.width * r.height > best.width * best.height) {
-        best = r;
-        bestFrame = frame;
-      }
-    }
-
-    const open = Boolean(best && bestFrame);
-    let hole: MenuHoleRect | null = null;
-    if (best && bestFrame) {
-      const ir = bestFrame.getBoundingClientRect();
-      // Pad so shadows / submenu edges aren’t clipped.
+      const ir = frame.getBoundingClientRect();
       const pad = 6;
-      hole = {
-        left: Math.round(ir.left + best.left - pad),
-        top: Math.round(ir.top + best.top - pad),
-        width: Math.round(best.width + pad * 2),
-        height: Math.round(best.height + pad * 2),
+      found.push({
+        left: Math.round(ir.left + r.left - pad),
+        top: Math.round(ir.top + r.top - pad),
+        width: Math.round(r.width + pad * 2),
+        height: Math.round(r.height + pad * 2),
         frameLeft: Math.round(ir.left),
         frameTop: Math.round(ir.top),
         frameWidth: Math.round(ir.width),
         frameHeight: Math.round(ir.height),
-      };
+      });
     }
+    // A seconds flyout is smaller than the interval list and hangs off its edge.
+    // Keep both. Drop a box that already sits inside a larger one.
+    const holes = found.filter((hole, index) => {
+      return !found.some((other, otherIndex) => {
+        if (otherIndex === index) return false;
+        return (
+          hole.left >= other.left - 4 &&
+          hole.top >= other.top - 4 &&
+          hole.left + hole.width <= other.left + other.width + 4 &&
+          hole.top + hole.height <= other.top + other.height + 4 &&
+          other.width * other.height > hole.width * hole.height
+        );
+      });
+    });
 
+    const open = holes.length > 0;
     const key = open
-      ? `1:${hole?.left}:${hole?.top}:${hole?.width}:${hole?.height}`
+      ? holes.map((hole) => `${hole.left}:${hole.top}:${hole.width}:${hole.height}`).join("|")
       : "0";
     if (key === lastKey) return;
     lastKey = key;
-    onChange({ open, hole });
+    onChange({ open, holes });
   };
 
   // Poll. A MutationObserver on the chart body runs on every price tick and

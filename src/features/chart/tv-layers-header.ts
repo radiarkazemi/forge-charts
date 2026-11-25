@@ -12,6 +12,12 @@ import { layoutSyncBus } from "./layout-sync";
 const INTERVAL_RE = /^(?:[1-9]\d*[SRL]?|[1-9]\d*[DWM]|[1-9]\d*)$/i;
 
 const INTERVAL_TITLE_MAP: ReadonlyArray<{ readonly match: RegExp; readonly value: Interval }> = [
+  { match: /^1 second$/i, value: "1S" },
+  { match: /^5 seconds$/i, value: "5S" },
+  { match: /^10 seconds$/i, value: "10S" },
+  { match: /^15 seconds$/i, value: "15S" },
+  { match: /^30 seconds$/i, value: "30S" },
+  { match: /^45 seconds$/i, value: "45S" },
   { match: /^1 minute$/i, value: "1" },
   { match: /^5 minutes$/i, value: "5" },
   { match: /^15 minutes$/i, value: "15" },
@@ -29,6 +35,12 @@ const INTERVAL_TITLE_MAP: ReadonlyArray<{ readonly match: RegExp; readonly value
 ];
 
 const INTERVAL_TEXT_MAP: Record<string, Interval> = {
+  "1s": "1S",
+  "5s": "5S",
+  "10s": "10S",
+  "15s": "15S",
+  "30s": "30S",
+  "45s": "45S",
   "1m": "1",
   "5m": "5",
   "15m": "15",
@@ -49,6 +61,30 @@ function isIntervalValue(raw: string): raw is Interval {
   return INTERVAL_RE.test(raw);
 }
 
+/** "30s" / "30 seconds" must stay seconds. A bare data-value "30" is 30 minutes. */
+function intervalFromLabel(text: string): Interval | null {
+  const label = text.replace(/\s+/g, " ").trim();
+  if (!label) return null;
+  const mapped = INTERVAL_TEXT_MAP[label] ?? INTERVAL_TEXT_MAP[label.toLowerCase()];
+  if (mapped) return mapped;
+  for (const row of INTERVAL_TITLE_MAP) {
+    if (row.match.test(label)) return row.value;
+  }
+  const seconds = /^(\d+)\s*(s|sec|secs|second|seconds)\b/i.exec(label);
+  if (seconds) return `${Number(seconds[1])}S`;
+  const tagged = /^(\d+)([SDWM])$/i.exec(label);
+  if (tagged) return `${tagged[1]}${tagged[2].toUpperCase()}`;
+  return null;
+}
+
+function canonicalInterval(raw: string): Interval | null {
+  const value = raw.trim();
+  if (!value || !isIntervalValue(value)) return null;
+  const tagged = /^(\d+)([SDWM])$/i.exec(value);
+  if (tagged) return `${tagged[1]}${tagged[2].toUpperCase()}`;
+  return value;
+}
+
 /** Quick-pick toolbar buttons ship `data-value` + role=radio in CL. */
 function parseQuickIntervalButton(btn: HTMLElement): Interval | null {
   // Never steal the dropdown toggle (opens the full interval menu).
@@ -60,31 +96,27 @@ function parseQuickIntervalButton(btn: HTMLElement): Interval | null {
     return null;
   }
 
-  const dataValue = btn.getAttribute("data-value");
-  if (dataValue && isIntervalValue(dataValue)) return dataValue;
+  const hint = (btn.getAttribute("title") || btn.getAttribute("aria-label") || btn.textContent || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const fromLabel = intervalFromLabel(hint);
+  if (fromLabel) return fromLabel;
 
-  // Favorite quick buttons: role=radio with a known title/hint.
-  if (btn.getAttribute("role") === "radio") {
-    const title = (btn.getAttribute("title") || btn.getAttribute("aria-label") || "").trim();
-    for (const row of INTERVAL_TITLE_MAP) {
-      if (row.match.test(title)) return row.value;
-    }
-    const text = (btn.textContent || "").replace(/\s+/g, " ").trim();
-    if (text && INTERVAL_TEXT_MAP[text]) return INTERVAL_TEXT_MAP[text];
+  const dataValue = btn.getAttribute("data-value");
+  if (dataValue) {
+    const canonical = canonicalInterval(dataValue);
+    if (canonical) return canonical;
   }
 
   return null;
 }
 
 function parseMenuInterval(item: HTMLElement): Interval | null {
-  const dataValue = item.getAttribute("data-value");
-  if (dataValue && isIntervalValue(dataValue)) return dataValue;
-
   const title = (item.getAttribute("title") || item.textContent || "").replace(/\s+/g, " ").trim();
-  for (const row of INTERVAL_TITLE_MAP) {
-    if (row.match.test(title)) return row.value;
-  }
-  return null;
+  const fromLabel = intervalFromLabel(title.split(" ").length > 4 ? title.slice(0, 24) : title);
+  if (fromLabel) return fromLabel;
+  const dataValue = item.getAttribute("data-value");
+  return dataValue ? canonicalInterval(dataValue) : null;
 }
 
 function isSymbolSearchButton(btn: HTMLElement): boolean {
@@ -106,11 +138,12 @@ function isIndicatorsButton(btn: HTMLElement): boolean {
 }
 
 function labelForInterval(interval: Interval): string {
+  const canonical = canonicalInterval(String(interval)) ?? interval;
   const entries = Object.entries(INTERVAL_TEXT_MAP);
   for (const [label, value] of entries) {
-    if (value === interval) return label;
+    if (value === canonical) return label;
   }
-  return String(interval);
+  return String(canonical);
 }
 
 export function syncHeaderChrome(doc: Document, symbol: string, interval: Interval): void {
@@ -123,13 +156,9 @@ export function syncHeaderChrome(doc: Document, symbol: string, interval: Interv
 
   const buttons = doc.querySelectorAll<HTMLElement>("button[data-value], button[role='radio']");
   for (const btn of buttons) {
-    const dataValue = btn.getAttribute("data-value");
-    const parsed =
-      dataValue && isIntervalValue(dataValue) ? dataValue : parseQuickIntervalButton(btn);
+    const parsed = parseQuickIntervalButton(btn);
     if (!parsed) continue;
-    // Skip chart-style radios (candle, etc.)
-    if (!isIntervalValue(String(parsed)) && !INTERVAL_TEXT_MAP[String(parsed)]) continue;
-    const active = parsed === interval;
+    const active = parsed === (canonicalInterval(String(interval)) ?? interval);
     btn.classList.toggle("isActive-GwQQdU8S", active);
     btn.classList.toggle("isActive", active);
     if (active) {
