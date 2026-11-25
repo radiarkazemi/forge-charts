@@ -150,6 +150,8 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   private readonly subscriptions = new Map<string, Unsubscribe>();
   /** Last bar time the chart actually has, per symbol+resolution. */
   private readonly seriesTail = new Map<string, number>();
+  /** Last bar OHLC, so a live tick updates the candle that is already drawn. */
+  private readonly seriesHead = new Map<string, Bar>();
   private readonly quoteTimers = new Map<string, ReturnType<typeof setInterval>>();
 
   /** When set, history past this unix-second is hidden and live ticks are muted. */
@@ -504,6 +506,7 @@ export class TradingViewDatafeed implements IBasicDataFeed {
         // the big pane drops every later candle.
         if (periodParams.firstDataRequest || tail > (this.seriesTail.get(tailKey) ?? 0)) {
           this.seriesTail.set(tailKey, tail);
+          this.seriesHead.set(tailKey, painted[painted.length - 1]!);
         }
       }
       onResult(painted.map((bar) => toTvBar(bar, step)), { noData: false });
@@ -532,7 +535,8 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     const step = barStep(resolution);
     const tailKey = `${symbol.exchange}:${symbol.ticker}|${resKey}`;
     let chartTime = this.seriesTail.get(tailKey) ?? 0;
-    let forming: Bar | null = null;
+    const seeded = this.seriesHead.get(tailKey);
+    let forming: Bar | null = seeded && seeded.time === chartTime ? { ...seeded } : null;
     const wallBucket = () => {
       const now = Math.floor(Date.now() / 1000);
       return now - (now % Math.max(1, step));
@@ -548,6 +552,7 @@ export class TradingViewDatafeed implements IBasicDataFeed {
         onTick(toTvBar(packed, step));
         chartTime = bar.time;
         this.seriesTail.set(tailKey, bar.time);
+        this.seriesHead.set(tailKey, bar);
       } catch {
         /* drop corrupt realtime bars instead of crashing the widget */
       }
@@ -555,7 +560,11 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     const unsubscribe = this.marketData.subscribe(symbol, resolution, (bar) => {
       if (this.replayActive) return;
       const known = this.seriesTail.get(tailKey) ?? 0;
-      if (known > 0 && (chartTime === 0 || known < chartTime)) chartTime = known;
+      if (known > 0 && (chartTime === 0 || known < chartTime)) {
+        chartTime = known;
+        const head = this.seriesHead.get(tailKey);
+        forming = head && head.time === known ? { ...head } : null;
+      }
       const wall = wallBucket();
       const price = bar.close;
       if (!Number.isFinite(price)) return;

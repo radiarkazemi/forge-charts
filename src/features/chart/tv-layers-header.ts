@@ -62,7 +62,7 @@ function isIntervalValue(raw: string): raw is Interval {
 }
 
 /** "30s" / "30 seconds" must stay seconds. A bare data-value "30" is 30 minutes. */
-function intervalFromLabel(text: string): Interval | null {
+export function intervalFromLabel(text: string): Interval | null {
   const label = text.replace(/\s+/g, " ").trim();
   if (!label) return null;
   const mapped = INTERVAL_TEXT_MAP[label] ?? INTERVAL_TEXT_MAP[label.toLowerCase()];
@@ -77,7 +77,7 @@ function intervalFromLabel(text: string): Interval | null {
   return null;
 }
 
-function canonicalInterval(raw: string): Interval | null {
+export function canonicalInterval(raw: string): Interval | null {
   const value = raw.trim();
   if (!value || !isIntervalValue(value)) return null;
   const tagged = /^(\d+)([SDWM])$/i.exec(value);

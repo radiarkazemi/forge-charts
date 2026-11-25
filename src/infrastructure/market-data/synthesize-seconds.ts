@@ -66,20 +66,25 @@ export function synthesizeSecondsFromMinute(parent: Bar): Bar[] {
     }
     const px = a + (b - a) * Math.min(1, Math.max(0, frac));
     const prev = i === 0 ? parent.open : out[i - 1]!.close;
+    // The last second is snapped to the 1m close. That close can sit outside
+    // the interpolated print, which left a wick that did not cover the close.
+    const close = i === slots - 1 ? parent.close : px;
     const bar: Bar = {
       time: t,
       open: prev,
-      high: Math.max(prev, px),
-      low: Math.min(prev, px),
-      close: i === slots - 1 ? parent.close : px,
+      high: Math.max(prev, px, close),
+      low: Math.min(prev, px, close),
+      close,
       volume: parent.volume / slots,
     };
     out.push(bar);
     if (bar.high >= out[hiIdx]!.high) hiIdx = i;
     if (bar.low <= out[loIdx]!.low) loIdx = i;
   }
-  out[hiIdx] = { ...out[hiIdx]!, high: parent.high };
-  out[loIdx] = { ...out[loIdx]!, low: parent.low };
+  const hi = out[hiIdx]!;
+  out[hiIdx] = { ...hi, high: Math.max(hi.high, parent.high, hi.open, hi.close) };
+  const lo = out[loIdx]!;
+  out[loIdx] = { ...lo, low: Math.min(lo.low, parent.low, lo.open, lo.close) };
   return out;
 }
 
@@ -98,6 +103,29 @@ export function synthesizeFromMinuteBars(parents: readonly Bar[], stepSec: numbe
 
 /** Seconds resolutions we can always synthesize from 1m parents. */
 export const SYNTH_SECONDS_INTERVALS = ["1S", "5S", "10S", "15S", "30S", "45S"] as const;
+
+/**
+ * Seconds history the chart is allowed to load.
+ * The raw path draws the whole minute, including seconds that have not
+ * happened yet. Those future bars freeze the live candle, so they are removed
+ * and the open bucket uses the 1m close.
+ */
+export function presentSecondBars(parents: readonly Bar[], stepSec: number, nowSec: number): Bar[] {
+  const step = Math.max(1, Math.floor(stepSec));
+  const wall = nowSec - (nowSec % step);
+  const bars = synthesizeFromMinuteBars(parents, step).filter((bar) => bar.time <= wall);
+  const parent = parents[parents.length - 1];
+  const last = bars[bars.length - 1];
+  if (parent && last && last.time === wall) {
+    bars[bars.length - 1] = {
+      ...last,
+      high: Math.max(last.high, parent.close),
+      low: Math.min(last.low, parent.close),
+      close: parent.close,
+    };
+  }
+  return bars;
+}
 
 /**
  * Live seconds bars for one forming minute.
