@@ -25,7 +25,7 @@ const REQUEST_TIMEOUT_MS = 15_000;
 const HEALTH_TTL_MS = 60_000;
 const TICK_POLL_MS = 120;
 /** Browser forex HTTP is fallback only — VPS /market-ticks owns the Germany budget. */
-const FOREX_POLL_MS = 900;
+const FOREX_POLL_MS = 400;
 const BAR_RECONCILE_MS = 12_000;
 /** Germany `/ohlc/` hard ceiling (API truncates above this). Deep history uses Mongo. */
 const MAX_BARS = 1_000;
@@ -303,35 +303,30 @@ function applyTick(
   /** FX 1D must sit on 22:00 UTC — midnight floor invents a premature daily candle. */
   fxDaily = false,
 ): Bar {
-  // Never open a candle in the future (e.g. mongo `bct` = period close was used as ts).
   const nowSec = Math.floor(Date.now() / 1000);
   const wallBucket = fxDaily ? alignFxSessionDailyTime(nowSec) : alignTime(nowSec, step);
-  let t = fxDaily ? alignFxSessionDailyTime(tsSec) : alignTime(tsSec, step);
-  if (t > wallBucket) t = wallBucket;
-  // Live carry prints the wall-clock forming bar first. Quote timestamps often
-  // still sit on the previous period — those ticks belong on the forming close.
-  if (current && current.time >= wallBucket) t = current.time;
-  else t = wallBucket;
-  if (!current || current.time < t) {
-    return { time: t, open: price, high: price, low: price, close: price, volume: Math.max(0, volumeDelta) };
-  }
-  if (current.time > t) {
+  void tsSec;
+  const vol = Math.max(0, volumeDelta);
+  // Always the wall-clock forming bar. Quote `t` is often the previous period
+  // or a future period-close; Charting Library ignores those updates.
+  if (!current || current.time !== wallBucket) {
+    const open = current && current.time < wallBucket ? current.close : price;
     return {
-      time: current.time,
-      open: current.open,
-      high: Math.max(current.high, price),
-      low: Math.min(current.low, price),
+      time: wallBucket,
+      open,
+      high: Math.max(open, price),
+      low: Math.min(open, price),
       close: price,
-      volume: Math.max(0, current.volume + (volumeDelta > 0 ? volumeDelta : 0)),
+      volume: vol,
     };
   }
   return {
-    time: t,
+    time: wallBucket,
     open: current.open,
     high: Math.max(current.high, price),
     low: Math.min(current.low, price),
     close: price,
-    volume: Math.max(0, current.volume + (volumeDelta > 0 ? volumeDelta : 0)),
+    volume: Math.max(0, current.volume + vol),
   };
 }
 
@@ -741,7 +736,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
 
   private async fetchForexXau(force = false): Promise<ForexXau> {
     const now = Date.now();
-    if (!force && this.forexCache && now - this.forexCache.at < 1_000) return this.forexCache.data;
+    if (!force && this.forexCache && now - this.forexCache.at < 400) return this.forexCache.data;
     try {
       const fx = await fetchJson<ForexXau>(`${BASE}/forex/xauusd/`, { timeoutMs: 1_500 });
       this.forexCache = { at: now, data: fx };
@@ -843,11 +838,13 @@ export class GermanyMarketProvider implements MarketDataProvider {
     const quoteVolume: VolumeCursor = { last: null };
 
     const emit = (bar: Bar) => {
-      current = bar;
-      if (bar.time === lastEmittedTime && bar.close === lastEmittedClose) return;
-      lastEmittedTime = bar.time;
-      lastEmittedClose = bar.close;
-      onBar(bar);
+      const wall = wallBucketAt(Math.floor(Date.now() / 1000));
+      const next = bar.time > wall ? { ...bar, time: wall } : bar;
+      current = next;
+      if (next.time === lastEmittedTime && next.close === lastEmittedClose) return;
+      lastEmittedTime = next.time;
+      lastEmittedClose = next.close;
+      onBar(next);
     };
 
     const wallBucketAt = (tsSec: number) =>
@@ -861,13 +858,11 @@ export class GermanyMarketProvider implements MarketDataProvider {
     const onTick = (price: number, tsSec: number, volumeDelta = 0) => {
       // Market closed → no new forming candles (TradingView freezes the series).
       if (!isMarketSessionOpen(symbol)) return;
-      // Clamp futuristic timestamps (mongo bct = period end) to "now".
       const nowSec = Math.floor(Date.now() / 1000);
       let ts = tsSec;
-      if (ts > nowSec + 1) ts = nowSec;
-      // Stale timestamps must not roll the series into empty future candles.
-      const maxAgeSec = Math.max(45, step * 3);
-      if (nowSec - ts > maxAgeSec) return;
+      if (!Number.isFinite(ts) || ts <= 0 || ts > nowSec + 2) ts = nowSec;
+      // Late quotes still move the forming close; only drop a dead feed.
+      if (nowSec - ts > 180) ts = nowSec;
       lastTickMs = Date.now();
       if (!readyForTicks) {
         pendingTicks.push({ price, tsSec: ts, volumeDelta });
@@ -890,16 +885,13 @@ export class GermanyMarketProvider implements MarketDataProvider {
         if (last) {
           const nowSec = Math.floor(Date.now() / 1000);
           const wallBucket = fxDaily ? alignFxSessionDailyTime(nowSec) : alignTime(nowSec, step);
-          const t = fxDaily ? alignFxSessionDailyTime(last.time) : alignTime(last.time, step);
+          const t = Math.min(
+            fxDaily ? alignFxSessionDailyTime(last.time) : alignTime(last.time, step),
+            wallBucket,
+          );
           const sessionOpen = isMarketSessionOpen(symbol);
-          // Weekend / closed session: freeze on the last real bar (no invented
-          // wall-clock candles that look like demo data).
-          if (!sessionOpen) {
-            emit({ ...last, time: t });
-          } else {
-            emit({ ...last, time: t });
-            carryTo(wallBucket, true);
-          }
+          emit({ ...last, time: t });
+          if (sessionOpen) carryTo(wallBucket, true);
         }
       } catch {
         /* ticks will create */
@@ -1052,13 +1044,10 @@ export class GermanyMarketProvider implements MarketDataProvider {
       disposers.push(
         startPolling(async () => {
           if (!isMarketSessionOpen(symbol)) return;
-          if (Date.now() - lastTickMs < 700) return;
           const fx = await this.fetchForexXau();
           const price = +fx.price;
           if (!Number.isFinite(price)) return;
-          const ts = parseUpdatedAt(fx.updated_at);
-          if (Math.abs(Date.now() / 1000 - ts) > Math.max(30, step * 2)) return;
-          onTick(price, ts, 0);
+          onTick(price, Math.floor(Date.now() / 1000), 0);
         }, FOREX_POLL_MS),
       );
     }
@@ -1140,8 +1129,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
       if (!isMarketSessionOpen(symbol)) return;
       const nowSec = Math.floor(Date.now() / 1000);
       let ts = tsSec;
-      if (ts > nowSec + 1) ts = nowSec;
-      if (nowSec - ts > 180) return;
+      if (!Number.isFinite(ts) || ts <= 0 || ts > nowSec + 2 || nowSec - ts > 180) ts = nowSec;
       lastTickMs = Date.now();
       minute = applyTick(minute, price, ts, 60, volumeDelta, false);
       tickClose = true;
@@ -1241,13 +1229,10 @@ export class GermanyMarketProvider implements MarketDataProvider {
       disposers.push(
         startPolling(async () => {
           if (!isMarketSessionOpen(symbol)) return;
-          if (Date.now() - lastTickMs < 700) return;
           const fx = await this.fetchForexXau();
           const price = +fx.price;
           if (!Number.isFinite(price)) return;
-          const ts = parseUpdatedAt(fx.updated_at);
-          if (Math.abs(Date.now() / 1000 - ts) > 120) return;
-          onTick(price, ts, 0);
+          onTick(price, Math.floor(Date.now() / 1000), 0);
         }, FOREX_POLL_MS),
       );
     }
