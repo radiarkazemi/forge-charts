@@ -519,7 +519,6 @@ export class TradingViewDatafeed implements IBasicDataFeed {
 
     const step = barStep(resolution);
     let forming: Bar | null = null;
-    let lastEmitTime = 0;
     const wallBucket = () => {
       const now = Math.floor(Date.now() / 1000);
       return now - (now % Math.max(1, step));
@@ -527,16 +526,7 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     const pushBar = (bar: Bar) => {
       if (this.replayActive) return;
       try {
-        const wall = wallBucket();
-        let time = bar.time > wall ? wall : bar.time;
-        // A quote often arrives stamped on the previous bucket. Dropping it
-        // froze the candle. Paint it on the bar already on screen instead.
-        if (lastEmitTime > wall) lastEmitTime = wall;
-        if (lastEmitTime > 0 && time < lastEmitTime) time = lastEmitTime;
-        if (time > wall) time = wall;
-        lastEmitTime = time;
-        const next = { ...bar, time };
-        const canonical = canonicalizeBar(symbol, resolution, next);
+        const canonical = canonicalizeBar(symbol, resolution, bar);
         const packed =
           symbol.exchange.toUpperCase() === "TSE"
             ? this.packTseLive(symbol, resKey, canonical, step)
@@ -549,30 +539,41 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     const unsubscribe = this.marketData.subscribe(symbol, resolution, (bar) => {
       if (this.replayActive) return;
       const wall = wallBucket();
-      const stamped = bar.time > wall ? wall : bar.time;
-      const time = forming && stamped < forming.time && forming.time <= wall ? forming.time : stamped;
-      if (!forming || time > forming.time) {
-        const adjacent = forming != null && time > forming.time && time - forming.time <= step * 2;
-        const open = adjacent ? forming.close : bar.open;
+      // Live quotes and minute snapshots sometimes still carry the previous
+      // bucket. Moving that whole candle forward rewrote the 1m close to its
+      // low. Keep the price, and put it on the candle that is open now.
+      const price = bar.close;
+      if (!Number.isFinite(price)) return;
+      if (!forming || forming.time < wall) {
+        const open = forming && wall - forming.time <= step * 2 ? forming.close : bar.time >= wall ? bar.open : price;
         forming = {
-          time,
+          time: wall,
           open,
-          high: Math.max(bar.high, open, bar.close),
-          low: Math.min(bar.low, open, bar.close),
-          close: bar.close,
+          high: Math.max(bar.high, open, price),
+          low: Math.min(bar.low, open, price),
+          close: price,
           volume: bar.volume,
         };
-      } else if (time === forming.time) {
+      } else if (bar.time < wall) {
         forming = {
-          time,
+          time: wall,
+          open: forming.open,
+          high: Math.max(forming.high, price),
+          low: Math.min(forming.low, price),
+          close: price,
+          volume: forming.volume,
+        };
+      } else {
+        forming = {
+          time: wall,
           open: forming.open || bar.open,
-          high: Math.max(forming.high, bar.high, bar.close),
-          low: Math.min(forming.low, bar.low, bar.close),
-          close: bar.close,
+          high: Math.max(forming.high, bar.high, price),
+          low: Math.min(forming.low, bar.low, price),
+          close: price,
           volume: Math.max(forming.volume, bar.volume),
         };
       }
-      if (forming) pushBar(forming);
+      pushBar(forming);
     });
 
     this.subscriptions.set(listenerGuid, () => {

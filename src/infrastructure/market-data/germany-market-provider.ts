@@ -896,8 +896,6 @@ export class GermanyMarketProvider implements MarketDataProvider {
     let lastEmittedTime = -1;
     let lastTickMs = 0;
     let lastSocketMs = 0;
-    let readyForTicks = false;
-    const pendingTicks: Array<{ price: number; tsSec: number; volumeDelta: number }> = [];
     // TV quote volume is the session total. Keep only the increment so a busy
     // 5m print is not copied, at the same size, onto the 4h candle.
     const quoteVolume: VolumeCursor = { last: null };
@@ -929,11 +927,8 @@ export class GermanyMarketProvider implements MarketDataProvider {
       // Late quotes still move the forming close; only drop a dead feed.
       if (nowSec - ts > 180) ts = nowSec;
       lastTickMs = Date.now();
-      if (!readyForTicks) {
-        pendingTicks.push({ price, tsSec: ts, volumeDelta });
-        if (pendingTicks.length > 50) pendingTicks.shift();
-        return;
-      }
+      // Paint the live price immediately. Waiting for the history seed left the
+      // 1m candle sitting on its low while 15s and 30s already showed the quote.
       carryTo(wallBucketAt(nowSec), false);
       emit(applyTick(current, price, ts, step, volumeDelta, fxDaily));
     };
@@ -947,7 +942,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
           countBack: 3,
         });
         const last = seed[seed.length - 1];
-        if (last) {
+        if (last && lastTickMs === 0) {
           const nowSec = Math.floor(Date.now() / 1000);
           const wallBucket = fxDaily ? alignFxSessionDailyTime(nowSec) : alignTime(nowSec, step);
           const t = Math.min(
@@ -957,18 +952,26 @@ export class GermanyMarketProvider implements MarketDataProvider {
           const sessionOpen = isMarketSessionOpen(symbol);
           emit({ ...last, time: t });
           if (sessionOpen) carryTo(wallBucket, true);
+        } else if (last && current) {
+          const nowSec = Math.floor(Date.now() / 1000);
+          const wallBucket = fxDaily ? alignFxSessionDailyTime(nowSec) : alignTime(nowSec, step);
+          const t = Math.min(
+            fxDaily ? alignFxSessionDailyTime(last.time) : alignTime(last.time, step),
+            wallBucket,
+          );
+          if (t === current.time) {
+            emit({
+              time: current.time,
+              open: last.open || current.open,
+              high: Math.max(last.high, current.high),
+              low: Math.min(last.low, current.low),
+              close: current.close,
+              volume: Math.max(last.volume, current.volume),
+            });
+          }
         }
       } catch {
         /* ticks will create */
-      } finally {
-        readyForTicks = true;
-        if (isMarketSessionOpen(symbol)) {
-          for (const tick of pendingTicks.splice(0)) {
-            emit(applyTick(current, tick.price, tick.tsSec, step, tick.volumeDelta, fxDaily));
-          }
-        } else {
-          pendingTicks.length = 0;
-        }
       }
     })();
 
@@ -1060,6 +1063,9 @@ export class GermanyMarketProvider implements MarketDataProvider {
 
         // Live ticks own the forming close. Mongo/chart_ws may open the bucket
         // or widen wicks, but must not snap the last price backward.
+        // A closed minute must not be streamed again. That rewrite pinned the
+        // 1m close to the wick low while the seconds charts had already moved on.
+        if (aligned.time < wallBucket) return;
         const ticksFresh = lastTickMs > 0 && Date.now() - lastTickMs < Math.max(8_000, quietMs);
         if (ticksFresh) {
           if (aligned.time === wallBucket && (!current || current.time < wallBucket)) {
