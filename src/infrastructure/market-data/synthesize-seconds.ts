@@ -119,6 +119,17 @@ export function liveSecondUpdate(
     if (slice.time <= bucket) current = slice;
   }
   if (!current) return [];
+  // The 1m candle already shows parent.close. The reconstructed path only
+  // reaches that price in the last third of the minute, so 15s/30s looked late.
+  // The bucket on screen uses the live close immediately.
+  if (current.time === bucket) {
+    current = {
+      ...current,
+      high: Math.max(current.high, parent.close),
+      low: Math.min(current.low, parent.close),
+      close: parent.close,
+    };
+  }
   const out: Bar[] = [];
   if (lastEmittedTime >= 0 && current.time > lastEmittedTime) {
     const prev = slices.find((slice) => slice.time === lastEmittedTime);

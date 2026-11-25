@@ -397,7 +397,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
       setFavHole(null);
       return;
     }
-    const host = primaryHostRef.current;
+    const host = workspaceRef.current;
     if (!host) return;
     return watchPrimaryMenusOpen(host, (state) => {
       setMenusOpen(state.open);
@@ -412,6 +412,10 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
         top: state.hole.top - wr.top,
         width: state.hole.width,
         height: state.hole.height,
+        frameLeft: state.hole.frameLeft - wr.left,
+        frameTop: state.hole.frameTop - wr.top,
+        frameWidth: state.hole.frameWidth,
+        frameHeight: state.hole.frameHeight,
       });
     });
   }, [multi, chartLayout]);
@@ -575,13 +579,16 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
         const shown = Boolean(visible && rect && rect.width >= 8 && rect.height >= 8);
         const isActive = shown && activePane === index;
         const symbol = paneSymbols[index] ?? lastSymbol;
-        const holes = [menusOpen ? menuHole : null, favHole];
+        const layerBox = { left: rect?.left ?? 0, top: rect?.top ?? 0, width: rect?.width ?? 0, height: rect?.height ?? 0 };
+        const ownsMenu =
+          menuHole?.frameLeft != null &&
+          menuHole.frameTop != null &&
+          Math.abs(layerBox.left - menuHole.frameLeft) < 12 &&
+          Math.abs(layerBox.top - menuHole.frameTop) < 12;
+        const menuForLayer = menusOpen && menuHole && !ownsMenu ? menuHole : null;
         const holeClip =
           shown && rect
-            ? clipPathExcludingHoles(
-                { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-                holes,
-              )
+            ? clipPathExcludingHoles(layerBox, [menuForLayer, favHole])
             : undefined;
         return (
           <Box

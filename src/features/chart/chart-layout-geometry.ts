@@ -643,6 +643,11 @@ export interface MenuHoleRect {
   readonly top: number;
   readonly width: number;
   readonly height: number;
+  /** Iframe that owns the menu, in the same coordinate space as left/top. */
+  readonly frameLeft?: number;
+  readonly frameTop?: number;
+  readonly frameWidth?: number;
+  readonly frameHeight?: number;
 }
 
 export interface PrimaryMenuState {
@@ -665,35 +670,17 @@ export function watchPrimaryMenusOpen(
   onChange: (state: PrimaryMenuState) => void,
 ): () => void {
   let stopped = false;
-  let mo: MutationObserver | null = null;
+  const observers: MutationObserver[] = [];
   let lastKey = "";
   let poll = 0;
   let debounce = 0;
-  let boundDoc: Document | null = null;
+  let boundCount = -1;
 
   const isDrawingChrome = (el: Element): boolean => {
-    // Pinned favorite tools, edit bars, and settings stay clickable when a
-    // pane edge crosses them. The left-toolbar flyout does not punch a hole.
-    if (el.closest("[data-forge-pin='1'], [data-name='favorite-drawings-toolbar']")) return false;
+    // Left-toolbar flyouts stay out of the hole. Line/shape edit bars, color
+    // popups, and settings dialogs must punch through the other panes or the
+    // click lands on the chart above them.
     if (el.closest(".layout__area--left")) return true;
-    if (
-      el.closest(
-        [
-          ".drawing-toolbar",
-          "[class*='drawingToolbar']",
-          "[class*='drawing-toolbar']",
-          "[class*='floating-toolbar']",
-          "[class*='floatingToolbar']",
-          "[data-name='drawing-toolbar']",
-          "[class*='toolbox']",
-          "[class*='Toolbar'][class*='drawing']",
-        ].join(","),
-      )
-    ) {
-      return true;
-    }
-    const name = (el.getAttribute("data-name") || "").toLowerCase();
-    if (name.includes("drawing") || name.includes("line-tool") || name.includes("linetool")) return true;
     return false;
   };
 
@@ -711,53 +698,63 @@ export function watchPrimaryMenusOpen(
 
   const check = () => {
     if (stopped) return;
-    const iframe = container.querySelector("iframe");
-    const doc = iframe?.contentDocument;
-    if (!doc || !iframe) return;
+    const frames = [...container.querySelectorAll("iframe")];
+    if (frames.length === 0) return;
 
-    const candidates: Element[] = [
-      ...doc.querySelectorAll(
-        [
-          '[class*="menuWrap"]',
-          '[class*="menuBox"]',
-          '[data-name="menu-inner"]',
-          '[class*="popupMenu"]',
-          '[role="menu"]',
-          '[data-name="layout-menu"]',
-          ".forge-layout-menu",
-          ".forge-save-menu",
-          ".forge-ind-menu",
-          '[data-name="forge-save-menu"]',
-          '[data-name="forge-indicators-menu"]',
-          '[class*="context-menu"]',
-          '[data-name="indicators-dialog"]',
-          '[data-name="symbol-search-items-dialog"]',
-          '[role="dialog"]',
-        ].join(","),
-      ),
-    ];
+    const menuSelector = [
+      '[class*="menuWrap"]',
+      '[class*="menuBox"]',
+      '[data-name="menu-inner"]',
+      '[class*="popupMenu"]',
+      '[role="menu"]',
+      '[data-name="layout-menu"]',
+      ".forge-layout-menu",
+      ".forge-save-menu",
+      ".forge-ind-menu",
+      '[data-name="forge-save-menu"]',
+      '[data-name="forge-indicators-menu"]',
+      '[class*="context-menu"]',
+      '[class*="floatingToolbar"]',
+      '[class*="floating-toolbar"]',
+      '[data-name="indicators-dialog"]',
+      '[data-name="symbol-search-items-dialog"]',
+      '[role="dialog"]',
+    ].join(",");
+    const candidates: Element[] = [];
+    for (const frame of frames) {
+      const frameDoc = frame.contentDocument;
+      if (!frameDoc) continue;
+      candidates.push(...frameDoc.querySelectorAll(menuSelector));
+    }
 
     let best: DOMRect | null = null;
+    let bestFrame: HTMLIFrameElement | null = null;
     for (const node of candidates) {
       if (!isHeaderMenu(node)) continue;
+      const owner = node.ownerDocument;
+      const frame = frames.find((item) => item.contentDocument === owner) ?? null;
+      const view = owner.defaultView;
       // A dialog has to show through the other charts. Skip a full-window
       // shell; the real card is the sized dialog inside it.
       if (node.getAttribute("role") === "dialog") {
         const box = node.getBoundingClientRect();
-        const fullW = doc.documentElement.clientWidth;
-        const fullH = doc.documentElement.clientHeight;
-        if (box.width < 200 || box.height < 120) continue;
+        const fullW = owner.documentElement.clientWidth;
+        const fullH = owner.documentElement.clientHeight;
+        if (box.width < 48 || box.height < 36) continue;
         if (fullW > 0 && box.width > fullW * 0.92 && box.height > fullH * 0.92) continue;
       }
-      const r = visibleBox(node, doc);
-      if (!r) continue;
-      if (!best || r.width * r.height > best.width * best.height) best = r;
+      const r = view ? visibleBox(node, owner) : null;
+      if (!r || !frame) continue;
+      if (!best || r.width * r.height > best.width * best.height) {
+        best = r;
+        bestFrame = frame;
+      }
     }
 
-    const open = Boolean(best);
+    const open = Boolean(best && bestFrame);
     let hole: MenuHoleRect | null = null;
-    if (best) {
-      const ir = iframe.getBoundingClientRect();
+    if (best && bestFrame) {
+      const ir = bestFrame.getBoundingClientRect();
       // Pad so shadows / submenu edges aren’t clipped.
       const pad = 6;
       hole = {
@@ -765,6 +762,10 @@ export function watchPrimaryMenusOpen(
         top: Math.round(ir.top + best.top - pad),
         width: Math.round(best.width + pad * 2),
         height: Math.round(best.height + pad * 2),
+        frameLeft: Math.round(ir.left),
+        frameTop: Math.round(ir.top),
+        frameWidth: Math.round(ir.width),
+        frameHeight: Math.round(ir.height),
       };
     }
 
@@ -789,33 +790,35 @@ export function watchPrimaryMenusOpen(
   };
 
   const bind = () => {
-    const doc = container.querySelector("iframe")?.contentDocument;
-    if (!doc?.body) return false;
-    if (boundDoc === doc && mo) return true;
-    mo?.disconnect();
-    boundDoc = doc;
+    const docs = [...container.querySelectorAll("iframe")]
+      .map((frame) => frame.contentDocument)
+      .filter((doc): doc is Document => Boolean(doc?.body));
+    if (docs.length === 0) return false;
+    if (docs.length === boundCount && observers.length === docs.length) return true;
+    for (const observer of observers) observer.disconnect();
+    observers.length = 0;
+    boundCount = docs.length;
     // childList only — attribute spam from CL was a major multi-pane lag source.
-    mo = new MutationObserver(scheduleCheck);
-    mo.observe(doc.body, { childList: true, subtree: true });
+    for (const doc of docs) {
+      const observer = new MutationObserver(scheduleCheck);
+      observer.observe(doc.body, { childList: true, subtree: true });
+      observers.push(observer);
+    }
     check();
     return true;
   };
 
   bind();
-  let tries = 0;
+  // Panes mount after the first chart. Keep rebinding when an iframe appears.
   poll = window.setInterval(() => {
-    tries += 1;
-    if (bind() || tries > 20) {
-      window.clearInterval(poll);
-      poll = 0;
-    }
-  }, 500);
+    bind();
+  }, 1000);
 
   return () => {
     stopped = true;
     window.clearInterval(poll);
     window.clearTimeout(debounce);
-    mo?.disconnect();
+    for (const observer of observers) observer.disconnect();
   };
 }
 
