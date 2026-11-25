@@ -423,16 +423,10 @@ function fitPrimaryChart(win: Window, width: number, height: number): void {
   if (!owners || width < 16 || height < 16) return;
   holdBridge(owners.width, width);
   holdBridge(owners.height, height);
-  let changed = false;
-  if (Math.abs(owners.width.value() - width) > 1) {
-    owners.width.setValue(width);
-    changed = true;
-  }
-  if (Math.abs(owners.height.value() - height) > 1) {
-    owners.height.setValue(height);
-    changed = true;
-  }
-  if (changed) owners.chart.resize?.();
+  if (Math.abs(owners.width.value() - width) > 1) owners.width.setValue(width);
+  if (Math.abs(owners.height.value() - height) > 1) owners.height.setValue(height);
+  // setValue already notifies the chart. Calling resize() on the 400ms poll
+  // reloaded the left pane's series and left its candle on the old close.
 }
 
 const PANE_BOX = "forgePaneBox";

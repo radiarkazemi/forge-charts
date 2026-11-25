@@ -566,6 +566,9 @@ export class TradingViewDatafeed implements IBasicDataFeed {
         forming = head && head.time === known ? { ...head } : null;
       }
       const wall = wallBucket();
+      // A tail that ran past the candle on screen makes every later tick look
+      // old, so the library keeps the left chart's last close forever.
+      if (chartTime > wall) chartTime = wall;
       const price = bar.close;
       if (!Number.isFinite(price)) return;
       if (!forming || forming.time < wall) {

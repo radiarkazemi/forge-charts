@@ -534,6 +534,25 @@ describe("provider chain and the chart", () => {
     expect(left[1]?.close).toBe(11.7);
   });
 
+  it("keeps painting the left chart after its tail ran ahead of the clock", async () => {
+    const later = Date.parse("2026-11-28T16:02:00Z");
+    const earlier = Date.parse("2026-11-28T16:01:10Z");
+    vi.spyOn(Date, "now").mockReturnValue(later);
+    const wall = Math.floor(later / 1000);
+    let push: (bar: Bar) => void = () => undefined;
+    const datafeed = feed([bar(wall, 10, 11, 9, 10.4)], (cb) => {
+      push = cb;
+    });
+    await load(datafeed, "1", wall + 30);
+    const ticks: Bar[] = [];
+    datafeed.subscribeBars(librarySymbol, "1" as never, (row) => ticks.push(row as unknown as Bar), "left");
+    push(bar(wall, 10.4, 12, 10, 11));
+    vi.spyOn(Date, "now").mockReturnValue(earlier);
+    push(bar(Math.floor(earlier / 1000), 11, 13, 10, 12.5));
+    expect(ticks[ticks.length - 1]?.close).toBe(12.5);
+    expect(ticks[ticks.length - 1]?.time).toBe(Math.floor(earlier / 1000) * 1000 - (Math.floor(earlier / 1000) % 60) * 1000);
+  });
+
   it("does not let a 30-minute tail block the 30-second chart", async () => {
     vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-11-28T16:00:30Z"));
     const now = Math.floor(Date.parse("2026-11-28T16:00:30Z") / 1000);

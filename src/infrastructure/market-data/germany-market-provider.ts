@@ -587,8 +587,15 @@ function openBinanceTickSocket(
  */
 type MarketTickFn = (price: number, tsSec: number, volume?: number) => void;
 const marketTickListeners = new Map<string, Set<MarketTickFn>>();
+/** Last quote per channel, so a pane that missed a socket callback still paints it. */
+const marketTickLatest = new Map<string, { price: number; ts: number; at: number }>();
 let marketTickSocket: WebSocket | null = null;
 let marketTickRetry: ReturnType<typeof setTimeout> | null = null;
+
+function rememberMarketTick(channel: string, price: number, ts: number): void {
+  if (!channel) return;
+  marketTickLatest.set(channel, { price, ts, at: Date.now() });
+}
 
 function marketTickUrl(): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -631,6 +638,7 @@ function ensureMarketTickSocket(): void {
       if (!Number.isFinite(ts) || ts <= 0) ts = Math.floor(Date.now() / 1000);
       const volume = Number(msg.volume ?? 0);
       const channel = String(msg.channel ?? "");
+      rememberMarketTick(channel, price, ts);
       const targets = channel ? marketTickListeners.get(channel) : null;
       const listeners = targets ?? (channel ? null : new Set([...marketTickListeners.values()].flatMap((set) => [...set])));
       if (!listeners) return;
@@ -896,6 +904,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
     let lastEmittedTime = -1;
     let lastTickMs = 0;
     let lastSocketMs = 0;
+    let lastPrice = Number.NaN;
     // TV quote volume is the session total. Keep only the increment so a busy
     // 5m print is not copied, at the same size, onto the 4h candle.
     const quoteVolume: VolumeCursor = { last: null };
@@ -927,6 +936,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
       // Late quotes still move the forming close; only drop a dead feed.
       if (nowSec - ts > 180) ts = nowSec;
       lastTickMs = Date.now();
+      lastPrice = price;
       // Paint the live price immediately. Waiting for the history seed left the
       // 1m candle sitting on its low while 15s and 30s already showed the quote.
       carryTo(wallBucketAt(nowSec), false);
@@ -1021,6 +1031,19 @@ export class GermanyMarketProvider implements MarketDataProvider {
       }),
     );
 
+    // The big left chart was staying on the last history close while the
+    // seconds panes kept the quote. Re-paint that same quote onto this candle.
+    if (typeof window !== "undefined") {
+      const paintShared = () => {
+        const latest = marketTickLatest.get(channel);
+        if (!latest || Date.now() - latest.at > 3_000) return;
+        if (latest.price === lastPrice && Date.now() - lastTickMs < 200) return;
+        onTick(latest.price, latest.ts, 0);
+      };
+      const sharedClock = window.setInterval(paintShared, 200);
+      disposers.push(() => clearInterval(sharedClock));
+    }
+
     // cp_fetcher chart_ws — emits the subscribed TF already aggregated from base
     // 1m/1h/1d candles (server sets `t` = period OPEN). Ticks still own liveness.
     disposers.push(
@@ -1066,7 +1089,10 @@ export class GermanyMarketProvider implements MarketDataProvider {
         // A closed minute must not be streamed again. That rewrite pinned the
         // 1m close to the wick low while the seconds charts had already moved on.
         if (aligned.time < wallBucket) return;
-        const ticksFresh = lastTickMs > 0 && Date.now() - lastTickMs < Math.max(8_000, quietMs);
+        const sharedTick = marketTickLatest.get(channel);
+        const sharedFresh = sharedTick != null && Date.now() - sharedTick.at < 15_000;
+        const ticksFresh =
+          sharedFresh || (lastTickMs > 0 && Date.now() - lastTickMs < Math.max(8_000, quietMs));
         if (ticksFresh) {
           if (aligned.time === wallBucket && (!current || current.time < wallBucket)) {
             emit(bridged(aligned));
