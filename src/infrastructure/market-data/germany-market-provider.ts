@@ -966,7 +966,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
         // Refuse future buckets — only the current wall-clock candle may form.
         if (openTime > wallBucket) openTime = wallBucket;
         const aligned = { ...bar, time: openTime };
-        const quietMs = Math.max(5_000, step * 1_000);
+        const quietMs = Math.min(8_000, Math.max(5_000, step * 1_000));
         const quiet = lastTickMs === 0 || Date.now() - lastTickMs > quietMs;
 
         const mergeSame = (base: Bar, next: Bar, closeFrom: "tick" | "mongo"): Bar => ({
@@ -1065,7 +1065,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
           if (!last) return;
           const aligned = { ...last, time: alignTime(last.time, step) };
           // Without live ticks, never roll into a new candle from history reconcile.
-          const quietMs = Math.max(5_000, step * 1_000);
+          const quietMs = Math.min(8_000, Math.max(5_000, step * 1_000));
           const quiet = lastTickMs === 0 || Date.now() - lastTickMs > quietMs;
           if (quiet) return;
           if (!current || aligned.time > current.time) {

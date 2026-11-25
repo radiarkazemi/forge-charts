@@ -67,10 +67,12 @@ export function densifySessionBars(symbol: SymbolInfo, bars: readonly Bar[], ste
   const ordered = [...bars].sort((a, b) => a.time - b.time);
   const out: Bar[] = [];
   const nowSec = Math.floor(Date.now() / 1000);
-  const lastAllowed = Math.min(ordered[ordered.length - 1]!.time, Math.floor(nowSec / stepSec) * stepSec);
+  const wall = Math.floor(nowSec / stepSec) * stepSec;
+  const lastAllowed = Math.min(ordered[ordered.length - 1]!.time, wall);
 
   for (let i = 0; i < ordered.length; i += 1) {
-    const bar = ordered[i]!;
+    const raw = ordered[i]!;
+    const bar = raw.time > lastAllowed ? { ...raw, time: lastAllowed } : raw;
     const prev = out[out.length - 1];
     if (prev && bar.time <= prev.time) {
       out[out.length - 1] = {
@@ -86,7 +88,7 @@ export function densifySessionBars(symbol: SymbolInfo, bars: readonly Bar[], ste
     if (prev) {
       let cursor = prev.time + stepSec;
       const stop = Math.min(bar.time, lastAllowed + stepSec);
-      while (cursor < stop) {
+      while (cursor < stop && cursor <= lastAllowed) {
         if (isMarketSessionOpen(symbol, cursor * 1000)) {
           const px = prev.close;
           out.push({ time: cursor, open: px, high: px, low: px, close: px, volume: 0 });
@@ -94,7 +96,7 @@ export function densifySessionBars(symbol: SymbolInfo, bars: readonly Bar[], ste
         cursor += stepSec;
       }
     }
-    out.push(bar);
+    if (bar.time <= lastAllowed) out.push(bar);
   }
   return out;
 }

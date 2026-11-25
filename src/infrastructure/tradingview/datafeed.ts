@@ -488,7 +488,14 @@ export class TradingViewDatafeed implements IBasicDataFeed {
         onResult([], { noData: true });
         return;
       }
-      onResult(ready.map((bar) => toTvBar(bar, barStep(resolution))), { noData: false });
+      const step = barStep(resolution);
+      const wall = nowSec - (nowSec % Math.max(1, step));
+      if (step < 86_400 && ready.length > 0) {
+        const last = ready[ready.length - 1]!;
+        const aligned = Math.min(Math.floor(last.time / Math.max(1, step)) * step, wall);
+        if (aligned > 0 && aligned !== last.time) ready[ready.length - 1] = { ...last, time: aligned };
+      }
+      onResult(ready.map((bar) => toTvBar(bar, step)), { noData: false });
     } catch (error) {
       onError(error instanceof Error ? error.message : String(error));
     }
@@ -513,6 +520,8 @@ export class TradingViewDatafeed implements IBasicDataFeed {
 
     const step = barStep(resolution);
     let forming: Bar | null = null;
+    let lastEmitTime = 0;
+    let liveClose = Number.NaN;
     const wallBucket = () => {
       const now = Math.floor(Date.now() / 1000);
       return now - (now % Math.max(1, step));
@@ -520,7 +529,12 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     const pushBar = (bar: Bar) => {
       if (this.replayActive) return;
       try {
-        const canonical = canonicalizeBar(symbol, resolution, bar);
+        const wall = wallBucket();
+        let time = bar.time > wall ? wall : bar.time;
+        if (lastEmitTime > 0 && time < lastEmitTime) time = lastEmitTime;
+        lastEmitTime = time;
+        const next = { ...bar, time };
+        const canonical = canonicalizeBar(symbol, resolution, next);
         const packed =
           symbol.exchange.toUpperCase() === "TSE"
             ? this.packTseLive(symbol, resKey, canonical, step)
@@ -532,6 +546,7 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     };
     const paintPrice = (price: number) => {
       if (!Number.isFinite(price) || step >= 86_400) return;
+      liveClose = price;
       const wall = wallBucket();
       if (!forming || forming.time !== wall) {
         const open = forming && forming.time < wall ? forming.close : price;
@@ -560,15 +575,16 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       if (this.replayActive) return;
       const wall = wallBucket();
       const time = bar.time > wall ? wall : bar.time;
+      const close = Number.isFinite(liveClose) ? liveClose : bar.close;
       if (!forming || time > forming.time) {
-        forming = { ...bar, time };
+        forming = { ...bar, time, close, high: Math.max(bar.high, close), low: Math.min(bar.low, close) };
       } else if (time === forming.time) {
         forming = {
           time,
           open: forming.open || bar.open,
-          high: Math.max(forming.high, bar.high, bar.close),
-          low: Math.min(forming.low, bar.low, bar.close),
-          close: bar.close,
+          high: Math.max(forming.high, bar.high, close),
+          low: Math.min(forming.low, bar.low, close),
+          close,
           volume: Math.max(forming.volume, bar.volume),
         };
       }
