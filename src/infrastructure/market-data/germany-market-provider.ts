@@ -831,6 +831,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
     let lastEmittedClose = Number.NaN;
     let lastEmittedTime = -1;
     let lastTickMs = 0;
+    let lastSocketMs = 0;
     let readyForTicks = false;
     const pendingTicks: Array<{ price: number; tsSec: number; volumeDelta: number }> = [];
     // TV quote volume is the session total. Keep only the increment so a busy
@@ -930,6 +931,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
     if (route.tickSymbol) {
       disposers.push(
         openBinanceTickSocket(route.tickSymbol, (price, qty, ts) => {
+          lastSocketMs = Date.now();
           onTick(price, ts, qty);
         }),
       );
@@ -946,6 +948,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
       openMarketTicksSocket(channel, (price, ts, vol) => {
         // Binance trade qty already carries real size for crypto. TV's field is
         // the day total — adding it again doubles crypto and matches 5m to 4h.
+        lastSocketMs = Date.now();
         const delta = route.tickSymbol ? 0 : volumeDelta(quoteVolume, vol ?? 0);
         onTick(price, ts, delta);
       }),
@@ -1044,9 +1047,14 @@ export class GermanyMarketProvider implements MarketDataProvider {
       disposers.push(
         startPolling(async () => {
           if (!isMarketSessionOpen(symbol)) return;
-          const fx = await this.fetchForexXau();
+          // /market-ticks is the TradingView quote. The HTTP snapshot lags that
+          // feed by many seconds and was pulling every candle behind TV.
+          if (Date.now() - lastSocketMs < 1_500) return;
+          const fx = await this.fetchForexXau(true);
           const price = +fx.price;
           if (!Number.isFinite(price)) return;
+          const age = Math.abs(Date.now() / 1000 - parseUpdatedAt(fx.updated_at));
+          if (age > 2) return;
           onTick(price, Math.floor(Date.now() / 1000), 0);
         }, FOREX_POLL_MS),
       );
@@ -1108,6 +1116,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
     let minute: Bar | null = null;
     let tickClose = false;
     let lastTickMs = 0;
+    let lastSocketMs = 0;
     let lastEmittedTime = -1;
     let lastEmittedKey = "";
     const quoteVolume: VolumeCursor = { last: null };
@@ -1181,6 +1190,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
     if (route.tickSymbol) {
       disposers.push(
         openBinanceTickSocket(route.tickSymbol, (price, qty, ts) => {
+          lastSocketMs = Date.now();
           onTick(price, ts, qty);
         }),
       );
@@ -1194,6 +1204,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
           : `crypto:${route.apiSymbol.toLowerCase()}`;
     disposers.push(
       openMarketTicksSocket(channel, (price, ts, vol) => {
+        lastSocketMs = Date.now();
         const delta = route.tickSymbol ? 0 : volumeDelta(quoteVolume, vol ?? 0);
         onTick(price, ts, delta);
       }),
@@ -1229,9 +1240,14 @@ export class GermanyMarketProvider implements MarketDataProvider {
       disposers.push(
         startPolling(async () => {
           if (!isMarketSessionOpen(symbol)) return;
-          const fx = await this.fetchForexXau();
+          // /market-ticks is the TradingView quote. The HTTP snapshot lags that
+          // feed by many seconds and was pulling every candle behind TV.
+          if (Date.now() - lastSocketMs < 1_500) return;
+          const fx = await this.fetchForexXau(true);
           const price = +fx.price;
           if (!Number.isFinite(price)) return;
+          const age = Math.abs(Date.now() / 1000 - parseUpdatedAt(fx.updated_at));
+          if (age > 2) return;
           onTick(price, Math.floor(Date.now() / 1000), 0);
         }, FOREX_POLL_MS),
       );
