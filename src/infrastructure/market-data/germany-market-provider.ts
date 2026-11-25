@@ -1518,7 +1518,19 @@ export class GermanyMarketProvider implements MarketDataProvider {
       );
     }
     if (!parents.length) throw new Error(`germany-market: no 1m parents for ${route.apiSymbol}`);
-    const bars = synthesizeFromMinuteBars(parents, step);
+    const nowSec = Math.floor(Date.now() / 1000);
+    const wall = nowSec - (nowSec % Math.max(1, step));
+    const bars = synthesizeFromMinuteBars(parents, step).filter((bar) => bar.time <= wall);
+    const parent = parents[parents.length - 1];
+    const last = bars[bars.length - 1];
+    if (parent && last && last.time === wall) {
+      bars[bars.length - 1] = {
+        ...last,
+        high: Math.max(last.high, parent.close),
+        low: Math.min(last.low, parent.close),
+        close: parent.close,
+      };
+    }
     const before = range.to > 0 ? range.to : Number.POSITIVE_INFINITY;
     return bars.filter((b) => b.time < before).slice(-Math.max(limit, 1));
   }

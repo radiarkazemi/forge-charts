@@ -18,8 +18,8 @@ if [[ -n "${SSHPASS:-}" ]]; then
 fi
 
 cd "$ROOT"
-if [[ ! -f dist/assets/forge-main-v24.js ]]; then
-  echo "dist/assets/forge-main-v24.js missing — run npx vite build first" >&2
+if [[ ! -f dist/assets/forge-main-v25.js ]]; then
+  echo "dist/assets/forge-main-v25.js missing — run npx vite build first" >&2
   exit 1
 fi
 

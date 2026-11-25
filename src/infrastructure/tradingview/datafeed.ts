@@ -148,6 +148,8 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   readonly source: Store<DataSourceInfo | null> = createStore<DataSourceInfo | null>(null);
 
   private readonly subscriptions = new Map<string, Unsubscribe>();
+  /** Last bar time the chart actually has, per symbol+resolution. */
+  private readonly seriesTail = new Map<string, number>();
   private readonly quoteTimers = new Map<string, ReturnType<typeof setInterval>>();
 
   /** When set, history past this unix-second is hidden and live ticks are muted. */
@@ -489,12 +491,18 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       }
       const step = barStep(resolution);
       const wall = nowSec - (nowSec % Math.max(1, step));
+      let painted = ready;
       if (step < 86_400 && ready.length > 0) {
-        const last = ready[ready.length - 1]!;
-        const aligned = Math.min(Math.floor(last.time / Math.max(1, step)) * step, wall);
-        if (aligned > 0 && aligned !== last.time) ready[ready.length - 1] = { ...last, time: aligned };
+        // A bar past the current bucket makes the library drop every live
+        // update that follows (30s froze on the previous candle).
+        const kept = ready.filter((bar) => bar.time <= wall);
+        painted = kept.length > 0 ? kept : [{ ...ready[ready.length - 1]!, time: wall }];
+        const tail = painted[painted.length - 1]!.time;
+        const tailKey = `${symbol.exchange}:${symbol.ticker}|${resolution}`;
+        const prevTail = this.seriesTail.get(tailKey) ?? 0;
+        if (tail > prevTail) this.seriesTail.set(tailKey, tail);
       }
-      onResult(ready.map((bar) => toTvBar(bar, step)), { noData: false });
+      onResult(painted.map((bar) => toTvBar(bar, step)), { noData: false });
     } catch (error) {
       onError(error instanceof Error ? error.message : String(error));
     }
@@ -518,6 +526,8 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     });
 
     const step = barStep(resolution);
+    const tailKey = `${symbol.exchange}:${symbol.ticker}|${resKey}`;
+    let chartTime = this.seriesTail.get(tailKey) ?? 0;
     let forming: Bar | null = null;
     const wallBucket = () => {
       const now = Math.floor(Date.now() / 1000);
@@ -532,6 +542,8 @@ export class TradingViewDatafeed implements IBasicDataFeed {
             ? this.packTseLive(symbol, resKey, canonical, step)
             : canonical;
         onTick(toTvBar(packed, step));
+        chartTime = bar.time;
+        this.seriesTail.set(tailKey, bar.time);
       } catch {
         /* drop corrupt realtime bars instead of crashing the widget */
       }
@@ -539,9 +551,6 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     const unsubscribe = this.marketData.subscribe(symbol, resolution, (bar) => {
       if (this.replayActive) return;
       const wall = wallBucket();
-      // Live quotes and minute snapshots sometimes still carry the previous
-      // bucket. Moving that whole candle forward rewrote the 1m close to its
-      // low. Keep the price, and put it on the candle that is open now.
       const price = bar.close;
       if (!Number.isFinite(price)) return;
       if (!forming || forming.time < wall) {
@@ -573,6 +582,26 @@ export class TradingViewDatafeed implements IBasicDataFeed {
           volume: Math.max(forming.volume, bar.volume),
         };
       }
+      // The library rejects a bar that skips ahead. 30s history often ended on
+      // the previous bucket, so the live candle never appeared. Walk the gap
+      // one step at a time, then paint the open candle.
+      if (chartTime > 0 && forming.time > chartTime + step) {
+        let cursor = chartTime + step;
+        let guard = 0;
+        while (cursor < forming.time && guard < 240) {
+          pushBar({
+            time: cursor,
+            open: price,
+            high: price,
+            low: price,
+            close: price,
+            volume: 0,
+          });
+          cursor += step;
+          guard += 1;
+        }
+      }
+      if (chartTime > 0 && forming.time < chartTime) return;
       pushBar(forming);
     });
 
