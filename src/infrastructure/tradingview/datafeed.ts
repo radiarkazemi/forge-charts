@@ -4,6 +4,7 @@ import { EXCHANGE_PRIORITY } from "@/infrastructure/symbols/static-symbol-reposi
 import { presentCandleSeries } from "@/infrastructure/market-data/candle-series";
 import { firstHistoryPage, markTfSwitch } from "@/infrastructure/market-data/history-page";
 import { canonicalizeBar } from "@/infrastructure/market-data/session-bars";
+import { fetchJson } from "@/infrastructure/http/fetch-json";
 import {
   appendLive,
   emptyTseSeries,
@@ -148,6 +149,7 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   readonly source: Store<DataSourceInfo | null> = createStore<DataSourceInfo | null>(null);
 
   private readonly subscriptions = new Map<string, Unsubscribe>();
+  private readonly quoteTimers = new Map<string, ReturnType<typeof setInterval>>();
 
   /** When set, history past this unix-second is hidden and live ticks are muted. */
   private replayCutoffSec: number | null = null;
@@ -510,8 +512,13 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     });
 
     const step = barStep(resolution);
-    const unsubscribe = this.marketData.subscribe(symbol, resolution, (bar) => {
-      if (this.replayActive) return; // muted during Bar Replay
+    let forming: Bar | null = null;
+    const wallBucket = () => {
+      const now = Math.floor(Date.now() / 1000);
+      return now - (now % Math.max(1, step));
+    };
+    const pushBar = (bar: Bar) => {
+      if (this.replayActive) return;
       try {
         const canonical = canonicalizeBar(symbol, resolution, bar);
         const packed =
@@ -522,9 +529,71 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       } catch {
         /* drop corrupt realtime bars instead of crashing the widget */
       }
+    };
+    const paintPrice = (price: number) => {
+      if (!Number.isFinite(price) || step >= 86_400) return;
+      const wall = wallBucket();
+      if (!forming || forming.time !== wall) {
+        const open = forming && forming.time < wall ? forming.close : price;
+        forming = {
+          time: wall,
+          open,
+          high: Math.max(open, price),
+          low: Math.min(open, price),
+          close: price,
+          volume: 1,
+        };
+      } else {
+        forming = {
+          time: wall,
+          open: forming.open,
+          high: Math.max(forming.high, price),
+          low: Math.min(forming.low, price),
+          close: price,
+          volume: forming.volume,
+        };
+      }
+      pushBar(forming);
+    };
+
+    const unsubscribe = this.marketData.subscribe(symbol, resolution, (bar) => {
+      if (this.replayActive) return;
+      const wall = wallBucket();
+      const time = bar.time > wall ? wall : bar.time;
+      if (!forming || time > forming.time) {
+        forming = { ...bar, time };
+      } else if (time === forming.time) {
+        forming = {
+          time,
+          open: forming.open || bar.open,
+          high: Math.max(forming.high, bar.high, bar.close),
+          low: Math.min(forming.low, bar.low, bar.close),
+          close: bar.close,
+          volume: Math.max(forming.volume, bar.volume),
+        };
+      }
+      if (forming) pushBar(forming);
     });
+
+    const gold = /XAU|GC1!/i.test(symbol.ticker);
+    let pulse: ReturnType<typeof setInterval> | undefined;
+    if (gold && typeof window !== "undefined") {
+      const beat = async () => {
+        if (this.replayActive) return;
+        try {
+          const fx = await fetchJson<{ price?: number }>("/market-api/forex/xauusd/", { timeoutMs: 1_500 });
+          paintPrice(Number(fx.price));
+        } catch {
+          /* provider socket may still tick */
+        }
+      };
+      void beat();
+      pulse = window.setInterval(() => void beat(), 400);
+    }
+
     this.subscriptions.set(listenerGuid, () => {
       unsubscribe();
+      if (pulse) window.clearInterval(pulse);
       this.barSubs.delete(listenerGuid);
     });
   }
@@ -533,6 +602,37 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     this.subscriptions.get(listenerGuid)?.();
     this.subscriptions.delete(listenerGuid);
     this.barSubs.delete(listenerGuid);
+  }
+
+  getQuotes(
+    symbols: string[],
+    onDataCallback: (data: Array<{ s: "ok" | "error"; n: string; v: Record<string, number> }>) => void,
+    onErrorCallback: (reason: string) => void,
+  ): void {
+    void this.pullQuotes(symbols)
+      .then(onDataCallback)
+      .catch((error: unknown) => onErrorCallback(error instanceof Error ? error.message : String(error)));
+  }
+
+  subscribeQuotes(
+    symbols: string[],
+    fastSymbols: string[],
+    onRealtimeCallback: (data: Array<{ s: "ok" | "error"; n: string; v: Record<string, number> }>) => void,
+    listenerGUID: string,
+  ): void {
+    this.unsubscribeQuotes(listenerGUID);
+    const wanted = [...new Set([...fastSymbols, ...symbols])];
+    const beat = () => {
+      void this.pullQuotes(wanted).then(onRealtimeCallback).catch(() => undefined);
+    };
+    beat();
+    this.quoteTimers.set(listenerGUID, setInterval(beat, 400));
+  }
+
+  unsubscribeQuotes(listenerGUID: string): void {
+    const timer = this.quoteTimers.get(listenerGUID);
+    if (timer) clearInterval(timer);
+    this.quoteTimers.delete(listenerGUID);
   }
 
   getServerTime(callback: ServerTimeCallback): void {
@@ -550,6 +650,33 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   dispose(): void {
     for (const unsubscribe of this.subscriptions.values()) unsubscribe();
     this.subscriptions.clear();
+    for (const timer of this.quoteTimers.values()) clearInterval(timer);
+    this.quoteTimers.clear();
+  }
+
+  private async pullQuotes(
+    symbols: string[],
+  ): Promise<Array<{ s: "ok" | "error"; n: string; v: Record<string, number> }>> {
+    let gold = Number.NaN;
+    if (symbols.some((item) => /XAU|GC1!/i.test(item))) {
+      try {
+        const fx = await fetchJson<{ price?: number; change_pct?: number }>("/market-api/forex/xauusd/", {
+          timeoutMs: 1_500,
+        });
+        gold = Number(fx.price);
+        const chp = Number(fx.change_pct);
+        if (Number.isFinite(gold)) {
+          return symbols.map((n) =>
+            /XAU|GC1!/i.test(n) && Number.isFinite(gold)
+              ? { s: "ok" as const, n, v: { lp: gold, chp: Number.isFinite(chp) ? chp : 0, ch: 0 } }
+              : { s: "error" as const, n, v: {} },
+          );
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+    return symbols.map((n) => ({ s: "error" as const, n, v: {} }));
   }
 
   /* ── internals ─────────────────────────────────────────────────────── */

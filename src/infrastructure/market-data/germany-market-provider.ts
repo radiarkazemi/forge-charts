@@ -913,9 +913,9 @@ export class GermanyMarketProvider implements MarketDataProvider {
       const rollLive = () => {
         if (!current) return;
         const wall = wallBucketAt(Math.floor(Date.now() / 1000));
-        carryTo(wall, isMarketSessionOpen(symbol));
+        if (current.time + step <= wall) carryTo(wall, false);
       };
-      const clock = window.setInterval(rollLive, unit === "seconds" ? 250 : 1_000);
+      const clock = window.setInterval(rollLive, unit === "seconds" ? 250 : 5_000);
       const onVis = () => {
         if (document.visibilityState === "visible") rollLive();
       };
