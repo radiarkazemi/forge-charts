@@ -9,7 +9,7 @@ import {
   mongoHistoryPlan,
 } from "./cp-chart-history";
 import { isLiveHistoryPage } from "./history-page";
-import { densifySessionBars } from "./session-fill";
+import { densifySessionBars, liveCarryBars } from "./session-fill";
 import { aggregateBars, liveSecondUpdate, synthesizeFromMinuteBars } from "./synthesize-seconds";
 import { volumeDelta, type VolumeCursor } from "./volume-delta";
 
@@ -837,6 +837,14 @@ export class GermanyMarketProvider implements MarketDataProvider {
       onBar(bar);
     };
 
+    const wallBucketAt = (tsSec: number) =>
+      fxDaily ? alignFxSessionDailyTime(tsSec) : alignTime(tsSec, step);
+
+    const carryTo = (bucket: number, includeTarget: boolean) => {
+      if (!current || bucket <= current.time) return;
+      for (const bar of liveCarryBars(symbol, current, bucket, step, includeTarget)) emit(bar);
+    };
+
     const onTick = (price: number, tsSec: number, volumeDelta = 0) => {
       // Market closed → no new forming candles (TradingView freezes the series).
       if (!isMarketSessionOpen(symbol)) return;
@@ -853,6 +861,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
         if (pendingTicks.length > 50) pendingTicks.shift();
         return;
       }
+      carryTo(Math.min(wallBucketAt(ts), wallBucketAt(nowSec)), false);
       emit(applyTick(current, price, ts, step, volumeDelta, fxDaily));
     };
 
@@ -874,19 +883,9 @@ export class GermanyMarketProvider implements MarketDataProvider {
           // wall-clock candles that look like demo data).
           if (!sessionOpen) {
             emit({ ...last, time: t });
-          } else if (t < wallBucket) {
-            // Session open but history ended on a prior period — open forming bar
-            // so countdown works (has_empty_bars: false otherwise hides it).
-            emit({
-              time: wallBucket,
-              open: last.close,
-              high: last.close,
-              low: last.close,
-              close: last.close,
-              volume: 0,
-            });
           } else {
-            emit({ ...last, time: Math.min(t, wallBucket) });
+            emit({ ...last, time: t });
+            carryTo(wallBucket, true);
           }
         }
       } catch {
@@ -903,22 +902,23 @@ export class GermanyMarketProvider implements MarketDataProvider {
       }
     })();
 
-    // Seconds charts: only carry the series forward while live ticks are flowing.
-    // Never invent candles when the market is closed or the feed is quiet.
-    if (parseInterval(interval).unit === "seconds" && typeof window !== "undefined") {
-      const quietMs = Math.max(2_000, step * 2_000);
-      const clock = window.setInterval(() => {
-        if (!isMarketSessionOpen(symbol)) return;
-        if (Date.now() - lastTickMs > quietMs) return;
-        const lastPrice = current?.close;
-        if (!Number.isFinite(lastPrice)) return;
-        const tsSec = Math.floor(Date.now() / 1000);
-        const bucket = alignTime(tsSec, step);
-        if (!current || current.time < bucket) {
-          emit({ time: bucket, open: lastPrice!, high: lastPrice!, low: lastPrice!, close: lastPrice!, volume: 0 });
-        }
-      }, Math.min(250, Math.max(50, (step * 1000) / 4)));
-      disposers.push(() => clearInterval(clock));
+    // Keep printing in-session bars while the tab stays open. Jumping the
+    // forming candle to "now" left 5m/15m holes until the next refresh.
+    if (typeof window !== "undefined") {
+      const rollLive = () => {
+        if (!current) return;
+        const wall = wallBucketAt(Math.floor(Date.now() / 1000));
+        carryTo(wall, isMarketSessionOpen(symbol));
+      };
+      const clock = window.setInterval(rollLive, unit === "seconds" ? 250 : 1_000);
+      const onVis = () => {
+        if (document.visibilityState === "visible") rollLive();
+      };
+      document.addEventListener("visibilitychange", onVis);
+      disposers.push(() => {
+        clearInterval(clock);
+        document.removeEventListener("visibilitychange", onVis);
+      });
     }
 
     // Binance tick stream (crypto + PAXG proxy for gold/FXPRO/FOREXCOM XAU).
@@ -1067,6 +1067,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
           const quiet = lastTickMs === 0 || Date.now() - lastTickMs > quietMs;
           if (quiet) return;
           if (!current || aligned.time > current.time) {
+            if (current) carryTo(aligned.time, false);
             emit(aligned);
             return;
           }

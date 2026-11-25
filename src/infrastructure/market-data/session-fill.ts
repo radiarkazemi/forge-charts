@@ -1,6 +1,42 @@
 import { isMarketSessionOpen, type Bar, type SymbolInfo } from "@/domain";
 
 /**
+ * Carry last close across every in-session slot up to `toBucket` (exclusive
+ * unless `includeTarget`). Live subscribe used to jump the forming candle to
+ * "now", which left 5m/15m holes until the next refresh.
+ */
+export function liveCarryBars(
+  symbol: SymbolInfo,
+  fromBar: Bar,
+  toBucket: number,
+  stepSec: number,
+  includeTarget = false,
+): Bar[] {
+  if (stepSec < 1 || !Number.isFinite(toBucket) || toBucket <= fromBar.time) return [];
+  const px = fromBar.close;
+  const out: Bar[] = [];
+  const maxSteps = Math.min(2_000, Math.max(8, Math.floor((36 * 3_600) / stepSec) + 2));
+  let cursor = fromBar.time + stepSec;
+  let steps = 0;
+  while (cursor < toBucket && steps < maxSteps) {
+    if (isMarketSessionOpen(symbol, cursor * 1000)) {
+      out.push({ time: cursor, open: px, high: px, low: px, close: px, volume: 0 });
+    }
+    cursor += stepSec;
+    steps += 1;
+  }
+  if (
+    includeTarget &&
+    toBucket > fromBar.time &&
+    isMarketSessionOpen(symbol, toBucket * 1000) &&
+    (out.length === 0 || out[out.length - 1]!.time < toBucket)
+  ) {
+    out.push({ time: toBucket, open: px, high: px, low: px, close: px, volume: 0 });
+  }
+  return out;
+}
+
+/**
  * Insert a candle for every in-session step between the first and last print.
  * Weekend, Friday close, and the 17:00–18:00 New York FX break stay empty.
  * Missing session minutes copy the previous close so the chart never drops a
