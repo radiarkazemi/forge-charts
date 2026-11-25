@@ -79,7 +79,12 @@ export function intervalFromLabel(text: string): Interval | null {
 
 export function canonicalInterval(raw: string): Interval | null {
   const value = raw.trim();
-  if (!value || !isIntervalValue(value)) return null;
+  if (!value) return null;
+  // "1m" is one minute. The month suffix is "1M" / "M", so lowercase the
+  // lookup before the D/W/M parser turns "1m" into one month.
+  const mapped = INTERVAL_TEXT_MAP[value] ?? (value === value.toLowerCase() ? INTERVAL_TEXT_MAP[value] : undefined);
+  if (mapped) return mapped;
+  if (!isIntervalValue(value)) return null;
   const tagged = /^(\d+)([SDWM])$/i.exec(value);
   if (tagged) return `${tagged[1]}${tagged[2].toUpperCase()}`;
   return value;

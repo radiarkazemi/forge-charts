@@ -23,7 +23,7 @@ function forgeStableEntryPlugin(): Plugin {
         throw new Error("forge-stable-entry: no index-*.js in dist/assets");
       }
       // Stable name under /assets/forge/ — bump when CDN has a poisoned cache entry.
-      const stableName = "forge-main-v27.js";
+      const stableName = "forge-main-v28.js";
       copyFileSync(join(assetsDir, hashed), join(assetsDir, stableName));
       let html = readFileSync(indexHtmlPath, "utf8");
       const next = html

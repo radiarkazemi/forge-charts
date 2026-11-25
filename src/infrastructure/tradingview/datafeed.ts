@@ -391,8 +391,8 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     onResult: HistoryCallback,
     onError: DatafeedErrorCallback,
   ): Promise<void> {
-    const symbol = this.requireSymbol(symbolInfo);
     try {
+      const symbol = this.requireSymbol(symbolInfo);
       const cutoff = this.replayCutoffSec;
       const cutoffOn = cutoff != null && Number.isFinite(cutoff);
 
