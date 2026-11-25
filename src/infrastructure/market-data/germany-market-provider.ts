@@ -983,12 +983,23 @@ export class GermanyMarketProvider implements MarketDataProvider {
           volume: next.volume > 0 ? next.volume : base.volume,
         });
 
+        const bridged = (bar: Bar): Bar => {
+          if (!current || bar.time <= current.time || bar.time - current.time > step * 2) return bar;
+          const open = current.close;
+          return {
+            ...bar,
+            open,
+            high: Math.max(bar.high, open, bar.close),
+            low: Math.min(bar.low, open, bar.close),
+          };
+        };
+
         // Live ticks own the forming close. Mongo/chart_ws may open the bucket
         // or widen wicks, but must not snap the last price backward.
         const ticksFresh = lastTickMs > 0 && Date.now() - lastTickMs < Math.max(8_000, quietMs);
         if (ticksFresh) {
           if (aligned.time === wallBucket && (!current || current.time < wallBucket)) {
-            emit(aligned);
+            emit(bridged(aligned));
             return;
           }
           if (current && aligned.time === current.time) {
@@ -1002,7 +1013,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
         if (quiet) {
           if (aligned.time === wallBucket) {
             if (!current || current.time < wallBucket) {
-              emit(aligned);
+              emit(bridged(aligned));
             } else if (current.time === wallBucket) {
               emit(mergeSame(current, aligned, "mongo"));
             }
@@ -1014,7 +1025,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
 
         if (aligned.time > wallBucket) return;
         if (!current || aligned.time > current.time) {
-          emit(aligned);
+          emit(bridged(aligned));
           return;
         }
         if (aligned.time === current.time) {
@@ -1077,6 +1088,16 @@ export class GermanyMarketProvider implements MarketDataProvider {
           const quiet = lastTickMs === 0 || Date.now() - lastTickMs > quietMs;
           if (quiet) return;
           if (!current || aligned.time > current.time) {
+            if (current && aligned.time - current.time <= step * 2) {
+              const open = current.close;
+              emit({
+                ...aligned,
+                open,
+                high: Math.max(aligned.high, open, aligned.close),
+                low: Math.min(aligned.low, open, aligned.close),
+              });
+              return;
+            }
             if (current) carryTo(aligned.time, false);
             emit(aligned);
             return;

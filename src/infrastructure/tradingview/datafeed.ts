@@ -528,8 +528,10 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       if (this.replayActive) return;
       try {
         const wall = wallBucket();
-        let time = bar.time > wall ? wall : bar.time;
-        if (lastEmitTime > 0 && time < lastEmitTime) time = lastEmitTime;
+        const time = bar.time > wall ? wall : bar.time;
+        // A tick older than the bar already on screen must not be moved forward.
+        // Doing that parked the whole move on a later candle and left a hole.
+        if (lastEmitTime > 0 && time < lastEmitTime) return;
         lastEmitTime = time;
         const next = { ...bar, time };
         const canonical = canonicalizeBar(symbol, resolution, next);
@@ -547,7 +549,16 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       const wall = wallBucket();
       const time = bar.time > wall ? wall : bar.time;
       if (!forming || time > forming.time) {
-        forming = { ...bar, time };
+        const adjacent = forming != null && time > forming.time && time - forming.time <= step * 2;
+        const open = adjacent ? forming.close : bar.open;
+        forming = {
+          time,
+          open,
+          high: Math.max(bar.high, open, bar.close),
+          low: Math.min(bar.low, open, bar.close),
+          close: bar.close,
+          volume: bar.volume,
+        };
       } else if (time === forming.time) {
         forming = {
           time,
