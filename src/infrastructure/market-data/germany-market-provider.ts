@@ -642,7 +642,13 @@ function ensureMarketTickSocket(): void {
       const targets = channel ? marketTickListeners.get(channel) : null;
       const listeners = targets ?? (channel ? null : new Set([...marketTickListeners.values()].flatMap((set) => [...set])));
       if (!listeners) return;
-      for (const fn of listeners) fn(price, ts, volume);
+      for (const fn of listeners) {
+        try {
+          fn(price, ts, volume);
+        } catch {
+          /* one pane must not drop the tick for every other broker */
+        }
+      }
     } catch {
       /* ignore */
     }

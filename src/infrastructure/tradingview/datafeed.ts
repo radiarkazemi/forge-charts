@@ -82,7 +82,9 @@ function toTvBar(bar: Bar, stepSec = 300) {
     throw new Error(`Invalid bar time: ${String(bar.time)}`);
   }
   const rawVol = Number(bar.volume);
-  let volume = Number.isFinite(rawVol) && rawVol > 0 ? rawVol : 0;
+  // A quote sometimes carries the session total (1e100). The library throws on
+  // that and then ignores every later candle for the symbol.
+  let volume = Number.isFinite(rawVol) && rawVol > 0 && rawVol < 1e12 ? rawVol : 0;
   // No exchange volume: estimate activity from range, scaled by bar length.
   // A raw range proxy made a 5m spike and the 4h candle that contains it
   // draw the same volume bar.
@@ -533,8 +535,10 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     });
 
     const step = barStep(resolution);
+    const daily = step >= 86_400;
     const tailKey = `${symbol.exchange}:${symbol.ticker}|${resKey}`;
     let chartTime = this.seriesTail.get(tailKey) ?? 0;
+    let lastSent = 0;
     const seeded = this.seriesHead.get(tailKey);
     let forming: Bar | null = seeded && seeded.time === chartTime ? { ...seeded } : null;
     const wallBucket = () => {
@@ -543,47 +547,63 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     };
     const pushBar = (bar: Bar) => {
       if (this.replayActive) return;
+      // The library drops a bar older than the one it already cached, then
+      // keeps that close forever. Never hand it an earlier timestamp.
+      const safe = lastSent > 0 && bar.time < lastSent ? { ...bar, time: lastSent } : bar;
       try {
-        const canonical = canonicalizeBar(symbol, resolution, bar);
+        const canonical = canonicalizeBar(symbol, resolution, safe);
         const packed =
           symbol.exchange.toUpperCase() === "TSE"
             ? this.packTseLive(symbol, resKey, canonical, step)
             : canonical;
         onTick(toTvBar(packed, step));
-        chartTime = bar.time;
-        this.seriesTail.set(tailKey, bar.time);
-        this.seriesHead.set(tailKey, bar);
+        chartTime = safe.time;
+        lastSent = safe.time;
+        this.seriesTail.set(tailKey, safe.time);
+        this.seriesHead.set(tailKey, safe);
       } catch {
         /* drop corrupt realtime bars instead of crashing the widget */
       }
     };
     const unsubscribe = this.marketData.subscribe(symbol, resolution, (bar) => {
       if (this.replayActive) return;
+      const price = bar.close;
+      if (!Number.isFinite(price)) return;
       const known = this.seriesTail.get(tailKey) ?? 0;
-      if (known > 0 && (chartTime === 0 || known < chartTime)) {
+      // History can arrive after the first tick. Follow it only when it is
+      // not behind a candle the library has already accepted.
+      if (known > 0 && (chartTime === 0 || known < chartTime) && (lastSent === 0 || known >= lastSent)) {
         chartTime = known;
         const head = this.seriesHead.get(tailKey);
         forming = head && head.time === known ? { ...head } : null;
       }
       const wall = wallBucket();
-      // A tail that ran past the candle on screen makes every later tick look
-      // old, so the library keeps the left chart's last close forever.
-      if (chartTime > wall) chartTime = wall;
-      const price = bar.close;
-      if (!Number.isFinite(price)) return;
-      if (!forming || forming.time < wall) {
-        const open = forming && wall - forming.time <= step * 2 ? forming.close : bar.time >= wall ? bar.open : price;
+      // Intraday buckets share the UTC grid. Daily/weekly FX bars sit on the
+      // New York session open (17:00), not UTC midnight. Painting midnight
+      // opens the next day, and the candle on screen never takes the tick.
+      let target = daily && Number.isFinite(bar.time) && bar.time > 0 ? bar.time : wall;
+      if (chartTime > 0 && target !== chartTime) {
+        const delta = target - chartTime;
+        if (delta < 0 || (delta > 0 && delta < step)) target = chartTime;
+      }
+      if (!forming || forming.time !== target) {
+        const open =
+          forming && target - forming.time <= step * 2 && target >= forming.time
+            ? forming.close
+            : bar.time >= target
+              ? bar.open
+              : price;
         forming = {
-          time: wall,
+          time: target,
           open,
           high: Math.max(bar.high, open, price),
           low: Math.min(bar.low, open, price),
           close: price,
           volume: bar.volume,
         };
-      } else if (bar.time < wall) {
+      } else if (bar.time < target) {
         forming = {
-          time: wall,
+          time: target,
           open: forming.open,
           high: Math.max(forming.high, price),
           low: Math.min(forming.low, price),
@@ -592,7 +612,7 @@ export class TradingViewDatafeed implements IBasicDataFeed {
         };
       } else {
         forming = {
-          time: wall,
+          time: target,
           open: forming.open || bar.open,
           high: Math.max(forming.high, bar.high, price),
           low: Math.min(forming.low, bar.low, price),
@@ -619,7 +639,6 @@ export class TradingViewDatafeed implements IBasicDataFeed {
           guard += 1;
         }
       }
-      if (chartTime > 0 && forming.time < chartTime) return;
       pushBar(forming);
     });
 

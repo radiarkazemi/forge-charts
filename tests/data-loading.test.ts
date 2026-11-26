@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { intervalSeconds, parseInterval, resampleBars, type Bar, type SymbolInfo } from "@/domain";
 import { MarketDataService } from "@/application";
 import type { MarketDataProvider } from "@/application";
+import { alignFxSessionDailyTime } from "@/infrastructure/market-data/cp-chart-history";
 import { densifySessionBars } from "@/infrastructure/market-data/session-fill";
 import { firstHistoryPage, historyFetchLimit } from "@/infrastructure/market-data/history-page";
 import {
@@ -295,8 +296,31 @@ describe("chart history and the live candle", () => {
     const before = early.length;
     live.push(bar(wall, 10, 12, 9, 11.25));
     const ticks = early.slice(before);
-    expect(ticks.map((row) => row.time / 1000)).toContain(wall - 30);
+    // The chart already accepted the early candle. A later history page must
+    // not walk backward — the library would ignore every price after that.
+    expect(ticks.every((row) => row.time / 1000 >= wall)).toBe(true);
+    expect(ticks[ticks.length - 1]?.time).toBe(wall * 1000);
     expect(ticks[ticks.length - 1]?.close).toBe(11.25);
+    vi.restoreAllMocks();
+  });
+
+  it("keeps a daily tick on the forex session candle for every broker", async () => {
+    const clock = Date.parse("2026-11-26T07:40:00Z");
+    vi.spyOn(Date, "now").mockReturnValue(clock);
+    const sessionOpen = alignFxSessionDailyTime(Math.floor(clock / 1000));
+    const utcMidnight = Math.floor(clock / 1000) - (Math.floor(clock / 1000) % 86_400);
+    expect(sessionOpen).not.toBe(utcMidnight);
+    const live = { push: (_bar: Bar) => undefined };
+    const datafeed = feed([bar(sessionOpen, 3560, 3580, 3550, 3570)], live);
+    await load(datafeed, "1D", sessionOpen + 86_400);
+    const ticks: Bar[] = [];
+    datafeed.subscribeBars(librarySymbol, "1D" as never, (bar) => ticks.push(bar as unknown as Bar), "daily");
+    live.push(bar(sessionOpen, 3560, 3582, 3550, 3573.6));
+    live.push(bar(utcMidnight, 3573.6, 3574, 3573, 3574.2));
+    expect(ticks.length).toBeGreaterThan(0);
+    expect(ticks.every((row) => row.time === sessionOpen * 1000)).toBe(true);
+    expect(ticks[ticks.length - 1]?.close).toBe(3574.2);
+    expect(ticks[ticks.length - 1]?.open).toBe(3560);
     vi.restoreAllMocks();
   });
 

@@ -14,6 +14,7 @@ import { startPolling } from "./polling";
 import { aggregateBars, synthesizeFromMinuteBars, SYNTH_SECONDS_INTERVALS } from "./synthesize-seconds";
 import { isTvBrokerSymbol, marketTicksChannelFor, tradingViewSymbolFor } from "./tv-broker-symbols";
 import { fetchCpChartHistory, mongoHistoryPlan } from "./cp-chart-history";
+import { sessionDailyOpen } from "./session-bars";
 import { historyFetchLimit, historyTimeoutMs, isLiveHistoryPage } from "./history-page";
 import { volumeDelta, type VolumeCursor } from "./volume-delta";
 
@@ -264,14 +265,20 @@ export class TradingViewBrokerProvider implements MarketDataProvider {
     const channel = marketTicksChannelFor(symbol);
     const disposers: Unsubscribe[] = [];
     let current: Bar | null = null;
+    let lastTickMs = 0;
     const quoteVolume: VolumeCursor = { last: null };
 
-    const emit = (price: number, tsSec: number, reported = 0) => {
+    const emit = (price: number, _tsSec: number, reported = 0) => {
       if (!isMarketSessionOpen(symbol) && !current) return;
       const delta = volumeDelta(quoteVolume, reported);
-      const bucket = Math.floor(tsSec / step) * step;
+      const nowSec = Math.floor(Date.now() / 1000);
+      // Quote timestamps are often the previous bar or the next period close.
+      // The chart only accepts the candle it already has, or the next one.
+      const bucket = step >= 86_400 ? sessionDailyOpen(symbol, nowSec) : nowSec - (nowSec % Math.max(1, step));
+      lastTickMs = Date.now();
       if (!current || current.time !== bucket) {
-        current = { time: bucket, open: price, high: price, low: price, close: price, volume: delta };
+        const open = current && current.time < bucket ? current.close : price;
+        current = { time: bucket, open, high: Math.max(open, price), low: Math.min(open, price), close: price, volume: delta };
       } else {
         current = {
           time: bucket,
@@ -301,7 +308,14 @@ export class TradingViewBrokerProvider implements MarketDataProvider {
         });
         const last = bars.at(-1);
         if (!last) return;
-        if (!current || last.time >= current.time) {
+        // A fresh tick owns the close. Replacing it with the last history
+        // print every 15s froze the candle on the stale close.
+        if (!current) {
+          current = last;
+          onBar(last);
+          return;
+        }
+        if (last.time > current.time && Date.now() - lastTickMs > 2_000) {
           current = last;
           onBar(last);
         }

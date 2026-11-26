@@ -550,7 +550,8 @@ describe("provider chain and the chart", () => {
     vi.spyOn(Date, "now").mockReturnValue(earlier);
     push(bar(Math.floor(earlier / 1000), 11, 13, 10, 12.5));
     expect(ticks[ticks.length - 1]?.close).toBe(12.5);
-    expect(ticks[ticks.length - 1]?.time).toBe(Math.floor(earlier / 1000) * 1000 - (Math.floor(earlier / 1000) % 60) * 1000);
+    // The library already has the later bar. Moving the tick backward drops it.
+    expect(ticks[ticks.length - 1]?.time).toBe(wall * 1000);
   });
 
   it("does not let a 30-minute tail block the 30-second chart", async () => {
