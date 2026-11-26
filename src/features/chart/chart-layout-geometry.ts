@@ -485,14 +485,23 @@ export function mountFullWidthNavbar(
       });
     }
 
-    if (getLayout() === "s") {
+    const phone = window.matchMedia("(max-width: 900px)").matches;
+    // The pane clamp is for a desktop grid, where the big chart is full-window
+    // and the other panes cover it. On a phone that clamp shrinks the only
+    // chart, so the candles sit off the screen. Leave the library's own size.
+    if (phone || getLayout() === "s") {
       releasePaneBox(center);
       releasePaneBox(center?.querySelector(".chart-container") as HTMLElement | null);
       releasePaneBox(center?.querySelector(".chart-widget") as HTMLElement | null);
       releasePaneBox(bottom);
       const W = doc.documentElement.clientWidth || container.clientWidth;
       const H = doc.documentElement.clientHeight || container.clientHeight;
-      fitPrimaryChart(win, W - leftToolbarWidth, H - headerHeight);
+      const owners = chartOwners(win);
+      if (owners) {
+        holdBridge(owners.width, 0);
+        holdBridge(owners.height, 0);
+      }
+      if (!phone) fitPrimaryChart(win, W - leftToolbarWidth, H - headerHeight);
       return;
     }
 
