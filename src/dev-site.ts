@@ -4,9 +4,9 @@ const PREFIX = "forge.dev.";
 const DEV_HOSTNAME = "dev.forgechart.ir";
 
 /**
- * Development charts. `/dev/` stays behind the server password.
- * `/team/` is the same build with the normal login form, so teammates
- * can open it without that password dialog.
+ * Development charts. The normal Forge sign-in is the only login.
+ * `/team/` is that sign-in. `/dev/` is redirected there so the old
+ * browser password dialog does not appear.
  * The dev subdomain is its own origin, so its charts never share storage
  * with the product site or www.
  */
