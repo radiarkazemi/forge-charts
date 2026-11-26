@@ -5,7 +5,7 @@
  */
 
 const ITERATIONS = 600_000;
-export const MIN_NEW_PASSWORD = 15;
+export const MIN_NEW_PASSWORD = 8;
 export const MAX_PASSWORD = 128;
 
 const COMMON_PASSWORDS = new Set([
