@@ -1,17 +1,25 @@
 const PREFIX = "forge.dev.";
 
+/** This host only. forgechart.ir and www.forgechart.ir stay the product. */
+const DEV_HOSTNAME = "dev.forgechart.ir";
+
 /**
  * Development charts. `/dev/` stays behind the server password.
  * `/team/` is the same build with the normal login form, so teammates
  * can open it without that password dialog.
+ * The dev subdomain is its own origin, so its charts never share storage
+ * with the product site or www.
  */
 /** `/team` or `/dev`, without a trailing slash. */
 export function devRoot(): string {
   try {
-    return window.location.pathname.startsWith("/dev") ? "/dev" : "/team";
+    const path = window.location.pathname;
+    if (path.startsWith("/team")) return "/team";
+    if (path.startsWith("/dev") || window.location.hostname === DEV_HOSTNAME) return "/dev";
   } catch {
-    return "/team";
+    /* no window */
   }
+  return "/team";
 }
 
 /** Exact landing from the Forge design, hosted on the dev site. */
@@ -26,6 +34,7 @@ export function devAdminUrl(): string {
 
 export function isDevSite(): boolean {
   try {
+    if (window.location.hostname === DEV_HOSTNAME) return true;
     const path = window.location.pathname;
     return (
       path === "/dev"
