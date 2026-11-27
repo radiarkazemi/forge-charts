@@ -1,12 +1,9 @@
 name: Remove dev server password
 
+# The product SSH port does not accept connections from outside.
+# Run this by hand from a machine that can open port 2222.
 on:
-  push:
-    branches:
-      - cursor/gold-htf-history-depth-2908
-    paths:
-      - scripts/remove-dev-basic-auth.sh
-      - .github/workflows/remove-dev-basic-auth.yml
+  workflow_dispatch:
 
 jobs:
   remove:
