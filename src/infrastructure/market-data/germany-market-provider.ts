@@ -1,4 +1,4 @@
-import { intervalSeconds, parseInterval, isFxDailyBreak, isMarketSessionOpen, type Bar, type BarRange, type Interval, type Quote, type SymbolInfo } from "@/domain";
+import { intervalSeconds, parseInterval, isFxDailyBreak, isMarketSessionOpen, SESSION_FX, type Bar, type BarRange, type Interval, type Quote, type SymbolInfo } from "@/domain";
 import type { MarketDataProvider, Unsubscribe } from "@/application";
 import { buildUrl, fetchJson } from "../http/fetch-json";
 import { startPolling } from "./polling";
@@ -9,8 +9,8 @@ import {
   mongoHistoryPlan,
 } from "./cp-chart-history";
 import { isLiveHistoryPage } from "./history-page";
-import { densifySessionBars } from "./session-fill";
-import { aggregateBars, liveSecondUpdate, synthesizeFromMinuteBars } from "./synthesize-seconds";
+import { densifySessionBars, liveCarryBars } from "./session-fill";
+import { aggregateBars, presentSecondBars } from "./synthesize-seconds";
 import { volumeDelta, type VolumeCursor } from "./volume-delta";
 
 /**
@@ -25,7 +25,7 @@ const REQUEST_TIMEOUT_MS = 15_000;
 const HEALTH_TTL_MS = 60_000;
 const TICK_POLL_MS = 120;
 /** Browser forex HTTP is fallback only — VPS /market-ticks owns the Germany budget. */
-const FOREX_POLL_MS = 3_500;
+const FOREX_POLL_MS = 400;
 const BAR_RECONCILE_MS = 12_000;
 /** Germany `/ohlc/` hard ceiling (API truncates above this). Deep history uses Mongo. */
 const MAX_BARS = 1_000;
@@ -303,22 +303,30 @@ function applyTick(
   /** FX 1D must sit on 22:00 UTC — midnight floor invents a premature daily candle. */
   fxDaily = false,
 ): Bar {
-  // Never open a candle in the future (e.g. mongo `bct` = period close was used as ts).
   const nowSec = Math.floor(Date.now() / 1000);
   const wallBucket = fxDaily ? alignFxSessionDailyTime(nowSec) : alignTime(nowSec, step);
-  let t = fxDaily ? alignFxSessionDailyTime(tsSec) : alignTime(tsSec, step);
-  if (t > wallBucket) t = wallBucket;
-  if (!current || current.time < t) {
-    return { time: t, open: price, high: price, low: price, close: price, volume: Math.max(0, volumeDelta) };
+  void tsSec;
+  const vol = Math.max(0, volumeDelta);
+  // Always the wall-clock forming bar. Quote `t` is often the previous period
+  // or a future period-close; Charting Library ignores those updates.
+  if (!current || current.time !== wallBucket) {
+    const open = current && current.time < wallBucket ? current.close : price;
+    return {
+      time: wallBucket,
+      open,
+      high: Math.max(open, price),
+      low: Math.min(open, price),
+      close: price,
+      volume: vol,
+    };
   }
-  if (current.time > t) return current;
   return {
-    time: t,
+    time: wallBucket,
     open: current.open,
     high: Math.max(current.high, price),
     low: Math.min(current.low, price),
     close: price,
-    volume: Math.max(0, current.volume + (volumeDelta > 0 ? volumeDelta : 0)),
+    volume: Math.max(0, current.volume + vol),
   };
 }
 
@@ -572,120 +580,200 @@ function openBinanceTickSocket(
   };
 }
 
-/** VPS-side tick push (Germany polled server-side → browser). */
-function openMarketTicksSocket(
-  channel: string,
-  onTick: (price: number, tsSec: number, volume?: number) => void,
-): Unsubscribe {
-  let closed = false;
-  let socket: WebSocket | null = null;
-  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * One `/market-ticks` socket for every pane. A multi-chart layout used to open
+ * a socket per layer; the host caps those connections, and the 30s pane (opened
+ * last) never received a price.
+ */
+type MarketTickFn = (price: number, tsSec: number, volume?: number) => void;
+const marketTickListeners = new Map<string, Set<MarketTickFn>>();
+/** Last quote per channel, so a pane that missed a socket callback still paints it. */
+const marketTickLatest = new Map<string, { price: number; ts: number; at: number }>();
+let marketTickSocket: WebSocket | null = null;
+let marketTickRetry: ReturnType<typeof setTimeout> | null = null;
 
-  const connect = () => {
-    if (closed || typeof window === "undefined") return;
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${proto}//${window.location.host}/market-ticks`;
+function rememberMarketTick(channel: string, price: number, ts: number): void {
+  if (!channel) return;
+  marketTickLatest.set(channel, { price, ts, at: Date.now() });
+}
+
+function marketTickUrl(): string {
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}/market-ticks`;
+}
+
+function sendMarketTickSubscribes(): void {
+  const socket = marketTickSocket;
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  for (const channel of marketTickListeners.keys()) {
+    socket.send(JSON.stringify({ op: "subscribe", channel }));
+  }
+}
+
+function ensureMarketTickSocket(): void {
+  if (typeof window === "undefined") return;
+  if (
+    marketTickSocket &&
+    (marketTickSocket.readyState === WebSocket.OPEN || marketTickSocket.readyState === WebSocket.CONNECTING)
+  ) {
+    return;
+  }
+  let socket: WebSocket;
+  try {
+    socket = new WebSocket(marketTickUrl());
+  } catch {
+    scheduleMarketTickRetry();
+    return;
+  }
+  marketTickSocket = socket;
+  socket.onopen = () => sendMarketTickSubscribes();
+  socket.onmessage = (event) => {
     try {
-      socket = new WebSocket(url);
+      const msg = JSON.parse(String(event.data)) as Record<string, unknown>;
+      if (String(msg.type ?? "") !== "tick") return;
+      const price = Number(msg.price);
+      if (!Number.isFinite(price)) return;
+      let ts = Number(msg.ts);
+      if (ts > 1e12) ts = Math.floor(ts / 1000);
+      if (!Number.isFinite(ts) || ts <= 0) ts = Math.floor(Date.now() / 1000);
+      const volume = Number(msg.volume ?? 0);
+      const channel = String(msg.channel ?? "");
+      rememberMarketTick(channel, price, ts);
+      const targets = channel ? marketTickListeners.get(channel) : null;
+      const listeners = targets ?? (channel ? null : new Set([...marketTickListeners.values()].flatMap((set) => [...set])));
+      if (!listeners) return;
+      for (const fn of listeners) {
+        try {
+          fn(price, ts, volume);
+        } catch {
+          /* one pane must not drop the tick for every other broker */
+        }
+      }
     } catch {
-      return;
+      /* ignore */
     }
-    socket.onopen = () => {
-      socket?.send(JSON.stringify({ op: "subscribe", channel }));
-    };
-    socket.onmessage = (event) => {
+  };
+  socket.onclose = () => {
+    if (marketTickSocket === socket) marketTickSocket = null;
+    if (marketTickListeners.size > 0) scheduleMarketTickRetry();
+  };
+}
+
+function scheduleMarketTickRetry(): void {
+  if (marketTickRetry) return;
+  marketTickRetry = setTimeout(() => {
+    marketTickRetry = null;
+    if (marketTickListeners.size > 0) ensureMarketTickSocket();
+  }, 600);
+}
+
+function openMarketTicksSocket(channel: string, onTick: MarketTickFn): Unsubscribe {
+  let set = marketTickListeners.get(channel);
+  if (!set) {
+    set = new Set();
+    marketTickListeners.set(channel, set);
+  }
+  set.add(onTick);
+  ensureMarketTickSocket();
+  if (marketTickSocket?.readyState === WebSocket.OPEN) {
+    marketTickSocket.send(JSON.stringify({ op: "subscribe", channel }));
+  }
+  return () => {
+    set?.delete(onTick);
+    if (set && set.size === 0) marketTickListeners.delete(channel);
+    if (marketTickListeners.size === 0) {
+      if (marketTickRetry) clearTimeout(marketTickRetry);
+      marketTickRetry = null;
       try {
-        const msg = JSON.parse(String(event.data)) as Record<string, unknown>;
-        if (String(msg.type ?? "") !== "tick") return;
-        if (String(msg.channel ?? "") !== channel && msg.channel != null) return;
-        const price = Number(msg.price);
-        if (!Number.isFinite(price)) return;
-        const ts = msg.ts ? Number(msg.ts) : Math.floor(Date.now() / 1000);
-        onTick(price, ts, Number(msg.volume ?? 0));
+        marketTickSocket?.close();
       } catch {
         /* ignore */
       }
-    };
-    socket.onclose = () => {
-      socket = null;
-      if (!closed) {
-        retryTimer = setTimeout(() => {
-          retryTimer = null;
-          connect();
-        }, 600);
-      }
-    };
-  };
-
-  connect();
-  return () => {
-    closed = true;
-    if (retryTimer) clearTimeout(retryTimer);
-    try {
-      socket?.close();
-    } catch {
-      /* ignore */
+      marketTickSocket = null;
     }
   };
 }
 
-function openCpFetcherSocket(apiSymbol: string, interval: Interval, onBar: (bar: Bar) => void): Unsubscribe {
-  let closed = false;
-  let socket: WebSocket | null = null;
-  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * chart_ws keeps one symbol/interval per connection, so panes on the same
+ * book share a socket and a different timeframe opens its own.
+ */
+type CpBarFn = (bar: Bar) => void;
+interface CpHub {
+  socket: WebSocket | null;
+  listeners: Set<CpBarFn>;
+  retry: ReturnType<typeof setTimeout> | null;
+  symbol: string;
+  interval: string;
+}
+const cpHubs = new Map<string, CpHub>();
 
-  const connect = () => {
-    if (closed || typeof window === "undefined") return;
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${proto}//${window.location.host}/crypto-ws`;
-    try {
-      socket = new WebSocket(url);
-    } catch {
-      return;
-    }
-    socket.onopen = () => {
-      // cp_fetcher chart_ws accepts any symbol id present in Mongo `last`
-      // (btcusdt, xauusd, eurusd, …) — interval aliases map to 1m/1h/1d.
-      socket?.send(JSON.stringify({ op: "subscribe", symbol: apiSymbol, interval }));
-    };
-    socket.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(String(event.data)) as Record<string, unknown>;
-        const src = (msg.bar && typeof msg.bar === "object" ? msg.bar : msg) as Record<string, unknown>;
-        if (String(msg.type ?? src.type ?? "") !== "bar" && src.t == null && src.c == null) return;
-        const bar = parseBar({
-          time: src.t ?? src.time,
-          open: src.o ?? src.open,
-          high: src.h ?? src.high,
-          low: src.l ?? src.low,
-          close: src.c ?? src.close,
-          volume: src.v ?? src.volume,
-        });
-        if (bar) onBar(bar);
-      } catch {
-        /* ignore */
-      }
-    };
-    socket.onclose = () => {
-      socket = null;
-      if (!closed) {
-        retryTimer = setTimeout(() => {
-          retryTimer = null;
-          connect();
-        }, 1_200);
-      }
-    };
+function connectCpHub(key: string, hub: CpHub): void {
+  if (typeof window === "undefined" || hub.listeners.size === 0) return;
+  if (hub.socket && (hub.socket.readyState === WebSocket.OPEN || hub.socket.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  let socket: WebSocket;
+  try {
+    socket = new WebSocket(`${proto}//${window.location.host}/crypto-ws`);
+  } catch {
+    return;
+  }
+  hub.socket = socket;
+  socket.onopen = () => {
+    socket.send(JSON.stringify({ op: "subscribe", symbol: hub.symbol, interval: hub.interval }));
   };
-
-  connect();
-  return () => {
-    closed = true;
-    if (retryTimer) clearTimeout(retryTimer);
+  socket.onmessage = (event) => {
     try {
-      socket?.close();
+      const msg = JSON.parse(String(event.data)) as Record<string, unknown>;
+      const src = (msg.bar && typeof msg.bar === "object" ? msg.bar : msg) as Record<string, unknown>;
+      if (String(msg.type ?? src.type ?? "") !== "bar" && src.t == null && src.c == null) return;
+      const bar = parseBar({
+        time: src.t ?? src.time,
+        open: src.o ?? src.open,
+        high: src.h ?? src.high,
+        low: src.l ?? src.low,
+        close: src.c ?? src.close,
+        volume: src.v ?? src.volume,
+      });
+      if (!bar) return;
+      for (const fn of hub.listeners) fn(bar);
     } catch {
       /* ignore */
     }
+  };
+  socket.onclose = () => {
+    if (hub.socket === socket) hub.socket = null;
+    if (!cpHubs.has(key) || hub.listeners.size === 0 || hub.retry) return;
+    hub.retry = setTimeout(() => {
+      hub.retry = null;
+      connectCpHub(key, hub);
+    }, 1_200);
+  };
+}
+
+function openCpFetcherSocket(apiSymbol: string, interval: Interval, onBar: CpBarFn): Unsubscribe {
+  const key = `${apiSymbol}|${interval}`;
+  let hub = cpHubs.get(key);
+  if (!hub) {
+    hub = { socket: null, listeners: new Set(), retry: null, symbol: apiSymbol, interval: String(interval) };
+    cpHubs.set(key, hub);
+    connectCpHub(key, hub);
+  }
+  hub.listeners.add(onBar);
+  return () => {
+    const current = cpHubs.get(key);
+    if (!current) return;
+    current.listeners.delete(onBar);
+    if (current.listeners.size > 0) return;
+    if (current.retry) clearTimeout(current.retry);
+    try {
+      current.socket?.close();
+    } catch {
+      /* ignore */
+    }
+    cpHubs.delete(key);
   };
 }
 
@@ -726,7 +814,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
 
   private async fetchForexXau(force = false): Promise<ForexXau> {
     const now = Date.now();
-    if (!force && this.forexCache && now - this.forexCache.at < 1_000) return this.forexCache.data;
+    if (!force && this.forexCache && now - this.forexCache.at < 400) return this.forexCache.data;
     try {
       const fx = await fetchJson<ForexXau>(`${BASE}/forex/xauusd/`, { timeoutMs: 1_500 });
       this.forexCache = { at: now, data: fx };
@@ -821,36 +909,43 @@ export class GermanyMarketProvider implements MarketDataProvider {
     let lastEmittedClose = Number.NaN;
     let lastEmittedTime = -1;
     let lastTickMs = 0;
-    let readyForTicks = false;
-    const pendingTicks: Array<{ price: number; tsSec: number; volumeDelta: number }> = [];
+    let lastSocketMs = 0;
+    let lastPrice = Number.NaN;
     // TV quote volume is the session total. Keep only the increment so a busy
     // 5m print is not copied, at the same size, onto the 4h candle.
     const quoteVolume: VolumeCursor = { last: null };
 
     const emit = (bar: Bar) => {
-      current = bar;
-      if (bar.time === lastEmittedTime && bar.close === lastEmittedClose) return;
-      lastEmittedTime = bar.time;
-      lastEmittedClose = bar.close;
-      onBar(bar);
+      const wall = wallBucketAt(Math.floor(Date.now() / 1000));
+      const next = bar.time > wall ? { ...bar, time: wall } : bar;
+      current = next;
+      if (next.time === lastEmittedTime && next.close === lastEmittedClose) return;
+      lastEmittedTime = next.time;
+      lastEmittedClose = next.close;
+      onBar(next);
+    };
+
+    const wallBucketAt = (tsSec: number) =>
+      fxDaily ? alignFxSessionDailyTime(tsSec) : alignTime(tsSec, step);
+
+    const carryTo = (bucket: number, includeTarget: boolean) => {
+      if (!current || bucket <= current.time) return;
+      for (const bar of liveCarryBars(symbol, current, bucket, step, includeTarget)) emit(bar);
     };
 
     const onTick = (price: number, tsSec: number, volumeDelta = 0) => {
       // Market closed → no new forming candles (TradingView freezes the series).
       if (!isMarketSessionOpen(symbol)) return;
-      // Clamp futuristic timestamps (mongo bct = period end) to "now".
       const nowSec = Math.floor(Date.now() / 1000);
       let ts = tsSec;
-      if (ts > nowSec + 1) ts = nowSec;
-      // Stale timestamps must not roll the series into empty future candles.
-      const maxAgeSec = Math.max(45, step * 3);
-      if (nowSec - ts > maxAgeSec) return;
+      if (!Number.isFinite(ts) || ts <= 0 || ts > nowSec + 2) ts = nowSec;
+      // Late quotes still move the forming close; only drop a dead feed.
+      if (nowSec - ts > 180) ts = nowSec;
       lastTickMs = Date.now();
-      if (!readyForTicks) {
-        pendingTicks.push({ price, tsSec: ts, volumeDelta });
-        if (pendingTicks.length > 50) pendingTicks.shift();
-        return;
-      }
+      lastPrice = price;
+      // Paint the live price immediately. Waiting for the history seed left the
+      // 1m candle sitting on its low while 15s and 30s already showed the quote.
+      carryTo(wallBucketAt(nowSec), false);
       emit(applyTick(current, price, ts, step, volumeDelta, fxDaily));
     };
 
@@ -863,66 +958,63 @@ export class GermanyMarketProvider implements MarketDataProvider {
           countBack: 3,
         });
         const last = seed[seed.length - 1];
-        if (last) {
+        if (last && lastTickMs === 0) {
           const nowSec = Math.floor(Date.now() / 1000);
           const wallBucket = fxDaily ? alignFxSessionDailyTime(nowSec) : alignTime(nowSec, step);
-          const t = fxDaily ? alignFxSessionDailyTime(last.time) : alignTime(last.time, step);
+          const t = Math.min(
+            fxDaily ? alignFxSessionDailyTime(last.time) : alignTime(last.time, step),
+            wallBucket,
+          );
           const sessionOpen = isMarketSessionOpen(symbol);
-          // Weekend / closed session: freeze on the last real bar (no invented
-          // wall-clock candles that look like demo data).
-          if (!sessionOpen) {
-            emit({ ...last, time: t });
-          } else if (t < wallBucket) {
-            // Session open but history ended on a prior period — open forming bar
-            // so countdown works (has_empty_bars: false otherwise hides it).
+          emit({ ...last, time: t });
+          if (sessionOpen) carryTo(wallBucket, true);
+        } else if (last && current) {
+          const nowSec = Math.floor(Date.now() / 1000);
+          const wallBucket = fxDaily ? alignFxSessionDailyTime(nowSec) : alignTime(nowSec, step);
+          const t = Math.min(
+            fxDaily ? alignFxSessionDailyTime(last.time) : alignTime(last.time, step),
+            wallBucket,
+          );
+          if (t === current.time) {
             emit({
-              time: wallBucket,
-              open: last.close,
-              high: last.close,
-              low: last.close,
-              close: last.close,
-              volume: 0,
+              time: current.time,
+              open: last.open || current.open,
+              high: Math.max(last.high, current.high),
+              low: Math.min(last.low, current.low),
+              close: current.close,
+              volume: Math.max(last.volume, current.volume),
             });
-          } else {
-            emit({ ...last, time: Math.min(t, wallBucket) });
           }
         }
       } catch {
         /* ticks will create */
-      } finally {
-        readyForTicks = true;
-        if (isMarketSessionOpen(symbol)) {
-          for (const tick of pendingTicks.splice(0)) {
-            emit(applyTick(current, tick.price, tick.tsSec, step, tick.volumeDelta, fxDaily));
-          }
-        } else {
-          pendingTicks.length = 0;
-        }
       }
     })();
 
-    // Seconds charts: only carry the series forward while live ticks are flowing.
-    // Never invent candles when the market is closed or the feed is quiet.
-    if (parseInterval(interval).unit === "seconds" && typeof window !== "undefined") {
-      const quietMs = Math.max(2_000, step * 2_000);
-      const clock = window.setInterval(() => {
-        if (!isMarketSessionOpen(symbol)) return;
-        if (Date.now() - lastTickMs > quietMs) return;
-        const lastPrice = current?.close;
-        if (!Number.isFinite(lastPrice)) return;
-        const tsSec = Math.floor(Date.now() / 1000);
-        const bucket = alignTime(tsSec, step);
-        if (!current || current.time < bucket) {
-          emit({ time: bucket, open: lastPrice!, high: lastPrice!, low: lastPrice!, close: lastPrice!, volume: 0 });
-        }
-      }, Math.min(250, Math.max(50, (step * 1000) / 4)));
-      disposers.push(() => clearInterval(clock));
+    // Keep printing in-session bars while the tab stays open. Jumping the
+    // forming candle to "now" left 5m/15m holes until the next refresh.
+    if (typeof window !== "undefined") {
+      const rollLive = () => {
+        if (!current) return;
+        const wall = wallBucketAt(Math.floor(Date.now() / 1000));
+        if (current.time + step <= wall) carryTo(wall, false);
+      };
+      const clock = window.setInterval(rollLive, unit === "seconds" ? 250 : 5_000);
+      const onVis = () => {
+        if (document.visibilityState === "visible") rollLive();
+      };
+      document.addEventListener("visibilitychange", onVis);
+      disposers.push(() => {
+        clearInterval(clock);
+        document.removeEventListener("visibilitychange", onVis);
+      });
     }
 
     // Binance tick stream (crypto + PAXG proxy for gold/FXPRO/FOREXCOM XAU).
     if (route.tickSymbol) {
       disposers.push(
         openBinanceTickSocket(route.tickSymbol, (price, qty, ts) => {
+          lastSocketMs = Date.now();
           onTick(price, ts, qty);
         }),
       );
@@ -939,10 +1031,24 @@ export class GermanyMarketProvider implements MarketDataProvider {
       openMarketTicksSocket(channel, (price, ts, vol) => {
         // Binance trade qty already carries real size for crypto. TV's field is
         // the day total — adding it again doubles crypto and matches 5m to 4h.
+        lastSocketMs = Date.now();
         const delta = route.tickSymbol ? 0 : volumeDelta(quoteVolume, vol ?? 0);
         onTick(price, ts, delta);
       }),
     );
+
+    // The big left chart was staying on the last history close while the
+    // seconds panes kept the quote. Re-paint that same quote onto this candle.
+    if (typeof window !== "undefined") {
+      const paintShared = () => {
+        const latest = marketTickLatest.get(channel);
+        if (!latest || Date.now() - latest.at > 3_000) return;
+        if (latest.price === lastPrice && Date.now() - lastTickMs < 200) return;
+        onTick(latest.price, latest.ts, 0);
+      };
+      const sharedClock = window.setInterval(paintShared, 200);
+      disposers.push(() => clearInterval(sharedClock));
+    }
 
     // cp_fetcher chart_ws — emits the subscribed TF already aggregated from base
     // 1m/1h/1d candles (server sets `t` = period OPEN). Ticks still own liveness.
@@ -959,7 +1065,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
         // Refuse future buckets — only the current wall-clock candle may form.
         if (openTime > wallBucket) openTime = wallBucket;
         const aligned = { ...bar, time: openTime };
-        const quietMs = Math.max(5_000, step * 1_000);
+        const quietMs = Math.min(8_000, Math.max(5_000, step * 1_000));
         const quiet = lastTickMs === 0 || Date.now() - lastTickMs > quietMs;
 
         const mergeSame = (base: Bar, next: Bar, closeFrom: "tick" | "mongo"): Bar => ({
@@ -973,11 +1079,29 @@ export class GermanyMarketProvider implements MarketDataProvider {
           volume: next.volume > 0 ? next.volume : base.volume,
         });
 
-        // Prefer raw ticks when they are fresh — but still allow chart_ws to present
-        // the current wall-clock bucket (required for candle-close countdown).
-        if (lastTickMs > 0 && Date.now() - lastTickMs < 400) {
+        const bridged = (bar: Bar): Bar => {
+          if (!current || bar.time <= current.time || bar.time - current.time > step * 2) return bar;
+          const open = current.close;
+          return {
+            ...bar,
+            open,
+            high: Math.max(bar.high, open, bar.close),
+            low: Math.min(bar.low, open, bar.close),
+          };
+        };
+
+        // Live ticks own the forming close. Mongo/chart_ws may open the bucket
+        // or widen wicks, but must not snap the last price backward.
+        // A closed minute must not be streamed again. That rewrite pinned the
+        // 1m close to the wick low while the seconds charts had already moved on.
+        if (aligned.time < wallBucket) return;
+        const sharedTick = marketTickLatest.get(channel);
+        const sharedFresh = sharedTick != null && Date.now() - sharedTick.at < 15_000;
+        const ticksFresh =
+          sharedFresh || (lastTickMs > 0 && Date.now() - lastTickMs < Math.max(8_000, quietMs));
+        if (ticksFresh) {
           if (aligned.time === wallBucket && (!current || current.time < wallBucket)) {
-            emit(aligned);
+            emit(bridged(aligned));
             return;
           }
           if (current && aligned.time === current.time) {
@@ -991,7 +1115,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
         if (quiet) {
           if (aligned.time === wallBucket) {
             if (!current || current.time < wallBucket) {
-              emit(aligned);
+              emit(bridged(aligned));
             } else if (current.time === wallBucket) {
               emit(mergeSame(current, aligned, "mongo"));
             }
@@ -1003,11 +1127,11 @@ export class GermanyMarketProvider implements MarketDataProvider {
 
         if (aligned.time > wallBucket) return;
         if (!current || aligned.time > current.time) {
-          emit(aligned);
+          emit(bridged(aligned));
           return;
         }
         if (aligned.time === current.time) {
-          emit(mergeSame(current, aligned, "mongo"));
+          emit(mergeSame(current, aligned, ticksFresh ? "tick" : "mongo"));
         }
       }),
     );
@@ -1036,13 +1160,15 @@ export class GermanyMarketProvider implements MarketDataProvider {
       disposers.push(
         startPolling(async () => {
           if (!isMarketSessionOpen(symbol)) return;
-          if (Date.now() - lastTickMs < 1_800) return;
-          const fx = await this.fetchForexXau();
+          // /market-ticks is the TradingView quote. The HTTP snapshot lags that
+          // feed by many seconds and was pulling every candle behind TV.
+          if (Date.now() - lastSocketMs < 1_500) return;
+          const fx = await this.fetchForexXau(true);
           const price = +fx.price;
           if (!Number.isFinite(price)) return;
-          const ts = parseUpdatedAt(fx.updated_at);
-          if (Math.abs(Date.now() / 1000 - ts) > Math.max(30, step * 2)) return;
-          onTick(price, ts, 0);
+          const age = Math.abs(Date.now() / 1000 - parseUpdatedAt(fx.updated_at));
+          if (age > 2) return;
+          onTick(price, Math.floor(Date.now() / 1000), 0);
         }, FOREX_POLL_MS),
       );
     }
@@ -1060,10 +1186,21 @@ export class GermanyMarketProvider implements MarketDataProvider {
           if (!last) return;
           const aligned = { ...last, time: alignTime(last.time, step) };
           // Without live ticks, never roll into a new candle from history reconcile.
-          const quietMs = Math.max(5_000, step * 1_000);
+          const quietMs = Math.min(8_000, Math.max(5_000, step * 1_000));
           const quiet = lastTickMs === 0 || Date.now() - lastTickMs > quietMs;
           if (quiet) return;
           if (!current || aligned.time > current.time) {
+            if (current && aligned.time - current.time <= step * 2) {
+              const open = current.close;
+              emit({
+                ...aligned,
+                open,
+                high: Math.max(aligned.high, open, aligned.close),
+                low: Math.min(aligned.low, open, aligned.close),
+              });
+              return;
+            }
+            if (current) carryTo(aligned.time, false);
             emit(aligned);
             return;
           }
@@ -1102,33 +1239,52 @@ export class GermanyMarketProvider implements MarketDataProvider {
     let minute: Bar | null = null;
     let tickClose = false;
     let lastTickMs = 0;
-    let lastEmittedTime = -1;
+    let lastSocketMs = 0;
     let lastEmittedKey = "";
+    let liveBar: Bar | null = null;
     const quoteVolume: VolumeCursor = { last: null };
 
-    const project = () => {
-      if (!minute || !isMarketSessionOpen(symbol)) return;
+    let lastPrice = Number.NaN;
+    const paintLive = (price: number) => {
+      if (!Number.isFinite(price) || !isMarketSessionOpen(symbol)) return;
       const nowSec = Math.floor(Date.now() / 1000);
-      const updates = liveSecondUpdate(minute, step, nowSec, lastEmittedTime);
-      for (const bar of updates) {
-        const key = `${bar.time}:${bar.open}:${bar.high}:${bar.low}:${bar.close}`;
-        if (key === lastEmittedKey) continue;
-        lastEmittedKey = key;
-        lastEmittedTime = bar.time;
-        onBar(bar);
+      const bucket = nowSec - (nowSec % Math.max(1, step));
+      if (!liveBar || liveBar.time !== bucket) {
+        const open = liveBar && liveBar.time < bucket ? liveBar.close : price;
+        liveBar = {
+          time: bucket,
+          open,
+          high: Math.max(open, price),
+          low: Math.min(open, price),
+          close: price,
+          volume: 1,
+        };
+      } else {
+        liveBar = {
+          time: bucket,
+          open: liveBar.open,
+          high: Math.max(liveBar.high, price),
+          low: Math.min(liveBar.low, price),
+          close: price,
+          volume: liveBar.volume,
+        };
       }
+      const key = `${liveBar.time}:${liveBar.close}`;
+      if (key === lastEmittedKey) return;
+      lastEmittedKey = key;
+      onBar(liveBar);
     };
 
     const onTick = (price: number, tsSec: number, volumeDelta = 0) => {
       if (!isMarketSessionOpen(symbol)) return;
       const nowSec = Math.floor(Date.now() / 1000);
       let ts = tsSec;
-      if (ts > nowSec + 1) ts = nowSec;
-      if (nowSec - ts > 180) return;
+      if (!Number.isFinite(ts) || ts <= 0 || ts > nowSec + 2 || nowSec - ts > 180) ts = nowSec;
       lastTickMs = Date.now();
+      lastPrice = price;
       minute = applyTick(minute, price, ts, 60, volumeDelta, false);
       tickClose = true;
-      project();
+      paintLive(price);
     };
 
     const adoptMinute = (bar: Bar) => {
@@ -1151,7 +1307,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
       } else {
         return;
       }
-      project();
+      if (!tickClose && Number.isFinite(minute.close)) paintLive(minute.close);
     };
 
     void (async () => {
@@ -1169,13 +1325,16 @@ export class GermanyMarketProvider implements MarketDataProvider {
     })();
 
     if (typeof window !== "undefined") {
-      const clock = window.setInterval(project, 250);
+      const clock = window.setInterval(() => {
+        if (Number.isFinite(lastPrice)) paintLive(lastPrice);
+      }, 250);
       disposers.push(() => clearInterval(clock));
     }
 
     if (route.tickSymbol) {
       disposers.push(
         openBinanceTickSocket(route.tickSymbol, (price, qty, ts) => {
+          lastSocketMs = Date.now();
           onTick(price, ts, qty);
         }),
       );
@@ -1189,6 +1348,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
           : `crypto:${route.apiSymbol.toLowerCase()}`;
     disposers.push(
       openMarketTicksSocket(channel, (price, ts, vol) => {
+        lastSocketMs = Date.now();
         const delta = route.tickSymbol ? 0 : volumeDelta(quoteVolume, vol ?? 0);
         onTick(price, ts, delta);
       }),
@@ -1224,13 +1384,15 @@ export class GermanyMarketProvider implements MarketDataProvider {
       disposers.push(
         startPolling(async () => {
           if (!isMarketSessionOpen(symbol)) return;
-          if (Date.now() - lastTickMs < 1_800) return;
-          const fx = await this.fetchForexXau();
+          // /market-ticks is the TradingView quote. The HTTP snapshot lags that
+          // feed by many seconds and was pulling every candle behind TV.
+          if (Date.now() - lastSocketMs < 1_500) return;
+          const fx = await this.fetchForexXau(true);
           const price = +fx.price;
           if (!Number.isFinite(price)) return;
-          const ts = parseUpdatedAt(fx.updated_at);
-          if (Math.abs(Date.now() / 1000 - ts) > 120) return;
-          onTick(price, ts, 0);
+          const age = Math.abs(Date.now() / 1000 - parseUpdatedAt(fx.updated_at));
+          if (age > 2) return;
+          onTick(price, Math.floor(Date.now() / 1000), 0);
         }, FOREX_POLL_MS),
       );
     }
@@ -1378,7 +1540,7 @@ export class GermanyMarketProvider implements MarketDataProvider {
           exchange: route.exchange,
           type: "forex",
           pricePrecision: 2,
-          session: "1800-1700:123456",
+          session: SESSION_FX,
           timezone: "America/New_York",
         },
         parents,
@@ -1386,7 +1548,8 @@ export class GermanyMarketProvider implements MarketDataProvider {
       );
     }
     if (!parents.length) throw new Error(`germany-market: no 1m parents for ${route.apiSymbol}`);
-    const bars = synthesizeFromMinuteBars(parents, step);
+    const nowSec = Math.floor(Date.now() / 1000);
+    const bars = presentSecondBars(parents, step, nowSec);
     const before = range.to > 0 ? range.to : Number.POSITIVE_INFINITY;
     return bars.filter((b) => b.time < before).slice(-Math.max(limit, 1));
   }

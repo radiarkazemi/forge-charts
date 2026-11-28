@@ -27,6 +27,15 @@ export interface MarketDataLogger {
  * answers successfully wins; the synthetic provider is expected to sit last so
  * the chart is never blank.
  */
+function coversRequestedRange(slice: readonly Bar[], range: BarRange, want: number, need: number): boolean {
+  if (slice.length < 2) return false;
+  const first = slice[0]!.time;
+  const last = slice[slice.length - 1]!.time;
+  if (last - first < need * want * 0.35) return false;
+  if (range.from > 0 && first > range.from + want * 4) return false;
+  return true;
+}
+
 export class MarketDataService {
   private readonly providers: readonly MarketDataProvider[];
   private readonly logger: MarketDataLogger;
@@ -78,6 +87,9 @@ export class MarketDataService {
   private rememberSeries(symbol: SymbolInfo, interval: Interval, bars: Bar[]): void {
     if (bars.length < 8) return;
     const step = intervalSeconds(interval);
+    // 30s history is a path drawn from 1m. Rolling it back into 1m/30m replaced
+    // the real candles on the other panes of a multi-chart layout.
+    if (step < 60) return;
     this.byStep.set(this.stepKey(symbol, step), bars.slice(-12_000));
     for (const roll of MarketDataService.ROLL_STEPS) {
       if (roll < step || roll % step !== 0) continue;
@@ -91,11 +103,14 @@ export class MarketDataService {
     if (want < 60) return null;
     const before = range.to > 0 ? range.to : Number.POSITIVE_INFINITY;
     const need = Math.max(1, range.countBack);
+    const minHit = want >= 3_600 ? Math.min(need, 100) : Math.min(need, 24);
     const exact = this.byStep.get(this.stepKey(symbol, want));
-    if (exact && exact.length >= 8) {
+    if (exact && exact.length >= minHit) {
       const filtered = exact.filter((b) => b.time < before);
-      if (filtered.length >= 8) {
-        return { bars: filtered.slice(-need), providerId: "tf-cache", isSynthetic: false };
+      if (filtered.length >= minHit) {
+        const slice = filtered.slice(-need);
+        if (!coversRequestedRange(slice, range, want, need)) return null;
+        return { bars: slice, providerId: "tf-cache", isSynthetic: false };
       }
     }
     let best: Bar[] | null = null;
@@ -104,7 +119,7 @@ export class MarketDataService {
     for (const [key, bars] of this.byStep) {
       if (!key.startsWith(prefix)) continue;
       const step = Number(key.slice(prefix.length));
-      if (!Number.isFinite(step) || step <= 0 || want < step || want % step !== 0) continue;
+      if (!Number.isFinite(step) || step < 60 || want < step || want % step !== 0) continue;
       if (step < bestStep && bars.length >= 8) {
         best = bars;
         bestStep = step;
@@ -113,8 +128,10 @@ export class MarketDataService {
     if (!best) return null;
     const src = bestStep === want ? best : resampleBars(best, want);
     const filtered = src.filter((b) => b.time < before);
-    if (filtered.length < 8) return null;
-    return { bars: filtered.slice(-need), providerId: "tf-cache", isSynthetic: false };
+    if (filtered.length < minHit) return null;
+    const slice = filtered.slice(-need);
+    if (!coversRequestedRange(slice, range, want, need)) return null;
+    return { bars: slice, providerId: "tf-cache", isSynthetic: false };
   }
 
   private warmMinuteHistory(symbol: SymbolInfo): void {

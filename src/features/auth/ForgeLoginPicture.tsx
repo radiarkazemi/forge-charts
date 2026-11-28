@@ -5,6 +5,7 @@ import { devLandingUrl, devRoot, isDevSite } from "@/dev-site";
 import { googleClientId, mountGoogleButton } from "./google-sign-in";
 import { fetchTapeQuotes, placeholderTape, type TapeQuote } from "./login-quotes";
 import { LoginInfoPage, type InfoPageId } from "./login-pages";
+import { MAX_PASSWORD, MIN_NEW_PASSWORD } from "./password";
 
 function brandSrc(file: string): string {
   if (isDevSite()) return `${devRoot()}/brand/${file}`;
@@ -288,7 +289,7 @@ function FooterLinks({
   );
 }
 
-function DesktopTape({ quotes }: { readonly quotes: readonly TapeQuote[] }) {
+function DesktopTape({ quotes, compact = false }: { readonly quotes: readonly TapeQuote[]; readonly compact?: boolean }) {
   const loop = [...quotes, ...quotes];
   return (
     <Box dir="ltr" sx={{
@@ -297,7 +298,7 @@ function DesktopTape({ quotes }: { readonly quotes: readonly TapeQuote[] }) {
       flex: "0 0 auto",
       borderTop: "1px solid rgba(224,176,90,0.28)",
       bgcolor: "rgba(0,0,0,0.28)",
-      py: 1.15,
+      py: compact ? 0.7 : 1.15,
       "@keyframes forgeTape": {
         from: { transform: "translateX(0)" },
         to: { transform: "translateX(-50%)" },
@@ -313,7 +314,7 @@ function DesktopTape({ quotes }: { readonly quotes: readonly TapeQuote[] }) {
         {loop.map((quote, index) => (
           <Box key={`${quote.id}-${index}`} sx={{ display: "flex", alignItems: "center", gap: 0.8, px: 2.25, flex: "0 0 auto" }}>
             <QuoteMark id={quote.id} />
-            <Box sx={{ display: "flex", alignItems: "baseline", gap: 0.8, fontSize: 13, whiteSpace: "nowrap" }}>
+            <Box sx={{ display: "flex", alignItems: "baseline", gap: 0.8, fontSize: compact ? 12 : 13, whiteSpace: "nowrap" }}>
               <Box component="span" sx={{ fontWeight: 750 }}>{quote.id}</Box>
               <span>{quote.price}</span>
               <Box component="span" dir="ltr" sx={{ color: quote.up ? "#3ddc84" : "#ff6b7a", unicodeBidi: "isolate" }}>
@@ -321,48 +322,6 @@ function DesktopTape({ quotes }: { readonly quotes: readonly TapeQuote[] }) {
               </Box>
             </Box>
             <Box sx={{ width: "1px", height: 16, bgcolor: "rgba(232,196,130,0.35)", ml: 1.5 }} />
-          </Box>
-        ))}
-      </Box>
-    </Box>
-  );
-}
-
-function MovingTape({ quotes }: { readonly quotes: readonly TapeQuote[] }) {
-  const loop = [...quotes, ...quotes];
-  return (
-    <Box dir="ltr" sx={{
-      overflow: "hidden",
-      width: "100%",
-      maxWidth: "100%",
-      flex: "0 0 auto",
-      borderTop: "1px solid rgba(224,176,90,0.35)",
-      bgcolor: "rgba(0,0,0,0.5)",
-      py: 0.65,
-      "@keyframes forgeTape": {
-        from: { transform: "translateX(0)" },
-        to: { transform: "translateX(-50%)" },
-      },
-    }}>
-      <Box sx={{
-        display: "flex",
-        width: "max-content",
-        animation: "forgeTape 28s linear infinite",
-        "@media (prefers-reduced-motion: reduce)": { animation: "none" },
-      }}>
-        {loop.map((quote, index) => (
-          <Box key={`${quote.id}-${index}`} sx={{ display: "flex", alignItems: "center", gap: 0.7, px: 1.15, flex: "0 0 auto" }}>
-            <QuoteMark id={quote.id} />
-            <Box sx={{ lineHeight: 1.15 }}>
-              <Box sx={{ fontSize: 11, fontWeight: 750, letterSpacing: "0.03em" }}>{quote.id}</Box>
-              <Box sx={{ display: "flex", gap: 0.45, fontSize: 10, whiteSpace: "nowrap" }}>
-                <span>{quote.price}</span>
-                <Box component="span" dir="ltr" sx={{ color: quote.up ? "#3ddc84" : "#ff6b7a", unicodeBidi: "isolate" }}>
-                  {quote.change === "—" ? "—" : `${quote.up ? "▲" : "▼"}${quote.change}`}
-                </Box>
-              </Box>
-            </Box>
-            <Box sx={{ width: "1px", height: 22, bgcolor: "rgba(232,196,130,0.28)", ml: 0.4 }} />
           </Box>
         ))}
       </Box>
@@ -742,8 +701,8 @@ function SignupCard({
       </Box>
       <Box component="input" aria-label={t.name} placeholder={t.name} value={displayName} onChange={(event) => onDisplayName(event.target.value)} dir="ltr" sx={{ ...hole, top: "36.06%" }} />
       <Box component="input" aria-label={t.email} placeholder={t.email} type="email" required value={username} autoComplete="username" onChange={(event) => onUsername(event.target.value)} dir="ltr" sx={{ ...hole, top: "44.08%" }} />
-      <Box component="input" aria-label={t.password} placeholder={t.password} type="password" required minLength={15} maxLength={128} value={password} autoComplete="new-password" onChange={(event) => onPassword(event.target.value)} dir="ltr" sx={{ ...hole, top: "52.09%" }} />
-      <Box component="input" aria-label={t.confirm} placeholder={t.confirm} type="password" required minLength={15} maxLength={128} value={confirm} autoComplete="new-password" onChange={(event) => onConfirm(event.target.value)} dir="ltr" sx={{ ...hole, top: "60.10%" }} />
+      <Box component="input" aria-label={t.password} placeholder={t.password} type="password" required minLength={MIN_NEW_PASSWORD} maxLength={MAX_PASSWORD} value={password} autoComplete="new-password" onChange={(event) => onPassword(event.target.value)} dir="ltr" sx={{ ...hole, top: "52.09%" }} />
+      <Box component="input" aria-label={t.confirm} placeholder={t.confirm} type="password" required minLength={MIN_NEW_PASSWORD} maxLength={MAX_PASSWORD} value={confirm} autoComplete="new-password" onChange={(event) => onConfirm(event.target.value)} dir="ltr" sx={{ ...hole, top: "60.10%" }} />
       {error ? (
         <Box sx={{ position: "absolute", left: "16%", width: "68%", top: "66.2%", color: "#ffb4b4", fontSize: "1.8cqw", textAlign: "center", lineHeight: 1.1 }}>{error}</Box>
       ) : null}
@@ -961,13 +920,14 @@ export function ForgeLoginPicture({
           overflow: "hidden",
           display: "flex",
           flexDirection: "column",
+          pb: "calc(34px + env(safe-area-inset-bottom))",
         }}>
-          <Box sx={{ flex: "0 0 36%" }} />
+          <Box sx={{ flex: "1 1 12%", minHeight: 0 }} />
           <Box sx={{ containerType: "inline-size", px: 1, flex: "0 0 auto" }}>
             <Tagline text={t} compact dir={lang === "fa" ? "rtl" : "ltr"} />
           </Box>
           <Box sx={{
-            flex: "1 1 auto",
+            flex: "0 1 auto",
             minHeight: 0,
             minWidth: 0,
             width: "100%",
@@ -976,7 +936,9 @@ export function ForgeLoginPicture({
             justifyContent: "center",
             alignItems: "flex-start",
           }}>
-            <Box sx={{ width: "116%" }}>
+            {/* Width follows the form art (1370×1148) so the card, the ticker,
+                and the sign-in control all stay inside a short phone screen. */}
+            <Box sx={{ width: "min(100%, calc((100dvh - 168px) * 1370 / 1148))", maxWidth: "100%" }}>
               {card}
             </Box>
           </Box>
@@ -993,7 +955,15 @@ export function ForgeLoginPicture({
           <Box sx={{ containerType: "inline-size", flex: "0 0 auto", py: 0.4 }}>
             <FooterLinks items={footer} compact onOpen={setInfoPage} subscribeLabel={t.subscribe} />
           </Box>
-          <MovingTape quotes={quotes} />
+          <Box sx={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            bottom: 0,
+            pb: "env(safe-area-inset-bottom)",
+          }}>
+            <DesktopTape quotes={quotes} compact />
+          </Box>
         </Box>
       </Box>
     );

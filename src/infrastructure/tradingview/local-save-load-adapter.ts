@@ -11,6 +11,7 @@ import type {
   StudyTemplateData,
   StudyTemplateMetaInfo,
 } from "./types";
+import { packLibrarySessionJson } from "./pack-session";
 
 const KEYS = {
   charts: "forge.tv.charts",
@@ -469,7 +470,8 @@ export class LocalSaveLoadAdapter implements IExternalSaveLoadAdapter {
     const chart = this.charts().find((c) => String(c.id) === String(chartId));
     if (!chart) throw new Error(`Chart ${chartId} not found`);
     const state = libraryChartState(chart.content);
-    return state ? JSON.stringify(state) : chart.content;
+    const raw = state ? JSON.stringify(state) : chart.content;
+    return packLibrarySessionJson(raw);
   }
 
   /* ── study templates ───────────────────────────────────────────────── */

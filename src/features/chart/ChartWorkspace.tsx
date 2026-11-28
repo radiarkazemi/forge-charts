@@ -103,7 +103,7 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
    * pointer-events:none + a clip-path hole around the open menu.
    */
   const [menusOpen, setMenusOpen] = useState(false);
-  const [menuHole, setMenuHole] = useState<MenuHoleRect | null>(null);
+  const [menuHoles, setMenuHoles] = useState<readonly MenuHoleRect[]>([]);
   const [favHole, setFavHole] = useState<MenuHoleRect | null>(null);
   /** One chart filling the workspace. Null is the multi-pane grid. */
   const [maximizedPane, setMaximizedPane] = useState<number | null>(null);
@@ -393,26 +393,32 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
   useEffect(() => {
     if (!multi) {
       setMenusOpen(false);
-      setMenuHole(null);
+      setMenuHoles([]);
       setFavHole(null);
       return;
     }
-    const host = primaryHostRef.current;
+    const host = workspaceRef.current;
     if (!host) return;
     return watchPrimaryMenusOpen(host, (state) => {
       setMenusOpen(state.open);
-      // Hole comes in viewport coords — convert to workspace-local for clip-path.
+      // Holes come in viewport coords — convert to workspace-local for clip-path.
       const wr = workspaceRef.current?.getBoundingClientRect();
-      if (!state.hole || !wr) {
-        setMenuHole(state.hole);
+      if (!wr || state.holes.length === 0) {
+        setMenuHoles([]);
         return;
       }
-      setMenuHole({
-        left: state.hole.left - wr.left,
-        top: state.hole.top - wr.top,
-        width: state.hole.width,
-        height: state.hole.height,
-      });
+      setMenuHoles(
+        state.holes.map((hole) => ({
+          left: hole.left - wr.left,
+          top: hole.top - wr.top,
+          width: hole.width,
+          height: hole.height,
+          frameLeft: hole.frameLeft != null ? hole.frameLeft - wr.left : undefined,
+          frameTop: hole.frameTop != null ? hole.frameTop - wr.top : undefined,
+          frameWidth: hole.frameWidth,
+          frameHeight: hole.frameHeight,
+        })),
+      );
     });
   }, [multi, chartLayout]);
 
@@ -575,14 +581,15 @@ export function ChartWorkspace({ onCreateAlert, onOpenProfile }: ChartWorkspaceP
         const shown = Boolean(visible && rect && rect.width >= 8 && rect.height >= 8);
         const isActive = shown && activePane === index;
         const symbol = paneSymbols[index] ?? lastSymbol;
-        const holes = [menusOpen ? menuHole : null, favHole];
+        const layerBox = { left: rect?.left ?? 0, top: rect?.top ?? 0, width: rect?.width ?? 0, height: rect?.height ?? 0 };
+        const holesForLayer = menuHoles.filter((hole) => {
+          if (hole.frameLeft == null || hole.frameTop == null) return true;
+          const owns =
+            Math.abs(layerBox.left - hole.frameLeft) < 12 && Math.abs(layerBox.top - hole.frameTop) < 12;
+          return !owns;
+        });
         const holeClip =
-          shown && rect
-            ? clipPathExcludingHoles(
-                { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-                holes,
-              )
-            : undefined;
+          shown && rect ? clipPathExcludingHoles(layerBox, [...holesForLayer, favHole]) : undefined;
         return (
           <Box
             key={`forge-layer-${index}`}

@@ -1,0 +1,22 @@
+name: Remove dev server password
+
+# The product SSH port does not accept connections from outside.
+# Run this by hand from a machine that can open port 2222.
+on:
+  workflow_dispatch:
+
+jobs:
+  remove:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install sshpass
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Remove the browser password on the product nginx
+        env:
+          VPS_HOST: "185.222.0.116"
+          VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+          VPS_SSH_PORT: "2222"
+          SSHPASS: ${{ secrets.VPS_SSH_PASSWORD }}
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: bash scripts/remove-dev-basic-auth.sh

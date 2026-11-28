@@ -52,8 +52,10 @@ export function AppShell({ onSignOut, account }: AppShellProps) {
   const [profileMenuPos, setProfileMenuPos] = useState<ProfileAnchorRect | null>(null);
   const [subscribeOpen, setSubscribeOpen] = useState(false);
   useEffect(() => {
-    document.title = `${symbol} — Forge Charts`;
-  }, [symbol]);
+    // One brand token. "Forge Charts" is what Chrome translated into جعل نمودارها.
+    const brand = language === "fa" ? "فورج چارت" : "ForgeChart";
+    document.title = `${symbol} — ${brand}`;
+  }, [symbol, language]);
 
   useEffect(() => {
     // Keep chart chrome LTR (TradingView); menus/dialogs set their own `dir`.

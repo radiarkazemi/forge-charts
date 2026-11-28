@@ -400,19 +400,33 @@ function chartOwners(win: Window): { chart: ChartWidget; width: SizeBridge; heig
   }
 }
 
+function holdBridge(bridge: SizeBridge, cap: number): void {
+  const slot = bridge as SizeBridge & {
+    __forgeCap?: number;
+    __forgeOrig?: (next: number) => void;
+  };
+  if (!slot.__forgeOrig) {
+    slot.__forgeOrig = bridge.setValue.bind(bridge);
+    bridge.setValue = (next: number) => {
+      const limit = slot.__forgeCap ?? 0;
+      // The library keeps sizing this widget to the whole window. That parks
+      // the live candle of the big left pane under the charts on the right.
+      const value = limit > 0 && next > limit + 1 ? limit : next;
+      slot.__forgeOrig!(value);
+    };
+  }
+  slot.__forgeCap = cap;
+}
+
 function fitPrimaryChart(win: Window, width: number, height: number): void {
   const owners = chartOwners(win);
   if (!owners || width < 16 || height < 16) return;
-  let changed = false;
-  if (Math.abs(owners.width.value() - width) > 1) {
-    owners.width.setValue(width);
-    changed = true;
-  }
-  if (Math.abs(owners.height.value() - height) > 1) {
-    owners.height.setValue(height);
-    changed = true;
-  }
-  if (changed) owners.chart.resize?.();
+  holdBridge(owners.width, width);
+  holdBridge(owners.height, height);
+  if (Math.abs(owners.width.value() - width) > 1) owners.width.setValue(width);
+  if (Math.abs(owners.height.value() - height) > 1) owners.height.setValue(height);
+  // setValue already notifies the chart. Calling resize() on the 400ms poll
+  // reloaded the left pane's series and left its candle on the old close.
 }
 
 const PANE_BOX = "forgePaneBox";
@@ -471,14 +485,23 @@ export function mountFullWidthNavbar(
       });
     }
 
-    if (getLayout() === "s") {
+    const phone = window.matchMedia("(max-width: 900px)").matches;
+    // The pane clamp is for a desktop grid, where the big chart is full-window
+    // and the other panes cover it. On a phone that clamp shrinks the only
+    // chart, so the candles sit off the screen. Leave the library's own size.
+    if (phone || getLayout() === "s") {
       releasePaneBox(center);
       releasePaneBox(center?.querySelector(".chart-container") as HTMLElement | null);
       releasePaneBox(center?.querySelector(".chart-widget") as HTMLElement | null);
       releasePaneBox(bottom);
       const W = doc.documentElement.clientWidth || container.clientWidth;
       const H = doc.documentElement.clientHeight || container.clientHeight;
-      fitPrimaryChart(win, W - leftToolbarWidth, H - headerHeight);
+      const owners = chartOwners(win);
+      if (owners) {
+        holdBridge(owners.width, 0);
+        holdBridge(owners.height, 0);
+      }
+      if (!phone) fitPrimaryChart(win, W - leftToolbarWidth, H - headerHeight);
       return;
     }
 
@@ -643,12 +666,17 @@ export interface MenuHoleRect {
   readonly top: number;
   readonly width: number;
   readonly height: number;
+  /** Iframe that owns the menu, in the same coordinate space as left/top. */
+  readonly frameLeft?: number;
+  readonly frameTop?: number;
+  readonly frameWidth?: number;
+  readonly frameHeight?: number;
 }
 
 export interface PrimaryMenuState {
   readonly open: boolean;
-  /** Bounding box of the open header menu/dialog in workspace/page coords. */
-  readonly hole: MenuHoleRect | null;
+  /** Every open menu, including a seconds submenu that sticks out of the main list. */
+  readonly holes: readonly MenuHoleRect[];
 }
 
 /**
@@ -665,35 +693,14 @@ export function watchPrimaryMenusOpen(
   onChange: (state: PrimaryMenuState) => void,
 ): () => void {
   let stopped = false;
-  let mo: MutationObserver | null = null;
   let lastKey = "";
   let poll = 0;
-  let debounce = 0;
-  let boundDoc: Document | null = null;
 
   const isDrawingChrome = (el: Element): boolean => {
-    // Pinned favorite tools, edit bars, and settings stay clickable when a
-    // pane edge crosses them. The left-toolbar flyout does not punch a hole.
-    if (el.closest("[data-forge-pin='1'], [data-name='favorite-drawings-toolbar']")) return false;
+    // Left-toolbar flyouts stay out of the hole. Line/shape edit bars, color
+    // popups, and settings dialogs must punch through the other panes or the
+    // click lands on the chart above them.
     if (el.closest(".layout__area--left")) return true;
-    if (
-      el.closest(
-        [
-          ".drawing-toolbar",
-          "[class*='drawingToolbar']",
-          "[class*='drawing-toolbar']",
-          "[class*='floating-toolbar']",
-          "[class*='floatingToolbar']",
-          "[data-name='drawing-toolbar']",
-          "[class*='toolbox']",
-          "[class*='Toolbar'][class*='drawing']",
-        ].join(","),
-      )
-    ) {
-      return true;
-    }
-    const name = (el.getAttribute("data-name") || "").toLowerCase();
-    if (name.includes("drawing") || name.includes("line-tool") || name.includes("linetool")) return true;
     return false;
   };
 
@@ -711,111 +718,100 @@ export function watchPrimaryMenusOpen(
 
   const check = () => {
     if (stopped) return;
-    const iframe = container.querySelector("iframe");
-    const doc = iframe?.contentDocument;
-    if (!doc || !iframe) return;
+    const frames = [...container.querySelectorAll("iframe")];
+    if (frames.length === 0) return;
 
-    const candidates: Element[] = [
-      ...doc.querySelectorAll(
-        [
-          '[class*="menuWrap"]',
-          '[class*="menuBox"]',
-          '[data-name="menu-inner"]',
-          '[class*="popupMenu"]',
-          '[role="menu"]',
-          '[data-name="layout-menu"]',
-          ".forge-layout-menu",
-          ".forge-save-menu",
-          ".forge-ind-menu",
-          '[data-name="forge-save-menu"]',
-          '[data-name="forge-indicators-menu"]',
-          '[class*="context-menu"]',
-          '[data-name="indicators-dialog"]',
-          '[data-name="symbol-search-items-dialog"]',
-          '[role="dialog"]',
-        ].join(","),
-      ),
-    ];
+    const menuSelector = [
+      '[class*="menuWrap"]',
+      '[class*="menuBox"]',
+      '[data-name="menu-inner"]',
+      '[data-name="popup-menu-container"]',
+      '[class*="popupMenu"]',
+      '[role="menu"]',
+      '[data-name="layout-menu"]',
+      ".forge-layout-menu",
+      ".forge-save-menu",
+      ".forge-ind-menu",
+      '[data-name="forge-save-menu"]',
+      '[data-name="forge-indicators-menu"]',
+      '[class*="context-menu"]',
+      '[class*="floatingToolbar"]',
+      '[class*="floating-toolbar"]',
+      '[data-name="indicators-dialog"]',
+      '[data-name="symbol-search-items-dialog"]',
+      '[role="dialog"]',
+    ].join(",");
+    const candidates: Element[] = [];
+    for (const frame of frames) {
+      const frameDoc = frame.contentDocument;
+      if (!frameDoc) continue;
+      candidates.push(...frameDoc.querySelectorAll(menuSelector));
+    }
 
-    let best: DOMRect | null = null;
+    const found: MenuHoleRect[] = [];
     for (const node of candidates) {
       if (!isHeaderMenu(node)) continue;
+      const owner = node.ownerDocument;
+      const frame = frames.find((item) => item.contentDocument === owner) ?? null;
+      const view = owner.defaultView;
       // A dialog has to show through the other charts. Skip a full-window
       // shell; the real card is the sized dialog inside it.
       if (node.getAttribute("role") === "dialog") {
         const box = node.getBoundingClientRect();
-        const fullW = doc.documentElement.clientWidth;
-        const fullH = doc.documentElement.clientHeight;
-        if (box.width < 200 || box.height < 120) continue;
+        const fullW = owner.documentElement.clientWidth;
+        const fullH = owner.documentElement.clientHeight;
+        if (box.width < 48 || box.height < 36) continue;
         if (fullW > 0 && box.width > fullW * 0.92 && box.height > fullH * 0.92) continue;
       }
-      const r = visibleBox(node, doc);
-      if (!r) continue;
-      if (!best || r.width * r.height > best.width * best.height) best = r;
-    }
-
-    const open = Boolean(best);
-    let hole: MenuHoleRect | null = null;
-    if (best) {
-      const ir = iframe.getBoundingClientRect();
-      // Pad so shadows / submenu edges aren’t clipped.
+      const r = view ? visibleBox(node, owner) : null;
+      if (!r || !frame) continue;
+      const ir = frame.getBoundingClientRect();
       const pad = 6;
-      hole = {
-        left: Math.round(ir.left + best.left - pad),
-        top: Math.round(ir.top + best.top - pad),
-        width: Math.round(best.width + pad * 2),
-        height: Math.round(best.height + pad * 2),
-      };
+      found.push({
+        left: Math.round(ir.left + r.left - pad),
+        top: Math.round(ir.top + r.top - pad),
+        width: Math.round(r.width + pad * 2),
+        height: Math.round(r.height + pad * 2),
+        frameLeft: Math.round(ir.left),
+        frameTop: Math.round(ir.top),
+        frameWidth: Math.round(ir.width),
+        frameHeight: Math.round(ir.height),
+      });
     }
+    // A seconds flyout is smaller than the interval list and hangs off its edge.
+    // Keep both. Drop a box that already sits inside a larger one.
+    const holes = found.filter((hole, index) => {
+      return !found.some((other, otherIndex) => {
+        if (otherIndex === index) return false;
+        return (
+          hole.left >= other.left - 4 &&
+          hole.top >= other.top - 4 &&
+          hole.left + hole.width <= other.left + other.width + 4 &&
+          hole.top + hole.height <= other.top + other.height + 4 &&
+          other.width * other.height > hole.width * hole.height
+        );
+      });
+    });
 
+    const open = holes.length > 0;
     const key = open
-      ? `1:${hole?.left}:${hole?.top}:${hole?.width}:${hole?.height}`
+      ? holes.map((hole) => `${hole.left}:${hole.top}:${hole.width}:${hole.height}`).join("|")
       : "0";
     if (key === lastKey) return;
     lastKey = key;
-    onChange({ open, hole });
+    onChange({ open, holes });
   };
 
-  const scheduleCheck = () => {
-    window.clearTimeout(debounce);
-    debounce = window.setTimeout(check, 80);
-    // A settings card is often inserted empty and sized a moment later.
-    window.setTimeout(() => {
-      if (!stopped) check();
-    }, 320);
-    window.setTimeout(() => {
-      if (!stopped) check();
-    }, 700);
-  };
-
-  const bind = () => {
-    const doc = container.querySelector("iframe")?.contentDocument;
-    if (!doc?.body) return false;
-    if (boundDoc === doc && mo) return true;
-    mo?.disconnect();
-    boundDoc = doc;
-    // childList only — attribute spam from CL was a major multi-pane lag source.
-    mo = new MutationObserver(scheduleCheck);
-    mo.observe(doc.body, { childList: true, subtree: true });
-    check();
-    return true;
-  };
-
-  bind();
-  let tries = 0;
+  // Poll. A MutationObserver on the chart body runs on every price tick and
+  // was freezing the forming candle.
+  check();
   poll = window.setInterval(() => {
-    tries += 1;
-    if (bind() || tries > 20) {
-      window.clearInterval(poll);
-      poll = 0;
-    }
-  }, 500);
+    if (!stopped) check();
+  }, 300);
 
   return () => {
     stopped = true;
     window.clearInterval(poll);
-    window.clearTimeout(debounce);
-    mo?.disconnect();
   };
 }
 

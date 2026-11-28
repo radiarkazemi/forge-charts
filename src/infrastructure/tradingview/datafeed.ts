@@ -2,7 +2,7 @@ import { normalizeTicker, parseInterval, intervalSeconds, isMarketSessionOpen, S
 import { createStore, type MarketDataService, type Store, type SymbolRepository, type Unsubscribe } from "@/application";
 import { EXCHANGE_PRIORITY } from "@/infrastructure/symbols/static-symbol-repository";
 import { presentCandleSeries } from "@/infrastructure/market-data/candle-series";
-import { FIRST_HISTORY_PAGE, markTfSwitch } from "@/infrastructure/market-data/history-page";
+import { firstHistoryPage, markTfSwitch } from "@/infrastructure/market-data/history-page";
 import { canonicalizeBar } from "@/infrastructure/market-data/session-bars";
 import {
   appendLive,
@@ -82,7 +82,9 @@ function toTvBar(bar: Bar, stepSec = 300) {
     throw new Error(`Invalid bar time: ${String(bar.time)}`);
   }
   const rawVol = Number(bar.volume);
-  let volume = Number.isFinite(rawVol) && rawVol > 0 ? rawVol : 0;
+  // A quote sometimes carries the session total (1e100). The library throws on
+  // that and then ignores every later candle for the symbol.
+  let volume = Number.isFinite(rawVol) && rawVol > 0 && rawVol < 1e12 ? rawVol : 0;
   // No exchange volume: estimate activity from range, scaled by bar length.
   // A raw range proxy made a 5m spike and the 4h candle that contains it
   // draw the same volume bar.
@@ -148,6 +150,11 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   readonly source: Store<DataSourceInfo | null> = createStore<DataSourceInfo | null>(null);
 
   private readonly subscriptions = new Map<string, Unsubscribe>();
+  /** Last bar time the chart actually has, per symbol+resolution. */
+  private readonly seriesTail = new Map<string, number>();
+  /** Last bar OHLC, so a live tick updates the candle that is already drawn. */
+  private readonly seriesHead = new Map<string, Bar>();
+  private readonly quoteTimers = new Map<string, ReturnType<typeof setInterval>>();
 
   /** When set, history past this unix-second is hidden and live ticks are muted. */
   private replayCutoffSec: number | null = null;
@@ -386,8 +393,8 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     onResult: HistoryCallback,
     onError: DatafeedErrorCallback,
   ): Promise<void> {
-    const symbol = this.requireSymbol(symbolInfo);
     try {
+      const symbol = this.requireSymbol(symbolInfo);
       const cutoff = this.replayCutoffSec;
       const cutoffOn = cutoff != null && Number.isFinite(cutoff);
 
@@ -449,7 +456,8 @@ export class TradingViewDatafeed implements IBasicDataFeed {
       let countBack = periodParams.countBack;
       if (periodParams.firstDataRequest) {
         markTfSwitch();
-        countBack = Math.min(Math.max(countBack || 200, 1), FIRST_HISTORY_PAGE);
+        const step = barStep(String(resolution));
+        countBack = firstHistoryPage(step);
       }
       if (cutoffOn) {
         if (from > cutoff!) {
@@ -485,7 +493,25 @@ export class TradingViewDatafeed implements IBasicDataFeed {
         onResult([], { noData: true });
         return;
       }
-      onResult(ready.map((bar) => toTvBar(bar, barStep(resolution))), { noData: false });
+      const step = barStep(resolution);
+      const wall = nowSec - (nowSec % Math.max(1, step));
+      let painted = ready;
+      if (step < 86_400 && ready.length > 0) {
+        // A bar past the current bucket makes the library drop every live
+        // update that follows (30s froze on the previous candle).
+        const kept = ready.filter((bar) => bar.time <= wall);
+        painted = kept.length > 0 ? kept : [{ ...ready[ready.length - 1]!, time: wall }];
+        const tail = painted[painted.length - 1]!.time;
+        const tailKey = `${symbol.exchange}:${symbol.ticker}|${resolution}`;
+        // The first page is the series the chart actually shows. A live tick
+        // that landed before this must not leave the tail in the future, or
+        // the big pane drops every later candle.
+        if (periodParams.firstDataRequest || tail > (this.seriesTail.get(tailKey) ?? 0)) {
+          this.seriesTail.set(tailKey, tail);
+          this.seriesHead.set(tailKey, painted[painted.length - 1]!);
+        }
+      }
+      onResult(painted.map((bar) => toTvBar(bar, step)), { noData: false });
     } catch (error) {
       onError(error instanceof Error ? error.message : String(error));
     }
@@ -509,19 +535,113 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     });
 
     const step = barStep(resolution);
-    const unsubscribe = this.marketData.subscribe(symbol, resolution, (bar) => {
-      if (this.replayActive) return; // muted during Bar Replay
+    const daily = step >= 86_400;
+    const tailKey = `${symbol.exchange}:${symbol.ticker}|${resKey}`;
+    let chartTime = this.seriesTail.get(tailKey) ?? 0;
+    let lastSent = 0;
+    const seeded = this.seriesHead.get(tailKey);
+    let forming: Bar | null = seeded && seeded.time === chartTime ? { ...seeded } : null;
+    const wallBucket = () => {
+      const now = Math.floor(Date.now() / 1000);
+      return now - (now % Math.max(1, step));
+    };
+    const pushBar = (bar: Bar) => {
+      if (this.replayActive) return;
+      // The library drops a bar older than the one it already cached, then
+      // keeps that close forever. Never hand it an earlier timestamp.
+      const safe = lastSent > 0 && bar.time < lastSent ? { ...bar, time: lastSent } : bar;
       try {
-        const canonical = canonicalizeBar(symbol, resolution, bar);
+        const canonical = canonicalizeBar(symbol, resolution, safe);
         const packed =
           symbol.exchange.toUpperCase() === "TSE"
             ? this.packTseLive(symbol, resKey, canonical, step)
             : canonical;
         onTick(toTvBar(packed, step));
+        chartTime = safe.time;
+        lastSent = safe.time;
+        this.seriesTail.set(tailKey, safe.time);
+        this.seriesHead.set(tailKey, safe);
       } catch {
         /* drop corrupt realtime bars instead of crashing the widget */
       }
+    };
+    const unsubscribe = this.marketData.subscribe(symbol, resolution, (bar) => {
+      if (this.replayActive) return;
+      const price = bar.close;
+      if (!Number.isFinite(price)) return;
+      const known = this.seriesTail.get(tailKey) ?? 0;
+      // History can arrive after the first tick. Follow it only when it is
+      // not behind a candle the library has already accepted.
+      if (known > 0 && (chartTime === 0 || known < chartTime) && (lastSent === 0 || known >= lastSent)) {
+        chartTime = known;
+        const head = this.seriesHead.get(tailKey);
+        forming = head && head.time === known ? { ...head } : null;
+      }
+      const wall = wallBucket();
+      // Intraday buckets share the UTC grid. Daily/weekly FX bars sit on the
+      // New York session open (17:00), not UTC midnight. Painting midnight
+      // opens the next day, and the candle on screen never takes the tick.
+      let target = daily && Number.isFinite(bar.time) && bar.time > 0 ? bar.time : wall;
+      if (chartTime > 0 && target !== chartTime) {
+        const delta = target - chartTime;
+        if (delta < 0 || (delta > 0 && delta < step)) target = chartTime;
+      }
+      if (!forming || forming.time !== target) {
+        const open =
+          forming && target - forming.time <= step * 2 && target >= forming.time
+            ? forming.close
+            : bar.time >= target
+              ? bar.open
+              : price;
+        forming = {
+          time: target,
+          open,
+          high: Math.max(bar.high, open, price),
+          low: Math.min(bar.low, open, price),
+          close: price,
+          volume: bar.volume,
+        };
+      } else if (bar.time < target) {
+        forming = {
+          time: target,
+          open: forming.open,
+          high: Math.max(forming.high, price),
+          low: Math.min(forming.low, price),
+          close: price,
+          volume: forming.volume,
+        };
+      } else {
+        forming = {
+          time: target,
+          open: forming.open || bar.open,
+          high: Math.max(forming.high, bar.high, price),
+          low: Math.min(forming.low, bar.low, price),
+          close: price,
+          volume: Math.max(forming.volume, bar.volume),
+        };
+      }
+      // The library rejects a bar that skips ahead. 30s history often ended on
+      // the previous bucket, so the live candle never appeared. Walk the gap
+      // one step at a time, then paint the open candle.
+      if (chartTime > 0 && forming.time > chartTime + step) {
+        let cursor = chartTime + step;
+        let guard = 0;
+        while (cursor < forming.time && guard < 240) {
+          pushBar({
+            time: cursor,
+            open: price,
+            high: price,
+            low: price,
+            close: price,
+            volume: 0,
+          });
+          cursor += step;
+          guard += 1;
+        }
+      }
+      pushBar(forming);
     });
+
     this.subscriptions.set(listenerGuid, () => {
       unsubscribe();
       this.barSubs.delete(listenerGuid);
@@ -532,6 +652,35 @@ export class TradingViewDatafeed implements IBasicDataFeed {
     this.subscriptions.get(listenerGuid)?.();
     this.subscriptions.delete(listenerGuid);
     this.barSubs.delete(listenerGuid);
+  }
+
+  getQuotes(
+    symbols: string[],
+    onDataCallback: (data: Array<{ s: "ok" | "error"; n: string; v: Record<string, number> }>) => void,
+    onErrorCallback: (reason: string) => void,
+  ): void {
+    void this.pullQuotes(symbols)
+      .then(onDataCallback)
+      .catch((error: unknown) => onErrorCallback(error instanceof Error ? error.message : String(error)));
+  }
+
+  subscribeQuotes(
+    symbols: string[],
+    fastSymbols: string[],
+    onRealtimeCallback: (data: Array<{ s: "ok" | "error"; n: string; v: Record<string, number> }>) => void,
+    listenerGUID: string,
+  ): void {
+    this.unsubscribeQuotes(listenerGUID);
+    void fastSymbols;
+    void symbols;
+    void onRealtimeCallback;
+    void listenerGUID;
+  }
+
+  unsubscribeQuotes(listenerGUID: string): void {
+    const timer = this.quoteTimers.get(listenerGUID);
+    if (timer) clearInterval(timer);
+    this.quoteTimers.delete(listenerGUID);
   }
 
   getServerTime(callback: ServerTimeCallback): void {
@@ -549,6 +698,16 @@ export class TradingViewDatafeed implements IBasicDataFeed {
   dispose(): void {
     for (const unsubscribe of this.subscriptions.values()) unsubscribe();
     this.subscriptions.clear();
+    for (const timer of this.quoteTimers.values()) clearInterval(timer);
+    this.quoteTimers.clear();
+  }
+
+  private async pullQuotes(
+    symbols: string[],
+  ): Promise<Array<{ s: "ok" | "error"; n: string; v: Record<string, number> }>> {
+    // Last price comes from the live bar (TradingView quote socket). The HTTP
+    // forex snapshot lags that feed and was dragging the price line behind TV.
+    return symbols.map((n) => ({ s: "error" as const, n, v: {} }));
   }
 
   /* ── internals ─────────────────────────────────────────────────────── */
@@ -628,18 +787,13 @@ export class TradingViewDatafeed implements IBasicDataFeed {
           ? { listed_exchange: "TSETMC" }
           : { listed_exchange: symbol.exchange }),
       type: symbol.type,
-      // TSE cash hours (Sat–Wed 09:00–12:30) make the library reserve
-      // empty slots for holidays and missing minutes. 24x7 lets the packed
-      // bars sit on adjacent slots. The cash session stays in the UI label.
-      session: tse ? "24x7" : symbol.session,
-      // The plotted FX session lists Friday so Thursday's overnight candles
-      // survive. The legend still shows the real week: Sunday 18:00 through
-      // Friday 17:00. Saturday, and the 17:00–18:00 break, stay closed.
-      ...(tse
+      // Cash/FX sessions make the library reserve empty wall-clock slots
+      // (weekend, NY 17:00–18:00). 24x7 packs bars next to each other like TV.
+      // The real session stays on the legend; densify still skips those closes.
+      session: tse || symbol.session.startsWith("1800-1700") ? "24x7" : symbol.session,
+      ...(tse || symbol.session.startsWith("1800-1700")
         ? { session_display: symbol.session }
-        : symbol.session.startsWith("1800-1700")
-          ? { session_display: "1800-1700:12345" }
-          : {}),
+        : {}),
       timezone: symbol.timezone as Timezone,
       exchange: symbol.exchange,
       format: "price",
